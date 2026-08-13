@@ -6,16 +6,19 @@ import RoomService, { RoomError, type Message } from "./src/room-service";
 import {
   authHeader,
   enqueue,
+  formatNotificationLines,
   formatRoom,
   identity,
   loadRegistry,
   loadRooms,
+  NOTIFY_INSTRUCTION,
   saveRegistry,
   saveRooms,
   senderName,
   statePath,
   timeOf,
   type Registry,
+  type RegistryEntry,
 } from "./src/store";
 import { centerAction, checkCenterInbox } from "./src/center-client";
 
@@ -58,15 +61,16 @@ async function registerSelf(
   return enqueue(async () => {
     try {
       const reg = await loadRegistry();
-      reg[roomId] = reg[roomId] ?? {};
-      reg[roomId][sessionID] = {
+      const regRoom = (reg[roomId] =
+        reg[roomId] ?? Object.create(null) as Record<string, RegistryEntry>);
+      regRoom[sessionID] = {
         serverUrl: selfServerUrl,
         apiPrefix: "/api",
         name,
         // ponytail: re-join must not rewind the read watermark (unread
         // messages before the re-join would be silently dropped); a first
         // join starts reading at join time
-        lastReadTs: reg[roomId]?.[sessionID]?.lastReadTs ?? Date.now(),
+        lastReadTs: regRoom[sessionID]?.lastReadTs ?? Date.now(),
       };
       await saveRegistry(reg);
     } catch {
@@ -138,6 +142,7 @@ async function bumpLastRead(
 // ponytail: one push carries EVERY unread message for the target (not just
 // the latest), so advancing the watermark on success never skips a message
 // whose earlier push failed. Event-only pushes (empty messages) don't bump.
+// ponytail: push is best-effort; poll remains the fallback; log every attempt for debugging
 async function notifyRoom(
   roomId: string,
   roomName: string,
@@ -156,13 +161,11 @@ async function notifyRoom(
         const unread = messages.filter(
           (m) => m.createdAt > (entry.lastReadTs ?? 0) && m.senderId !== entry.name,
         );
-        const lines = unread.map(
-          (m) => `- [${timeOf(m.createdAt)}] ${m.senderId}: ${m.text}`,
-        );
+        const { lines, capped } = formatNotificationLines(unread);
         const prompt =
           unread.length > 0
-            ? `<notification>\nNew messages in room ${roomName}:\n${lines.join("\n")}\n${body}\n</notification>`
-            : `<notification>\n${body}\n</notification>`;
+            ? `<notification>\nNew messages in room ${roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`
+            : `<notification>\n${NOTIFY_INSTRUCTION}\n</notification>`;
         const base = new URL(entry.serverUrl);
         const prefix = (entry.apiPrefix || "/api").replace(/^\/+|\/+$/g, "");
         const url = `${base.origin}/${prefix}/session/${sessionID}/prompt`;
@@ -178,7 +181,12 @@ async function notifyRoom(
           url,
           status: res.status,
           sessionID,
-          maxTs: unread.length > 0 ? Math.max(...unread.map((m) => m.createdAt)) : undefined,
+          // ponytail: a capped push must not advance the watermark — the
+          // folded-out messages would become permanently unreadable
+          maxTs:
+            unread.length > 0 && !capped
+              ? Math.max(...unread.map((m) => m.createdAt))
+              : undefined,
         };
       }),
     );
@@ -207,9 +215,9 @@ const room = tool({
     "Chat room operations: create, join, leave and list rooms; send and poll messages; list members",
   args: {
     action: z.enum(["create", "join", "leave", "list", "send", "poll", "members"]),
-    name: z.string().optional(),
+    name: z.string().max(64).optional(),
     roomId: z.string().optional(),
-    text: z.string().optional(),
+    text: z.string().max(2000).optional(),
   },
   execute: async (args, context) => {
     try {
@@ -224,12 +232,24 @@ const room = tool({
       }
       // ponytail: act as the identity this session registered with on join
       let selfName = identity();
+      let joinPrevName: string | undefined;
+      let joinPrevShared = false;
       let pollLastRead = 0;
       let pollEntry = false;
       if (args.roomId) {
         const reg = await loadRegistry().catch(() => ({} as Registry));
         if (args.action === "send" || args.action === "leave") {
           selfName = reg[args.roomId]?.[context.sessionID]?.name ?? selfName;
+        }
+        if (args.action === "join") {
+          joinPrevName = reg[args.roomId]?.[context.sessionID]?.name;
+          // ponytail: don't retire the old participant if another session
+          // still uses it (default same-host identity is shared)
+          joinPrevShared =
+            joinPrevName !== undefined &&
+            Object.entries(reg[args.roomId] ?? {}).some(
+              ([sid, e]) => sid !== context.sessionID && e.name === joinPrevName,
+            );
         }
         if (args.action === "poll") {
           pollEntry = reg[args.roomId]?.[context.sessionID] !== undefined;
@@ -238,8 +258,6 @@ const room = tool({
         }
       }
       let actedRoomId: string | undefined;
-      let joinedRoomName: string | undefined;
-      let isJoin = false;
       let newMemberName: string | undefined;
       let leftRoomId: string | undefined;
       let pollMaxTs: number | undefined;
@@ -252,7 +270,6 @@ const room = tool({
             }
             const created = svc.createRoom(args.name.trim(), identity());
             actedRoomId = created.id;
-            joinedRoomName = created.name;
             return formatRoom(svc, created);
           }
           case "join": {
@@ -260,19 +277,50 @@ const room = tool({
               return "error: roomId is required";
             }
             const me = identity(args.name?.trim());
+            // ponytail: F5 — re-join under a new name retires the old
+            // participant, otherwise every rename leaks a ghost member;
+            // skipped when another session still holds the old name
+            if (
+              joinPrevName !== undefined &&
+              joinPrevName !== me &&
+              !joinPrevShared &&
+              svc.containsParticipant(args.roomId, joinPrevName)
+            ) {
+              svc.leaveRoom(args.roomId, joinPrevName);
+            }
             const already = svc.containsParticipant(args.roomId, me);
             svc.joinRoom(args.roomId, { id: me, name: me });
+            const room = svc.getRoom(args.roomId);
             actedRoomId = args.roomId;
-            joinedRoomName = svc.getRoom(args.roomId).name;
-            isJoin = !already;
             newMemberName = me;
-            return formatRoom(svc, svc.getRoom(args.roomId));
+            if (!already) {
+              // ponytail: membership events live in the message stream, so
+              // the join notification rides the normal unread push
+              svc.addEvent(args.roomId, `${me} joined the room`);
+              void notifyRoom(
+                args.roomId,
+                room.name,
+                NOTIFY_INSTRUCTION,
+                context.sessionID,
+                room.messages,
+              );
+            }
+            return formatRoom(svc, room);
           }
           case "leave": {
             if (!args.roomId) {
               return "error: roomId is required";
             }
             svc.leaveRoom(args.roomId, selfName);
+            const room = svc.getRoom(args.roomId);
+            svc.addEvent(args.roomId, `${selfName} left the room`);
+            void notifyRoom(
+              args.roomId,
+              room.name,
+              NOTIFY_INSTRUCTION,
+              context.sessionID,
+              room.messages,
+            );
             leftRoomId = args.roomId;
             return `left room ${args.roomId}`;
           }
@@ -309,7 +357,7 @@ const room = tool({
             void notifyRoom(
               args.roomId,
               room.name,
-              `This is an automatic chat-room notification. Do NOT reply, do NOT call any tools, do NOT interrupt your current work, unless you are explicitly addressed (mentioned by name) or genuinely need to respond.`,
+              NOTIFY_INSTRUCTION,
               context.sessionID,
               room.messages,
             );
@@ -353,15 +401,6 @@ const room = tool({
       const joinedRoom = actedRoomId;
       if (joinedRoom !== undefined) {
         await registerSelf(joinedRoom, context.sessionID, newMemberName);
-        if (isJoin && joinedRoomName !== undefined) {
-          void notifyRoom(
-            joinedRoom,
-            joinedRoomName,
-            `New member joined room ${joinedRoomName}: ${newMemberName ?? identity()}. This is an automatic chat-room notification for your information only. Do NOT reply, do NOT call any tools, do NOT interrupt your current work.`,
-            context.sessionID,
-            [],
-          );
-        }
       }
       if (leftRoomId !== undefined) {
         await unregisterSelf(leftRoomId, context.sessionID);

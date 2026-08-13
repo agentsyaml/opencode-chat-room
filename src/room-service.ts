@@ -25,7 +25,6 @@ export type Room = {
 
 export type RoomErrorCode =
   | "ROOM_NOT_FOUND"
-  | "PARTICIPANT_NOT_FOUND"
   | "NOT_JOINED"
   | "EMPTY_MESSAGE";
 
@@ -42,8 +41,15 @@ export class RoomError extends Error {
 export default class RoomService {
   private rooms: Map<string, Room> = new Map();
 
+  // ponytail: per-room history ceiling — everything above the watermark is
+  // unreachable anyway; this bounds rooms.json and every serialized response
+  static readonly MAX_MESSAGES = 500;
+
   hydrate(rooms: Room[]): void {
     for (const room of rooms) {
+      // ponytail: cap pre-existing rooms.json files on load so an old
+      // oversized file doesn't stay heavy until the next event
+      this.trimMessages(room);
       this.rooms.set(room.id, room);
     }
   }
@@ -122,7 +128,31 @@ export default class RoomService {
       createdAt: Date.now(),
     };
     room.messages.push(message);
+    this.trimMessages(room);
     return message;
+  }
+
+  // ponytail: membership events live in the message stream (senderId
+  // "system") so push notifications and the central inbox carry them for free
+  addEvent(roomId: string, text: string): Message {
+    const message: Message = {
+      id: randomUUID(),
+      roomId,
+      senderId: "system",
+      text,
+      createdAt: Date.now(),
+    };
+    const room = this.getRoom(roomId);
+    room.messages.push(message);
+    this.trimMessages(room);
+    return message;
+  }
+
+  private trimMessages(room: Room): void {
+    const overflow = room.messages.length - RoomService.MAX_MESSAGES;
+    if (overflow > 0) {
+      room.messages.splice(0, overflow);
+    }
   }
 
   getMessages(roomId: string): Message[] {

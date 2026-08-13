@@ -115,7 +115,7 @@ export type RegistryEntry = {
 };
 export type Registry = Record<string, Record<string, RegistryEntry>>;
 
-export function registryPath(): string {
+function registryPath(): string {
   return path.join(path.dirname(statePath()), "registry.json");
 }
 
@@ -143,8 +143,16 @@ export async function loadRegistry(): Promise<Registry> {
   if (data === null || typeof data !== "object" || Array.isArray(data)) {
     return {};
   }
-  // ponytail: null-proto so hostile keys ("__proto__") can't touch Object.prototype
-  return Object.assign(Object.create(null), data) as Registry;
+  // ponytail: null-proto at both levels so hostile keys ("__proto__",
+  // "constructor") can't touch Object.prototype or shadow lookups
+  const reg = Object.assign(Object.create(null), data);
+  for (const key of Object.keys(reg)) {
+    const room = reg[key] as Record<string, unknown> | undefined;
+    if (room !== null && typeof room === "object" && !Array.isArray(room)) {
+      reg[key] = Object.assign(Object.create(null), room);
+    }
+  }
+  return reg as Registry;
 }
 
 export async function saveRegistry(reg: Registry): Promise<void> {
@@ -156,7 +164,36 @@ export async function saveRegistry(reg: Registry): Promise<void> {
 }
 
 export function identity(name?: string): string {
-  return name || `${os.userInfo().username}@${os.hostname()}`;
+  // ponytail: cap the resolved identity so long-hostname defaults can't hit
+  // the central server's 64-char name limit on a path the user never typed
+  return (name || `${os.userInfo().username}@${os.hostname()}`).slice(0, 64);
+}
+
+// ponytail: shared trailing instruction for push notifications
+export const NOTIFY_INSTRUCTION =
+  "This is an automatic chat-room notification. Do NOT reply, do NOT call any tools, do NOT interrupt your current work, unless you are explicitly addressed (mentioned by name) or genuinely need to respond.";
+
+// ponytail: oversize protection for push payloads — truncate long texts and
+// cap the number of unread lines per notification
+const MAX_LINE = 300;
+const MAX_LINES = 20;
+
+// Display lines for a push. `capped` means older unread messages were folded
+// into a count line — callers must NOT advance the recipient's read
+// watermark when capped, so uncapped poll remains the lossless catch-up path.
+export function formatNotificationLines(
+  items: ReadonlyArray<{ createdAt: number; senderId: string; text: string }>,
+): { lines: string[]; capped: boolean } {
+  const capped = items.length > MAX_LINES;
+  const lines = items.slice(-MAX_LINES).map((it) => {
+    const text =
+      it.text.length > MAX_LINE ? `${it.text.slice(0, MAX_LINE)}\u2026` : it.text;
+    return `- [${timeOf(it.createdAt)}] ${it.senderId}: ${text}`;
+  });
+  if (capped) {
+    lines.unshift(`\u2026 and ${items.length - MAX_LINES} earlier messages`);
+  }
+  return { lines, capped };
 }
 
 export function authHeader(): string {

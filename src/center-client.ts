@@ -7,7 +7,14 @@ import RoomService, {
   type Participant,
   type Room,
 } from "./room-service";
-import { authHeader, formatRoom, identity, senderName, timeOf } from "./store";
+import {
+  authHeader,
+  formatNotificationLines,
+  formatRoom,
+  identity,
+  NOTIFY_INSTRUCTION,
+  timeOf,
+} from "./store";
 
 type Json = Record<string, unknown>;
 
@@ -162,23 +169,30 @@ export async function centerAction(
       if (!args.roomId) {
         return "error: roomId is required";
       }
-      const items = (await request(
+      const result = (await request(
         opts,
-        `/inbox?sessionID=${encodeURIComponent(sessionID)}&roomId=${encodeURIComponent(args.roomId)}`,
+        `/inbox?sessionID=${encodeURIComponent(sessionID)}&roomId=${encodeURIComponent(args.roomId)}&excludeSelf=0`,
         "GET",
-      )) as unknown as InboxItem[];
-      if (!Array.isArray(items) || items.length === 0) {
+      )) as unknown as { member: boolean; items: InboxItem[] };
+      // ponytail: F6 — same gate as standalone: only members can read
+      if (!result.member) {
+        return "error: not joined";
+      }
+      const items = Array.isArray(result.items) ? result.items : [];
+      if (items.length === 0) {
         return "no new messages";
       }
       const lines = items.map(
         (it) => `[${timeOf(it.createdAt)}] ${it.senderId}: ${it.text}`,
       );
+      // ponytail: F7 — advance the watermark after the result is delivered
+      // (fire-and-forget); a failure only repeats the messages, never loses
       const maxTs = items.reduce((mx, it) => Math.max(mx, it.createdAt), 0);
-      await request(opts, "/read", "POST", {
+      void request(opts, "/read", "POST", {
         roomId: args.roomId,
         sessionID,
         ts: maxTs,
-      });
+      }).catch(() => {});
       return lines.join("\n");
     }
     default:
@@ -212,12 +226,13 @@ export async function checkCenterInbox(
   }
   inboxChecks.add(sessionID);
   try {
-    const items = (await request(
+    const result = (await request(
       opts,
-      `/inbox?sessionID=${encodeURIComponent(sessionID)}`,
+      `/inbox?sessionID=${encodeURIComponent(sessionID)}&excludeSelf=1`,
       "GET",
-    )) as unknown as InboxItem[];
-    if (!Array.isArray(items) || items.length === 0) {
+    )) as unknown as { member: boolean; items: InboxItem[] };
+    const items = Array.isArray(result.items) ? result.items : [];
+    if (items.length === 0) {
       return;
     }
     const byRoom = new Map<string, InboxItem[]>();
@@ -229,10 +244,8 @@ export async function checkCenterInbox(
     const auth = authHeader();
     const base = selfServerUrl.replace(/\/+$/, "");
     for (const [roomId, roomItems] of byRoom) {
-      const lines = roomItems.map(
-        (it) => `- [${timeOf(it.createdAt)}] ${it.senderId}: ${it.text}`,
-      );
-      const prompt = `<notification>\nNew messages in room ${roomItems[0]!.roomName}:\n${lines.join("\n")}\nThis is an automatic chat-room notification. Do NOT reply, do NOT call any tools, do NOT interrupt your current work, unless you are explicitly addressed (mentioned by name) or genuinely need to respond.\n</notification>`;
+      const { lines, capped } = formatNotificationLines(roomItems);
+      const prompt = `<notification>\nNew messages in room ${roomItems[0]!.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
       const res = await fetch(`${base}/api/session/${sessionID}/prompt`, {
         method: "POST",
         headers: {
@@ -241,7 +254,10 @@ export async function checkCenterInbox(
         },
         body: JSON.stringify({ prompt, delivery: "queue" }),
       });
-      if (res.ok) {
+      // ponytail: a capped push must not advance the watermark — the
+      // folded-out messages would become permanently unreadable; the
+      // uncapped poll/inbox path remains the lossless catch-up
+      if (res.ok && !capped) {
         const maxTs = roomItems.reduce(
           (mx, it) => Math.max(mx, it.createdAt),
           0,

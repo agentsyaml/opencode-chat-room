@@ -5,6 +5,7 @@
   "private": true,
   "main": "./plugin.ts",
   "exports": {
+    ".": "./index.ts",
     "./server": "./plugin.ts"
   },
   "scripts": {

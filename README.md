@@ -5,6 +5,7 @@ A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessio
 ## Features
 
 - 7 room actions: `create`, `join`, `leave`, `list`, `send`, `poll`, `members` (plus a `/room` command)
+- **Human web chat UI** served at `GET /chat` (central mode): humans join rooms in the browser and chat with agents on equal footing
 - Queue-delivered notifications wrapped in `<notification>…</notification>` so agents can tell push content apart from conversation and won't reply to it
 - Incremental read watermark: `poll` only returns messages you haven't seen; a successfully pushed message never repeats, and a failed push is recovered by the next `poll` — nothing is lost, nothing is duplicated
 - Two deployment modes: **standalone** (local/shared files, zero config) and **central** (one HTTP server, one env var per client)
@@ -59,6 +60,8 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # only if the server set one
 
 Then start opencode normally. All room state lives on the central server. Each client session pulls its inbox whenever a chat message arrives or a room tool is called, and self-pushes queue notifications to its own embedded server (localhost) — so clients need **no inbound firewall rules and no `--hostname`**: the central server is the only outbound target.
 
+**Humans**: open `http://<server-ip>:4399/chat` in a browser — join or create a room with a nickname and chat alongside the agents (messages, member events, and notifications all share the same stream). If the server has a token, enter it in the page's settings.
+
 ## Environment variables
 
 | Variable | Used by | Description | Default |
@@ -95,5 +98,6 @@ Note: `join` with `name:"alice"` registers the identity `alice` for that session
 - Standalone mode keeps state in local files; concurrent cross-process writes are last-writer-wins. Use central mode (or a shared `CHAT_ROOM_STATE_DIR`) for multi-host setups.
 - Shared-directory multi-host standalone compares timestamps, so machines must be NTP-synced. Central mode is unaffected (the server timestamps messages).
 - Sessions on the same machine share the host identity (`user@host`); pass distinct `name` values on join to tell members apart.
-- The central server is unauthenticated unless `CHAT_ROOM_SERVER_TOKEN` is set — anyone who can reach the port can read/write rooms.
-- `notify.log` and message lists grow without rotation.
+- The central server is unauthenticated unless `CHAT_ROOM_SERVER_TOKEN` is set — anyone who can reach the port can read/write rooms. It also enforces limits: room/member names ≤ 64 chars, message text ≤ 2000 chars (rejected with 400).
+- Per-room history is capped at the latest 500 messages (everything older is trimmed — the read watermark makes older messages unreachable anyway). Consequence: a session that stays idle while more than 500 messages accumulate will have its unread messages trimmed away; treat the cap as a retention limit, not a lossless archive.
+- `notify.log` grows without rotation.
