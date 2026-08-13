@@ -1,0 +1,23 @@
+{
+  "name": "opencode-chat-room",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "main": "./plugin.ts",
+  "exports": {
+    "./server": "./plugin.ts"
+  },
+  "scripts": {
+    "server": "bun run server/chat-server.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.18.16",
+    "zod": "4.1.8"
+  }
+}
