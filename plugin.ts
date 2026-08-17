@@ -20,16 +20,22 @@ import {
   type Registry,
   type RegistryEntry,
 } from "./src/store";
-import { centerAction, checkCenterInbox } from "./src/center-client";
+import { centerAction, checkCenterInbox, wakeSessions } from "./src/center-client";
 
 // captured once at server start; registry push notifications route to it
 let selfServerUrl = "";
+
+// ponytail: central-mode in-process wake timer (see server() below)
+let wakeTimer: ReturnType<typeof setInterval> | null = null;
 
 // ponytail: CHAT_ROOM_SERVER_URL switches to central mode (all state on a
 // central server); unset = standalone local-file mode
 const centerUrl = process.env.CHAT_ROOM_SERVER_URL ?? "";
 const centerToken = process.env.CHAT_ROOM_SERVER_TOKEN ?? "";
 const centerOpts = { center: centerUrl, token: centerToken };
+// ponytail: optional常驻 opencode serve 地址——配置了才能对已退出 session
+// 做进程内唤起；未配置则不唤起（用户要求）
+const serveWakeUrl = process.env.CHAT_ROOM_WAKE_SERVE_URL ?? "";
 
 async function withRooms<T>(
   fn: (svc: RoomService) => T,
@@ -234,12 +240,19 @@ const room = tool({
       let selfName = identity();
       let joinPrevName: string | undefined;
       let joinPrevShared = false;
+      let leaveNameShared = false;
       let pollLastRead = 0;
       let pollEntry = false;
       if (args.roomId) {
         const reg = await loadRegistry().catch(() => ({} as Registry));
         if (args.action === "send" || args.action === "leave") {
           selfName = reg[args.roomId]?.[context.sessionID]?.name ?? selfName;
+        }
+        if (args.action === "leave") {
+          // ora-2 M2: 其他 session 仍持有该名字时，离开只删条目不删参与者
+          leaveNameShared = Object.entries(reg[args.roomId] ?? {}).some(
+            ([sid, e]) => sid !== context.sessionID && e.name === selfName,
+          );
         }
         if (args.action === "join") {
           joinPrevName = reg[args.roomId]?.[context.sessionID]?.name;
@@ -311,16 +324,22 @@ const room = tool({
             if (!args.roomId) {
               return "error: roomId is required";
             }
-            svc.leaveRoom(args.roomId, selfName);
-            const room = svc.getRoom(args.roomId);
-            svc.addEvent(args.roomId, `${selfName} left the room`);
-            void notifyRoom(
-              args.roomId,
-              room.name,
-              NOTIFY_INSTRUCTION,
-              context.sessionID,
-              room.messages,
-            );
+            // ponytail: ora-2 M2 — mirror the join guard: if another session
+            // still holds this name, remove only the registry entry, not the
+            // participant (or the sibling window breaks with NOT_JOINED);
+            // 也不广播假的 "left" 事件（参与者仍在场）
+            if (!leaveNameShared) {
+              svc.leaveRoom(args.roomId, selfName);
+              const room = svc.getRoom(args.roomId);
+              svc.addEvent(args.roomId, `${selfName} left the room`);
+              void notifyRoom(
+                args.roomId,
+                room.name,
+                NOTIFY_INSTRUCTION,
+                context.sessionID,
+                room.messages,
+              );
+            }
             leftRoomId = args.roomId;
             return `left room ${args.roomId}`;
           }
@@ -429,6 +448,20 @@ export default {
   id: "chat-room",
   server: async (input: { serverUrl: URL | string }) => {
     selfServerUrl = String(input.serverUrl);
+    if (centerUrl) {
+      // ponytail: in-process wake watcher — sweep the central server every
+      // 10s and self-push queue notifications to any session (including
+      // sleeping sub-agents in this process) that has unread messages; the
+      // central server itself has no opencode knowledge. 10s balances
+      // wake latency vs scan cost (wakeChecking prevents overlap)
+      if (wakeTimer) {
+        clearInterval(wakeTimer); // HMR/reload must not accumulate timers
+      }
+      void wakeSessions(centerOpts, selfServerUrl, serveWakeUrl);
+      wakeTimer = setInterval(() => {
+        void wakeSessions(centerOpts, selfServerUrl, serveWakeUrl);
+      }, 10000);
+    }
     return {
       tool: { room },
       config,

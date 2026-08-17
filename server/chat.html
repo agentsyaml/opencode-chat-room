@@ -25,6 +25,7 @@
     --accent-soft: #f6e3d6;
     --danger: #b23a2e;
     --danger-soft: #f9e7e2;
+    --mention-blue: #2e6cc4;
     --shadow: 0 1px 2px rgb(48 38 25 / .05), 0 12px 32px rgb(48 38 25 / .08);
   }
 
@@ -42,6 +43,7 @@
       --accent-soft: #3b2418;
       --danger: #e27a6c;
       --danger-soft: #3a201b;
+      --mention-blue: #86a9ee;
       --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 14px 36px rgb(0 0 0 / .45);
     }
   }
@@ -395,10 +397,120 @@
     border-bottom-left-radius: 4px;
     font-size: 15px;
     line-height: 1.65;
-    white-space: pre-wrap;
+    white-space: pre-line; /* Markdown 依赖换行：保留 \n，折叠连续空格 */
     overflow-wrap: anywhere;
   }
   .msg.own .msg-text { background: var(--accent-soft); border-bottom-left-radius: 14px; border-bottom-right-radius: 4px; }
+
+  /* ── 消息内 Markdown 元素 ── */
+  .msg-text p, .msg-text pre, .msg-text blockquote, .msg-text ul, .msg-text ol { margin: 0; }
+  .msg-text > :not(:first-child) { margin-top: 8px; }
+  .msg-text ul, .msg-text ol { padding-left: 22px; }
+  .msg-text li { margin: 2px 0; }
+  .msg-text blockquote {
+    padding: 1px 0 1px 12px;
+    border-left: 3px solid var(--ink-3);
+    color: var(--ink-2);
+  }
+  .msg-text code {
+    font-family: var(--font-mono);
+    font-size: .9em;
+    background: color-mix(in srgb, var(--ink) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+    border-radius: 5px;
+    padding: 0 4px;
+  }
+  .msg-text pre {
+    overflow-x: auto; /* 长代码行横向滚动，不折行 */
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--ink) 5%, transparent);
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  .msg-text pre code {
+    display: block;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    white-space: pre;
+  }
+  .msg-text a {
+    color: var(--mention-blue);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .msg-text a:hover { text-decoration: none; }
+
+  /* ── @提及 ── */
+  /* 默认：灰调（成员已离开 / 改名 / 从未加入）；.member：蓝色高亮（当前房间成员） */
+  .mention-chip {
+    display: inline-block;
+    margin: 0 1px;
+    padding: 2px 7px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    /* 对齐：middle 相对父元素 x-height 中点居中——CJK 与 Latin 混排时
+       都比基线微调（-0.15em 对中文仍偏上）更稳；line-height:1 让药丸
+       高度只由自身字号+内边距决定，不撑高行盒 */
+    vertical-align: middle;
+    line-height: 1;
+    font-size: .92em;
+    font-weight: 600;
+    color: var(--ink-2);
+    background: color-mix(in srgb, var(--ink-2) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ink-2) 26%, transparent);
+    border-radius: 999px;
+  }
+  .mention-chip.member {
+    color: var(--mention-blue);
+    background: color-mix(in srgb, var(--mention-blue) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--mention-blue) 32%, transparent);
+  }
+
+  .mention-picker {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    bottom: calc(100% + 8px);
+    z-index: 30;
+    max-height: 224px;
+    overflow-y: auto;
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    animation: rise .15s ease both;
+  }
+  .mention-picker ul { list-style: none; margin: 0; padding: 0; position: relative; }
+  .mention-opt {
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--ink);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mention-opt:hover { background: var(--surface-2); }
+  .mention-opt.active { background: var(--accent-soft); color: var(--accent); }
+  .mention-at { font-weight: 600; color: var(--accent); margin-right: 4px; }
+  .mention-hit { background: color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 3px; }
+  .mention-empty { margin: 0; padding: 12px 8px; font-size: 13px; color: var(--ink-3); text-align: center; }
+  .mention-hint {
+    margin: 6px 0 2px;
+    padding: 7px 8px 0;
+    border-top: 1px solid var(--line);
+    font-size: 11.5px;
+    color: var(--ink-3);
+    text-align: center;
+  }
 
   .sys {
     display: flex;
@@ -438,6 +550,7 @@
   }
 
   .composer {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -575,8 +688,9 @@
 
     <footer class="composer">
       <p id="sendError" class="send-error" role="alert" hidden></p>
+      <div id="mentionPicker" class="mention-picker" role="listbox" aria-label="选择要提及的成员" hidden></div>
       <div class="composer-row">
-        <textarea id="msgInput" class="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行" autocomplete="off" disabled></textarea>
+        <textarea id="msgInput" class="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行" autocomplete="off" aria-autocomplete="list" aria-controls="mentionPicker" aria-expanded="false" disabled></textarea>
         <button class="btn primary" type="button" id="btnSend" disabled>发送</button>
       </div>
     </footer>
@@ -601,10 +715,14 @@
   }
   const LS = {
     get sessionID() {
-      let v = lsGet("chat.sessionID");
+      // ponytail: sessionID 必须 tab 级独立（sessionStorage）——localStorage
+      // 会被同一浏览器的多个 tab 共享，一个 tab 的 /read 推进会吃掉另一个
+      // tab 未读窗口的消息（orc-1 #1）
+      let v = null;
+      try { v = sessionStorage.getItem("chat.sessionID"); } catch { /* ignore */ }
       if (!v) {
         v = crypto.randomUUID();
-        lsSet("chat.sessionID", v);
+        try { sessionStorage.setItem("chat.sessionID", v); } catch { /* ignore */ }
       }
       return v;
     },
@@ -639,7 +757,9 @@
   }
 
   /* ---------- 状态 ---------- */
-  const state = { room: null, myName: "", rendered: 0, firstMsgId: null, timer: null, unread: 0, copyT: 0 };
+  const state = { room: null, myName: "", rendered: 0, firstMsgId: null, polling: false, unread: 0, copyT: 0 };
+  // orc-2 #3——渲染失败的消息 id；对账时据此强制重建重试
+  const failedRenderIds = new Set();
   let lastFocus = null;
   let pollDelay = 2000;
 
@@ -873,7 +993,7 @@
       meta.append(nm, tm);
       const tx = document.createElement("div");
       tx.className = "msg-text";
-      tx.textContent = m.text;
+      renderTextWithMentions(tx, m.text);
       li.append(meta, tx);
     }
     if (live) li.classList.add("in");
@@ -902,27 +1022,47 @@
     if (rebuild) live = false;
     const nearBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 80;
     let appended = 0;
+    let skipped = 0; // orc-3 #1——渲染失败计数（此前未声明 → ReferenceError）
     let last = list.lastElementChild;
+    // ponytail: 防御性去重——发送回显（send.then 全量替换+渲染）与长轮询
+    // echo（inbox excludeSelf=0）可能把同一条消息带进渲染区间，按 id
+    // 跳过已渲染节点，确保任何并发路径下都不产生重复消息节点
+    const renderedIds = new Set(
+      Array.from(list.children)
+        .map((el) => el.dataset.msgId)
+        .filter(Boolean),
+    );
     for (let i = state.rendered; i < msgs.length; i++) {
       const m = msgs[i];
-      const day = new Date(m.createdAt).toDateString();
-      if (!last || last.dataset.day !== day) {
-        const sep = document.createElement("li");
-        sep.className = "day-sep";
-        sep.dataset.day = day;
-        sep.textContent = dayText(m.createdAt);
-        list.appendChild(sep);
-        last = sep;
+      if (renderedIds.has(m.id)) continue;
+      // ponytail: 单条消息渲染容错——一条坏消息（渲染抛异常）绝不能卡死
+      // 整批渲染（否则后续消息全部不可见 = "Agent 消息丢失"）；跳过它并
+      // 继续渲染其余，统计 skipped 供调用方决定水位推进
+      try {
+        const day = new Date(m.createdAt).toDateString();
+        if (!last || last.dataset.day !== day) {
+          const sep = document.createElement("li");
+          sep.className = "day-sep";
+          sep.dataset.day = day;
+          sep.textContent = dayText(m.createdAt);
+          list.appendChild(sep);
+          last = sep;
+        }
+        const li = renderMessage(m, live);
+        li.dataset.day = day;
+        // 同一人 8 分钟内连发：省略重复名字，间距收紧
+        if (last.classList.contains("msg") && last.dataset.sender === m.senderId
+            && m.createdAt - +last.dataset.ts < 8 * 60 * 1000) {
+          li.classList.add("repeat");
+        }
+        list.appendChild(li);
+        last = li;
+      } catch (err) {
+        console.error("[chat] 单条消息渲染失败，跳过:", m.id, err);
+        skipped++;
+        failedRenderIds.add(m.id); // orc-2 #3——对账时据此强制重建重试
       }
-      const li = renderMessage(m, live);
-      li.dataset.day = day;
-      // 同一人 8 分钟内连发：省略重复名字，间距收紧
-      if (last.classList.contains("msg") && last.dataset.sender === m.senderId
-          && m.createdAt - +last.dataset.ts < 8 * 60 * 1000) {
-        li.classList.add("repeat");
-      }
-      list.appendChild(li);
-      last = li;
+      renderedIds.add(m.id);
       appended++;
     }
     state.rendered = msgs.length;
@@ -940,13 +1080,10 @@
     } else if (msgs.length && (live ? nearBottom : true)) {
       scroll.scrollTop = scroll.scrollHeight;
     }
-    // 离开底部或切到后台期间的新消息计入未读
-    if (live && appended && (!nearBottom || document.hidden)) {
-      state.unread += appended;
-      updateBadge();
-    }
+    // 未读计数已统一在 poll 层处理（rebuild 场景 live=false 也能计数）
     updateJump();
     trimList();
+    return { skipped };
   }
 
   function renderMembers() {
@@ -965,49 +1102,179 @@
       list.appendChild(li);
     }
     $("#memberEmpty").hidden = parts.length > 0;
+    if (mention.active) updateMentionList(mention.query); // 成员刷新时同步提及候选
   }
 
   /* ---------- 轮询（失败时指数退避，恢复后回到 2s） ---------- */
+  // ponytail: 串行轮询——poll 完成（含长轮询挂起）后才等待间隔再下一轮，
+  // 绝不多个轮询并发叠加；generation 计数器保证 leave+rejoin 后旧循环
+  // 立即终止（ora-1 #1：否则 25s 在途的旧 poll 会让两条循环永久并存）
   function startPolling() {
     stopPolling();
+    state.pollGen = (state.pollGen ?? 0) + 1;
+    state.polling = true;
     pollDelay = 2000;
-    poll();
-    schedulePoll();
+    void pollLoop(state.pollGen);
   }
-  function schedulePoll() {
-    state.timer = setTimeout(() => {
-      if (!state.room) return;
-      poll();
-      schedulePoll();
-    }, pollDelay);
+  async function pollLoop(gen) {
+    while (state.polling && state.room && gen === state.pollGen) {
+      await poll().catch(() => {});
+      if (!state.polling || gen !== state.pollGen) break;
+      await new Promise((r) => setTimeout(r, pollDelay));
+    }
   }
   function stopPolling() {
-    if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+    state.polling = false;
   }
 
   async function poll() {
     if (!state.room) return;
+    const roomId = state.room.id; // 请求发起时的房间（ora-2 M1：防过期响应串房）
     try {
-      const room = await api(`/rooms/${encodeURIComponent(state.room.id)}`);
-      if (room.messages.length < state.rendered) return; // 过期的快照
-      state.room = room;
-      appendMessages(true);
-      renderMembers();
+      // ponytail: 25s 长轮询（串行 pollLoop 保证同一时刻只有一个请求）
+      const q = new URLSearchParams({
+        sessionID: LS.sessionID,
+        roomId,
+        excludeSelf: "0",
+        timeout: "25000",
+      });
+      const data = await api(`/inbox?${q}`);
+      // 长轮询挂起期间离开/换房：丢弃过期响应，绝不污染新房间
+      if (!state.room || state.room.id !== roomId) return;
+      if (!data.member) {
+        leaveRoom(true);
+        showJoinError("房间不存在或已被删除");
+        return;
+      }
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (items.length) {
+        const msgs = state.room.messages;
+        const known = new Set(msgs.map((m) => m.id));
+        let maxTs = 0;
+        let sawSystem = false;
+        let newCount = 0;
+        for (const it of items) {
+          maxTs = Math.max(maxTs, it.createdAt);
+          if (it.senderId === "system") sawSystem = true;
+          if (known.has(it.id)) continue;
+          msgs.push({
+            id: it.id,
+            roomId: state.room.id,
+            senderId: it.senderId,
+            text: it.text,
+            createdAt: it.createdAt,
+          });
+          newCount++;
+        }
+        // ponytail: mirror the server's 500-message trim locally so the
+        // rebuild-on-head-change path fires like before
+        if (msgs.length > 500) msgs.splice(0, msgs.length - 500);
+        // ponytail: 渲染成功才推进水位——渲染失败（含单条跳过）时消息不得
+        // 标记已读，否则消息"已读"但未显示（不刷新就永久丢）；跳过即强制
+        // 对账重试
+        let rendered = true;
+        try {
+          const { skipped } = appendMessages(true);
+          if (skipped > 0) {
+            rendered = false;
+            state.lastReconcileAt = 0; // 强制下一次 poll 全量对账
+          }
+        } catch (err) {
+          rendered = false;
+          state.lastReconcileAt = 0;
+          console.error("[chat] 渲染失败，水位不推进，立即对账:", err);
+        }
+        if (sawSystem) refreshRoomMeta(); // 成员进出事件后同步成员列表
+        // ponytail: ora-1 #3 — 未读计数在 poll 层统一统计（rebuild 场景
+        // appendMessages 以 live=false 渲染，原计数逻辑会漏掉角标）
+        if (newCount > 0) {
+          const sc = $("#thread");
+          const nearBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80;
+          if (!nearBottom || document.hidden) {
+            state.unread += newCount;
+            updateBadge();
+          }
+        }
+        // advance our own watermark only after successful render
+        if (rendered && maxTs > 0) {
+          void api("/read", {
+            method: "POST",
+            body: JSON.stringify({ roomId: state.room.id, sessionID: LS.sessionID, ts: maxTs }),
+          }).catch(() => {});
+        }
+      }
+      // ponytail: 周期性全量对账（每 2 分钟）——拉房间全量按 msgId 补漏，
+      // 兜底水位竞态/渲染跳过等任何口子，保证 Agent 消息永不丢
+      if (!state.lastReconcileAt || Date.now() - state.lastReconcileAt > 120000) {
+        state.lastReconcileAt = Date.now();
+        void reconcileFull();
+      }
       setOnline(true);
       pollDelay = 2000;
     } catch (e) {
+      if (!state.room || state.room.id !== roomId) return; // 过期错误不处理
       if (e.status === 401) {
         setOnline(false);
         if ($("#chatSettings").hidden) openChatSettings(); // 只弹一次，避免抢焦点
+        pollDelay = Math.min(pollDelay * 2, 30000); // 配置问题——退避
       } else if (e.status === 404) {
         leaveRoom(true);
         showJoinError("房间不存在或已被删除");
         return;
       } else {
-        setOnline(false); // 网络或其它错误：继续轮询
+        setOnline(false); // 网络/服务器重启等暂时性错误——固定 2s 快速重试
+        pollDelay = 2000;
       }
-      pollDelay = Math.min(pollDelay * 2, 30000);
     }
+  }
+
+  // ponytail: 全量对账——拉房间全量（500 cap 内）按 msgId 补缺失并重建渲染，
+  // 确保任何情况下前端与服务器一致（多 tab 各自独立 sessionID，互不影响）
+  async function reconcileFull() {
+    if (!state.room) return;
+    const roomId = state.room.id;
+    try {
+      const room = await api(`/rooms/${encodeURIComponent(roomId)}`);
+      if (!state.room || state.room.id !== roomId) return;
+      const msgs = state.room.messages;
+      const known = new Set(msgs.map((m) => m.id));
+      const missing = (room.messages || []).filter((m) => !known.has(m.id));
+      // orc-2 #3——渲染失败的消息在数组里（missing 为空），但需要重建重试
+      if (missing.length === 0 && failedRenderIds.size === 0) return; // 一致
+      for (const m of missing) {
+        let i = msgs.length;
+        while (i > 0 && msgs[i - 1].createdAt > m.createdAt) i--;
+        msgs.splice(i, 0, m);
+      }
+      if (msgs.length > 500) msgs.splice(0, msgs.length - 500);
+      const list = $("#msgList");
+      list.textContent = ""; // 缺失可能插入已渲染区间——强制重建
+      state.rendered = 0;
+      failedRenderIds.clear(); // 重建会重新渲染全部——失败会重新登记
+      const { skipped } = appendMessages(false);
+      // orc-3 #5——渲染失败时不得推进水位（与 poll 同规则）：失败消息留在
+      // 未读，下次对账重试；否则水位越过它且 inbox 不再返回，只剩整页刷新
+      const maxTs = msgs.reduce((mx, m) => Math.max(mx, m.createdAt), 0);
+      if (maxTs > 0 && skipped === 0) {
+        void api("/read", {
+          method: "POST",
+          body: JSON.stringify({ roomId, sessionID: LS.sessionID, ts: maxTs }),
+        }).catch(() => {});
+      }
+    } catch { /* 网络错误——下次对账 */ }
+  }
+
+  async function refreshRoomMeta() {
+    const roomId = state.room?.id;
+    if (!roomId) return;
+    try {
+      const room = await api(`/rooms/${encodeURIComponent(roomId)}`);
+      // orc-2 #4——await 期间可能已切换房间：丢弃过期响应
+      if (state.room && state.room.id === roomId) {
+        state.room.participants = room.participants;
+        renderMembers();
+      }
+    } catch { /* 下次 system 事件再试 */ }
   }
 
   function setOnline(ok) { $("#connBar").hidden = ok; }
@@ -1017,6 +1284,7 @@
     const input = $("#msgInput");
     const text = input.value.trim();
     if (!text || !state.room) return;
+    closeMention();
     input.value = "";
     autoGrow(input);
     updateSendState();
@@ -1052,6 +1320,7 @@
   /* ---------- 离开 ---------- */
   function leaveRoom(silent) {
     stopPolling();
+    closeMention();
     const roomId = state.room ? state.room.id : "";
     state.room = null;
     state.myName = "";
@@ -1146,6 +1415,317 @@
     $("#inTokenChat").focus();
   }
 
+  /* ---------- @提及 ---------- */
+  const mention = { active: false, start: 0, query: "", items: [], index: 0 };
+  const MENTION_RE = /<at>@([^<]+)<\/at>/g;
+  const MENTION_HINT = document.createElement("p");
+  MENTION_HINT.className = "mention-hint";
+  MENTION_HINT.textContent = "↑↓ 选择 · Enter 确认 · Esc 关闭";
+
+  // Markdown 最小子集渲染：粗体 / 斜体 / 行内代码 / 链接 / 围栏代码 / 列表 / 引用。
+  // 全部用 DOM API + textContent 构建，不用 innerHTML；任何未闭合或畸形的标记
+  // 都退化为字面文本，不会破坏布局或注入 HTML。
+  const MD_FENCE = /^```/;
+  const MD_QUOTE = /^>\s?/;
+  const MD_UL = /^\s*[-*+]\s+(.*)$/;
+  const MD_OL = /^\s*\d+\.\s+(.*)$/;
+  const MD_INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|\[([^\]\n]+)\]\(([^)\n]*)\)/g;
+
+  // 行内渲染：先按 <at>@名字</at> 拆提及（提及优先，提及内部永不做 Markdown），
+  // 纯文本段再做行内格式化。提及是否高亮蓝色取决于当前房间成员名单。
+  function renderInline(root, text) {
+    const parts = String(text).split(MENTION_RE);
+    const names = mentionNames();
+    for (let i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) {
+        const chip = document.createElement("span");
+        chip.className = "mention-chip";
+        if (names.has(parts[i])) chip.classList.add("member");
+        chip.textContent = "@" + parts[i];
+        root.appendChild(chip);
+      } else if (parts[i]) {
+        formatInline(root, parts[i]);
+      }
+    }
+  }
+
+  function formatInline(root, text) {
+    MD_INLINE.lastIndex = 0;
+    let last = 0, m;
+    while ((m = MD_INLINE.exec(text))) {
+      if (m.index > last) root.appendChild(document.createTextNode(text.slice(last, m.index)));
+      if (m[1]) { // 行内代码
+        const code = document.createElement("code");
+        code.textContent = m[1].slice(1, -1);
+        root.appendChild(code);
+      } else if (m[2]) { // 粗体
+        const strong = document.createElement("strong");
+        strong.textContent = m[2].slice(2, -2);
+        root.appendChild(strong);
+      } else if (m[3]) { // 斜体
+        const em = document.createElement("em");
+        em.textContent = m[3].slice(1, -1);
+        root.appendChild(em);
+      } else { // 链接：href 仅允许 http/https，否则按纯文本显示
+        const url = m[5];
+        if (/^https?:\/\//i.test(url)) {
+          const a = document.createElement("a");
+          a.href = url;
+          a.textContent = m[4];
+          a.rel = "noopener noreferrer";
+          a.target = "_blank";
+          root.appendChild(a);
+        } else {
+          root.appendChild(document.createTextNode(m[0]));
+        }
+      }
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) root.appendChild(document.createTextNode(text.slice(last)));
+  }
+
+  function renderList(root, tag, re, lines, i, first) {
+    const list = document.createElement(tag);
+    const item = (content) => {
+      const li = document.createElement("li");
+      renderInline(li, content);
+      list.appendChild(li);
+    };
+    item(first);
+    i++;
+    while (i < lines.length) {
+      const m = re.exec(lines[i]);
+      if (!m) break; // 换个列表符号就结束本列表，交给外层循环重新识别
+      item(m[1]);
+      i++;
+    }
+    root.appendChild(list);
+    return i;
+  }
+
+  // 块级解析：逐行扫描产出 p / pre / ul / ol / blockquote，行内内容交给 renderInline
+  function renderMarkdown(root, text) {
+    const lines = String(text).split("\n");
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+
+      if (MD_FENCE.test(line)) { // 围栏代码块（``` 后可跟语言，不展示）；未闭合则到消息末尾
+        const buf = [];
+        i++;
+        while (i < lines.length && !MD_FENCE.test(lines[i])) { buf.push(lines[i]); i++; }
+        i++; // 跳过闭合围栏行
+        const pre = document.createElement("pre");
+        const code = document.createElement("code");
+        code.textContent = buf.join("\n");
+        pre.appendChild(code);
+        root.appendChild(pre);
+        continue;
+      }
+
+      let m = MD_UL.exec(line);
+      if (m) { i = renderList(root, "ul", MD_UL, lines, i, m[1]); continue; }
+      m = MD_OL.exec(line);
+      if (m) { i = renderList(root, "ol", MD_OL, lines, i, m[1]); continue; }
+
+      if (MD_QUOTE.test(line)) { // 引用：连续 > 行合并为一个块
+        const buf = [];
+        while (i < lines.length) {
+          const q = MD_QUOTE.exec(lines[i]);
+          if (!q) break;
+          buf.push(lines[i].slice(q[0].length));
+          i++;
+        }
+        const bq = document.createElement("blockquote");
+        renderInline(bq, buf.join("\n"));
+        root.appendChild(bq);
+        continue;
+      }
+
+      if (!line.trim()) { i++; continue; } // 空行：段落分隔
+
+      // 段落：连续的非空、非块起始行；换行保留（.msg-text 为 pre-line）
+      const buf = [line];
+      i++;
+      while (i < lines.length && lines[i].trim()
+          && !MD_FENCE.test(lines[i]) && !MD_QUOTE.test(lines[i])
+          && !MD_UL.test(lines[i]) && !MD_OL.test(lines[i])) {
+        buf.push(lines[i]);
+        i++;
+      }
+      const p = document.createElement("p");
+      renderInline(p, buf.join("\n"));
+      root.appendChild(p);
+    }
+  }
+
+  // 消息正文入口：<at>@名字</at> 负载对 Markdown 语法是惰性的（不含 *、`、[ ] 等，
+  // 且总是以 < 开头，不会误判为块起始），所以块结构按原文解析、提及在行内拆分渲染，
+  // 两者互不污染：提及永远保持为 chip，Markdown 永不进入 chip 内部。
+  function renderTextWithMentions(root, text) {
+    renderMarkdown(root, text);
+  }
+
+  // 光标处的 @ 查询：@ 前必须是行首/空白/标点（不在单词中间）才算有效位置
+  // SKIP_CHAR: 跳过 @ 后的查询文本（中文+字母+数字）；ASCII_WORD: 英文
+  // mid-word 保护（"email@x" 不触发），中文前输入 @ 正常触发（"你好@小明"）
+  const SKIP_CHAR = /[\p{L}\p{N}_]/u;
+  const ASCII_WORD = /[A-Za-z0-9_]/;
+  function currentMention(input) {
+    const pos = input.selectionStart;
+    const val = input.value;
+    let s = pos;
+    while (s > 0 && SKIP_CHAR.test(val[s - 1])) s--;
+    if (s > 0 && val[s - 1] === "@" && (s - 1 === 0 || !ASCII_WORD.test(val[s - 2]))) {
+      return { start: s - 1, query: val.slice(s, pos) };
+    }
+    return null;
+  }
+
+  function mentionNames() {
+    const names = new Set();
+    for (const p of (state.room && state.room.participants) || []) {
+      // 不包含自己：@ 自己没有意义
+      if (p.name !== state.myName) names.add(p.name);
+    }
+    return names;
+  }
+
+  // 前缀优先、其次包含；不区分大小写
+  function filterMention(q) {
+    const ql = q.toLowerCase();
+    const prefix = [], sub = [];
+    for (const n of mentionNames()) {
+      if (!n) continue;
+      const nl = n.toLowerCase();
+      if (nl.startsWith(ql)) prefix.push(n);
+      else if (nl.includes(ql)) sub.push(n);
+    }
+    return prefix.concat(sub);
+  }
+
+  function highlightMention() {
+    const input = $("#msgInput");
+    const picker = $("#mentionPicker");
+    const opts = picker.querySelectorAll(".mention-opt");
+    if (!mention.items.length) { input.removeAttribute("aria-activedescendant"); return; }
+    opts.forEach((el, i) => {
+      el.classList.toggle("active", i === mention.index);
+      el.setAttribute("aria-selected", i === mention.index ? "true" : "false");
+    });
+    const el = opts[mention.index];
+    input.setAttribute("aria-activedescendant", el.id);
+    const ul = picker.querySelector("ul");
+    if (el.offsetTop < ul.scrollTop) ul.scrollTop = el.offsetTop;
+    else if (el.offsetTop + el.offsetHeight > ul.scrollTop + ul.clientHeight)
+      ul.scrollTop = el.offsetTop + el.offsetHeight - ul.clientHeight;
+  }
+
+  function updateMentionList(query) {
+    mention.query = query;
+    mention.items = filterMention(query);
+    mention.index = mention.items.length ? 0 : -1;
+    const picker = $("#mentionPicker");
+    picker.textContent = "";
+    const ul = document.createElement("ul");
+    mention.items.forEach((name, i) => {
+      const li = document.createElement("li");
+      li.className = "mention-opt";
+      li.id = `mention-opt-${i}`;
+      li.setAttribute("role", "option");
+      li.dataset.name = name;
+      const at = document.createElement("span");
+      at.className = "mention-at";
+      at.textContent = "@";
+      li.appendChild(at);
+      // 命中部分高亮
+      const nl = name.toLowerCase();
+      const ql = mention.query.toLowerCase();
+      const idx = ql ? nl.indexOf(ql) : -1;
+      if (idx < 0) li.appendChild(document.createTextNode(name));
+      else {
+        if (idx > 0) li.appendChild(document.createTextNode(name.slice(0, idx)));
+        const hit = document.createElement("span");
+        hit.className = "mention-hit";
+        hit.textContent = name.slice(idx, idx + mention.query.length);
+        li.appendChild(hit);
+        li.appendChild(document.createTextNode(name.slice(idx + mention.query.length)));
+      }
+      ul.appendChild(li);
+    });
+    picker.appendChild(ul);
+    if (!mention.items.length) {
+      const empty = document.createElement("p");
+      empty.className = "mention-empty";
+      empty.textContent = "没有匹配的成员";
+      picker.appendChild(empty);
+    }
+    picker.appendChild(MENTION_HINT);
+    highlightMention();
+  }
+
+  function openMention(start, query) {
+    mention.active = true;
+    mention.start = start;
+    updateMentionList(query);
+    $("#mentionPicker").hidden = false;
+    $("#msgInput").setAttribute("aria-expanded", "true");
+  }
+
+  function closeMention() {
+    if (!mention.active) return;
+    mention.active = false;
+    mention.items = [];
+    mention.index = 0;
+    $("#mentionPicker").hidden = true;
+    const input = $("#msgInput");
+    input.removeAttribute("aria-expanded");
+    input.removeAttribute("aria-activedescendant");
+  }
+
+  function recomputeMention() {
+    const input = $("#msgInput");
+    const m = currentMention(input);
+    if (m) {
+      // 命中：弹框未开则打开，已开则更新过滤
+      if (mention.active) updateMentionList(m.query);
+      else openMention(m.start, m.query);
+    } else if (mention.active) {
+      // 弹框已开但边界扫描未命中：只要 @ 还在输入框里就保持弹框
+      // （仅更新过滤），避免 keydown 打开后被 input 事件链立刻误关；
+      // @ 被删除/移动后才关闭
+      const val = input.value;
+      if (val.includes("@")) {
+        const at = val.lastIndexOf("@");
+        // ponytail: orc-1 #6 — 同步更新 mention.start，避免第二个 @ 时
+        // 插入替换到旧位置
+        mention.start = at;
+        updateMentionList(val.slice(at + 1, input.selectionStart));
+      } else {
+        closeMention();
+      }
+    }
+  }
+
+  function moveMention(d) {
+    const n = mention.items.length;
+    if (!n) return;
+    mention.index = (mention.index + d + n) % n;
+    highlightMention();
+  }
+
+  // 把光标处的 @查询 替换为 <at>@名字</at>，光标放到末尾
+  function insertMention(name) {
+    const input = $("#msgInput");
+    const end = mention.start + 1 + mention.query.length;
+    if (input.value.slice(mention.start, end) !== "@" + mention.query) { closeMention(); return; } // 内容变了就放弃
+    input.setRangeText(`<at>@${name}</at>`, mention.start, end, "end");
+    closeMention();
+    autoGrow(input);
+    updateSendState();
+    input.focus({ preventScroll: true });
+  }
+
   /* ---------- 事件 ---------- */
   function wireEvents() {
     $("#joinForm").addEventListener("submit", (e) => { e.preventDefault(); joinRoom(); });
@@ -1154,20 +1734,57 @@
     $("#btnJump").addEventListener("click", jumpToBottom);
     $("#btnCopyId").addEventListener("click", copyRoomId);
     $("#msgInput").addEventListener("keydown", (e) => {
+      // ponytail: @ 弹框由 input 事件统一驱动（recomputeMention）——之前
+      // 为绕过 scroll 误关打的多条补丁（keydown 即弹、doc-capture）已随
+      // 根因修复移除；此处只处理弹框开启后的键盘导航
+      if (mention.active && !e.isComposing) {
+        if (e.key === "ArrowDown") { e.preventDefault(); moveMention(1); return; }
+        if (e.key === "ArrowUp") { e.preventDefault(); moveMention(-1); return; }
+        if (e.key === "Escape") { e.preventDefault(); closeMention(); return; }
+        if (e.key === "Enter" || e.key === "Tab") {
+          if (mention.items.length) {
+            e.preventDefault();
+            insertMention(mention.items[mention.index]);
+            return;
+          }
+          closeMention();
+          if (e.key === "Tab") return; // 无匹配时 Tab 照常离开
+          // Enter 无匹配：落到下面的发送逻辑
+        }
+      }
       // Enter 发送（Ctrl+Enter 也发送，Shift+Enter 换行）；isComposing: 中文输入法组词回车不误发
       if (e.key === "Enter" && !e.isComposing && (e.ctrlKey || !e.shiftKey)) {
         e.preventDefault();
         send();
       }
     });
-    $("#msgInput").addEventListener("input", () => {
+    $("#msgInput").addEventListener("input", (e) => {
       autoGrow($("#msgInput"));
       updateSendState();
+      // ponytail: 不因 isComposing 跳过——中文输入法下 @ 上屏的 input 事件
+      // 可能带 composing 标志，跳过会导致弹框永不打开；组词产生的候选
+      // 字符不含 @，recomputeMention 天然无害
+      recomputeMention();
+    });
+    $("#msgInput").addEventListener("keyup", (e) => {
+      // 左右方向键 / Home / End 移动了光标后重新定位（上下键已被面板占用）
+      if (mention.active && !e.isComposing && /^(ArrowLeft|ArrowRight|Home|End)/.test(e.key)) recomputeMention();
+    });
+    $("#msgInput").addEventListener("click", recomputeMention);
+    $("#msgInput").addEventListener("blur", closeMention);
+    $("#mentionPicker").addEventListener("mousedown", (e) => {
+      const opt = e.target.closest(".mention-opt");
+      if (!opt) return;
+      e.preventDefault(); // 阻止 textarea 失焦，blur 就不会抢先关面板
+      insertMention(opt.dataset.name);
     });
     ["#inRoomId", "#inName", "#inRoomName"].forEach((s) => {
       $(s).addEventListener("input", hideJoinError);
     });
     $("#thread").addEventListener("scroll", () => {
+      // ponytail: 不在此处 closeMention——弹框打开引起的布局/滚动位置
+      // 调整会触发 scroll 事件，无条件关闭会让弹框"打开即消失"；
+      // 弹框只由用户明确操作（Esc/点击外部/失焦/插入/发送）关闭
       const sc = $("#thread");
       if (sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80) {
         state.unread = 0;
@@ -1190,11 +1807,16 @@
         flash(save, "已保存");
         return;
       }
+      if (mention.active && !e.target.closest("#mentionPicker")) closeMention();
       if (!e.target.closest(".anchor")) closePanels();
     });
+    // ponytail: 不用 pagehide 自动 leave——它无法区分关闭/后台/bfcache，
+    // 刷新竞态会把新 join 的条目删掉（orc-1 #2）；死条目由 join 清理 +
+    // claim 窗口限制影响，可接受
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && closePanels()) {
+      if (e.key === "Escape" && (closePanels() || mention.active)) {
         e.preventDefault();
+        closeMention();
         if (lastFocus) lastFocus.focus();
       }
     });

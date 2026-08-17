@@ -112,6 +112,8 @@ export type RegistryEntry = {
   apiPrefix: string;
   name: string;
   lastReadTs?: number;
+  // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行；web 条目不填
+  host?: string;
 };
 export type Registry = Record<string, Record<string, RegistryEntry>>;
 
@@ -172,6 +174,11 @@ export function identity(name?: string): string {
 // ponytail: shared trailing instruction for push notifications
 export const NOTIFY_INSTRUCTION =
   "This is an automatic chat-room notification. Do NOT reply, do NOT call any tools, do NOT interrupt your current work, unless you are explicitly addressed (mentioned by name) or genuinely need to respond.";
+
+// ponytail: 唤醒已退出 session 的消息（serve /session/:id/message 的 parts
+// 文本）——客户端（center-client）与服务器（chat-server）共享
+export const SERVE_WAKE_PROMPT =
+  "You were woken because you were mentioned (@) in the chat room. Use the room tool to poll the room(s) you are a member of, read the new messages, and reply to anything addressed to you. Then report what you did.";
 
 // ponytail: oversize protection for push payloads — truncate long texts and
 // cap the number of unread lines per notification

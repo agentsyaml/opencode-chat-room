@@ -3,6 +3,7 @@
 // via CHAT_ROOM_SERVER_URL. Optional bearer token (CHAT_ROOM_SERVER_TOKEN).
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import RoomService, { RoomError, type Room } from "../src/room-service";
 import {
   enqueue,
@@ -10,10 +11,140 @@ import {
   loadRooms,
   saveRegistry,
   saveRooms,
+  SERVE_WAKE_PROMPT,
+  type RegistryEntry,
 } from "../src/store";
 
 const port = Number(process.env.CHAT_ROOM_SERVER_PORT ?? 4399);
 const token = process.env.CHAT_ROOM_SERVER_TOKEN;
+
+// ponytail: 部署者显式配置的 serve 地址——消息到达时立即唤起被 @ 的已退出
+// session（零轮询延迟）；未配置则跳过（插件定时器兜底）。这是显式配置，
+// 不是对 opencode 存在的假设
+const serveWakeUrl = process.env.CHAT_ROOM_WAKE_SERVE_URL ?? "";
+
+// ponytail: cross-process wake dedupe — multiple opencode windows all run the
+// 10s wake sweep, and their per-process spawn windows don't see each other;
+// the server claims the wake atomically so only one window spawns per session
+// (generic coordination, no opencode assumption)
+const wakeClaims = new Map<string, number>();
+const WAKE_CLAIM_MS = 30 * 1000;
+
+function claimWake(sessionID: string): boolean {
+  const now = Date.now();
+  const last = wakeClaims.get(sessionID) ?? 0;
+  if (now - last < WAKE_CLAIM_MS) {
+    return false;
+  }
+  wakeClaims.set(sessionID, now);
+  return true;
+}
+
+// ponytail: 活跃心跳（内存）——任何活跃操作（inbox/read/send/join）都会刷
+// 新；近 2 分钟活跃的会话由插件 queue 推送处理，服务器绝不 serve 双唤起。
+// 内存态：服务器重启后短暂视为未活跃（可接受——重启场景罕见）
+const activeSessions = new Map<string, number>();
+const WAKE_INACTIVE_MS = 2 * 60 * 1000;
+
+function touchActive(sessionID: string): void {
+  if (sessionID) {
+    activeSessions.set(sessionID, Date.now());
+  }
+}
+
+// ponytail: 服务器消息触发唤起——只有 @ 点名了成员的消息才会唤起（用户
+// 核心需求）。仅唤起本机（host === 服务器主机名）的已退出 opencode 成员：
+// 服务器的 serve 只能恢复本机 session，异机 session 由该机插件定时器兜底。
+// 水位在唤起成功后推进（prompt 已带消息内容——agent 无需 poll 到它，
+// 也不会因先推进而在唤起失败时丢消息）。
+async function wakeMentionedSessions(
+  roomId: string,
+  roomName: string,
+  senderName: string,
+  text: string,
+  senderSessionID: string,
+  messageTs: number,
+): Promise<void> {
+  if (!serveWakeUrl) {
+    return;
+  }
+  const mentions = new Set<string>();
+  for (const m of text.matchAll(/<at>@([^<]+)<\/at>/g)) {
+    mentions.add(m[1]!);
+  }
+  for (const m of text.matchAll(/@([\p{L}\p{N}_]+)/gu)) {
+    // ponytail: mid-word 守卫（orc-1）——email/URL 里的 @token 不算提及。
+    // 用 ASCII 词字符（与客户端 picker 的 ASCII_WORD 一致，orc-2 #5）：
+    // 中文前缀（你好@小明）正常触发，dev@bob 不触发
+    const at = m.index ?? 0;
+    if (at > 0 && /[A-Za-z0-9_]/.test(text[at - 1] ?? "")) continue;
+    mentions.add(m[1]!);
+  }
+  if (mentions.size === 0) {
+    return; // 未 @ 任何人——不唤起（核心需求）
+  }
+  const reg = await enqueue(async () => {
+    const r = await loadRegistry();
+    return r[roomId] ?? {};
+  });
+  const now = Date.now();
+  for (const [sid, entry] of Object.entries(reg)) {
+    if (
+      sid === senderSessionID ||
+      !mentions.has(entry.name) || // 只唤起被 @ 点名的人
+      entry.host !== os.hostname() || // 只唤起本机 session（serve 只能恢复本机）
+      (activeSessions.get(sid) ?? 0) > now - WAKE_INACTIVE_MS // 活跃中——插件推送处理
+    ) {
+      continue;
+    }
+    if (!claimWake(sid)) {
+      continue; // 30s 窗口内已唤起过
+    }
+    void (async () => {
+      try {
+        // orc-3 #2——带该 session 的全部未读（含更早的），水位推进到
+        // maxTs；否则更早未读被标记已读但从未投递（插件 sweep 也会因
+        // 水位已推进而跳过——永久丢失）
+        const inbox = await readInbox(sid, roomId, true);
+        const older = inbox.items.filter((it) => it.createdAt < messageTs);
+        // prompt 附带触发消息内容——agent 无需 poll 也能精确回复
+        const prompt =
+          `${SERVE_WAKE_PROMPT}\n\n` +
+          `New message in room ${roomName} from ${senderName}: ${text}` +
+          (older.length
+            ? `\n\n更早的未读消息：\n${older
+                .map((it) => `[${it.senderId}]: ${it.text}`)
+                .join("\n")}`
+            : "");
+        const res = await fetch(
+          `${serveWakeUrl.replace(/\/+$/, "")}/session/${sid}/message`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parts: [{ type: "text", text: prompt }] }),
+          },
+        );
+        if (res.ok) {
+          // 唤起成功（serve 同步处理完）后推进水位——防循环唤起
+          const maxTs = Math.max(
+            messageTs,
+            ...inbox.items.map((it) => it.createdAt),
+          );
+          await enqueue(async () => {
+            const r = await loadRegistry();
+            const e = r[roomId]?.[sid];
+            if (e) {
+              e.lastReadTs = Math.max(e.lastReadTs ?? 0, maxTs);
+              await saveRegistry(r);
+            }
+          });
+        }
+      } catch {
+        // serve 不可达——静默，插件 10s 定时器兜底
+      }
+    })();
+  }
+}
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -50,6 +181,60 @@ async function read<T>(fn: (svc: RoomService) => T | Promise<T>): Promise<T> {
   });
 }
 
+type InboxItem = {
+  id: string;
+  roomId: string;
+  roomName: string;
+  senderId: string;
+  text: string;
+  createdAt: number;
+};
+type InboxResult = { member: boolean; items: InboxItem[] };
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// ponytail: short enqueue per check (writes are never blocked by a long poll)
+async function readInbox(
+  sessionID: string,
+  roomFilter: string | null,
+  excludeSelf: boolean,
+): Promise<InboxResult> {
+  // 注意：这里绝不 touchActive——插件 10s 扫描也会调 inbox（把已退出
+  // session 误标活跃会让消息触发唤起失效）
+  return read(async (svc) => {
+    const reg = await loadRegistry();
+    const out: InboxItem[] = [];
+    let member = false;
+    for (const room of svc.listRooms()) {
+      if (roomFilter && room.id !== roomFilter) {
+        continue;
+      }
+      const entry = reg[room.id]?.[sessionID];
+      if (!entry) {
+        continue;
+      }
+      member = true;
+      const lastRead = entry.lastReadTs ?? 0;
+      for (const m of room.messages) {
+        if (
+          m.createdAt > lastRead &&
+          (!excludeSelf || m.senderId !== entry.name)
+        ) {
+          out.push({
+            id: m.id,
+            roomId: room.id,
+            roomName: room.name,
+            senderId: m.senderId,
+            text: m.text,
+            createdAt: m.createdAt,
+          });
+        }
+      }
+    }
+    return { member, items: out };
+  });
+}
+
 async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const p = url.pathname;
@@ -63,7 +248,12 @@ async function handle(req: Request): Promise<Response> {
       return json({ error: "chat page not found" }, 404);
     }
     return new Response(html, {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        // ponytail: never cache the page — the UI is iterated often and the
+        // server reads it fresh from disk on every request
+        "Cache-Control": "no-store",
+      },
     });
   }
   // ponytail: F1 — reject non-JSON POSTs; a text/plain simple request from a
@@ -78,6 +268,18 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "unauthorized" }, 401);
   }
   try {
+    if (req.method === "GET" && p === "/rooms/summary") {
+      // ponytail: 轻量房间摘要（不含消息）——wakeSessions 每 10s 用它计算
+      // latest，避免下载全部房间历史（orc-1 #5）
+      const rooms = await read((svc) =>
+        svc.listRooms().map((r) => ({
+          id: r.id,
+          name: r.name,
+          latestMsgTs: r.messages.at(-1)?.createdAt ?? 0,
+        })),
+      );
+      return json(rooms);
+    }
     if (req.method === "GET" && p === "/rooms") {
       const rooms = await read((svc) => svc.listRooms());
       return json(rooms.map(serializeRoom));
@@ -99,12 +301,15 @@ async function handle(req: Request): Promise<Response> {
         const created = svc.createRoom(name, owner);
         if (body.sessionID) {
           const reg = await loadRegistry();
-          const regRoom = (reg[created.id] = reg[created.id] ?? {});
+          const regRoom = (reg[created.id] =
+            reg[created.id] ?? Object.create(null) as Record<string, RegistryEntry>);
           regRoom[body.sessionID] = {
             // ponytail: central mode self-pulls the inbox; no cross-host URL
             serverUrl: "",
             apiPrefix: "/api",
             name: owner,
+            // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行
+            host: body.host ?? "",
             lastReadTs: Date.now(),
           };
           await saveRegistry(reg);
@@ -119,34 +324,21 @@ async function handle(req: Request): Promise<Response> {
       // ponytail: poll includes the caller's own messages (echo), the
       // notification self-pull excludes them — aligned with standalone poll
       const excludeSelf = url.searchParams.get("excludeSelf") === "1";
-      const result = await read(async (svc) => {
-        const reg = await loadRegistry();
-        const out: unknown[] = [];
-        let member = false;
-        for (const room of svc.listRooms()) {
-          if (roomFilter && room.id !== roomFilter) {
-            continue;
-          }
-          const entry = reg[room.id]?.[sessionID];
-          if (!entry) {
-            continue;
-          }
-          member = true;
-          const lastRead = entry.lastReadTs ?? 0;
-          for (const m of room.messages) {
-            if (m.createdAt > lastRead && (!excludeSelf || m.senderId !== entry.name)) {
-              out.push({
-                roomId: room.id,
-                roomName: room.name,
-                senderId: m.senderId,
-                text: m.text,
-                createdAt: m.createdAt,
-              });
-            }
-          }
-        }
-        return { member, items: out };
-      });
+      // long-poll: wait up to `timeout` ms for the first new message
+      // instead of returning empty immediately (web chat + sub-agent
+      // watchers); empty responses only happen on timeout
+      const timeout = Math.min(
+        Math.max(Number(url.searchParams.get("timeout") ?? 0) || 0, 0),
+        30000,
+      );
+      const deadline = Date.now() + timeout;
+      let result = await readInbox(sessionID, roomFilter, excludeSelf);
+      while (result.items.length === 0 && Date.now() < deadline) {
+        // ponytail: 2s between disk scans (orc-1 #7) — 1s × 25 iterations
+        // doubles the file reads on shared-mount deployments
+        await sleep(2000);
+        result = await readInbox(sessionID, roomFilter, excludeSelf);
+      }
       return json(result);
     }
     if (req.method === "POST" && p === "/read") {
@@ -155,6 +347,7 @@ async function handle(req: Request): Promise<Response> {
       // accepted as a limitation until real session auth exists
       const body = (await req.json()) as Record<string, unknown>;
       const ts = Number(body.ts ?? 0);
+      touchActive(String(body.sessionID ?? "")); // poll 推进 = 活跃
       await enqueue(async () => {
         const reg = await loadRegistry();
         const entry = reg[String(body.roomId)]?.[String(body.sessionID)];
@@ -165,6 +358,21 @@ async function handle(req: Request): Promise<Response> {
         }
       });
       return json({ ok: true });
+    }
+    if (req.method === "POST" && p === "/active") {
+      // ponytail: 活跃上报——插件对"进程内自推成功"的 session 调用（真实
+      // 活跃）；服务器据此避免 serve 双唤起
+      const body = (await req.json()) as Record<string, unknown>;
+      touchActive(String(body.sessionID ?? ""));
+      return json({ ok: true });
+    }
+    if (req.method === "POST" && p === "/wake-claim") {
+      // ponytail: atomic cross-process wake dedupe (see claimWake) — the
+      // server only arbitrates, it never spawns anything itself
+      const body = (await req.json()) as Record<string, unknown>;
+      const sessionID = String(body.sessionID ?? "");
+      const ok = await enqueue(async () => claimWake(sessionID));
+      return json({ ok });
     }
     const m = p.match(/^\/rooms\/([^/]+)\/(join|leave|messages)$/);
     if (m) {
@@ -187,7 +395,8 @@ async function handle(req: Request): Promise<Response> {
         }
         const room = await mutate(async (svc) => {
           const reg = await loadRegistry();
-          const regRoom = (reg[roomId] = reg[roomId] ?? {});
+          const regRoom = (reg[roomId] =
+            reg[roomId] ?? Object.create(null) as Record<string, RegistryEntry>);
           // retire the participant this session previously held, if renamed
           // — skipped when another session still uses the old name
           const prevEntry = regRoom[sessionID];
@@ -212,6 +421,7 @@ async function handle(req: Request): Promise<Response> {
             }
           }
           svc.joinRoom(roomId, { id, name });
+          touchActive(sessionID); // join = 活跃
           if (!already) {
             svc.addEvent(roomId, `${name} joined the room`);
           }
@@ -222,6 +432,8 @@ async function handle(req: Request): Promise<Response> {
             serverUrl: "",
             apiPrefix: "/api",
             name,
+            // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行
+            host: body.host ?? "",
             lastReadTs: regRoom[sessionID]?.lastReadTs ?? Date.now(),
           };
           await saveRegistry(reg);
@@ -234,8 +446,15 @@ async function handle(req: Request): Promise<Response> {
           const reg = await loadRegistry();
           const entry = reg[roomId]?.[sessionID];
           const participantId = entry?.name ?? sessionID;
-          svc.leaveRoom(roomId, participantId);
-          svc.addEvent(roomId, `${participantId} left the room`);
+          // ponytail: orc-2 #2——共享名守卫：还有别的 session 持有同名时，
+          // 只移除本 entry，不移除参与者（否则兄弟 tab 发送会 NOT_JOINED）
+          const shared = Object.entries(reg[roomId] ?? {}).some(
+            ([sid, e]) => e.name === participantId && sid !== sessionID,
+          );
+          if (!shared) {
+            svc.leaveRoom(roomId, participantId);
+            svc.addEvent(roomId, `${participantId} left the room`);
+          }
           if (reg[roomId]) {
             delete reg[roomId][sessionID];
             if (Object.keys(reg[roomId]).length === 0) {
@@ -261,6 +480,19 @@ async function handle(req: Request): Promise<Response> {
           svc.sendMessage(roomId, sender, text);
           return svc.getRoom(roomId);
         });
+        touchActive(sessionID); // 发送者活跃
+        // ponytail: 即时唤起——仅 @ 点名成员时（核心需求）
+        const sent = room.messages.at(-1);
+        if (sent) {
+          void wakeMentionedSessions(
+            roomId,
+            room.name,
+            sent.senderId,
+            text,
+            sessionID,
+            sent.createdAt,
+          );
+        }
         return json(serializeRoom(room), 201);
       }
     }
@@ -270,6 +502,24 @@ async function handle(req: Request): Promise<Response> {
         svc.getRoom(decodeURIComponent(g[1]!)),
       );
       return json(serializeRoom(room));
+    }
+    const r = p.match(/^\/rooms\/([^/]+)\/registry$/);
+    if (r && req.method === "GET") {
+      // ponytail: session registry for the in-plugin wake watcher — lets the
+      // plugin find which sessions have unread messages without polling every
+      // session's inbox; host is included for the @-wake ownership gate
+      const roomId = decodeURIComponent(r[1]!);
+      const reg = await enqueue(async () => {
+        const registry = await loadRegistry();
+        const entries = registry[roomId] ?? {};
+        return Object.fromEntries(
+          Object.entries(entries).map(([sid, e]) => [
+            sid,
+            { name: e.name, lastReadTs: e.lastReadTs ?? 0, host: e.host ?? "" },
+          ]),
+        );
+      });
+      return json(reg);
     }
     return json({ error: "not found" }, 404);
   } catch (err) {
@@ -286,6 +536,10 @@ async function handle(req: Request): Promise<Response> {
 export default {
   port,
   fetch: handle,
+  // ponytail: bun's default idleTimeout (10s) would close our long-poll
+  // connections (25s) mid-request -> ERR_EMPTY_RESPONSE on every poll;
+  // keep connections alive well past the longest long-poll window
+  idleTimeout: 60,
 };
 
 console.log(
