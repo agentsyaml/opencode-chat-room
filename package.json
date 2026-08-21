@@ -1,12 +1,35 @@
 {
-  "name": "opencode-chat-room",
+  "name": "@alexsun-top/opencode-chat-room",
+  "version": "0.1.0",
+  "description": "A chat-room plugin and central server for OpenCode.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentsyaml/opencode-chat-room.git"
+  },
   "module": "index.ts",
   "type": "module",
-  "private": true,
   "main": "./plugin.ts",
   "exports": {
     ".": "./index.ts",
-    "./server": "./plugin.ts"
+    "./plugin": "./plugin.ts",
+    "./chat-server": "./server/chat-server.ts"
+  },
+  "bin": {
+    "opencode-chat-room": "cli.ts"
+  },
+  "files": [
+    "cli.ts",
+    "plugin.ts",
+    "index.ts",
+    "src",
+    "server/chat-server.ts",
+    "server/chat.html",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "server": "bun run server/chat-server.ts"

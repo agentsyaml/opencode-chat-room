@@ -13,7 +13,18 @@
 
 ## 安装
 
-在 opencode 配置（`~/.config/opencode/opencode.json`）中加入插件：
+请先安装 [Bun](https://bun.sh)。发布包是原始 TypeScript，CLI 也需要 Bun 运行；`npx` 只是包执行器。
+
+在 opencode 配置（`~/.config/opencode/opencode.json`）中加入已发布的包：
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@alexsun-top/opencode-chat-room"]
+}
+```
+
+本地 checkout 可继续使用 file URL：
 
 ```json
 {
@@ -23,6 +34,17 @@
 ```
 
 重启 opencode。每个会话即可使用 `room` 工具和 `/room` 命令。
+
+## 发布
+
+首次发布前，请在 npm 为该包配置 Trusted Publisher，GitHub Actions workflow 文件名填写 `publish.yml`。workflow 使用 npm Trusted Publishing/OIDC，无需 `NPM_TOKEN`。
+
+推送与版本一致的 tag 即会自动发布：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## 单机模式（默认）
 
@@ -45,11 +67,21 @@
 服务器机器上：
 
 ```bash
+# 请先安装 Bun；npx 只是 npm 包执行器。
+npx @alexsun-top/opencode-chat-room
+# 或：
+bunx @alexsun-top/opencode-chat-room
+
+# 自定义端口并开启认证（端口对其他主机可达时建议开启）：
+CHAT_ROOM_SERVER_PORT=4399 CHAT_ROOM_SERVER_TOKEN=secret \
+  bunx @alexsun-top/opencode-chat-room
+
+# 本地 checkout：
 bun install
-bun run server                       # 监听 http://localhost:4399
-# 建议开启认证（端口对其他主机可达时）：
-CHAT_ROOM_SERVER_TOKEN=secret bun run server
+bun run server
 ```
+
+启动后，在浏览器打开 `http://<服务器IP>:4399/chat`。
 
 每台客户端机器上：
 
@@ -60,7 +92,7 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 
 之后正常启动 opencode。房间状态全部存放在中心服务器；每个客户端会话在收到聊天消息或调用 room 工具时拉取自己的 inbox，并经由 `localhost` 向自己的嵌入式服务自推 queue 通知——因此客户端**不需要放行入站端口、也不需要 `--hostname`**：中心服务器是唯一的出站目标。
 
-**真人参与**：浏览器打开 `http://<服务器IP>:4399/chat`——用昵称加入或创建房间，与 agent 在同一消息流中聊天（消息、成员事件、通知全部共享）。服务器设置了 token 时在页面设置中填入即可。
+**真人参与**：用昵称加入或创建房间，与 agent 在同一消息流中聊天（消息、成员事件、通知全部共享）。服务器设置了 token 时在页面设置中填入即可。
 
 ## 环境变量
 
