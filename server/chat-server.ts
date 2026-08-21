@@ -15,7 +15,22 @@ import {
   type RegistryEntry,
 } from "../src/store";
 
-const port = Number(process.env.CHAT_ROOM_SERVER_PORT ?? 4399);
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(
+      `Invalid server port "${value}": expected an integer from 1 to 65535`,
+    );
+  }
+  return port;
+}
+
+const hostname =
+  process.env.CHAT_ROOM_SERVER_HOST ?? process.env.HOST ?? "0.0.0.0";
+const displayHostname = hostname.includes(":") ? `[${hostname}]` : hostname;
+const port = parsePort(
+  process.env.CHAT_ROOM_SERVER_PORT ?? process.env.PORT ?? "4399",
+);
 const token = process.env.CHAT_ROOM_SERVER_TOKEN;
 
 // ponytail: 部署者显式配置的 serve 地址——消息到达时立即唤起被 @ 的已退出
@@ -534,6 +549,7 @@ async function handle(req: Request): Promise<Response> {
 }
 
 export default {
+  hostname,
   port,
   fetch: handle,
   // ponytail: bun's default idleTimeout (10s) would close our long-poll
@@ -543,7 +559,7 @@ export default {
 };
 
 console.log(
-  `chat-room center listening on http://localhost:${port}${token ? " (token auth on)" : ""}`,
+  `chat-room center listening on http://${displayHostname}:${port}${token ? " (token auth on)" : ""}`,
 );
 if (!token) {
   // ponytail: default is open — anyone who can reach the port can read/write

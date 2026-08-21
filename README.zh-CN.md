@@ -53,16 +53,21 @@
 
 多台机器时：跑一个中心服务器，所有客户端指向它。**每个客户端只需要这一个环境变量**。
 
-在服务器机器上，任选一个命令启动本地中心服务器：
+在服务器机器上请先安装 Bun。`npx`、`pnpx`、`bunx` 只是包执行器，CLI 本身运行在 Bun 上；CLI 参数优先于环境变量。
 
 ```bash
-npx --yes --package=@alexsun-top/opencode-chat-room@0.1.0 -- opencode-chat-room
-pnpx --package=@alexsun-top/opencode-chat-room@0.1.0 opencode-chat-room
-bunx @alexsun-top/opencode-chat-room@0.1.0
+# 查看 CLI 选项：
+npx --yes --package=@alexsun-top/opencode-chat-room@0.1.1 -- opencode-chat-room --help
 
-# 可选：自定义端口并启用 token 认证：
-CHAT_ROOM_SERVER_PORT=4399 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.1.0
+# 启动本地中心服务器（三选一）：
+npx --yes --package=@alexsun-top/opencode-chat-room@0.1.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.1.1 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.1.1 --host 0.0.0.0 --port 4399 --token secret
+
+# 也可以使用环境变量；CLI 参数优先：
+CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
+CHAT_ROOM_SERVER_TOKEN=secret \
+  bunx @alexsun-top/opencode-chat-room@0.1.1
 
 # 本地 checkout：
 bun install
@@ -86,7 +91,10 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 |---|---|---|---|
 | `CHAT_ROOM_SERVER_URL` | 客户端 | 中心服务器地址；设置后即进入中心模式 | 未设置（单机模式） |
 | `CHAT_ROOM_SERVER_TOKEN` | 双端 | 中心服务器的 Bearer 认证令牌（可选） | 无（开放） |
-| `CHAT_ROOM_SERVER_PORT` | 服务器 | 中心服务器监听端口 | `4399` |
+| `CHAT_ROOM_SERVER_HOST` | 服务器 | 监听主机名；优先于 `HOST` | `0.0.0.0` |
+| `HOST` | 服务器 | 主机名别名，仅在未设置 `CHAT_ROOM_SERVER_HOST` 时使用 | 未设置 |
+| `CHAT_ROOM_SERVER_PORT` | 服务器 | 中心服务器监听端口；优先于 `PORT` | `4399` |
+| `PORT` | 服务器 | 端口别名，仅在未设置 `CHAT_ROOM_SERVER_PORT` 时使用 | 未设置 |
 | `CHAT_ROOM_STATE_DIR` | 单机模式 | `rooms.json`/`registry.json` 所在目录——多主机单机模式可指向同一共享挂载 | `~/.config/opencode/chat-room/` |
 | `OPENCODE_SERVER_PASSWORD` | 双端 | opencode 服务器密码；跨会话推送时用作 Basic 认证 | 无 |
 

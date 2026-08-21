@@ -53,16 +53,21 @@ Push notifications travel over each session's embedded HTTP server. On one machi
 
 For several machines: run one central server, point every client at it. This is the only per-client configuration.
 
-On the server machine, run any one of these commands to start the local central server:
+On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute the package; the CLI itself runs on Bun. CLI options override environment variables.
 
 ```bash
-npx --yes --package=@alexsun-top/opencode-chat-room@0.1.0 -- opencode-chat-room
-pnpx --package=@alexsun-top/opencode-chat-room@0.1.0 opencode-chat-room
-bunx @alexsun-top/opencode-chat-room@0.1.0
+# Show CLI options:
+npx --yes --package=@alexsun-top/opencode-chat-room@0.1.1 -- opencode-chat-room --help
 
-# Optional custom port and token auth:
-CHAT_ROOM_SERVER_PORT=4399 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.1.0
+# Start the local central server (choose any one runner):
+npx --yes --package=@alexsun-top/opencode-chat-room@0.1.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.1.1 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.1.1 --host 0.0.0.0 --port 4399 --token secret
+
+# Environment variables also work; CLI options take precedence:
+CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
+CHAT_ROOM_SERVER_TOKEN=secret \
+  bunx @alexsun-top/opencode-chat-room@0.1.1
 
 # Local checkout:
 bun install
@@ -86,7 +91,10 @@ Then start opencode normally. Room state lives on the central server. Clients on
 |---|---|---|---|
 | `CHAT_ROOM_SERVER_URL` | client | Central server URL; when set, central mode is active | unset (standalone) |
 | `CHAT_ROOM_SERVER_TOKEN` | both | Bearer token for the central server (optional) | none (open) |
-| `CHAT_ROOM_SERVER_PORT` | server | Central server listen port | `4399` |
+| `CHAT_ROOM_SERVER_HOST` | server | Bind hostname; takes precedence over `HOST` | `0.0.0.0` |
+| `HOST` | server | Host alias, used when `CHAT_ROOM_SERVER_HOST` is unset | unset |
+| `CHAT_ROOM_SERVER_PORT` | server | Central server listen port; takes precedence over `PORT` | `4399` |
+| `PORT` | server | Port alias, used when `CHAT_ROOM_SERVER_PORT` is unset | unset |
 | `CHAT_ROOM_STATE_DIR` | standalone | Directory for `rooms.json`/`registry.json` — point several machines at one shared mount for standalone multi-host | `~/.config/opencode/chat-room/` |
 | `OPENCODE_SERVER_PASSWORD` | both | opencode server password; used for Basic auth on cross-session pushes | none |
 
