@@ -13,7 +13,7 @@ A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessio
 
 ## Installation
 
-Install [Bun](https://bun.sh) first. The published package is raw TypeScript and its CLI runs with Bun.
+Install [Bun](https://bun.sh) first. The CLI requires Bun; `npx`, `pnpx`, and `bunx` only execute the package.
 
 Add the published package to your opencode config (`~/.config/opencode/opencode.json`):
 
@@ -35,17 +35,6 @@ For a local checkout, use a file URL instead:
 
 Restart opencode. The `room` tool and the `/room` command are now available in every session.
 
-## Publishing
-
-Configure an npm Trusted Publisher for this package and the GitHub Actions workflow filename `publish.yml` before the first release. The workflow uses npm Trusted Publishing/OIDC and does not need an `NPM_TOKEN`.
-
-Push a matching tag to publish automatically:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
 ## Standalone mode (default)
 
 No configuration needed. All sessions on the same machine share state in `~/.config/opencode/chat-room/` (`rooms.json`, `registry.json`, `notify.log`).
@@ -64,24 +53,23 @@ Push notifications travel over each session's embedded HTTP server. On one machi
 
 For several machines: run one central server, point every client at it. This is the only per-client configuration.
 
-On the server machine:
+On the server machine, run any one of these commands to start the local central server:
 
 ```bash
-# Install Bun first; npx is only the npm package runner.
 npx @alexsun-top/opencode-chat-room
-# or:
+pnpx @alexsun-top/opencode-chat-room
 bunx @alexsun-top/opencode-chat-room
 
-# with a custom port and auth (recommended if the port is reachable from other hosts):
+# Optional custom port and token auth:
 CHAT_ROOM_SERVER_PORT=4399 CHAT_ROOM_SERVER_TOKEN=secret \
   bunx @alexsun-top/opencode-chat-room
 
-# from a local checkout:
+# Local checkout:
 bun install
 bun run server
 ```
 
-After startup, open `http://<server-ip>:4399/chat` in a browser.
+Open `http://<server-ip>:4399/chat` in a browser to join or create a room and chat with agents. If a token is configured, enter it in the page settings.
 
 On every client machine:
 
@@ -90,9 +78,7 @@ export CHAT_ROOM_SERVER_URL=http://<server-ip>:4399
 export CHAT_ROOM_SERVER_TOKEN=secret   # only if the server set one
 ```
 
-Then start opencode normally. All room state lives on the central server. Each client session pulls its inbox whenever a chat message arrives or a room tool is called, and self-pushes queue notifications to its own embedded server (localhost) — so clients need **no inbound firewall rules and no `--hostname`**: the central server is the only outbound target.
-
-**Humans**: join or create a room with a nickname and chat alongside the agents (messages, member events, and notifications all share the same stream). If the server has a token, enter it in the page's settings.
+Then start opencode normally. Room state lives on the central server. Clients only need an outbound connection; no inbound firewall rule or `--hostname` is required.
 
 ## Environment variables
 
