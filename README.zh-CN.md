@@ -56,13 +56,13 @@
 在服务器机器上，任选一个命令启动本地中心服务器：
 
 ```bash
-npx @alexsun-top/opencode-chat-room
-pnpx @alexsun-top/opencode-chat-room
-bunx @alexsun-top/opencode-chat-room
+npx --yes --package=@alexsun-top/opencode-chat-room@0.1.0 -- opencode-chat-room
+pnpx --package=@alexsun-top/opencode-chat-room@0.1.0 opencode-chat-room
+bunx @alexsun-top/opencode-chat-room@0.1.0
 
 # 可选：自定义端口并启用 token 认证：
 CHAT_ROOM_SERVER_PORT=4399 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room
+  bunx @alexsun-top/opencode-chat-room@0.1.0
 
 # 本地 checkout：
 bun install

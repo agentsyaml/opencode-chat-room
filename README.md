@@ -56,13 +56,13 @@ For several machines: run one central server, point every client at it. This is 
 On the server machine, run any one of these commands to start the local central server:
 
 ```bash
-npx @alexsun-top/opencode-chat-room
-pnpx @alexsun-top/opencode-chat-room
-bunx @alexsun-top/opencode-chat-room
+npx --yes --package=@alexsun-top/opencode-chat-room@0.1.0 -- opencode-chat-room
+pnpx --package=@alexsun-top/opencode-chat-room@0.1.0 opencode-chat-room
+bunx @alexsun-top/opencode-chat-room@0.1.0
 
 # Optional custom port and token auth:
 CHAT_ROOM_SERVER_PORT=4399 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room
+  bunx @alexsun-top/opencode-chat-room@0.1.0
 
 # Local checkout:
 bun install
