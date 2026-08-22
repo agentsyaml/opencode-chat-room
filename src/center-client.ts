@@ -1,7 +1,7 @@
 // ponytail: central-server mode client. All room state lives on the central
-// server (CHAT_ROOM_SERVER_URL); this machine self-pushes queue notifications
-// to its own embedded server (localhost is always reachable from the same
-// process, so no cross-host serverUrl or firewall setup is needed).
+// server (CHAT_ROOM_SERVER_URL); this machine pushes queue notifications to
+// sessions owned by this OpenCode process before using an HTTP fallback.
+import { OpencodeClient } from "@opencode-ai/sdk/v2";
 import RoomService, {
   type Message,
   type Participant,
@@ -10,15 +10,71 @@ import RoomService, {
 import os from "node:os";
 import {
   authHeader,
+  formatServeWakePrompt,
   formatNotificationLines,
   formatRoom,
   identity,
   NOTIFY_INSTRUCTION,
-  SERVE_WAKE_PROMPT,
   timeOf,
 } from "./store";
+import {
+  admissionMatches,
+  clearPendingAdmission,
+  getOrCreatePendingAdmission,
+  markPendingAdmissionAdmitted,
+  pendingAdmission,
+  rejectPendingAdmission,
+  type QueueBody,
+  type QueueItem,
+  type PendingAdmission,
+} from "./queue";
+export { queueAdmissionId } from "./queue";
 
 type Json = Record<string, unknown>;
+
+const LOCAL_SERVER_URL = "http://localhost:4096";
+
+export type PushResult = "delivered" | "unreachable" | "rejected";
+
+export type QueueTransport = {
+  client?: OpencodeClient;
+  serverUrl?: string;
+  directory?: string;
+};
+
+type QueueTransportInput = {
+  client?: unknown;
+  directory?: string;
+  serverUrl?: URL | string;
+};
+
+// Compatibility bridge for OpenCode 1.18.16. The plugin exposes the embedded
+// transport through a private field; HTTP remains the compatibility fallback.
+export function createQueueTransport(
+  input: QueueTransportInput = {},
+): QueueTransport {
+  const raw =
+    input.client && typeof input.client === "object"
+      ? (input.client as { _client?: unknown })._client
+      : undefined;
+  let client: OpencodeClient | undefined;
+  if (raw !== undefined && raw !== null) {
+    try {
+      type ClientArgs = NonNullable<ConstructorParameters<typeof OpencodeClient>[0]>;
+      client = new OpencodeClient({
+        client: raw as NonNullable<ClientArgs["client"]>,
+      });
+    } catch {
+      client = undefined;
+    }
+  }
+  const serverUrl = String(input.serverUrl ?? "").trim();
+  return {
+    client,
+    serverUrl: serverUrl || LOCAL_SERVER_URL,
+    directory: input.directory,
+  };
+}
 
 function toRoom(r: Json): Room {
   const participants = new Map<string, Participant>();
@@ -45,7 +101,7 @@ function svcOf(room: Json): RoomService {
   return svc;
 }
 
-type CenterOpts = { center: string; token: string };
+type CenterOpts = { center: string; token: string; directory?: string };
 
 async function request(
   opts: CenterOpts,
@@ -110,6 +166,7 @@ export async function centerAction(
         sessionID,
         // ponytail: ora-1 #2 — 记录归属主机，跨机 @-wake 只由所属机器唤醒
         host: os.hostname(),
+        directory: opts.directory,
       });
       return formatRoom(svcOf(room), toRoom(room));
     }
@@ -128,6 +185,7 @@ export async function centerAction(
           participantName: me,
           // ponytail: ora-1 #2 — 记录归属主机，跨机 @-wake 只由所属机器唤醒
           host: os.hostname(),
+          directory: opts.directory,
         },
       );
       return formatRoom(svcOf(room), toRoom(room));
@@ -202,7 +260,9 @@ export async function centerAction(
         roomId: args.roomId,
         sessionID,
         ts: maxTs,
-      }).catch(() => {});
+      })
+        .then(() => clearPendingAdmission(sessionID, args.roomId!, maxTs))
+        .catch(() => {});
       return lines.join("\n");
     }
     default:
@@ -210,26 +270,146 @@ export async function centerAction(
   }
 }
 
-type InboxItem = {
+type InboxItem = QueueItem & {
   roomId: string;
   roomName: string;
-  senderId: string;
-  text: string;
-  createdAt: number;
 };
 
-// ponytail: overlapping hook+tool triggers must not double-deliver;
-// per-session so a slow check for one session can't starve another
+function isRecord(value: unknown): value is Json {
+  return typeof value === "object" && value !== null;
+}
+
+function queueBody(admissionID: string, text: string): QueueBody {
+  return {
+    id: admissionID,
+    prompt: { text },
+    delivery: "queue",
+    resume: true,
+  };
+}
+
+function statusOf(value: unknown): number | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  if (typeof value.status === "number") {
+    return value.status;
+  }
+  if (isRecord(value.response) && typeof value.response.status === "number") {
+    return value.response.status;
+  }
+  if (isRecord(value.cause) && typeof value.cause.status === "number") {
+    return value.cause.status;
+  }
+  return undefined;
+}
+
+function httpHeaders(transport: QueueTransport): Record<string, string> {
+  const auth = authHeader();
+  return {
+    "Content-Type": "application/json",
+    ...(auth ? { Authorization: auth } : {}),
+    ...(transport.directory
+      ? { "x-opencode-directory": encodeURIComponent(transport.directory) }
+      : {}),
+  };
+}
+
+async function sendQueueInProcess(
+  client: OpencodeClient,
+  sessionID: string,
+  body: QueueBody,
+): Promise<PushResult> {
+  let result: unknown;
+  try {
+    result = await client.v2.session.prompt(
+      { sessionID, ...body },
+      { responseStyle: "fields", signal: AbortSignal.timeout(10_000) },
+    );
+  } catch (error) {
+    const status = statusOf(error);
+    return status === undefined || status === 404
+      ? "unreachable"
+      : "rejected";
+  }
+  if (!isRecord(result)) {
+    return "unreachable";
+  }
+  if (!isRecord(result.response)) {
+    if (admissionMatches(result, body, sessionID)) {
+      return "delivered";
+    }
+    return "unreachable";
+  }
+  const status = result.response.status;
+  if (typeof status !== "number") {
+    return "unreachable";
+  }
+  if (status === 404) {
+    return "unreachable";
+  }
+  if (status < 200 || status >= 300) {
+    return "rejected";
+  }
+  return admissionMatches(result.data, body, sessionID)
+    ? "delivered"
+    : "rejected";
+}
+
+async function sendQueueHttp(
+  transport: QueueTransport,
+  sessionID: string,
+  body: QueueBody,
+): Promise<PushResult> {
+  const base = (transport.serverUrl || LOCAL_SERVER_URL).replace(/\/+$/, "");
+  let response: Response;
+  try {
+    response = await fetch(
+      `${base}/api/session/${encodeURIComponent(sessionID)}/prompt`,
+      {
+        method: "POST",
+        headers: httpHeaders(transport),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+  } catch {
+    return "unreachable";
+  }
+  const data = await response.json().catch(() => undefined);
+  if (response.status === 404) {
+    return "unreachable";
+  }
+  if (!response.ok) {
+    return "rejected";
+  }
+  return admissionMatches(data, body, sessionID) ? "delivered" : "rejected";
+}
+
+export async function sendQueue(
+  transport: QueueTransport,
+  sessionID: string,
+  text: string,
+  admissionID: string,
+): Promise<PushResult> {
+  const body = queueBody(admissionID, text);
+  if (transport.client) {
+    const result = await sendQueueInProcess(transport.client, sessionID, body);
+    if (result !== "unreachable") {
+      return result;
+    }
+  }
+  return sendQueueHttp(transport, sessionID, body);
+}
+
+// Overlapping hook and tool triggers must not double-deliver; keep the lock
+// per session so a slow check cannot starve another session.
 const inboxChecks = new Set<string>();
 
-// ponytail: central mode has no cross-host push; each session pulls its inbox
-// on every hook/tool call and self-pushes queue notifications (localhost).
-// Items are grouped by room: a room's watermark advances only when every item
-// in that room was pushed successfully, so a failed push is retried next time.
 export async function checkCenterInbox(
   opts: CenterOpts,
   sessionID: string,
-  selfServerUrl: string,
+  transport: QueueTransport,
 ): Promise<void> {
   if (inboxChecks.has(sessionID)) {
     return;
@@ -243,7 +423,7 @@ export async function checkCenterInbox(
     )) as unknown as { member: boolean; items: InboxItem[] };
     const items = Array.isArray(result.items) ? result.items : [];
     if (items.length > 0) {
-      await pushItemsToSession(opts, sessionID, items, selfServerUrl);
+      await pushItemsToSession(opts, sessionID, items, transport);
     }
   } catch {
     // best-effort: next check retries
@@ -251,26 +431,16 @@ export async function checkCenterInbox(
     inboxChecks.delete(sessionID);
   }
 }
-// ponytail: push a batch of inbox items to one session (grouped per room —
-// a room's watermark advances only when every item in it was pushed
-// successfully, so a failed push is retried next time).
-// Result: "delivered" = all 2xx; "unreachable" = connection refused or 404
-// (the session's process is very likely gone — the only case worth spawning
-// a replacement process for); "rejected" = server alive but refused (401/5xx
-// — do NOT spawn, the session may live in another window).
-export type PushResult = "delivered" | "unreachable" | "rejected";
 
-// ponytail: in-process push dedupe — the 30s wake sweep and the per-hook
-// inbox check must not deliver the same items twice; capped pushes (which
-// deliberately don't advance the watermark) would otherwise re-notify every
-// sweep forever (orc-1 #4)
+// Items are grouped by room. A room watermark advances only after queue
+// admission and a successful /read, so failures remain retryable.
 const lastPushed = new Map<string, number>();
 
 export async function pushItemsToSession(
   opts: CenterOpts,
   sessionID: string,
   items: InboxItem[],
-  selfServerUrl: string,
+  transport: QueueTransport,
 ): Promise<PushResult> {
   if (items.length === 0) {
     return "delivered";
@@ -281,8 +451,6 @@ export async function pushItemsToSession(
     list.push(it);
     byRoom.set(it.roomId, list);
   }
-  const auth = authHeader();
-  const base = selfServerUrl.replace(/\/+$/, "");
   let worst: PushResult = "delivered";
   for (const [roomId, roomItems] of byRoom) {
     const maxTs = roomItems.reduce(
@@ -290,56 +458,75 @@ export async function pushItemsToSession(
       0,
     );
     const key = `${sessionID}|${roomId}`;
-    if (maxTs <= (lastPushed.get(key) ?? 0)) {
-      continue; // already pushed this content
-    }
-    if (lastPushed.size > 1000) {
-      lastPushed.clear(); // ponytail: cap——防长驻进程无限增长
-    }
-    const { lines, capped } = formatNotificationLines(roomItems);
-    const prompt = `<notification>\nNew messages in room ${roomItems[0]!.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
-    // ponytail: network errors (e.g. connection refused — the session's
-    // process has exited) count as push failure, NOT as a crash: a rejected
-    // fetch here would abort the whole wake sweep and skip every other
-    // session, and the @-wake spawn would never run
-    let res: Response;
-    try {
-      res = await fetch(`${base}/api/session/${sessionID}/prompt`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(auth ? { Authorization: auth } : {}),
-        },
-        body: JSON.stringify({ prompt, delivery: "queue" }),
-      });
-    } catch {
-      worst = "unreachable";
-      continue;
-    }
-    // ponytail: a capped push must not advance the watermark — the
-    // folded-out messages would become permanently unreadable; the
-    // uncapped poll/inbox path remains the lossless catch-up
-    if (res.ok) {
-      if (capped) {
-        lastPushed.set(key, maxTs);
+    const existing = pendingAdmission(sessionID, roomId);
+    if (existing?.state === "admitted") {
+      if (existing.capped) {
+        if (maxTs <= existing.maxTs) {
+          continue;
+        }
+      } else if (existing.maxTs <= 0) {
+        continue;
       } else {
-        // orc-3 #6——/read 失败时不得记 lastPushed：水位未推进，下次 sweep
-        // 重推（否则推送成功但水位未动 → 推送路径对该批消息永久静默）
         const advanced = await request(opts, "/read", "POST", {
           roomId,
           sessionID,
-          ts: maxTs,
+          ts: existing.maxTs,
         })
           .then(() => true)
           .catch(() => false);
-        if (advanced) lastPushed.set(key, maxTs);
+        if (advanced) {
+          lastPushed.set(key, existing.maxTs);
+          clearPendingAdmission(sessionID, roomId, existing.maxTs);
+        }
+        continue;
       }
-    } else if (res.status === 404 || res.status === 400) {
-      // 404 / 400 (Invalid session ID): 本进程/本 server 不持有该 session
-      // ——已退出或从未在本机运行 → 视为 unreachable，可由 serve 唤起
-      worst = "unreachable";
-    } else {
-      worst = "rejected";
+    }
+    if (!existing && maxTs <= (lastPushed.get(key) ?? 0)) {
+      continue;
+    }
+    if (lastPushed.size > 1000) {
+      lastPushed.clear();
+    }
+    const { lines, capped } = formatNotificationLines(roomItems);
+    const prompt = `<notification>\nNew messages in room ${roomItems[0]!.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+    const admission = getOrCreatePendingAdmission(
+      sessionID,
+      roomId,
+      roomItems,
+      prompt,
+      maxTs,
+      capped,
+    );
+    const result = await sendQueue(
+      transport,
+      sessionID,
+      admission.prompt,
+      admission.id,
+    );
+    if (result !== "delivered") {
+      if (result === "rejected") {
+        rejectPendingAdmission(sessionID, roomId, admission.id);
+      }
+      if (result === "rejected" || worst === "delivered") {
+        worst = result;
+      }
+      continue;
+    }
+    markPendingAdmissionAdmitted(sessionID, roomId, admission.id);
+    void request(opts, "/active", "POST", { sessionID }).catch(() => {});
+    if (admission.capped || admission.maxTs <= 0) {
+      continue;
+    }
+    const advanced = await request(opts, "/read", "POST", {
+      roomId,
+      sessionID,
+      ts: admission.maxTs,
+    })
+      .then(() => true)
+      .catch(() => false);
+    if (advanced) {
+      lastPushed.set(key, admission.maxTs);
+      clearPendingAdmission(sessionID, roomId, admission.maxTs);
     }
   }
   return worst;
@@ -352,16 +539,15 @@ export async function pushItemsToSession(
 // knowledge, this is purely client-side.
 let wakeChecking = false;
 
-// ponytail: 纯进程内唤醒（去 spawn）——已退出进程的 session 不再拉起新
-// 进程。若部署者配置了 CHAT_ROOM_WAKE_SERVE_URL（常驻 opencode serve），
-// 对被 @ 的已退出 session 通过 serve 的 /session/:id/message 进程内唤起；
-// serve 未配置/不可达 → 不唤醒（未读由水位保留，session 下次运行时 poll
-// 自动拿到）
+// No process is spawned here. A configured opencode serve is only a fallback
+// for mentioned sessions that cannot be admitted by the current process.
 async function wakeViaServe(
   serveUrl: string,
   sessionID: string,
+  roomId: string,
   opts: CenterOpts,
-  prompt = SERVE_WAKE_PROMPT,
+  transport: QueueTransport,
+  admission: PendingAdmission,
 ): Promise<boolean> {
   // ponytail: 与多窗口插件共用服务器原子去重，避免重复唤起同一 session
   try {
@@ -380,26 +566,24 @@ async function wakeViaServe(
   } catch {
     return false;
   }
-  try {
-    const res = await fetch(
-      `${serveUrl.replace(/\/+$/, "")}/session/${sessionID}/message`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parts: [{ type: "text", text: prompt }] }),
-        signal: AbortSignal.timeout(10_000),
-      },
-    );
-    return res.ok;
-  } catch {
-    // serve 未启动/不可达——按用户要求不唤醒（无 spawn、无重试）
-    return false;
+  const result = await sendQueue(
+    { ...transport, client: undefined, serverUrl: serveUrl },
+    sessionID,
+    admission.prompt,
+    admission.id,
+  );
+  if (result === "delivered") {
+    void request(opts, "/active", "POST", { sessionID }).catch(() => {});
+    markPendingAdmissionAdmitted(sessionID, roomId, admission.id);
+  } else if (result === "rejected") {
+    rejectPendingAdmission(sessionID, roomId, admission.id);
   }
+  return result === "delivered";
 }
 
 export async function wakeSessions(
   opts: CenterOpts,
-  selfServerUrl: string,
+  transport: QueueTransport,
   serveUrl = "",
 ): Promise<void> {
   if (wakeChecking) {
@@ -429,7 +613,12 @@ export async function wakeSessions(
         "GET",
       )) as unknown as Record<
         string,
-        { name: string; lastReadTs?: number; host?: string }
+        {
+          name: string;
+          lastReadTs?: number;
+          host?: string;
+          directory?: string;
+        }
       >;
       if (!reg || typeof reg !== "object") {
         continue;
@@ -451,11 +640,17 @@ export async function wakeSessions(
         }
         const result = (await request(
           opts,
-          `/inbox?sessionID=${encodeURIComponent(sessionID)}&excludeSelf=1&timeout=0`,
+          `/inbox?sessionID=${encodeURIComponent(sessionID)}&roomId=${encodeURIComponent(roomId)}&excludeSelf=1&timeout=0`,
           "GET",
         )) as unknown as { member: boolean; items: InboxItem[] };
-        const items = Array.isArray(result.items) ? result.items : [];
+        const items = Array.isArray(result.items)
+          ? result.items.filter((item) => item.roomId === roomId)
+          : [];
         if (items.length > 0) {
+          const targetTransport = {
+            ...transport,
+            directory: entry.directory ?? transport.directory,
+          };
           // ponytail: ora-1 #2 — @-wake 只由 session 归属主机执行；web 条目
           // （host 为空）与异机条目绝不 spawn（否则错机 spawn 一个不存在
           // 的 session，且 5 分钟 claim 窗口会挡住真正正确的那台机器）
@@ -463,15 +658,8 @@ export async function wakeSessions(
             opts,
             sessionID,
             items,
-            selfServerUrl,
+            targetTransport,
           );
-          if (pushed === "delivered") {
-            // ponytail: 进程内自推成功 = 该 session 真实活跃——上报服务器，
-            // 避免服务器 serve 双唤起
-            void request(opts, "/active", "POST", { sessionID }).catch(
-              () => {},
-            );
-          }
           // 被 @ 的已退出 session：serve 配置了才唤起（进程内，零 spawn）。
           // 唤起成功即推进水位——消息已进入该 session 的对话（不丢），
           // 避免同一未读反复唤起导致循环回复。
@@ -490,28 +678,42 @@ export async function wakeSessions(
               );
             });
             if (mentioned) {
-              // ponytail: orc-2 #1——唤起 prompt 必须带未读消息内容（镜像
-              // 服务器路径），否则 agent poll 时已无未读（水位已推进），
-              // @ 内容永远不达；水位推进到 maxTs 因此是安全的
-              const content = items
-                .map((it) => `[${it.senderId}]: ${it.text}`)
-                .join("\n");
+              const { lines, capped } = formatNotificationLines(items);
+              const prompt = formatServeWakePrompt(
+                items[0]!.roomName,
+                lines,
+              );
+              const maxTs = items.reduce(
+                (mx, it) => Math.max(mx, it.createdAt),
+                0,
+              );
+              const admission = getOrCreatePendingAdmission(
+                sessionID,
+                roomId,
+                items,
+                prompt,
+                maxTs,
+                capped,
+              );
               const woke = await wakeViaServe(
                 serveUrl,
                 sessionID,
+                roomId,
                 opts,
-                `${SERVE_WAKE_PROMPT}\n\n未读消息：\n${content}`,
+                targetTransport,
+                admission,
               );
-              if (woke) {
-                const maxTs = items.reduce(
-                  (mx, it) => Math.max(mx, it.createdAt),
-                  0,
-                );
-                await request(opts, "/read", "POST", {
+              if (woke && !admission.capped && admission.maxTs > 0) {
+                const advanced = await request(opts, "/read", "POST", {
                   roomId,
                   sessionID,
-                  ts: maxTs,
-                }).catch(() => {});
+                  ts: admission.maxTs,
+                })
+                  .then(() => true)
+                  .catch(() => false);
+                if (advanced) {
+                  clearPendingAdmission(sessionID, roomId, admission.maxTs);
+                }
               }
             }
           }

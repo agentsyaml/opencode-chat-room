@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>闲叙 · 轻量聊天室</title>
+<title data-i18n="documentTitle">Casual Chat · Lightweight Chatroom</title>
 <style>
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
@@ -101,6 +101,10 @@
     border-radius: 18px;
     box-shadow: var(--shadow);
   }
+  .locale-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 20px; color: var(--ink-2); font-size: 12.5px; }
+  .locale-control label { font-weight: 600; }
+  .locale-select { appearance: auto; font: inherit; font-size: 12.5px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; cursor: pointer; }
+  .chat-head-actions .locale-control { margin: 0; }
   .wordmark {
     margin: 0;
     font-family: var(--font-serif);
@@ -152,7 +156,7 @@
   .btn.ghost:not(:disabled):hover { color: var(--ink); border-color: var(--ink-3); }
   .btn.small { padding: 8px 14px; font-size: 13.5px; }
   .btn:focus-visible, .chip:focus-visible, .room-row:focus-visible, .input:focus-visible,
-  .jump:focus-visible, .copy-id:focus-visible {
+  .jump:focus-visible, .copy-id:focus-visible, .locale-select:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
@@ -256,7 +260,7 @@
   .copy-id.copied .mono { display: none; }
   .copy-id.copied .copy-ok { display: inline; color: var(--accent); }
 
-  .chat-head-actions { display: flex; align-items: center; gap: 8px; }
+  .chat-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
   .chip {
     appearance: none;
     font: inherit;
@@ -588,49 +592,56 @@
   <!-- ── 加入 / 创建 ── -->
   <section id="joinView" class="view">
     <div class="join-card">
-      <p class="wordmark">闲叙</p>
-      <p class="tagline">一个轻量的聊天房间。输入房间 ID 加入，或直接新建一个。</p>
+      <div class="locale-control">
+        <label for="localeSelectJoin" data-i18n="languageLabel">Language</label>
+        <select id="localeSelectJoin" class="locale-select" aria-label="Language" data-i18n-aria-label="languageLabel">
+          <option value="en">English</option>
+          <option value="zh-CN">中文</option>
+        </select>
+      </div>
+      <p class="wordmark" data-i18n="brand">Casual Chat</p>
+      <p class="tagline" data-i18n="tagline">A lightweight chat room. Enter a room ID to join, or create a new one.</p>
 
       <form id="joinForm" novalidate>
         <label class="field">
-          <span class="field-label">房间 ID</span>
-          <input id="inRoomId" class="input" placeholder="粘贴或输入房间 ID" autocomplete="off" spellcheck="false">
+          <span class="field-label" data-i18n="roomIdLabel">Room ID</span>
+          <input id="inRoomId" class="input" placeholder="Paste or enter a room ID" data-i18n-placeholder="roomIdPlaceholder" autocomplete="off" spellcheck="false">
         </label>
         <label class="field">
-          <span class="field-label">你的昵称</span>
-          <input id="inName" class="input" placeholder="怎么称呼你" autocomplete="nickname" maxlength="24">
+          <span class="field-label" data-i18n="nameLabel">Your name</span>
+          <input id="inName" class="input" placeholder="What should we call you?" data-i18n-placeholder="namePlaceholder" autocomplete="nickname" maxlength="24">
         </label>
-        <button class="btn primary" type="submit" id="btnJoin">加入房间</button>
+        <button class="btn primary" type="submit" id="btnJoin" data-i18n="joinRoom">Join room</button>
       </form>
 
-      <div class="or"><span>或</span></div>
+      <div class="or"><span data-i18n="or">or</span></div>
 
       <form id="createForm" novalidate>
         <label class="field">
-          <span class="field-label">新房间名称</span>
-          <input id="inRoomName" class="input" placeholder="例如：周末电影夜" maxlength="40">
+          <span class="field-label" data-i18n="newRoomNameLabel">New room name</span>
+          <input id="inRoomName" class="input" placeholder="e.g. Weekend movie night" data-i18n-placeholder="newRoomNamePlaceholder" maxlength="40">
         </label>
-        <button class="btn ghost" type="submit" id="btnCreate">创建新房间</button>
+        <button class="btn ghost" type="submit" id="btnCreate" data-i18n="createRoom">Create room</button>
       </form>
 
       <div id="joinError" class="alert" role="alert" hidden></div>
 
       <details id="tokenBox" class="token-box">
-        <summary>访问令牌（可选）</summary>
+        <summary data-i18n="tokenOptional">Access token (optional)</summary>
         <div class="token-body">
           <label class="field">
-            <span class="field-label">Bearer Token</span>
-            <input id="inToken" class="input" type="password" placeholder="服务器要求时填写" autocomplete="off" spellcheck="false">
+            <span class="field-label" data-i18n="bearerToken">Bearer Token</span>
+            <input id="inToken" class="input" type="password" placeholder="Enter if the server requires it" data-i18n-placeholder="tokenPlaceholder" autocomplete="off" spellcheck="false">
           </label>
-          <button class="btn ghost small" type="button" data-token-save="inToken">保存</button>
-          <p class="hint">若服务器设置了访问令牌（401），所有请求都会带上它。</p>
+          <button class="btn ghost small" type="button" data-token-save="inToken" data-i18n="save">Save</button>
+          <p class="hint" data-i18n="tokenHint">If the server requires an access token (401), all requests will include it.</p>
         </div>
       </details>
 
       <section class="room-list">
-        <h2>已有房间</h2>
+        <h2 data-i18n="existingRooms">Existing rooms</h2>
         <ul id="roomList"></ul>
-        <p id="roomListEmpty" class="hint" hidden>还没有房间，创建一个吧。</p>
+        <p id="roomListEmpty" class="hint" data-i18n="noRooms" hidden>No rooms yet. Create one.</p>
       </section>
     </div>
   </section>
@@ -641,57 +652,64 @@
       <div class="chat-head-main">
         <h1 id="roomName"></h1>
         <p class="room-meta">
-          <button type="button" id="btnCopyId" class="copy-id" aria-label="复制房间 ID" title="点击复制完整房间 ID">
-            <span class="mono" id="roomIdShort"></span><span class="copy-ok">已复制</span>
+          <button type="button" id="btnCopyId" class="copy-id" aria-label="Copy room ID" data-i18n-aria-label="copyRoomId" title="Click to copy the full room ID" data-i18n-title="copyRoomIdTitle">
+            <span class="mono" id="roomIdShort"></span><span class="copy-ok" data-i18n="copied">Copied</span>
           </button>
         </p>
       </div>
       <div class="chat-head-actions">
+        <div class="locale-control">
+          <label for="localeSelectChat" data-i18n="languageLabel">Language</label>
+          <select id="localeSelectChat" class="locale-select" aria-label="Language" data-i18n-aria-label="languageLabel">
+            <option value="en">English</option>
+            <option value="zh-CN">中文</option>
+          </select>
+        </div>
         <div class="anchor">
-          <button class="chip" type="button" id="btnMembers" aria-haspopup="true" aria-expanded="false">成员</button>
+          <button class="chip" type="button" id="btnMembers" aria-haspopup="true" aria-expanded="false" data-i18n="members">Members</button>
           <div class="panel" id="memberPanel" hidden>
-            <h3>成员</h3>
+            <h3 data-i18n="members">Members</h3>
             <ul id="memberList"></ul>
-            <p id="memberEmpty" class="hint" hidden>暂无成员</p>
+            <p id="memberEmpty" class="hint" data-i18n="noMembers" hidden>No members yet.</p>
           </div>
         </div>
         <div class="anchor">
-          <button class="chip" type="button" id="btnSettings" aria-haspopup="true" aria-expanded="false">设置</button>
+          <button class="chip" type="button" id="btnSettings" aria-haspopup="true" aria-expanded="false" data-i18n="settings">Settings</button>
           <div class="panel" id="chatSettings" hidden>
-            <h3>设置</h3>
+            <h3 data-i18n="settings">Settings</h3>
             <label class="field">
-              <span class="field-label">访问令牌（可选）</span>
-              <input id="inTokenChat" class="input" type="password" placeholder="服务器要求时填写" autocomplete="off" spellcheck="false">
+              <span class="field-label" data-i18n="tokenOptional">Access token (optional)</span>
+              <input id="inTokenChat" class="input" type="password" placeholder="Enter if the server requires it" data-i18n-placeholder="tokenPlaceholder" autocomplete="off" spellcheck="false">
             </label>
-            <button class="btn ghost small" type="button" data-token-save="inTokenChat">保存</button>
-            <p id="tokenHint" class="hint" hidden>服务器要求访问令牌（401）。</p>
+            <button class="btn ghost small" type="button" data-token-save="inTokenChat" data-i18n="save">Save</button>
+            <p id="tokenHint" class="hint" data-i18n="tokenRequired" hidden>The server requires an access token (401).</p>
           </div>
         </div>
-        <button class="chip danger" type="button" id="btnLeave">离开</button>
+        <button class="chip danger" type="button" id="btnLeave" data-i18n="leave">Leave</button>
       </div>
     </header>
 
     <div id="connBar" class="conn-bar" hidden aria-live="polite">
       <span class="pulse"></span>
-      <span>连接中断，正在重试…</span>
+      <span data-i18n="reconnecting">Connection lost. Retrying…</span>
     </div>
 
     <div id="msgScroll" class="msg-scroll">
       <div id="thread" class="thread">
-        <ul id="msgList" aria-label="消息列表"></ul>
-        <p id="msgEmpty" class="chat-empty">还没有消息，说点什么吧。</p>
+        <ul id="msgList" aria-label="Message list" data-i18n-aria-label="messageList"></ul>
+        <p id="msgEmpty" class="chat-empty" data-i18n="noMessages">No messages yet. Say something.</p>
       </div>
-      <button type="button" id="btnJump" class="jump" aria-label="回到最新消息" hidden>
+      <button type="button" id="btnJump" class="jump" aria-label="Back to latest messages" data-i18n-aria-label="latestMessages" hidden>
         <span aria-hidden="true">↓</span><span class="badge" id="jumpBadge" hidden></span>
       </button>
     </div>
 
     <footer class="composer">
       <p id="sendError" class="send-error" role="alert" hidden></p>
-      <div id="mentionPicker" class="mention-picker" role="listbox" aria-label="选择要提及的成员" hidden></div>
+      <div id="mentionPicker" class="mention-picker" role="listbox" aria-label="Choose a member to mention" data-i18n-aria-label="mentionMembers" hidden></div>
       <div class="composer-row">
-        <textarea id="msgInput" class="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行" autocomplete="off" aria-autocomplete="list" aria-controls="mentionPicker" aria-expanded="false" disabled></textarea>
-        <button class="btn primary" type="button" id="btnSend" disabled>发送</button>
+        <textarea id="msgInput" class="input" rows="1" placeholder="Type a message, Enter to send, Shift+Enter for a new line" data-i18n-placeholder="messagePlaceholder" autocomplete="off" aria-autocomplete="list" aria-controls="mentionPicker" aria-expanded="false" disabled></textarea>
+        <button class="btn primary" type="button" id="btnSend" data-i18n="send" disabled>Send</button>
       </div>
     </footer>
   </section>
@@ -713,6 +731,19 @@
     try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); }
     catch { if (v == null) delete memStore[k]; else memStore[k] = v; }
   }
+  function newSessionID() {
+    const webCrypto = globalThis.crypto;
+    if (typeof webCrypto?.randomUUID === "function") return webCrypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    if (typeof webCrypto?.getRandomValues !== "function") {
+      throw new Error("Secure session ID generation is unavailable");
+    }
+    webCrypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
   const LS = {
     get sessionID() {
       // ponytail: sessionID 必须 tab 级独立（sessionStorage）——localStorage
@@ -721,7 +752,7 @@
       let v = null;
       try { v = sessionStorage.getItem("chat.sessionID"); } catch { /* ignore */ }
       if (!v) {
-        v = crypto.randomUUID();
+        v = newSessionID();
         try { sessionStorage.setItem("chat.sessionID", v); } catch { /* ignore */ }
       }
       return v;
@@ -732,7 +763,189 @@
     set name(v) { lsSet("chat.name", v || null); },
     get token() { return lsGet("chat.token") || ""; },
     set token(v) { lsSet("chat.token", v || null); },
+    get locale() { return lsGet("chat.locale") || "en"; },
+    set locale(v) { lsSet("chat.locale", v || null); },
   };
+
+  const I18N = {
+    en: {
+      brand: "Casual Chat",
+      documentTitle: "Casual Chat · Lightweight Chatroom",
+      roomTitle: "{name} · Casual Chat",
+      tagline: "A lightweight chat room. Enter a room ID to join, or create a new one.",
+      languageLabel: "Language",
+      roomIdLabel: "Room ID",
+      roomIdPlaceholder: "Paste or enter a room ID",
+      nameLabel: "Your name",
+      namePlaceholder: "What should we call you?",
+      joinRoom: "Join room",
+      or: "or",
+      newRoomNameLabel: "New room name",
+      newRoomNamePlaceholder: "e.g. Weekend movie night",
+      createRoom: "Create room",
+      tokenOptional: "Access token (optional)",
+      bearerToken: "Bearer Token",
+      tokenPlaceholder: "Enter if the server requires it",
+      save: "Save",
+      tokenHint: "If the server requires an access token (401), all requests will include it.",
+      existingRooms: "Existing rooms",
+      noRooms: "No rooms yet. Create one.",
+      copyRoomId: "Copy room ID",
+      copyRoomIdTitle: "Click to copy the full room ID: {id}",
+      copied: "Copied",
+      members: "Members",
+      membersCount: ({ count }) => `Members (${count})`,
+      noMembers: "No members yet.",
+      settings: "Settings",
+      tokenRequired: "The server requires an access token (401).",
+      leave: "Leave",
+      reconnecting: "Connection lost. Retrying…",
+      messageList: "Message list",
+      noMessages: "No messages yet. Say something.",
+      latestMessages: "Back to latest messages",
+      mentionMembers: "Choose a member to mention",
+      messagePlaceholder: "Type a message, Enter to send, Shift+Enter for a new line",
+      send: "Send",
+      roomMeta: ({ members, messages }) => `${members} ${members === 1 ? "member" : "members"} · ${messages} ${messages === 1 ? "message" : "messages"}`,
+      joinArrow: "Join →",
+      joinDirectTitle: "Click to join directly",
+      mentionEmpty: "No matching members",
+      mentionHint: "↑↓ Select · Enter to confirm · Esc to close",
+      today: "Today",
+      yesterday: "Yesterday",
+      earlierMessages: "Earlier messages omitted",
+      you: "You",
+      systemJoined: "{name} joined the room",
+      systemLeft: "{name} left the room",
+      saved: "Saved",
+      copyFailed: "Copy failed; please copy the room ID manually: {id}",
+      networkError: "Network connection failed",
+      requestFailed: "Request failed (HTTP {status})",
+      roomIdRequired: "Enter a room ID",
+      nameRequired: "Enter your name",
+      authRetry: "The server requires an access token. Enter it and try again.",
+      networkRetry: "Unable to connect to the server. Check your network and try again.",
+      joinFailed: "Could not join: {message}",
+      roomNameRequired: "Enter a room name",
+      createFailed: "Could not create the room: {message}",
+      roomNotFound: "The room no longer exists or was deleted",
+      sendAuth: "Send failed: an access token is required",
+      sendNetwork: "Send failed: the network connection was lost. Your message was kept; try again later",
+      sendFailed: "Send failed: {message}",
+      roomListError: "Unable to load the room list. You can enter a room ID directly.",
+      guest: "Guest",
+    },
+    "zh-CN": {
+      brand: "闲叙",
+      documentTitle: "闲叙 · 轻量聊天室",
+      roomTitle: "{name} · 闲叙",
+      tagline: "一个轻量的聊天房间。输入房间 ID 加入，或直接新建一个。",
+      languageLabel: "语言",
+      roomIdLabel: "房间 ID",
+      roomIdPlaceholder: "粘贴或输入房间 ID",
+      nameLabel: "你的昵称",
+      namePlaceholder: "怎么称呼你",
+      joinRoom: "加入房间",
+      or: "或",
+      newRoomNameLabel: "新房间名称",
+      newRoomNamePlaceholder: "例如：周末电影夜",
+      createRoom: "创建新房间",
+      tokenOptional: "访问令牌（可选）",
+      bearerToken: "Bearer Token",
+      tokenPlaceholder: "服务器要求时填写",
+      save: "保存",
+      tokenHint: "若服务器设置了访问令牌（401），所有请求都会带上它。",
+      existingRooms: "已有房间",
+      noRooms: "还没有房间，创建一个吧。",
+      copyRoomId: "复制房间 ID",
+      copyRoomIdTitle: "点击复制完整房间 ID：{id}",
+      copied: "已复制",
+      members: "成员",
+      membersCount: ({ count }) => `成员 ${count}`,
+      noMembers: "暂无成员",
+      settings: "设置",
+      tokenRequired: "服务器要求访问令牌（401）。",
+      leave: "离开",
+      reconnecting: "连接中断，正在重试…",
+      messageList: "消息列表",
+      noMessages: "还没有消息，说点什么吧。",
+      latestMessages: "回到最新消息",
+      mentionMembers: "选择要提及的成员",
+      messagePlaceholder: "输入消息，Enter 发送，Shift+Enter 换行",
+      send: "发送",
+      roomMeta: ({ members, messages }) => `${members} 人 · ${messages} 条消息`,
+      joinArrow: "加入 →",
+      joinDirectTitle: "点击直接加入",
+      mentionEmpty: "没有匹配的成员",
+      mentionHint: "↑↓ 选择 · Enter 确认 · Esc 关闭",
+      today: "今天",
+      yesterday: "昨天",
+      earlierMessages: "更早的消息已省略",
+      you: "我",
+      systemJoined: "{name} 加入了房间",
+      systemLeft: "{name} 离开了房间",
+      saved: "已保存",
+      copyFailed: "复制失败，请手动复制房间 ID：{id}",
+      networkError: "网络连接失败",
+      requestFailed: "请求失败（HTTP {status}）",
+      roomIdRequired: "请输入房间 ID",
+      nameRequired: "请输入你的昵称",
+      authRetry: "服务器要求访问令牌，请填写后重试",
+      networkRetry: "无法连接服务器，请检查网络后重试",
+      joinFailed: "加入失败：{message}",
+      roomNameRequired: "请输入房间名称",
+      createFailed: "创建失败：{message}",
+      roomNotFound: "房间不存在或已被删除",
+      sendAuth: "发送失败：需要访问令牌",
+      sendNetwork: "发送失败：网络连接中断，消息已保留，可稍后重试",
+      sendFailed: "发送失败：{message}",
+      roomListError: "无法加载房间列表，可直接输入房间 ID 加入。",
+      guest: "访客",
+    },
+  };
+
+  function normalizeLocale(value) { return value === "zh-CN" ? "zh-CN" : "en"; }
+  let locale = normalizeLocale(LS.locale);
+  const intlLocale = () => locale === "zh-CN" ? "zh-CN" : "en-US";
+  function t(key, vars = {}) {
+    const value = I18N[locale][key] ?? I18N.en[key] ?? key;
+    const text = typeof value === "function" ? value(vars) : value;
+    return String(text).replace(/\{(\w+)\}/g, (_, name) => vars[name] ?? "");
+  }
+
+  function setI18nText(el, key, vars = {}) {
+    el.dataset.i18n = key;
+    el._i18nVars = vars;
+    el.textContent = t(key, vars);
+  }
+
+  function applyLocale() {
+    document.documentElement.lang = locale;
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      el.textContent = el._flashKey ? t(el._flashKey) : t(el.dataset.i18n, el._i18nVars || {});
+    });
+    for (const attr of ["aria-label", "title", "placeholder"]) {
+      document.querySelectorAll(`[data-i18n-${attr}]`).forEach((el) => {
+        el.setAttribute(attr, t(el.getAttribute(`data-i18n-${attr}`), el._i18nVars || {}));
+      });
+    }
+    document.querySelectorAll(".locale-select").forEach((select) => { select.value = locale; });
+    MENTION_HINT.textContent = t("mentionHint");
+    if (mention.active) updateMentionList(mention.query);
+    if (state.room) {
+      renderHead();
+      renderMembers();
+      rerenderMessages();
+    } else {
+      updateTitle();
+    }
+  }
+
+  function setLocale(next) {
+    locale = normalizeLocale(next);
+    LS.locale = locale;
+    applyLocale();
+  }
 
   /* ---------- 请求 ---------- */
   async function api(path, opts = {}) {
@@ -743,13 +956,13 @@
     try {
       res = await fetch(path, { ...opts, headers });
     } catch {
-      const e = new Error("网络连接失败");
+      const e = new Error(t("networkError"));
       e.network = true;
       throw e;
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const e = new Error(data.error || `请求失败（HTTP ${res.status}）`);
+      const e = new Error(data.error || t("requestFailed", { status: res.status }));
       e.status = res.status;
       throw e;
     }
@@ -766,13 +979,15 @@
   /* ---------- 工具 ---------- */
   function fmtTime(ts) {
     const d = new Date(ts);
-    const hm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    const hm = d.toLocaleTimeString(intlLocale(), { hour: "2-digit", minute: "2-digit" });
     const sameDay = d.toDateString() === new Date().toDateString();
-    return sameDay ? `今天 ${hm}` : `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+    return sameDay ? `${t("today")} ${hm}` : new Intl.DateTimeFormat(intlLocale(), {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    }).format(d);
   }
 
   function timeHM(ts) {
-    return new Date(ts).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    return new Date(ts).toLocaleTimeString(intlLocale(), { hour: "2-digit", minute: "2-digit" });
   }
 
   function dayText(ts) {
@@ -781,21 +996,28 @@
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const that = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     const diff = Math.round((today - that) / 86400000);
-    if (diff === 0) return "今天";
-    if (diff === 1) return "昨天";
-    return `${d.getMonth() + 1}月${d.getDate()}日`;
+    if (diff === 0) return t("today");
+    if (diff === 1) return t("yesterday");
+    return new Intl.DateTimeFormat(intlLocale(), { month: "short", day: "numeric" }).format(d);
   }
 
   function fmtSys(text) {
-    return String(text)
-      .replace(/^(.*?)\s+joined the room$/, "$1 加入了房间")
-      .replace(/^(.*?)\s+left the room$/, "$1 离开了房间");
+    const value = String(text);
+    const joined = /^(.*?)\s+joined the room$/.exec(value);
+    if (joined) return t("systemJoined", { name: joined[1] });
+    const left = /^(.*?)\s+left the room$/.exec(value);
+    if (left) return t("systemLeft", { name: left[1] });
+    return value;
   }
 
-  function flash(btn, msg) {
-    const old = btn.textContent;
-    btn.textContent = msg;
-    setTimeout(() => { btn.textContent = old; }, 1200);
+  function flash(btn, key) {
+    btn._flashKey = key;
+    btn.textContent = t(key);
+    setTimeout(() => {
+      if (btn._flashKey !== key) return;
+      delete btn._flashKey;
+      btn.textContent = t(btn.dataset.i18n, btn._i18nVars || {});
+    }, 1200);
   }
 
   /* ---------- 发送框 ---------- */
@@ -826,7 +1048,7 @@
     updateTitle();
   }
   function updateTitle() {
-    const base = state.room ? `${state.room.name} · 闲叙` : "闲叙 · 轻量聊天室";
+    const base = state.room ? t("roomTitle", { name: state.room.name }) : t("documentTitle");
     document.title = state.unread > 0 ? `(${state.unread}) ${base}` : base;
   }
 
@@ -839,7 +1061,7 @@
     if (list.firstElementChild && !list.firstElementChild.classList.contains("gap")) {
       const gap = document.createElement("li");
       gap.className = "gap";
-      gap.textContent = "更早的消息已省略";
+      setI18nText(gap, "earlierMessages");
       list.insertBefore(gap, list.firstChild);
     }
   }
@@ -864,7 +1086,10 @@
     ta.style.opacity = "0";
     document.body.appendChild(ta);
     ta.select();
-    try { document.execCommand("copy"); done(); } catch { /* 忽略 */ }
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch { /* ignore */ }
+    if (copied) done();
+    else showSendError("copyFailed", { id: text });
     ta.remove();
   }
 
@@ -882,9 +1107,9 @@
   }
 
   /* ---------- 加入 / 创建 ---------- */
-  function showJoinError(msg) {
+  function showJoinError(key, vars = {}) {
     const el = $("#joinError");
-    el.textContent = msg;
+    setI18nText(el, key, vars);
     el.hidden = false;
   }
   function hideJoinError() { $("#joinError").hidden = true; }
@@ -896,8 +1121,8 @@
   function joinRoom() {
     const roomId = $("#inRoomId").value.trim();
     const name = $("#inName").value.trim();
-    if (!roomId) return showJoinError("请输入房间 ID");
-    if (!name) return showJoinError("请输入你的昵称");
+    if (!roomId) return showJoinError("roomIdRequired");
+    if (!name) return showJoinError("nameRequired");
     doJoin(roomId, name);
   }
 
@@ -911,9 +1136,9 @@
       });
       enterRoom(room, name);
     } catch (e) {
-      if (e.status === 401) { openTokenBox(); showJoinError("服务器要求访问令牌，请填写后重试"); }
-      else if (e.network) showJoinError("无法连接服务器，请检查网络后重试");
-      else showJoinError(`加入失败：${e.message}`);
+      if (e.status === 401) { openTokenBox(); showJoinError("authRetry"); }
+      else if (e.network) showJoinError("networkRetry");
+      else showJoinError("joinFailed", { message: e.message });
     } finally {
       setJoinBusy(false);
     }
@@ -921,8 +1146,8 @@
 
   async function createRoom() {
     const roomName = $("#inRoomName").value.trim();
-    const displayName = $("#inName").value.trim() || "访客";
-    if (!roomName) return showJoinError("请输入房间名称");
+    const displayName = $("#inName").value.trim() || t("guest");
+    if (!roomName) return showJoinError("roomNameRequired");
     setJoinBusy(true);
     hideJoinError();
     try {
@@ -932,9 +1157,9 @@
       });
       enterRoom(room, displayName);
     } catch (e) {
-      if (e.status === 401) { openTokenBox(); showJoinError("服务器要求访问令牌，请填写后重试"); }
-      else if (e.network) showJoinError("无法连接服务器，请检查网络后重试");
-      else showJoinError(`创建失败：${e.message}`);
+      if (e.status === 401) { openTokenBox(); showJoinError("authRetry"); }
+      else if (e.network) showJoinError("networkRetry");
+      else showJoinError("createFailed", { message: e.message });
     } finally {
       setJoinBusy(false);
     }
@@ -964,7 +1189,9 @@
   function renderHead() {
     $("#roomName").textContent = state.room.name;
     $("#roomIdShort").textContent = state.room.id.slice(0, 8);
-    $("#btnCopyId").title = `复制完整房间 ID：${state.room.id}`;
+    const copy = $("#btnCopyId");
+    copy.setAttribute("aria-label", t("copyRoomId"));
+    copy.title = t("copyRoomIdTitle", { id: state.room.id });
     updateTitle();
   }
 
@@ -986,7 +1213,7 @@
       meta.className = "msg-meta";
       const nm = document.createElement("span");
       nm.className = "msg-name";
-      nm.textContent = own ? "我" : m.senderId;
+      nm.textContent = own ? t("you") : m.senderId;
       const tm = document.createElement("span");
       tm.className = "msg-time";
       tm.textContent = timeHM(m.createdAt);
@@ -1086,9 +1313,26 @@
     return { skipped };
   }
 
+  function rerenderMessages() {
+    if (!state.room) return;
+    const scroll = $("#thread");
+    const oldHeight = scroll.scrollHeight;
+    const oldTop = scroll.scrollTop;
+    const atBottom = oldHeight - oldTop - scroll.clientHeight < 80;
+    $("#msgList").textContent = "";
+    state.rendered = 0;
+    state.firstMsgId = null;
+    failedRenderIds.clear();
+    appendMessages(false);
+    scroll.scrollTop = atBottom
+      ? scroll.scrollHeight
+      : Math.max(0, oldTop + scroll.scrollHeight - oldHeight);
+    updateJump();
+  }
+
   function renderMembers() {
     const parts = state.room.participants || [];
-    $("#btnMembers").textContent = `成员 ${parts.length}`;
+    setI18nText($("#btnMembers"), "membersCount", { count: parts.length });
     const list = $("#memberList");
     list.textContent = "";
     for (const p of parts) {
@@ -1143,7 +1387,7 @@
       if (!state.room || state.room.id !== roomId) return;
       if (!data.member) {
         leaveRoom(true);
-        showJoinError("房间不存在或已被删除");
+        showJoinError("roomNotFound");
         return;
       }
       const items = Array.isArray(data.items) ? data.items : [];
@@ -1219,7 +1463,7 @@
         pollDelay = Math.min(pollDelay * 2, 30000); // 配置问题——退避
       } else if (e.status === 404) {
         leaveRoom(true);
-        showJoinError("房间不存在或已被删除");
+        showJoinError("roomNotFound");
         return;
       } else {
         setOnline(false); // 网络/服务器重启等暂时性错误——固定 2s 快速重试
@@ -1306,13 +1550,14 @@
         input.value = text; // 失败时把消息还回来，提示重试
         autoGrow(input);
         updateSendState();
-        if (e.status === 401) { openChatSettings(); showSendError("发送失败：需要访问令牌"); }
-        else showSendError(e.network ? "发送失败：网络连接中断，消息已保留，可稍后重试" : `发送失败：${e.message}`);
+        if (e.status === 401) { openChatSettings(); showSendError("sendAuth"); }
+        else if (e.network) showSendError("sendNetwork");
+        else showSendError("sendFailed", { message: e.message });
       });
   }
-  function showSendError(msg) {
+  function showSendError(key, vars = {}) {
     const el = $("#sendError");
-    el.textContent = msg;
+    setI18nText(el, key, vars);
     el.hidden = false;
   }
   function hideSendError() { $("#sendError").hidden = true; }
@@ -1347,7 +1592,7 @@
   async function refreshRoomList() {
     const list = $("#roomList");
     const empty = $("#roomListEmpty");
-    empty.textContent = "还没有房间，创建一个吧。";
+    setI18nText(empty, "noRooms");
     try {
       const rooms = await api("/rooms");
       list.textContent = "";
@@ -1357,20 +1602,21 @@
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "room-row";
-        btn.title = "点击直接加入";
+        btn.dataset.i18nTitle = "joinDirectTitle";
+        btn.title = t("joinDirectTitle");
         const nm = document.createElement("span");
         nm.className = "r-name";
         nm.textContent = r.name;
         const meta = document.createElement("span");
         meta.className = "r-meta";
-        meta.textContent = `${r.participants.length} 人 · ${r.messages.length} 条消息`;
+        setI18nText(meta, "roomMeta", { members: r.participants.length, messages: r.messages.length });
         const go = document.createElement("span");
         go.className = "r-go";
-        go.textContent = "加入 →";
+        setI18nText(go, "joinArrow");
         btn.append(nm, meta, go);
         btn.addEventListener("click", () => {
           $("#inRoomId").value = r.id;
-          doJoin(r.id, $("#inName").value.trim() || "访客"); // 一键加入，昵称未填则用“访客”
+          doJoin(r.id, $("#inName").value.trim() || t("guest")); // Use the localized guest name when no nickname is entered.
         });
         li.appendChild(btn);
         list.appendChild(li);
@@ -1380,7 +1626,7 @@
       else {
         // 网络失败：加入/创建仍可用，列表给个说明
         empty.hidden = false;
-        empty.textContent = "无法加载房间列表，可直接输入房间 ID 加入。";
+        setI18nText(empty, "roomListError");
       }
     }
   }
@@ -1420,7 +1666,7 @@
   const MENTION_RE = /<at>@([^<]+)<\/at>/g;
   const MENTION_HINT = document.createElement("p");
   MENTION_HINT.className = "mention-hint";
-  MENTION_HINT.textContent = "↑↓ 选择 · Enter 确认 · Esc 关闭";
+  MENTION_HINT.textContent = t("mentionHint");
 
   // Markdown 最小子集渲染：粗体 / 斜体 / 行内代码 / 链接 / 围栏代码 / 列表 / 引用。
   // 全部用 DOM API + textContent 构建，不用 innerHTML；任何未闭合或畸形的标记
@@ -1657,7 +1903,7 @@
     if (!mention.items.length) {
       const empty = document.createElement("p");
       empty.className = "mention-empty";
-      empty.textContent = "没有匹配的成员";
+      empty.textContent = t("mentionEmpty");
       picker.appendChild(empty);
     }
     picker.appendChild(MENTION_HINT);
@@ -1728,6 +1974,9 @@
 
   /* ---------- 事件 ---------- */
   function wireEvents() {
+    document.querySelectorAll(".locale-select").forEach((select) => {
+      select.addEventListener("change", () => setLocale(select.value));
+    });
     $("#joinForm").addEventListener("submit", (e) => { e.preventDefault(); joinRoom(); });
     $("#createForm").addEventListener("submit", (e) => { e.preventDefault(); createRoom(); });
     $("#btnSend").addEventListener("click", send);
@@ -1804,7 +2053,9 @@
         input.value = LS.token;
         $("#inToken").value = LS.token;
         $("#inTokenChat").value = LS.token;
-        flash(save, "已保存");
+        flash(save, "saved");
+        void refreshRoomList();
+        if (!state.room) void autoJoin();
         return;
       }
       if (mention.active && !e.target.closest("#mentionPicker")) closeMention();
@@ -1836,17 +2087,21 @@
       });
       enterRoom(room, name);
     } catch (e) {
-      LS.roomId = "";
-      LS.name = "";
-      if (e.status === 401) openTokenBox();
-      else if (e.status === 404) showJoinError("上次的房间已不存在");
-      else if (e.network) showJoinError("无法连接服务器，请检查网络后重试");
+      if (e.status === 401) { openTokenBox(); showJoinError("authRetry"); }
+      else if (e.status === 404) {
+        LS.roomId = "";
+        LS.name = "";
+        showJoinError("roomNotFound");
+      }
+      else if (e.network) showJoinError("networkRetry");
+      else showJoinError("joinFailed", { message: e.message });
     }
   }
 
   $("#inToken").value = LS.token;
   $("#inTokenChat").value = LS.token;
   wireEvents();
+  applyLocale();
   refreshRoomList();
   autoJoin();
   $("#inRoomId").focus();

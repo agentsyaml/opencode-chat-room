@@ -85,7 +85,9 @@ export async function loadRooms(): Promise<Room[]> {
           typeof m.roomId === "string" &&
           typeof m.senderId === "string" &&
           typeof m.text === "string" &&
-          typeof m.createdAt === "number",
+          typeof m.createdAt === "number" &&
+          (m.senderSessionID === undefined ||
+            typeof m.senderSessionID === "string"),
       );
     }
     return [room];
@@ -112,6 +114,7 @@ export type RegistryEntry = {
   apiPrefix: string;
   name: string;
   lastReadTs?: number;
+  directory?: string;
   // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行；web 条目不填
   host?: string;
 };
@@ -180,24 +183,33 @@ export const NOTIFY_INSTRUCTION =
 export const SERVE_WAKE_PROMPT =
   "You were woken because you were mentioned (@) in the chat room. Use the room tool to poll the room(s) you are a member of, read the new messages, and reply to anything addressed to you. Then report what you did.";
 
+export function formatServeWakePrompt(
+  roomName: string,
+  lines: ReadonlyArray<string>,
+): string {
+  return `${SERVE_WAKE_PROMPT}\n\nNew messages in room ${roomName}:\n${lines.join("\n")}`;
+}
+
 // ponytail: oversize protection for push payloads — truncate long texts and
 // cap the number of unread lines per notification
 const MAX_LINE = 300;
 const MAX_LINES = 20;
 
-// Display lines for a push. `capped` means older unread messages were folded
-// into a count line — callers must NOT advance the recipient's read
-// watermark when capped, so uncapped poll remains the lossless catch-up path.
+// Display lines for a push. `capped` means the notification is lossy because
+// lines were folded or message text was truncated; callers must not advance
+// the watermark until a full poll confirms it.
 export function formatNotificationLines(
   items: ReadonlyArray<{ createdAt: number; senderId: string; text: string }>,
 ): { lines: string[]; capped: boolean } {
-  const capped = items.length > MAX_LINES;
+  const countCapped = items.length > MAX_LINES;
+  const textCapped = items.some((it) => it.text.length > MAX_LINE);
+  const capped = countCapped || textCapped;
   const lines = items.slice(-MAX_LINES).map((it) => {
     const text =
       it.text.length > MAX_LINE ? `${it.text.slice(0, MAX_LINE)}\u2026` : it.text;
     return `- [${timeOf(it.createdAt)}] ${it.senderId}: ${text}`;
   });
-  if (capped) {
+  if (countCapped) {
     lines.unshift(`\u2026 and ${items.length - MAX_LINES} earlier messages`);
   }
   return { lines, capped };

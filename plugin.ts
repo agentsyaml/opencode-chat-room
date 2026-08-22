@@ -1,10 +1,9 @@
-import { tool } from "@opencode-ai/plugin";
+import { tool, type PluginInput } from "@opencode-ai/plugin";
 import { z } from "zod";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import RoomService, { RoomError, type Message } from "./src/room-service";
 import {
-  authHeader,
   enqueue,
   formatNotificationLines,
   formatRoom,
@@ -20,10 +19,25 @@ import {
   type Registry,
   type RegistryEntry,
 } from "./src/store";
-import { centerAction, checkCenterInbox, wakeSessions } from "./src/center-client";
+import {
+  centerAction,
+  checkCenterInbox,
+  createQueueTransport,
+  sendQueue,
+  wakeSessions,
+  type QueueTransport,
+} from "./src/center-client";
+import {
+  clearPendingAdmission,
+  getOrCreatePendingAdmission,
+  markPendingAdmissionAdmitted,
+  rejectPendingAdmission,
+} from "./src/queue";
 
 // captured once at server start; registry push notifications route to it
 let selfServerUrl = "";
+let selfDirectory = "";
+let queueTransport: QueueTransport = createQueueTransport();
 
 // ponytail: central-mode in-process wake timer (see server() below)
 let wakeTimer: ReturnType<typeof setInterval> | null = null;
@@ -32,7 +46,7 @@ let wakeTimer: ReturnType<typeof setInterval> | null = null;
 // central server); unset = standalone local-file mode
 const centerUrl = process.env.CHAT_ROOM_SERVER_URL ?? "";
 const centerToken = process.env.CHAT_ROOM_SERVER_TOKEN ?? "";
-const centerOpts = { center: centerUrl, token: centerToken };
+const centerOpts = { center: centerUrl, token: centerToken, directory: "" };
 // ponytail: optional常驻 opencode serve 地址——配置了才能对已退出 session
 // 做进程内唤起；未配置则不唤起（用户要求）
 const serveWakeUrl = process.env.CHAT_ROOM_WAKE_SERVE_URL ?? "";
@@ -67,16 +81,22 @@ async function registerSelf(
   return enqueue(async () => {
     try {
       const reg = await loadRegistry();
+      const latestMessageTs =
+        (await loadRooms()).find((room) => room.id === roomId)?.messages.at(-1)
+          ?.createdAt ?? 0;
       const regRoom = (reg[roomId] =
         reg[roomId] ?? Object.create(null) as Record<string, RegistryEntry>);
       regRoom[sessionID] = {
         serverUrl: selfServerUrl,
         apiPrefix: "/api",
         name,
+        directory: selfDirectory || undefined,
         // ponytail: re-join must not rewind the read watermark (unread
         // messages before the re-join would be silently dropped); a first
         // join starts reading at join time
-        lastReadTs: regRoom[sessionID]?.lastReadTs ?? Date.now(),
+        lastReadTs:
+          regRoom[sessionID]?.lastReadTs ??
+          Math.max(Date.now(), latestMessageTs),
       };
       await saveRegistry(reg);
     } catch {
@@ -115,9 +135,12 @@ async function logNotify(
 ): Promise<void> {
   const lines = results.map((r) => {
     const head = `[${timeOf(Date.now())}] room=${roomId}`;
-    return r.status === "fulfilled"
+    if (r.status === "rejected") {
+      return `${head} FAIL ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`;
+    }
+    return r.value.status >= 200 && r.value.status < 300
       ? `${head} OK ${r.value.status} ${r.value.url}`
-      : `${head} FAIL ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`;
+      : `${head} FAIL ${r.value.status} ${r.value.url}`;
   });
   await fs
     .appendFile(notifyPath(), lines.join("\n") + "\n", "utf8")
@@ -129,7 +152,7 @@ async function bumpLastRead(
   roomId: string,
   sessionID: string,
   ts: number,
-): Promise<void> {
+): Promise<boolean> {
   return enqueue(async () => {
     try {
       const reg = await loadRegistry();
@@ -138,9 +161,13 @@ async function bumpLastRead(
         // never rewind: an older in-flight push must not lower the watermark
         entry.lastReadTs = Math.max(entry.lastReadTs ?? 0, ts);
         await saveRegistry(reg);
+        clearPendingAdmission(sessionID, roomId, ts);
+        return true;
       }
+      return false;
     } catch {
       // best-effort: an unpromoted read position only means poll repeats
+      return false;
     }
   });
 }
@@ -148,69 +175,191 @@ async function bumpLastRead(
 // ponytail: one push carries EVERY unread message for the target (not just
 // the latest), so advancing the watermark on success never skips a message
 // whose earlier push failed. Event-only pushes (empty messages) don't bump.
-// ponytail: push is best-effort; poll remains the fallback; log every attempt for debugging
+type NotifyBatch = {
+  roomId: string;
+  roomName: string;
+  messages: Message[];
+};
+
+type NotifyAttempt = { url: string; status: number };
+
+type NotifyTargetQueue = {
+  latest: NotifyBatch | undefined;
+  latestTs: number;
+  running: Promise<NotifyAttempt[]>;
+};
+
+const notifyQueues = new Map<string, NotifyTargetQueue>();
+
+function notifyBatchMaxTs(batch: NotifyBatch): number {
+  return batch.messages.reduce(
+    (maxTs, message) => Math.max(maxTs, message.createdAt),
+    0,
+  );
+}
+
+async function notifyTarget(
+  sessionID: string,
+  batch: NotifyBatch,
+): Promise<NotifyAttempt | undefined> {
+  const reg = await loadRegistry();
+  const entry = reg[batch.roomId]?.[sessionID];
+  if (!entry?.serverUrl) {
+    return undefined;
+  }
+  const unread = batch.messages.filter(
+    (m) =>
+      m.createdAt > (entry.lastReadTs ?? 0) &&
+      (m.senderSessionID !== undefined
+        ? m.senderSessionID !== sessionID
+        : m.senderId !== entry.name),
+  );
+  const { lines, capped } = formatNotificationLines(unread);
+  const prompt =
+    unread.length > 0
+      ? `<notification>\nNew messages in room ${batch.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`
+      : `<notification>\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const maxTs = unread.reduce(
+    (mx, message) => Math.max(mx, message.createdAt),
+    0,
+  );
+  const admissionItems = unread.length > 0 ? unread : batch.messages.slice(-1);
+  const admission = getOrCreatePendingAdmission(
+    sessionID,
+    batch.roomId,
+    admissionItems,
+    prompt,
+    maxTs,
+    capped,
+  );
+  const base = new URL(entry.serverUrl);
+  const prefix = (entry.apiPrefix || "/api").replace(/^\/+|\/+$/g, "");
+  const url = `${base.origin}/${prefix}/session/${sessionID}/prompt`;
+  if (admission.state === "admitted") {
+    if (admission.capped) {
+      if (maxTs <= admission.maxTs) {
+        return { url, status: 200 };
+      }
+    } else {
+      if (admission.maxTs <= 0) {
+        return { url, status: 200 };
+      }
+      await bumpLastRead(batch.roomId, sessionID, admission.maxTs);
+      return { url, status: 200 };
+    }
+  }
+  const result = await sendQueue(
+    {
+      ...queueTransport,
+      serverUrl: entry.serverUrl,
+      directory: entry.directory ?? queueTransport.directory,
+    },
+    sessionID,
+    admission.prompt,
+    admission.id,
+  );
+  if (result !== "delivered") {
+    if (result === "rejected") {
+      rejectPendingAdmission(sessionID, batch.roomId, admission.id);
+    }
+    return { url, status: result === "unreachable" ? 0 : 400 };
+  }
+  markPendingAdmissionAdmitted(sessionID, batch.roomId, admission.id);
+  if (admission.maxTs > 0 && !admission.capped) {
+    await bumpLastRead(batch.roomId, sessionID, admission.maxTs);
+  }
+  return { url, status: 200 };
+}
+
+function queueNotifyTarget(
+  sessionID: string,
+  batch: NotifyBatch,
+): Promise<NotifyAttempt[]> {
+  const key = JSON.stringify([batch.roomId, sessionID]);
+  const existing = notifyQueues.get(key);
+  if (existing) {
+    const maxTs = notifyBatchMaxTs(batch);
+    if (maxTs > existing.latestTs) {
+      existing.latest = batch;
+      existing.latestTs = maxTs;
+    }
+    return existing.running;
+  }
+
+  const state: NotifyTargetQueue = {
+    latest: batch,
+    latestTs: notifyBatchMaxTs(batch),
+    running: Promise.resolve([] as NotifyAttempt[]),
+  };
+  const running = (async (): Promise<NotifyAttempt[]> => {
+    const attempts: NotifyAttempt[] = [];
+    let failed = false;
+    let firstError: unknown;
+    while (state.latest) {
+      const current = state.latest;
+      state.latest = undefined;
+      try {
+        const attempt = await notifyTarget(sessionID, current);
+        if (attempt) {
+          attempts.push(attempt);
+        }
+      } catch (error) {
+        if (!failed) {
+          firstError = error;
+          failed = true;
+        }
+      }
+    }
+    if (failed) {
+      throw firstError;
+    }
+    return attempts;
+  })();
+  state.running = running;
+  notifyQueues.set(key, state);
+  const cleanup = () => {
+    if (notifyQueues.get(key) === state) {
+      notifyQueues.delete(key);
+    }
+  };
+  void running.then(cleanup, cleanup);
+  return running;
+}
+
 async function notifyRoom(
   roomId: string,
   roomName: string,
-  body: string,
+  _body: string,
   selfSessionID: string,
   messages: Message[],
 ): Promise<void> {
-  try {
-    const reg = await loadRegistry();
-    const targets = Object.entries(reg[roomId] ?? {}).filter(
-      ([sessionID, entry]) => sessionID !== selfSessionID && entry.serverUrl,
-    );
-    const auth = authHeader();
-    const results = await Promise.allSettled(
-      targets.map(async ([sessionID, entry]) => {
-        const unread = messages.filter(
-          (m) => m.createdAt > (entry.lastReadTs ?? 0) && m.senderId !== entry.name,
-        );
-        const { lines, capped } = formatNotificationLines(unread);
-        const prompt =
-          unread.length > 0
-            ? `<notification>\nNew messages in room ${roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`
-            : `<notification>\n${NOTIFY_INSTRUCTION}\n</notification>`;
-        const base = new URL(entry.serverUrl);
-        const prefix = (entry.apiPrefix || "/api").replace(/^\/+|\/+$/g, "");
-        const url = `${base.origin}/${prefix}/session/${sessionID}/prompt`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(auth ? { Authorization: auth } : {}),
-          },
-          body: JSON.stringify({ prompt, delivery: "queue" }),
-        });
-        return {
-          url,
-          status: res.status,
-          sessionID,
-          // ponytail: a capped push must not advance the watermark — the
-          // folded-out messages would become permanently unreadable
-          maxTs:
-            unread.length > 0 && !capped
-              ? Math.max(...unread.map((m) => m.createdAt))
-              : undefined,
-        };
-      }),
-    );
-    // mark pushed messages as read only on 2xx; a failed push stays unread
-    // so the receiver's next poll picks it up
-    for (const r of results) {
-      if (
-        r.status === "fulfilled" &&
-        r.value.status >= 200 &&
-        r.value.status < 300 &&
-        r.value.maxTs !== undefined
-      ) {
-        void bumpLastRead(roomId, r.value.sessionID, r.value.maxTs);
+  const reg = await loadRegistry();
+  const targets = Object.entries(reg[roomId] ?? {}).filter(
+    ([sessionID, entry]) => sessionID !== selfSessionID && entry.serverUrl,
+  );
+  const batch: NotifyBatch = { roomId, roomName, messages };
+  const results = await Promise.allSettled(
+    targets.map(([sessionID]) => queueNotifyTarget(sessionID, batch)),
+  );
+  const logResults: PromiseSettledResult<NotifyAttempt>[] = [];
+  let failed = false;
+  let firstError: unknown;
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      for (const attempt of result.value) {
+        logResults.push({ status: "fulfilled", value: attempt });
+      }
+    } else {
+      logResults.push({ status: "rejected", reason: result.reason });
+      if (!failed) {
+        firstError = result.reason;
+        failed = true;
       }
     }
-    await logNotify(roomId, results);
-  } catch {
-    // registry/io failure: nothing to log, fall back to poll
+  }
+  await logNotify(roomId, logResults);
+  if (failed) {
+    throw firstError;
   }
 }
 
@@ -232,7 +381,7 @@ const room = tool({
         // (skipped for poll: poll itself pulls the inbox, so racing the
         // fire-and-forget check would read the position it just advanced)
         if (args.action !== "poll") {
-          void checkCenterInbox(centerOpts, context.sessionID, selfServerUrl);
+          void checkCenterInbox(centerOpts, context.sessionID, queueTransport);
         }
         return await centerAction(centerOpts, args, context.sessionID);
       }
@@ -316,7 +465,7 @@ const room = tool({
                 NOTIFY_INSTRUCTION,
                 context.sessionID,
                 room.messages,
-              );
+              ).catch(() => {});
             }
             return formatRoom(svc, room);
           }
@@ -338,7 +487,7 @@ const room = tool({
                 NOTIFY_INSTRUCTION,
                 context.sessionID,
                 room.messages,
-              );
+              ).catch(() => {});
             }
             leftRoomId = args.roomId;
             return `left room ${args.roomId}`;
@@ -371,7 +520,12 @@ const room = tool({
             if (!args.text?.trim()) {
               return "error: text is required";
             }
-            const msg = svc.sendMessage(args.roomId, selfName, args.text);
+            const msg = svc.sendMessage(
+              args.roomId,
+              selfName,
+              args.text,
+              context.sessionID,
+            );
             const room = svc.getRoom(args.roomId);
             void notifyRoom(
               args.roomId,
@@ -379,7 +533,7 @@ const room = tool({
               NOTIFY_INSTRUCTION,
               context.sessionID,
               room.messages,
-            );
+            ).catch(() => {});
             return `sent: ${args.text}\n${formatRoom(svc, room)}`;
           }
           case "poll": {
@@ -446,8 +600,11 @@ async function config(cfg: any) {
 
 export default {
   id: "chat-room",
-  server: async (input: { serverUrl: URL | string }) => {
-    selfServerUrl = String(input.serverUrl);
+  server: async (input: PluginInput) => {
+    queueTransport = createQueueTransport(input);
+    selfServerUrl = queueTransport.serverUrl ?? "";
+    selfDirectory = input.directory;
+    centerOpts.directory = selfDirectory;
     if (centerUrl) {
       // ponytail: in-process wake watcher — sweep the central server every
       // 10s and self-push queue notifications to any session (including
@@ -457,9 +614,9 @@ export default {
       if (wakeTimer) {
         clearInterval(wakeTimer); // HMR/reload must not accumulate timers
       }
-      void wakeSessions(centerOpts, selfServerUrl, serveWakeUrl);
+      void wakeSessions(centerOpts, queueTransport, serveWakeUrl);
       wakeTimer = setInterval(() => {
-        void wakeSessions(centerOpts, selfServerUrl, serveWakeUrl);
+        void wakeSessions(centerOpts, queueTransport, serveWakeUrl);
       }, 10000);
     }
     return {
@@ -477,7 +634,7 @@ export default {
               void checkCenterInbox(
                 centerOpts,
                 input.sessionID,
-                selfServerUrl,
+                queueTransport,
               );
             },
           }

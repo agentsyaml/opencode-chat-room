@@ -10,6 +10,7 @@ export type Message = {
   id: string;
   roomId: string;
   senderId: string;
+  senderSessionID?: string;
   text: string;
   createdAt: number;
 };
@@ -111,7 +112,12 @@ export default class RoomService {
     }
   }
 
-  sendMessage(roomId: string, senderId: string, text: string): Message {
+  sendMessage(
+    roomId: string,
+    senderId: string,
+    text: string,
+    senderSessionID?: string,
+  ): Message {
     const room = this.getRoom(roomId);
     if (!room.participants.has(senderId)) {
       throw new RoomError("NOT_JOINED", `not joined: ${senderId}`);
@@ -124,8 +130,9 @@ export default class RoomService {
       id: randomUUID(),
       roomId,
       senderId,
+      ...(senderSessionID ? { senderSessionID } : {}),
       text: trimmed,
-      createdAt: Date.now(),
+      createdAt: Math.max(Date.now(), (room.messages.at(-1)?.createdAt ?? 0) + 1),
     };
     room.messages.push(message);
     this.trimMessages(room);
@@ -135,14 +142,14 @@ export default class RoomService {
   // ponytail: membership events live in the message stream (senderId
   // "system") so push notifications and the central inbox carry them for free
   addEvent(roomId: string, text: string): Message {
+    const room = this.getRoom(roomId);
     const message: Message = {
       id: randomUUID(),
       roomId,
       senderId: "system",
       text,
-      createdAt: Date.now(),
+      createdAt: Math.max(Date.now(), (room.messages.at(-1)?.createdAt ?? 0) + 1),
     };
-    const room = this.getRoom(roomId);
     room.messages.push(message);
     this.trimMessages(room);
     return message;

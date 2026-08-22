@@ -4,16 +4,31 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import RoomService, { RoomError, type Room } from "../src/room-service";
+import RoomService, {
+  RoomError,
+  type Message,
+  type Room,
+} from "../src/room-service";
 import {
+  authHeader,
   enqueue,
+  formatServeWakePrompt,
+  formatNotificationLines,
   loadRegistry,
   loadRooms,
   saveRegistry,
   saveRooms,
-  SERVE_WAKE_PROMPT,
   type RegistryEntry,
 } from "../src/store";
+import {
+  admissionMatches,
+  clearPendingAdmission,
+  getOrCreatePendingAdmission,
+  markPendingAdmissionAdmitted,
+  rejectPendingAdmission,
+  type QueueBody,
+  type QueueItem,
+} from "../src/queue";
 
 function parsePort(value: string): number {
   const port = Number(value);
@@ -75,10 +90,9 @@ function touchActive(sessionID: string): void {
 async function wakeMentionedSessions(
   roomId: string,
   roomName: string,
-  senderName: string,
   text: string,
   senderSessionID: string,
-  messageTs: number,
+  triggeringMessage: Message,
 ): Promise<void> {
   if (!serveWakeUrl) {
     return;
@@ -121,38 +135,91 @@ async function wakeMentionedSessions(
         // maxTs；否则更早未读被标记已读但从未投递（插件 sweep 也会因
         // 水位已推进而跳过——永久丢失）
         const inbox = await readInbox(sid, roomId, true);
-        const older = inbox.items.filter((it) => it.createdAt < messageTs);
-        // prompt 附带触发消息内容——agent 无需 poll 也能精确回复
-        const prompt =
-          `${SERVE_WAKE_PROMPT}\n\n` +
-          `New message in room ${roomName} from ${senderName}: ${text}` +
-          (older.length
-            ? `\n\n更早的未读消息：\n${older
-                .map((it) => `[${it.senderId}]: ${it.text}`)
-                .join("\n")}`
-            : "");
-        const res = await fetch(
-          `${serveWakeUrl.replace(/\/+$/, "")}/session/${sid}/message`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ parts: [{ type: "text", text: prompt }] }),
-          },
+        const triggerItem: InboxItem = {
+          id: triggeringMessage.id,
+          roomId,
+          roomName,
+          senderId: triggeringMessage.senderId,
+          text: triggeringMessage.text,
+          createdAt: triggeringMessage.createdAt,
+        };
+        const items = inbox.items.some((item) => item.id === triggerItem.id)
+          ? inbox.items
+          : [...inbox.items, triggerItem].sort(
+              (a, b) => a.createdAt - b.createdAt,
+            );
+        const { lines, capped } = formatNotificationLines(items);
+        const prompt = formatServeWakePrompt(roomName, lines);
+        const maxTs = items.reduce(
+          (mx, it) => Math.max(mx, it.createdAt),
+          0,
         );
-        if (res.ok) {
-          // 唤起成功（serve 同步处理完）后推进水位——防循环唤起
-          const maxTs = Math.max(
-            messageTs,
-            ...inbox.items.map((it) => it.createdAt),
-          );
-          await enqueue(async () => {
+        const admissionItems: QueueItem[] = items;
+        const admission = getOrCreatePendingAdmission(
+          sid,
+          roomId,
+          admissionItems,
+          prompt,
+          maxTs,
+          capped,
+        );
+        const body: QueueBody = {
+          id: admission.id,
+          prompt: { text: admission.prompt },
+          delivery: "queue",
+          resume: true,
+        };
+        const confirmRead = async (): Promise<boolean> =>
+          enqueue(async () => {
             const r = await loadRegistry();
             const e = r[roomId]?.[sid];
-            if (e) {
-              e.lastReadTs = Math.max(e.lastReadTs ?? 0, maxTs);
-              await saveRegistry(r);
+            if (!e) {
+              return false;
             }
+            e.lastReadTs = Math.max(e.lastReadTs ?? 0, admission.maxTs);
+            await saveRegistry(r);
+            return true;
           });
+        if (admission.state === "admitted") {
+          if (admission.capped) {
+            if (maxTs <= admission.maxTs) {
+              return;
+            }
+          } else {
+            if (admission.maxTs > 0 && (await confirmRead())) {
+              clearPendingAdmission(sid, roomId, admission.maxTs);
+            }
+            return;
+          }
+        }
+        const directory =
+          (entry as RegistryEntry & { directory?: string }).directory ??
+          process.env.OPENCODE_DIRECTORY;
+        const auth = authHeader();
+        const res = await fetch(
+          `${serveWakeUrl.replace(/\/+$/, "")}/api/session/${encodeURIComponent(sid)}/prompt`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(auth ? { Authorization: auth } : {}),
+              ...(directory
+                ? { "x-opencode-directory": encodeURIComponent(directory) }
+                : {}),
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        const data = await res.json().catch(() => undefined);
+        if (res.status >= 200 && res.status < 300 && admissionMatches(data, body, sid)) {
+          markPendingAdmissionAdmitted(sid, roomId, admission.id);
+          touchActive(sid);
+          if (!admission.capped && admission.maxTs > 0 && (await confirmRead())) {
+            clearPendingAdmission(sid, roomId, admission.maxTs);
+          }
+        } else if (res.status !== 404) {
+          rejectPendingAdmission(sid, roomId, admission.id);
         }
       } catch {
         // serve 不可达——静默，插件 10s 定时器兜底
@@ -173,7 +240,7 @@ const serializeRoom = (r: Room) => ({
   ownerId: r.ownerId,
   createdAt: r.createdAt,
   participants: [...r.participants.values()],
-  messages: r.messages,
+  messages: r.messages.map(({ senderSessionID: _senderSessionID, ...message }) => message),
 });
 
 async function mutate<T>(
@@ -231,9 +298,13 @@ async function readInbox(
       member = true;
       const lastRead = entry.lastReadTs ?? 0;
       for (const m of room.messages) {
+        const isSelf =
+          m.senderSessionID !== undefined
+            ? m.senderSessionID === sessionID
+            : m.senderId === entry.name;
         if (
           m.createdAt > lastRead &&
-          (!excludeSelf || m.senderId !== entry.name)
+          (!excludeSelf || !isSelf)
         ) {
           out.push({
             id: m.id,
@@ -253,6 +324,9 @@ async function readInbox(
 async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const p = url.pathname;
+  if (req.method === "GET" && p === "/") {
+    return Response.redirect(new URL("/chat", url).toString(), 302);
+  }
   if (req.method === "GET" && p === "/chat") {
     // ponytail: the human-facing chat page; APIs stay token-gated, the page
     // itself is a static shell
@@ -323,9 +397,13 @@ async function handle(req: Request): Promise<Response> {
             serverUrl: "",
             apiPrefix: "/api",
             name: owner,
+            directory: body.directory || undefined,
             // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行
             host: body.host ?? "",
-            lastReadTs: Date.now(),
+            lastReadTs: Math.max(
+              Date.now(),
+              created.messages.at(-1)?.createdAt ?? 0,
+            ),
           };
           await saveRegistry(reg);
         }
@@ -362,14 +440,17 @@ async function handle(req: Request): Promise<Response> {
       // accepted as a limitation until real session auth exists
       const body = (await req.json()) as Record<string, unknown>;
       const ts = Number(body.ts ?? 0);
-      touchActive(String(body.sessionID ?? "")); // poll 推进 = 活跃
+      const roomId = String(body.roomId ?? "");
+      const sessionID = String(body.sessionID ?? "");
+      touchActive(sessionID); // poll 推进 = 活跃
       await enqueue(async () => {
         const reg = await loadRegistry();
-        const entry = reg[String(body.roomId)]?.[String(body.sessionID)];
+        const entry = reg[roomId]?.[sessionID];
         // ponytail: NaN would poison the watermark (all comparisons false)
         if (entry && Number.isFinite(ts)) {
           entry.lastReadTs = Math.max(entry.lastReadTs ?? 0, ts);
           await saveRegistry(reg);
+          clearPendingAdmission(sessionID, roomId, ts);
         }
       });
       return json({ ok: true });
@@ -440,6 +521,8 @@ async function handle(req: Request): Promise<Response> {
           if (!already) {
             svc.addEvent(roomId, `${name} joined the room`);
           }
+          const latestMessageTs =
+            svc.getMessages(roomId).at(-1)?.createdAt ?? 0;
           regRoom[sessionID] = {
             // ponytail: central mode self-pulls the inbox; no cross-host URL.
             // Re-join must not rewind the read watermark (unread messages
@@ -447,9 +530,12 @@ async function handle(req: Request): Promise<Response> {
             serverUrl: "",
             apiPrefix: "/api",
             name,
+            directory: body.directory || undefined,
             // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行
             host: body.host ?? "",
-            lastReadTs: regRoom[sessionID]?.lastReadTs ?? Date.now(),
+            lastReadTs:
+              regRoom[sessionID]?.lastReadTs ??
+              Math.max(Date.now(), latestMessageTs),
           };
           await saveRegistry(reg);
           return svc.getRoom(roomId);
@@ -492,7 +578,7 @@ async function handle(req: Request): Promise<Response> {
         const room = await mutate(async (svc) => {
           const reg = await loadRegistry();
           const sender = reg[roomId]?.[sessionID]?.name ?? sessionID;
-          svc.sendMessage(roomId, sender, text);
+          svc.sendMessage(roomId, sender, text, sessionID);
           return svc.getRoom(roomId);
         });
         touchActive(sessionID); // 发送者活跃
@@ -502,10 +588,9 @@ async function handle(req: Request): Promise<Response> {
           void wakeMentionedSessions(
             roomId,
             room.name,
-            sent.senderId,
             text,
             sessionID,
-            sent.createdAt,
+            sent,
           );
         }
         return json(serializeRoom(room), 201);
@@ -530,7 +615,12 @@ async function handle(req: Request): Promise<Response> {
         return Object.fromEntries(
           Object.entries(entries).map(([sid, e]) => [
             sid,
-            { name: e.name, lastReadTs: e.lastReadTs ?? 0, host: e.host ?? "" },
+            {
+              name: e.name,
+              lastReadTs: e.lastReadTs ?? 0,
+              host: e.host ?? "",
+              directory: e.directory,
+            },
           ]),
         );
       });
