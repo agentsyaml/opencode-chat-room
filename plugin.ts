@@ -31,6 +31,7 @@ import {
   clearPendingAdmission,
   getOrCreatePendingAdmission,
   markPendingAdmissionAdmitted,
+  pendingAdmission,
   rejectPendingAdmission,
 } from "./src/queue";
 
@@ -97,6 +98,7 @@ async function registerSelf(
         lastReadTs:
           regRoom[sessionID]?.lastReadTs ??
           Math.max(Date.now(), latestMessageTs),
+        lastQueuedTs: regRoom[sessionID]?.lastQueuedTs,
       };
       await saveRegistry(reg);
     } catch {
@@ -172,6 +174,28 @@ async function bumpLastRead(
   });
 }
 
+async function bumpLastQueued(
+  roomId: string,
+  sessionID: string,
+  ts: number,
+): Promise<boolean> {
+  return enqueue(async () => {
+    try {
+      const reg = await loadRegistry();
+      const entry = reg[roomId]?.[sessionID];
+      if (entry) {
+        entry.lastQueuedTs = Math.max(entry.lastQueuedTs ?? 0, ts);
+        await saveRegistry(reg);
+        clearPendingAdmission(sessionID, roomId, ts);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  });
+}
+
 // ponytail: one push carries EVERY unread message for the target (not just
 // the latest), so advancing the watermark on success never skips a message
 // whose earlier push failed. Event-only pushes (empty messages) don't bump.
@@ -209,21 +233,44 @@ async function notifyTarget(
   }
   const unread = batch.messages.filter(
     (m) =>
-      m.createdAt > (entry.lastReadTs ?? 0) &&
+      m.createdAt >
+        Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0) &&
       (m.senderSessionID !== undefined
         ? m.senderSessionID !== sessionID
         : m.senderId !== entry.name),
   );
-  const { lines, capped } = formatNotificationLines(unread);
-  const prompt =
-    unread.length > 0
-      ? `<notification>\nNew messages in room ${batch.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`
-      : `<notification>\n${NOTIFY_INSTRUCTION}\n</notification>`;
-  const maxTs = unread.reduce(
+  const currentMaxTs = unread.reduce(
     (mx, message) => Math.max(mx, message.createdAt),
     0,
   );
-  const admissionItems = unread.length > 0 ? unread : batch.messages.slice(-1);
+  const existing = pendingAdmission(sessionID, batch.roomId);
+  const deltaItems =
+    existing?.state === "admitted" && currentMaxTs > existing.maxTs
+      ? unread.filter((message) => message.createdAt > existing.maxTs)
+      : unread;
+  const base = new URL(entry.serverUrl);
+  const prefix = (entry.apiPrefix || "/api").replace(/^\/+|\/+$/g, "");
+  const url = `${base.origin}/${prefix}/session/${sessionID}/prompt`;
+  if (
+    existing?.state === "admitted" &&
+    (currentMaxTs <= existing.maxTs || deltaItems.length === 0)
+  ) {
+    if (existing.maxTs > 0) {
+      await bumpLastQueued(batch.roomId, sessionID, existing.maxTs);
+    }
+    return { url, status: 200 };
+  }
+  const { lines, capped } = formatNotificationLines(deltaItems);
+  const prompt =
+    deltaItems.length > 0
+      ? `<notification>\nNew messages in room ${batch.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`
+      : `<notification>\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const maxTs = deltaItems.reduce(
+    (mx, message) => Math.max(mx, message.createdAt),
+    0,
+  );
+  const admissionItems =
+    deltaItems.length > 0 ? deltaItems : batch.messages.slice(-1);
   const admission = getOrCreatePendingAdmission(
     sessionID,
     batch.roomId,
@@ -232,21 +279,12 @@ async function notifyTarget(
     maxTs,
     capped,
   );
-  const base = new URL(entry.serverUrl);
-  const prefix = (entry.apiPrefix || "/api").replace(/^\/+|\/+$/g, "");
-  const url = `${base.origin}/${prefix}/session/${sessionID}/prompt`;
-  if (admission.state === "admitted") {
-    if (admission.capped) {
-      if (maxTs <= admission.maxTs) {
-        return { url, status: 200 };
-      }
-    } else {
-      if (admission.maxTs <= 0) {
-        return { url, status: 200 };
-      }
-      await bumpLastRead(batch.roomId, sessionID, admission.maxTs);
+  if (admission.state === "admitted" && maxTs <= admission.maxTs) {
+    if (admission.maxTs <= 0) {
       return { url, status: 200 };
     }
+    await bumpLastQueued(batch.roomId, sessionID, admission.maxTs);
+    return { url, status: 200 };
   }
   const result = await sendQueue(
     {
@@ -265,8 +303,8 @@ async function notifyTarget(
     return { url, status: result === "unreachable" ? 0 : 400 };
   }
   markPendingAdmissionAdmitted(sessionID, batch.roomId, admission.id);
-  if (admission.maxTs > 0 && !admission.capped) {
-    await bumpLastRead(batch.roomId, sessionID, admission.maxTs);
+  if (admission.maxTs > 0) {
+    await bumpLastQueued(batch.roomId, sessionID, admission.maxTs);
   }
   return { url, status: 200 };
 }

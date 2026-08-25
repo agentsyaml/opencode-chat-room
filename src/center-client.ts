@@ -130,6 +130,17 @@ async function request(
   return data;
 }
 
+async function markQueued(
+  opts: CenterOpts,
+  roomId: string,
+  sessionID: string,
+  ts: number,
+): Promise<boolean> {
+  return request(opts, "/queued", "POST", { roomId, sessionID, ts })
+    .then(() => true)
+    .catch(() => false);
+}
+
 export async function centerAction(
   opts: CenterOpts,
   args: {
@@ -253,10 +264,11 @@ export async function centerAction(
       const lines = items.map(
         (it) => `[${timeOf(it.createdAt)}] ${it.senderId}: ${it.text}`,
       );
-      // ponytail: F7 — advance the watermark after the result is delivered
-      // (fire-and-forget); a failure only repeats the messages, never loses
+      // ponytail: F7 — serialize the acknowledgment before returning so a
+      // following action cannot race the read watermark update. A failure only
+      // repeats the messages, never loses them.
       const maxTs = items.reduce((mx, it) => Math.max(mx, it.createdAt), 0);
-      void request(opts, "/read", "POST", {
+      await request(opts, "/read", "POST", {
         roomId: args.roomId,
         sessionID,
         ts: maxTs,
@@ -405,6 +417,23 @@ export async function sendQueue(
 // Overlapping hook and tool triggers must not double-deliver; keep the lock
 // per session so a slow check cannot starve another session.
 const inboxChecks = new Set<string>();
+const sessionPushes = new Map<string, Promise<void>>();
+
+function serializeSessionPush(
+  sessionID: string,
+  task: () => Promise<void>,
+): Promise<void> {
+  const previous = sessionPushes.get(sessionID) ?? Promise.resolve();
+  const run = previous.catch(() => {}).then(task);
+  let current: Promise<void>;
+  current = run.finally(() => {
+    if (sessionPushes.get(sessionID) === current) {
+      sessionPushes.delete(sessionID);
+    }
+  });
+  sessionPushes.set(sessionID, current);
+  return current;
+}
 
 export async function checkCenterInbox(
   opts: CenterOpts,
@@ -416,15 +445,24 @@ export async function checkCenterInbox(
   }
   inboxChecks.add(sessionID);
   try {
-    const result = (await request(
-      opts,
-      `/inbox?sessionID=${encodeURIComponent(sessionID)}&excludeSelf=1`,
-      "GET",
-    )) as unknown as { member: boolean; items: InboxItem[] };
-    const items = Array.isArray(result.items) ? result.items : [];
-    if (items.length > 0) {
-      await pushItemsToSession(opts, sessionID, items, transport);
-    }
+    await serializeSessionPush(sessionID, async () => {
+      const result = (await request(
+        opts,
+        `/inbox?sessionID=${encodeURIComponent(sessionID)}&excludeSelf=1`,
+        "GET",
+      )) as unknown as {
+        member: boolean;
+        items: InboxItem[];
+        queuedTs?: Record<string, number>;
+      };
+      const queuedTs = result.queuedTs ?? {};
+      const items = (Array.isArray(result.items) ? result.items : []).filter(
+        (item) => item.createdAt > (queuedTs[item.roomId] ?? 0),
+      );
+      if (items.length > 0) {
+        await pushItemsToSession(opts, sessionID, items, transport, queuedTs);
+      }
+    });
   } catch {
     // best-effort: next check retries
   } finally {
@@ -432,21 +470,24 @@ export async function checkCenterInbox(
   }
 }
 
-// Items are grouped by room. A room watermark advances only after queue
-// admission and a successful /read, so failures remain retryable.
-const lastPushed = new Map<string, number>();
+// Items are grouped by room. Queue admission advances only the durable queued
+// cursor; poll remains the only path that advances the read cursor.
 
 export async function pushItemsToSession(
   opts: CenterOpts,
   sessionID: string,
   items: InboxItem[],
   transport: QueueTransport,
+  queuedTs: Readonly<Record<string, number>> = {},
 ): Promise<PushResult> {
   if (items.length === 0) {
     return "delivered";
   }
   const byRoom = new Map<string, InboxItem[]>();
   for (const it of items) {
+    if (it.createdAt <= (queuedTs[it.roomId] ?? 0)) {
+      continue;
+    }
     const list = byRoom.get(it.roomId) ?? [];
     list.push(it);
     byRoom.set(it.roomId, list);
@@ -457,44 +498,40 @@ export async function pushItemsToSession(
       (mx, it) => Math.max(mx, it.createdAt),
       0,
     );
-    const key = `${sessionID}|${roomId}`;
     const existing = pendingAdmission(sessionID, roomId);
-    if (existing?.state === "admitted") {
-      if (existing.capped) {
-        if (maxTs <= existing.maxTs) {
-          continue;
-        }
-      } else if (existing.maxTs <= 0) {
-        continue;
-      } else {
-        const advanced = await request(opts, "/read", "POST", {
+    const deltaItems =
+      existing?.state === "admitted" && maxTs > existing.maxTs
+        ? roomItems.filter((item) => item.createdAt > existing.maxTs)
+        : roomItems;
+    if (
+      existing?.state === "admitted" &&
+      (maxTs <= existing.maxTs || deltaItems.length === 0)
+    ) {
+      if (existing.maxTs > 0) {
+        const queued = await markQueued(
+          opts,
           roomId,
           sessionID,
-          ts: existing.maxTs,
-        })
-          .then(() => true)
-          .catch(() => false);
-        if (advanced) {
-          lastPushed.set(key, existing.maxTs);
+          existing.maxTs,
+        );
+        if (queued) {
           clearPendingAdmission(sessionID, roomId, existing.maxTs);
         }
-        continue;
       }
-    }
-    if (!existing && maxTs <= (lastPushed.get(key) ?? 0)) {
       continue;
     }
-    if (lastPushed.size > 1000) {
-      lastPushed.clear();
-    }
-    const { lines, capped } = formatNotificationLines(roomItems);
-    const prompt = `<notification>\nNew messages in room ${roomItems[0]!.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+    const deltaMaxTs = deltaItems.reduce(
+      (mx, it) => Math.max(mx, it.createdAt),
+      0,
+    );
+    const { lines, capped } = formatNotificationLines(deltaItems);
+    const prompt = `<notification>\nNew messages in room ${deltaItems[0]!.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
     const admission = getOrCreatePendingAdmission(
       sessionID,
       roomId,
-      roomItems,
+      deltaItems,
       prompt,
-      maxTs,
+      deltaMaxTs,
       capped,
     );
     const result = await sendQueue(
@@ -514,19 +551,11 @@ export async function pushItemsToSession(
     }
     markPendingAdmissionAdmitted(sessionID, roomId, admission.id);
     void request(opts, "/active", "POST", { sessionID }).catch(() => {});
-    if (admission.capped || admission.maxTs <= 0) {
-      continue;
-    }
-    const advanced = await request(opts, "/read", "POST", {
-      roomId,
-      sessionID,
-      ts: admission.maxTs,
-    })
-      .then(() => true)
-      .catch(() => false);
-    if (advanced) {
-      lastPushed.set(key, admission.maxTs);
-      clearPendingAdmission(sessionID, roomId, admission.maxTs);
+    if (admission.maxTs > 0) {
+      const queued = await markQueued(opts, roomId, sessionID, admission.maxTs);
+      if (queued) {
+        clearPendingAdmission(sessionID, roomId, admission.maxTs);
+      }
     }
   }
   return worst;
@@ -575,6 +604,12 @@ async function wakeViaServe(
   if (result === "delivered") {
     void request(opts, "/active", "POST", { sessionID }).catch(() => {});
     markPendingAdmissionAdmitted(sessionID, roomId, admission.id);
+    if (admission.maxTs > 0) {
+      const queued = await markQueued(opts, roomId, sessionID, admission.maxTs);
+      if (queued) {
+        clearPendingAdmission(sessionID, roomId, admission.maxTs);
+      }
+    }
   } else if (result === "rejected") {
     rejectPendingAdmission(sessionID, roomId, admission.id);
   }
@@ -616,6 +651,7 @@ export async function wakeSessions(
         {
           name: string;
           lastReadTs?: number;
+          lastQueuedTs?: number;
           host?: string;
           directory?: string;
         }
@@ -630,23 +666,40 @@ export async function wakeSessions(
           continue;
         }
         // ponytail: orc-2 #6——跨 host 条目由各自机器上的插件负责，本机
-        // 扫描+推送只会 404（lastPushed 只在 res.ok 时设置，永不去重）
+        // 扫描+推送只会 404；队列游标由中心服务器持久化
         if (entry.host !== os.hostname()) {
           continue;
         }
         // quick skip: nothing newer than this session's watermark
-        if (latest <= (entry.lastReadTs ?? 0)) {
+        if (
+          latest <=
+          Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0)
+        ) {
           continue;
         }
-        const result = (await request(
-          opts,
-          `/inbox?sessionID=${encodeURIComponent(sessionID)}&roomId=${encodeURIComponent(roomId)}&excludeSelf=1&timeout=0`,
-          "GET",
-        )) as unknown as { member: boolean; items: InboxItem[] };
-        const items = Array.isArray(result.items)
-          ? result.items.filter((item) => item.roomId === roomId)
-          : [];
-        if (items.length > 0) {
+        await serializeSessionPush(sessionID, async () => {
+          const result = (await request(
+            opts,
+            `/inbox?sessionID=${encodeURIComponent(sessionID)}&roomId=${encodeURIComponent(roomId)}&excludeSelf=1&timeout=0`,
+            "GET",
+          )) as unknown as {
+            member: boolean;
+            items: InboxItem[];
+            queuedTs?: Record<string, number>;
+          };
+          const queuedTs = Math.max(
+            entry.lastQueuedTs ?? 0,
+            result.queuedTs?.[roomId] ?? 0,
+          );
+          const items = Array.isArray(result.items)
+            ? result.items.filter(
+                (item) =>
+                  item.roomId === roomId && item.createdAt > queuedTs,
+              )
+            : [];
+          if (items.length === 0) {
+            return;
+          }
           const targetTransport = {
             ...transport,
             directory: entry.directory ?? transport.directory,
@@ -659,9 +712,10 @@ export async function wakeSessions(
             sessionID,
             items,
             targetTransport,
+            result.queuedTs,
           );
           // 被 @ 的已退出 session：serve 配置了才唤起（进程内，零 spawn）。
-          // 唤起成功即推进水位——消息已进入该 session 的对话（不丢），
+          // 唤起成功即推进队列游标——消息已进入该 session 的对话（不丢），
           // 避免同一未读反复唤起导致循环回复。
           // 仅唤起本机 opencode session（host === 本机主机名）——web 条目
           // 与 curl 模拟成员（host 空）没有可恢复的 opencode 会话
@@ -678,24 +732,40 @@ export async function wakeSessions(
               );
             });
             if (mentioned) {
-              const { lines, capped } = formatNotificationLines(items);
+              const currentMaxTs = items.reduce(
+                (mx, it) => Math.max(mx, it.createdAt),
+                0,
+              );
+              const existing = pendingAdmission(sessionID, roomId);
+              const deltaItems =
+                existing?.state === "admitted" &&
+                currentMaxTs > existing.maxTs
+                  ? items.filter((item) => item.createdAt > existing.maxTs)
+                  : items;
+              if (
+                existing?.state === "admitted" &&
+                (currentMaxTs <= existing.maxTs || deltaItems.length === 0)
+              ) {
+                return;
+              }
+              const { lines, capped } = formatNotificationLines(deltaItems);
               const prompt = formatServeWakePrompt(
-                items[0]!.roomName,
+                deltaItems[0]!.roomName,
                 lines,
               );
-              const maxTs = items.reduce(
+              const maxTs = deltaItems.reduce(
                 (mx, it) => Math.max(mx, it.createdAt),
                 0,
               );
               const admission = getOrCreatePendingAdmission(
                 sessionID,
                 roomId,
-                items,
+                deltaItems,
                 prompt,
                 maxTs,
                 capped,
               );
-              const woke = await wakeViaServe(
+              await wakeViaServe(
                 serveUrl,
                 sessionID,
                 roomId,
@@ -703,21 +773,9 @@ export async function wakeSessions(
                 targetTransport,
                 admission,
               );
-              if (woke && !admission.capped && admission.maxTs > 0) {
-                const advanced = await request(opts, "/read", "POST", {
-                  roomId,
-                  sessionID,
-                  ts: admission.maxTs,
-                })
-                  .then(() => true)
-                  .catch(() => false);
-                if (advanced) {
-                  clearPendingAdmission(sessionID, roomId, admission.maxTs);
-                }
-              }
             }
           }
-        }
+        });
       }
       } catch {
         // ponytail: orc-3 #4——单房间错误（registry/inbox 请求失败）只跳过

@@ -25,6 +25,7 @@ import {
   clearPendingAdmission,
   getOrCreatePendingAdmission,
   markPendingAdmissionAdmitted,
+  pendingAdmission,
   rejectPendingAdmission,
   type QueueBody,
   type QueueItem,
@@ -122,7 +123,9 @@ async function wakeMentionedSessions(
       sid === senderSessionID ||
       !mentions.has(entry.name) || // 只唤起被 @ 点名的人
       entry.host !== os.hostname() || // 只唤起本机 session（serve 只能恢复本机）
-      (activeSessions.get(sid) ?? 0) > now - WAKE_INACTIVE_MS // 活跃中——插件推送处理
+      (activeSessions.get(sid) ?? 0) > now - WAKE_INACTIVE_MS || // 活跃中——插件推送处理
+      triggeringMessage.createdAt <= (entry.lastReadTs ?? 0) ||
+      triggeringMessage.createdAt <= (entry.lastQueuedTs ?? 0)
     ) {
       continue;
     }
@@ -131,10 +134,29 @@ async function wakeMentionedSessions(
     }
     void (async () => {
       try {
-        // orc-3 #2——带该 session 的全部未读（含更早的），水位推进到
-        // maxTs；否则更早未读被标记已读但从未投递（插件 sweep 也会因
-        // 水位已推进而跳过——永久丢失）
+        // orc-3 #2——带该 session 的全部待通知消息（含更早的），队列游标
+        // 推进到 maxTs；lastReadTs 保留给 poll，避免未读消息被跳过
         const inbox = await readInbox(sid, roomId, true);
+        const currentEntry = await enqueue(async () => {
+          const r = await loadRegistry();
+          return r[roomId]?.[sid];
+        });
+        if (!currentEntry || !inbox.member) {
+          return;
+        }
+        const queuedTs = Math.max(
+          currentEntry.lastQueuedTs ?? 0,
+          inbox.queuedTs[roomId] ?? 0,
+        );
+        if (
+          triggeringMessage.createdAt <= (currentEntry.lastReadTs ?? 0) ||
+          triggeringMessage.createdAt <= queuedTs
+        ) {
+          return;
+        }
+        const queuedItems = inbox.items.filter(
+          (item) => item.createdAt > queuedTs,
+        );
         const triggerItem: InboxItem = {
           id: triggeringMessage.id,
           roomId,
@@ -143,18 +165,47 @@ async function wakeMentionedSessions(
           text: triggeringMessage.text,
           createdAt: triggeringMessage.createdAt,
         };
-        const items = inbox.items.some((item) => item.id === triggerItem.id)
-          ? inbox.items
-          : [...inbox.items, triggerItem].sort(
+        const items = queuedItems.some((item) => item.id === triggerItem.id)
+          ? queuedItems
+          : [...queuedItems, triggerItem].sort(
               (a, b) => a.createdAt - b.createdAt,
             );
-        const { lines, capped } = formatNotificationLines(items);
-        const prompt = formatServeWakePrompt(roomName, lines);
-        const maxTs = items.reduce(
+        const currentMaxTs = items.reduce(
           (mx, it) => Math.max(mx, it.createdAt),
           0,
         );
-        const admissionItems: QueueItem[] = items;
+        const existing = pendingAdmission(sid, roomId);
+        const deltaItems =
+          existing?.state === "admitted" && currentMaxTs > existing.maxTs
+            ? items.filter((item) => item.createdAt > existing.maxTs)
+            : items;
+        const confirmQueued = async (ts: number): Promise<boolean> =>
+          enqueue(async () => {
+            const r = await loadRegistry();
+            const e = r[roomId]?.[sid];
+            if (!e) {
+              return false;
+            }
+            e.lastQueuedTs = Math.max(e.lastQueuedTs ?? 0, ts);
+            await saveRegistry(r);
+            return true;
+          });
+        if (
+          existing?.state === "admitted" &&
+          (currentMaxTs <= existing.maxTs || deltaItems.length === 0)
+        ) {
+          if (existing.maxTs > 0 && (await confirmQueued(existing.maxTs))) {
+            clearPendingAdmission(sid, roomId, existing.maxTs);
+          }
+          return;
+        }
+        const { lines, capped } = formatNotificationLines(deltaItems);
+        const prompt = formatServeWakePrompt(roomName, lines);
+        const maxTs = deltaItems.reduce(
+          (mx, it) => Math.max(mx, it.createdAt),
+          0,
+        );
+        const admissionItems: QueueItem[] = deltaItems;
         const admission = getOrCreatePendingAdmission(
           sid,
           roomId,
@@ -169,28 +220,11 @@ async function wakeMentionedSessions(
           delivery: "queue",
           resume: true,
         };
-        const confirmRead = async (): Promise<boolean> =>
-          enqueue(async () => {
-            const r = await loadRegistry();
-            const e = r[roomId]?.[sid];
-            if (!e) {
-              return false;
-            }
-            e.lastReadTs = Math.max(e.lastReadTs ?? 0, admission.maxTs);
-            await saveRegistry(r);
-            return true;
-          });
-        if (admission.state === "admitted") {
-          if (admission.capped) {
-            if (maxTs <= admission.maxTs) {
-              return;
-            }
-          } else {
-            if (admission.maxTs > 0 && (await confirmRead())) {
-              clearPendingAdmission(sid, roomId, admission.maxTs);
-            }
-            return;
+        if (admission.state === "admitted" && maxTs <= admission.maxTs) {
+          if (admission.maxTs > 0 && (await confirmQueued(admission.maxTs))) {
+            clearPendingAdmission(sid, roomId, admission.maxTs);
           }
+          return;
         }
         const directory =
           (entry as RegistryEntry & { directory?: string }).directory ??
@@ -215,7 +249,7 @@ async function wakeMentionedSessions(
         if (res.status >= 200 && res.status < 300 && admissionMatches(data, body, sid)) {
           markPendingAdmissionAdmitted(sid, roomId, admission.id);
           touchActive(sid);
-          if (!admission.capped && admission.maxTs > 0 && (await confirmRead())) {
+          if (admission.maxTs > 0 && (await confirmQueued(admission.maxTs))) {
             clearPendingAdmission(sid, roomId, admission.maxTs);
           }
         } else if (res.status !== 404) {
@@ -271,7 +305,11 @@ type InboxItem = {
   text: string;
   createdAt: number;
 };
-type InboxResult = { member: boolean; items: InboxItem[] };
+type InboxResult = {
+  member: boolean;
+  items: InboxItem[];
+  queuedTs: Record<string, number>;
+};
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -286,6 +324,7 @@ async function readInbox(
   return read(async (svc) => {
     const reg = await loadRegistry();
     const out: InboxItem[] = [];
+    const queuedTs: Record<string, number> = Object.create(null);
     let member = false;
     for (const room of svc.listRooms()) {
       if (roomFilter && room.id !== roomFilter) {
@@ -296,6 +335,7 @@ async function readInbox(
         continue;
       }
       member = true;
+      queuedTs[room.id] = entry.lastQueuedTs ?? 0;
       const lastRead = entry.lastReadTs ?? 0;
       for (const m of room.messages) {
         const isSelf =
@@ -317,7 +357,7 @@ async function readInbox(
         }
       }
     }
-    return { member, items: out };
+    return { member, items: out, queuedTs };
   });
 }
 
@@ -404,6 +444,7 @@ async function handle(req: Request): Promise<Response> {
               Date.now(),
               created.messages.at(-1)?.createdAt ?? 0,
             ),
+            lastQueuedTs: 0,
           };
           await saveRegistry(reg);
         }
@@ -439,20 +480,64 @@ async function handle(req: Request): Promise<Response> {
       // watermark (sessionIDs are unguessable UUIDs and never exposed);
       // accepted as a limitation until real session auth exists
       const body = (await req.json()) as Record<string, unknown>;
-      const ts = Number(body.ts ?? 0);
+      const ts = Number(body.ts);
       const roomId = String(body.roomId ?? "");
       const sessionID = String(body.sessionID ?? "");
-      touchActive(sessionID); // poll 推进 = 活跃
-      await enqueue(async () => {
+      if (
+        body.ts === undefined ||
+        body.ts === null ||
+        !roomId ||
+        !sessionID ||
+        !Number.isFinite(ts)
+      ) {
+        return json({ error: "roomId/sessionID/finite ts are required" }, 400);
+      }
+      const updated = await enqueue(async () => {
         const reg = await loadRegistry();
         const entry = reg[roomId]?.[sessionID];
-        // ponytail: NaN would poison the watermark (all comparisons false)
-        if (entry && Number.isFinite(ts)) {
-          entry.lastReadTs = Math.max(entry.lastReadTs ?? 0, ts);
-          await saveRegistry(reg);
-          clearPendingAdmission(sessionID, roomId, ts);
+        if (!entry) {
+          return false;
         }
+        entry.lastReadTs = Math.max(entry.lastReadTs ?? 0, ts);
+        await saveRegistry(reg);
+        clearPendingAdmission(sessionID, roomId, ts);
+        return true;
       });
+      if (!updated) {
+        return json({ error: "registry entry not found" }, 404);
+      }
+      touchActive(sessionID); // poll 推进 = 活跃
+      return json({ ok: true });
+    }
+    if (req.method === "POST" && p === "/queued") {
+      const body = (await req.json()) as Record<string, unknown>;
+      const ts = Number(body.ts);
+      const roomId = String(body.roomId ?? "");
+      const sessionID = String(body.sessionID ?? "");
+      if (
+        body.ts === undefined ||
+        body.ts === null ||
+        !roomId ||
+        !sessionID ||
+        !Number.isFinite(ts)
+      ) {
+        return json({ error: "roomId/sessionID/finite ts are required" }, 400);
+      }
+      const updated = await enqueue(async () => {
+        const reg = await loadRegistry();
+        const entry = reg[roomId]?.[sessionID];
+        if (!entry) {
+          return false;
+        }
+        entry.lastQueuedTs = Math.max(entry.lastQueuedTs ?? 0, ts);
+        await saveRegistry(reg);
+        clearPendingAdmission(sessionID, roomId, ts);
+        return true;
+      });
+      if (!updated) {
+        return json({ error: "registry entry not found" }, 404);
+      }
+      touchActive(sessionID);
       return json({ ok: true });
     }
     if (req.method === "POST" && p === "/active") {
@@ -533,6 +618,7 @@ async function handle(req: Request): Promise<Response> {
             directory: body.directory || undefined,
             // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行
             host: body.host ?? "",
+            lastQueuedTs: regRoom[sessionID]?.lastQueuedTs,
             lastReadTs:
               regRoom[sessionID]?.lastReadTs ??
               Math.max(Date.now(), latestMessageTs),
@@ -618,6 +704,7 @@ async function handle(req: Request): Promise<Response> {
             {
               name: e.name,
               lastReadTs: e.lastReadTs ?? 0,
+              lastQueuedTs: e.lastQueuedTs ?? 0,
               host: e.host ?? "",
               directory: e.directory,
             },

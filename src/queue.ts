@@ -174,13 +174,18 @@ export function admissionMatches(
     return false;
   }
   const record = value as Record<string, unknown>;
-  const admission =
-    typeof record.data === "object" && record.data !== null
-      ? (record.data as Record<string, unknown>)
-      : record;
-  return (
-    admission.id === body.id &&
-    admission.sessionID === sessionID &&
-    admission.delivery === "queue"
-  );
+  if (
+    record.id === body.id &&
+    record.sessionID === sessionID &&
+    record.delivery === "queue"
+  ) {
+    return true;
+  }
+  return isRecord(record.data)
+    ? admissionMatches(record.data, body, sessionID)
+    : false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

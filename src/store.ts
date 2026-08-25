@@ -114,6 +114,7 @@ export type RegistryEntry = {
   apiPrefix: string;
   name: string;
   lastReadTs?: number;
+  lastQueuedTs?: number;
   directory?: string;
   // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行；web 条目不填
   host?: string;
