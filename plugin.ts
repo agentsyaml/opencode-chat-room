@@ -1,11 +1,10 @@
-import { tool, type PluginInput } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin";
+import type { ToolContext as V1ToolContext } from "@opencode-ai/plugin";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import RoomService, { RoomError, type Message } from "./src/room-service";
 import {
   enqueue,
-  formatNotificationLines,
   formatRoom,
   identity,
   loadRegistry,
@@ -14,43 +13,38 @@ import {
   saveRegistry,
   saveRooms,
   senderName,
-  statePath,
   timeOf,
   type Registry,
   type RegistryEntry,
 } from "./src/store";
-import {
-  centerAction,
-  checkCenterInbox,
-  createQueueTransport,
-  sendQueue,
-  wakeSessions,
-  type QueueTransport,
-} from "./src/center-client";
+import { centerAction } from "./src/center-client";
+import { createQueueTransport, type QueueTransport } from "./src/queue-transport";
+import { checkCenterInbox } from "./src/center-inbox";
+import { wakeSessions } from "./src/center-wake";
 import {
   clearPendingAdmission,
-  getOrCreatePendingAdmission,
-  markPendingAdmissionAdmitted,
-  pendingAdmission,
-  rejectPendingAdmission,
 } from "./src/queue";
-
-// captured once at server start; registry push notifications route to it
-let selfServerUrl = "";
-let selfDirectory = "";
-let queueTransport: QueueTransport = createQueueTransport();
-
-// ponytail: central-mode in-process wake timer (see server() below)
-let wakeTimer: ReturnType<typeof setInterval> | null = null;
+import { createNotifier } from "./src/plugin-notifications";
+import { createV2Setup, type V2Runtime } from "./src/v2-plugin";
+import { createV1Server } from "./src/v1-plugin";
 
 // ponytail: CHAT_ROOM_SERVER_URL switches to central mode (all state on a
 // central server); unset = standalone local-file mode
 const centerUrl = process.env.CHAT_ROOM_SERVER_URL ?? "";
 const centerToken = process.env.CHAT_ROOM_SERVER_TOKEN ?? "";
-const centerOpts = { center: centerUrl, token: centerToken, directory: "" };
-// ponytail: optional常驻 opencode serve 地址——配置了才能对已退出 session
-// 做进程内唤起；未配置则不唤起（用户要求）
+// A configured OpenCode serve URL is required to wake exited sessions.
 const serveWakeUrl = process.env.CHAT_ROOM_WAKE_SERVE_URL ?? "";
+type PluginRuntime = V2Runtime;
+
+const runtimeContext = new AsyncLocalStorage<PluginRuntime>();
+const defaultRuntime: PluginRuntime = {
+  selfServerUrl: "",
+  selfDirectory: "",
+  protocol: "v1",
+  transport: createQueueTransport(),
+  center: { center: centerUrl, token: centerToken, directory: "" },
+};
+const currentRuntime = (): PluginRuntime => runtimeContext.getStore() ?? defaultRuntime;
 
 async function withRooms<T>(
   fn: (svc: RoomService) => T,
@@ -79,6 +73,7 @@ async function registerSelf(
   sessionID: string,
   name = identity(),
 ): Promise<void> {
+  const runtime = currentRuntime();
   return enqueue(async () => {
     try {
       const reg = await loadRegistry();
@@ -88,10 +83,11 @@ async function registerSelf(
       const regRoom = (reg[roomId] =
         reg[roomId] ?? Object.create(null) as Record<string, RegistryEntry>);
       regRoom[sessionID] = {
-        serverUrl: selfServerUrl,
-        apiPrefix: "/api",
+        serverUrl: runtime.selfServerUrl,
+        apiPrefix: runtime.protocol === "v1" ? "" : "/api",
+        protocol: runtime.protocol,
         name,
-        directory: selfDirectory || undefined,
+        directory: runtime.selfDirectory || undefined,
         // ponytail: re-join must not rewind the read watermark (unread
         // messages before the re-join would be silently dropped); a first
         // join starts reading at join time
@@ -103,6 +99,27 @@ async function registerSelf(
       await saveRegistry(reg);
     } catch {
       // ponytail: registry failure only disables push, never blocks room ops
+    }
+  });
+}
+
+async function refreshSelf(runtime: PluginRuntime, sessionID: string): Promise<void> {
+  await enqueue(async () => {
+    try {
+      const registry = await loadRegistry();
+      let changed = false;
+      for (const members of Object.values(registry)) {
+        const entry = members[sessionID];
+        if (!entry) continue;
+        entry.serverUrl = runtime.selfServerUrl;
+        entry.apiPrefix = runtime.protocol === "v1" ? "" : "/api";
+        entry.protocol = runtime.protocol;
+        entry.directory = runtime.selfDirectory || undefined;
+        changed = true;
+      }
+      if (changed) await saveRegistry(registry);
+    } catch {
+      // Existing watermarks and identities remain untouched if refresh fails.
     }
   });
 }
@@ -125,28 +142,6 @@ async function unregisterSelf(
       // ponytail: registry failure only disables push, never blocks room ops
     }
   });
-}
-
-function notifyPath(): string {
-  return path.join(path.dirname(statePath()), "notify.log");
-}
-
-async function logNotify(
-  roomId: string,
-  results: ReadonlyArray<PromiseSettledResult<{ url: string; status: number }>>,
-): Promise<void> {
-  const lines = results.map((r) => {
-    const head = `[${timeOf(Date.now())}] room=${roomId}`;
-    if (r.status === "rejected") {
-      return `${head} FAIL ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`;
-    }
-    return r.value.status >= 200 && r.value.status < 300
-      ? `${head} OK ${r.value.status} ${r.value.url}`
-      : `${head} FAIL ${r.value.status} ${r.value.url}`;
-  });
-  await fs
-    .appendFile(notifyPath(), lines.join("\n") + "\n", "utf8")
-    .catch(() => {});
 }
 
 // ponytail: push is best-effort; poll remains the fallback; log every attempt for debugging
@@ -196,232 +191,60 @@ async function bumpLastQueued(
   });
 }
 
-// ponytail: one push carries EVERY unread message for the target (not just
-// the latest), so advancing the watermark on success never skips a message
-// whose earlier push failed. Event-only pushes (empty messages) don't bump.
-type NotifyBatch = {
-  roomId: string;
-  roomName: string;
-  messages: Message[];
-};
+const notifier = createNotifier({
+  transport: () => currentRuntime().transport,
+  bumpQueued: (roomId, sessionID, ts) => bumpLastQueued(roomId, sessionID, ts),
+});
+const { notifyRoom, notifyTarget } = notifier;
 
-type NotifyAttempt = { url: string; status: number };
-
-type NotifyTargetQueue = {
-  latest: NotifyBatch | undefined;
-  latestTs: number;
-  running: Promise<NotifyAttempt[]>;
-};
-
-const notifyQueues = new Map<string, NotifyTargetQueue>();
-
-function notifyBatchMaxTs(batch: NotifyBatch): number {
-  return batch.messages.reduce(
-    (maxTs, message) => Math.max(maxTs, message.createdAt),
-    0,
-  );
-}
-
-async function notifyTarget(
-  sessionID: string,
-  batch: NotifyBatch,
-): Promise<NotifyAttempt | undefined> {
-  const reg = await loadRegistry();
-  const entry = reg[batch.roomId]?.[sessionID];
-  if (!entry?.serverUrl) {
-    return undefined;
-  }
-  const unread = batch.messages.filter(
-    (m) =>
-      m.createdAt >
-        Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0) &&
-      (m.senderSessionID !== undefined
-        ? m.senderSessionID !== sessionID
-        : m.senderId !== entry.name),
-  );
-  const currentMaxTs = unread.reduce(
-    (mx, message) => Math.max(mx, message.createdAt),
-    0,
-  );
-  const existing = pendingAdmission(sessionID, batch.roomId);
-  const deltaItems =
-    existing?.state === "admitted" && currentMaxTs > existing.maxTs
-      ? unread.filter((message) => message.createdAt > existing.maxTs)
-      : unread;
-  const base = new URL(entry.serverUrl);
-  const prefix = (entry.apiPrefix || "/api").replace(/^\/+|\/+$/g, "");
-  const url = `${base.origin}/${prefix}/session/${sessionID}/prompt`;
-  if (
-    existing?.state === "admitted" &&
-    (currentMaxTs <= existing.maxTs || deltaItems.length === 0)
-  ) {
-    if (existing.maxTs > 0) {
-      await bumpLastQueued(batch.roomId, sessionID, existing.maxTs);
-    }
-    return { url, status: 200 };
-  }
-  const { lines, capped } = formatNotificationLines(deltaItems);
-  const prompt =
-    deltaItems.length > 0
-      ? `<notification>\nNew messages in room ${batch.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`
-      : `<notification>\n${NOTIFY_INSTRUCTION}\n</notification>`;
-  const maxTs = deltaItems.reduce(
-    (mx, message) => Math.max(mx, message.createdAt),
-    0,
-  );
-  const admissionItems =
-    deltaItems.length > 0 ? deltaItems : batch.messages.slice(-1);
-  const admission = getOrCreatePendingAdmission(
-    sessionID,
-    batch.roomId,
-    admissionItems,
-    prompt,
-    maxTs,
-    capped,
-  );
-  if (admission.state === "admitted" && maxTs <= admission.maxTs) {
-    if (admission.maxTs <= 0) {
-      return { url, status: 200 };
-    }
-    await bumpLastQueued(batch.roomId, sessionID, admission.maxTs);
-    return { url, status: 200 };
-  }
-  const result = await sendQueue(
-    {
-      ...queueTransport,
-      serverUrl: entry.serverUrl,
-      directory: entry.directory ?? queueTransport.directory,
-    },
-    sessionID,
-    admission.prompt,
-    admission.id,
-  );
-  if (result !== "delivered") {
-    if (result === "rejected") {
-      rejectPendingAdmission(sessionID, batch.roomId, admission.id);
-    }
-    return { url, status: result === "unreachable" ? 0 : 400 };
-  }
-  markPendingAdmissionAdmitted(sessionID, batch.roomId, admission.id);
-  if (admission.maxTs > 0) {
-    await bumpLastQueued(batch.roomId, sessionID, admission.maxTs);
-  }
-  return { url, status: 200 };
-}
-
-function queueNotifyTarget(
-  sessionID: string,
-  batch: NotifyBatch,
-): Promise<NotifyAttempt[]> {
-  const key = JSON.stringify([batch.roomId, sessionID]);
-  const existing = notifyQueues.get(key);
-  if (existing) {
-    const maxTs = notifyBatchMaxTs(batch);
-    if (maxTs > existing.latestTs) {
-      existing.latest = batch;
-      existing.latestTs = maxTs;
-    }
-    return existing.running;
-  }
-
-  const state: NotifyTargetQueue = {
-    latest: batch,
-    latestTs: notifyBatchMaxTs(batch),
-    running: Promise.resolve([] as NotifyAttempt[]),
-  };
-  const running = (async (): Promise<NotifyAttempt[]> => {
-    const attempts: NotifyAttempt[] = [];
-    let failed = false;
-    let firstError: unknown;
-    while (state.latest) {
-      const current = state.latest;
-      state.latest = undefined;
-      try {
-        const attempt = await notifyTarget(sessionID, current);
-        if (attempt) {
-          attempts.push(attempt);
-        }
-      } catch (error) {
-        if (!failed) {
-          firstError = error;
-          failed = true;
-        }
-      }
-    }
-    if (failed) {
-      throw firstError;
-    }
-    return attempts;
-  })();
-  state.running = running;
-  notifyQueues.set(key, state);
-  const cleanup = () => {
-    if (notifyQueues.get(key) === state) {
-      notifyQueues.delete(key);
-    }
-  };
-  void running.then(cleanup, cleanup);
-  return running;
-}
-
-async function notifyRoom(
-  roomId: string,
-  roomName: string,
-  _body: string,
-  selfSessionID: string,
-  messages: Message[],
+export async function pollKnownSessions(
+  sessions: ReadonlySet<string>,
+  transport: QueueTransport,
+  opts: PluginRuntime["center"],
 ): Promise<void> {
-  const reg = await loadRegistry();
-  const targets = Object.entries(reg[roomId] ?? {}).filter(
-    ([sessionID, entry]) => sessionID !== selfSessionID && entry.serverUrl,
-  );
-  const batch: NotifyBatch = { roomId, roomName, messages };
-  const results = await Promise.allSettled(
-    targets.map(([sessionID]) => queueNotifyTarget(sessionID, batch)),
-  );
-  const logResults: PromiseSettledResult<NotifyAttempt>[] = [];
-  let failed = false;
-  let firstError: unknown;
-  for (const result of results) {
-    if (result.status === "fulfilled") {
-      for (const attempt of result.value) {
-        logResults.push({ status: "fulfilled", value: attempt });
-      }
-    } else {
-      logResults.push({ status: "rejected", reason: result.reason });
-      if (!failed) {
-        firstError = result.reason;
-        failed = true;
-      }
-    }
+  if (opts.center) {
+    await Promise.all([...sessions].map((sessionID) =>
+      checkCenterInbox(opts, sessionID, transport),
+    ));
+    return;
   }
-  await logNotify(roomId, logResults);
-  if (failed) {
-    throw firstError;
+  const [rooms, registry] = await Promise.all([loadRooms(), loadRegistry()]);
+  for (const sessionID of sessions) {
+    for (const room of rooms) {
+      if (!registry[room.id]?.[sessionID]) continue;
+      await notifyTarget(sessionID, {
+        roomId: room.id,
+        roomName: room.name,
+        messages: room.messages,
+      }, transport);
+    }
   }
 }
 
 const READ_ONLY_ACTIONS = new Set(["list", "members", "poll"]);
 
-const room = tool({
-  description:
-    "Chat room operations: create, join, leave and list rooms; send and poll messages; list members",
-  args: {
-    action: z.enum(["create", "join", "leave", "list", "send", "poll", "members"]),
-    name: z.string().max(64).optional(),
-    roomId: z.string().optional(),
-    text: z.string().max(2000).optional(),
-  },
-  execute: async (args, context) => {
+const roomArgs = z.object({
+  action: z.enum(["create", "join", "leave", "list", "send", "poll", "members"]),
+  name: z.string().max(64).optional(),
+  roomId: z.string().optional(),
+  text: z.string().max(2000).optional(),
+});
+type RoomArguments = z.infer<typeof roomArgs>;
+
+const roomExecute = async (
+  args: RoomArguments,
+  context: Pick<V1ToolContext, "sessionID">,
+) => {
     try {
-      if (centerUrl) {
+      const runtime = currentRuntime();
+      if (runtime.center.center) {
         // ponytail: central mode — self-pull inbox first, then act via HTTP
         // (skipped for poll: poll itself pulls the inbox, so racing the
         // fire-and-forget check would read the position it just advanced)
         if (args.action !== "poll") {
-          void checkCenterInbox(centerOpts, context.sessionID, queueTransport);
+          void checkCenterInbox(runtime.center, context.sessionID, runtime.transport);
         }
-        return await centerAction(centerOpts, args, context.sessionID);
+        return await centerAction(runtime.center, args, context.sessionID);
       }
       // ponytail: act as the identity this session registered with on join
       let selfName = identity();
@@ -436,7 +259,7 @@ const room = tool({
           selfName = reg[args.roomId]?.[context.sessionID]?.name ?? selfName;
         }
         if (args.action === "leave") {
-          // ora-2 M2: 其他 session 仍持有该名字时，离开只删条目不删参与者
+          // Keep the participant while another session still uses this name.
           leaveNameShared = Object.entries(reg[args.roomId] ?? {}).some(
             ([sid, e]) => sid !== context.sessionID && e.name === selfName,
           );
@@ -514,7 +337,7 @@ const room = tool({
             // ponytail: ora-2 M2 — mirror the join guard: if another session
             // still holds this name, remove only the registry entry, not the
             // participant (or the sibling window breaks with NOT_JOINED);
-            // 也不广播假的 "left" 事件（参与者仍在场）
+            // Do not emit a false leave event while the participant remains.
             if (!leaveNameShared) {
               svc.leaveRoom(args.roomId, selfName);
               const room = svc.getRoom(args.roomId);
@@ -623,60 +446,45 @@ const room = tool({
     } catch (err) {
       return `error: ${err instanceof Error ? err.message : String(err)}`;
     }
-  },
+};
+
+const room = tool({
+  description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members",
+  args: roomArgs.shape,
+  execute: roomExecute,
 });
 
-// ponytail: mutation of the passed config is enough for the SDK to pick up the command
-async function config(cfg: any) {
-  cfg.command = cfg.command ?? {};
-  cfg.command["room"] = {
-    description: "Chat room: create/join/leave/list rooms, send and poll messages",
-    template:
-      "Use the room tool to handle the chat room command. Arguments: $ARGUMENTS",
-  };
-}
+export const server = createV1Server({
+  runtime: (input, transport) => ({
+    protocol: "v1",
+    selfServerUrl: transport.serverUrl ?? "",
+    selfDirectory: input.directory,
+    transport,
+    center: { center: centerUrl, token: centerToken, directory: input.directory },
+  }),
+  run: (runtime, callback) => runtimeContext.run(runtime, callback),
+  room,
+  observe: refreshSelf,
+  checkInbox: (runtime, sessionID) => checkCenterInbox(runtime.center, sessionID, runtime.transport),
+  wake: (runtime, sessions) => wakeSessions(runtime.center, runtime.transport, serveWakeUrl, sessions),
+  central: Boolean(centerUrl),
+});
 
-export default {
-  id: "chat-room",
-  server: async (input: PluginInput) => {
-    queueTransport = createQueueTransport(input);
-    selfServerUrl = queueTransport.serverUrl ?? "";
-    selfDirectory = input.directory;
-    centerOpts.directory = selfDirectory;
-    if (centerUrl) {
-      // ponytail: in-process wake watcher — sweep the central server every
-      // 10s and self-push queue notifications to any session (including
-      // sleeping sub-agents in this process) that has unread messages; the
-      // central server itself has no opencode knowledge. 10s balances
-      // wake latency vs scan cost (wakeChecking prevents overlap)
-      if (wakeTimer) {
-        clearInterval(wakeTimer); // HMR/reload must not accumulate timers
-      }
-      void wakeSessions(centerOpts, queueTransport, serveWakeUrl);
-      wakeTimer = setInterval(() => {
-        void wakeSessions(centerOpts, queueTransport, serveWakeUrl);
-      }, 10000);
-    }
-    return {
-      tool: { room },
-      config,
-      // ponytail: central mode has no cross-host push, so each session pulls
-      // its inbox on chat messages and self-pushes queue notifications
-      // (SDK signature: (input, output) — sessionID is on the first arg)
-      ...(centerUrl
-        ? {
-            "chat.message": async (
-              input: { sessionID: string },
-              _output: unknown,
-            ) => {
-              void checkCenterInbox(
-                centerOpts,
-                input.sessionID,
-                queueTransport,
-              );
-            },
-          }
-        : {}),
-    };
-  },
-};
+export const setup = createV2Setup({
+  runtime: (directory, transport) => ({
+    protocol: "v2",
+    selfServerUrl: "",
+    selfDirectory: directory,
+    transport,
+    center: { center: centerUrl, token: centerToken, directory },
+  }),
+  run: (runtime, callback) => runtimeContext.run(runtime, callback),
+  execute: (args, sessionID) => roomExecute(args, { sessionID }),
+  observe: refreshSelf,
+  poll: pollKnownSessions,
+  wake: (center, transport, sessions) => wakeSessions(center, transport, serveWakeUrl, sessions),
+  central: Boolean(centerUrl),
+});
+
+export const id = "chat-room";
+export default { id, server, setup };

@@ -6,8 +6,8 @@ A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessio
 
 - 7 room actions: `create`, `join`, `leave`, `list`, `send`, `poll`, `members` (plus a `/room` command)
 - **Human web chat UI** served at `GET /chat` (central mode): humans join rooms in the browser and chat with agents on equal footing
-- Queue-delivered notifications wrapped in `<notification>…</notification>` so agents can tell push content apart from conversation and won't reply to it
-- Incremental read watermark: `poll` only returns messages you haven't seen; a successfully pushed message never repeats, and a failed push is recovered by the next `poll` — nothing is lost, nothing is duplicated
+- Notifications wrapped in `<notification>…</notification>`; V2 uses the persistent session queue, while V1 uses asynchronous prompts
+- Incremental read watermark: `poll` returns unread messages; failed notification attempts remain available for retry. V1 asynchronous acceptance does not guarantee durable delivery.
 - Two deployment modes: **standalone** (local/shared files, zero config) and **central** (one HTTP server, one env var per client)
 - Corruption-safe JSON persistence (atomic tmp+rename writes, automatic backup of unparseable files)
 
@@ -35,6 +35,10 @@ For a local checkout, use a file URL instead:
 
 Restart opencode. The `room` tool and the `/room` command are now available in every session.
 
+## OpenCode compatibility
+
+This plugin supports OpenCode **1.18.29 and newer V1 releases**, plus the current V2 plugin API. Restart OpenCode after changing versions so it loads the matching plugin entrypoint. V1 uses the public `prompt_async` endpoint: a successful HTTP response means the notification was accepted for asynchronous processing, not durably queued. Both V1 and V2 poll only sessions observed by a prompt hook or room tool. After an OpenCode restart, use `/room` or the tool once in each session to resume polling. The optional serve fallback is also limited to sessions observed by that plugin instance. V2 does not assume a local server URL.
+
 ## Standalone mode (default)
 
 No configuration needed. All sessions on the same machine share state in `~/.config/opencode/chat-room/` (`rooms.json`, `registry.json`, `notify.log`).
@@ -43,11 +47,11 @@ Typical usage in a session:
 
 - Create: ask the agent to *"create a chat room named dev"*, or run `/room create dev`
 - Join with a name: `room join <roomId> name:"alice"` — the name is your identity in that room (defaults to `user@host`)
-- Send: `room send <roomId> "hello team"` — every other registered session gets a queued `<notification>`
+- Send: `room send <roomId> "hello team"` — other registered sessions receive a host-appropriate `<notification>`
 - Read new messages: `room poll <roomId>` — only unread ones, or just wait for the push
 - `room list` / `room members <roomId>` / `room leave <roomId>`
 
-Push notifications travel over each session's embedded HTTP server. On one machine this works out of the box; the receiver's watermark only advances when a push actually succeeds (HTTP 2xx), otherwise the message stays unread for the next `poll`.
+Push notifications use the host's supported transport. V1 notifications are ordinary asynchronous prompts; V2 notifications use the persistent session queue. In both cases the unread watermark advances only after the host accepts the notification.
 
 ## Central mode (multi-host)
 
@@ -57,17 +61,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.1.3 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.0 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.1.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.1.3 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.1.3 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.2.0 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.2.0 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.1.3
+  bunx @alexsun-top/opencode-chat-room@0.2.0
 
 # Local checkout:
 bun install
@@ -97,12 +101,13 @@ Then start opencode normally. Room state lives on the central server. Clients on
 | `PORT` | server | Port alias, used when `CHAT_ROOM_SERVER_PORT` is unset | unset |
 | `CHAT_ROOM_STATE_DIR` | standalone | Directory for `rooms.json`/`registry.json` — point several machines at one shared mount for standalone multi-host | `~/.config/opencode/chat-room/` |
 | `OPENCODE_SERVER_PASSWORD` | both | opencode server password; used for Basic auth on cross-session pushes | none |
+| `CHAT_ROOM_WAKE_SERVE_URL` | client | Optional OpenCode serve URL used as a fallback for mentioned inactive sessions | unset |
 
 ## How notifications work
 
-- **Standalone**: the sender POSTs every unread message to each registered session's embedded server (`/api/session/:id/prompt`, `delivery: "queue"`). Successful pushes advance the receiver's watermark; failed ones leave it alone.
-- **Central**: each session pulls its inbox (`GET /inbox?sessionID=…`) and self-pushes a `<notification>` to its own session via `localhost`. Items are grouped per room: a room's watermark only advances when the whole room batch was pushed successfully.
-- Every push attempt is appended to `notify.log` (`OK <status> <url>` / `FAIL <reason>`) — check it when notifications seem missing.
+- **Standalone**: V1 sends asynchronous prompts to registered session servers; V2 polls shared local state and admits notifications through its own persistent queue. The watermark advances only on host acceptance.
+- **Central**: sessions pull their inbox (`GET /inbox?sessionID=…`) and admit `<notification>` messages through the host API. Items are grouped per room; a room's queued watermark advances only after admission.
+- Standalone V1 HTTP attempts are appended to `notify.log` (`OK <status> <url>` / `FAIL <reason>`). V2 queue admissions are not currently written there.
 - Notifications include instructions for the agent: do not reply, do not call tools, unless explicitly addressed.
 
 ## Tool reference

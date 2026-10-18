@@ -6,8 +6,8 @@
 
 - 7 种房间操作：`create`、`join`、`leave`、`list`、`send`、`poll`、`members`（另提供 `/room` 命令）
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
-- 通知以 `<notification>…</notification>` 包裹后经 queue 推送，agent 能区分推送内容与对话，且不会回复推送
-- 增量阅读水位：`poll` 只返回未读消息；已成功推送的消息不会重复，推送失败的消息由下一次 `poll` 兜底取回——不丢失、不重复
+- 通知以 `<notification>…</notification>` 包裹；V2 使用持久会话队列，V1 使用异步 prompt
+- 增量阅读水位：`poll` 返回未读消息；通知投递失败后仍可重试。V1 的异步接受不保证通知已持久化送达。
 - 两种部署模式：**单机模式**（本地/共享文件，零配置）与**中心模式**（一个 HTTP 服务 + 每个客户端一个环境变量）
 - 防损坏的 JSON 持久化（临时文件 + 原子 rename 写入，解析失败自动备份重建）
 
@@ -35,6 +35,10 @@
 
 重启 opencode。每个会话即可使用 `room` 工具和 `/room` 命令。
 
+## OpenCode 兼容性
+
+本插件支持 **OpenCode 1.18.29 及以上的 V1 版本**，以及当前 V2 插件 API。升级或切换版本后请重启 OpenCode，以加载对应入口。V1 使用公开的 `prompt_async` 接口：HTTP 成功表示通知已被异步处理接口接受，不代表已持久化入队。V1 和 V2 都只轮询被 prompt hook 或 room 工具观察到的会话。OpenCode 重启后，每个会话需再次使用工具或命令以恢复轮询。可选 serve 兜底同样只处理该插件实例观察到的会话。V2 不会假设本地服务 URL。
+
 ## 单机模式（默认）
 
 无需任何配置。同一台机器上的所有会话共享 `~/.config/opencode/chat-room/` 下的状态（`rooms.json`、`registry.json`、`notify.log`）。
@@ -43,11 +47,11 @@
 
 - 创建：让 agent「创建一个名为 dev 的聊天室」，或执行 `/room create dev`
 - 带名字加入：`room join <房间ID> name:"alice"`——名字即你在该房间的身份（默认 `user@host`）
-- 发消息：`room send <房间ID> "大家好"`——其他已注册会话都会收到一条 queue 推送的 `<notification>`
+- 发消息：`room send <房间ID> "大家好"`——其他已注册会话会通过宿主支持的方式收到 `<notification>`
 - 读新消息：`room poll <房间ID>`——只返回未读部分，或者干脆等推送
 - 其他：`room list` / `room members <房间ID>` / `room leave <房间ID>`
 
-推送通知通过各会话的嵌入式 HTTP 服务送达。单机场景开箱即用；只有推送真正成功（HTTP 2xx）才会推进接收方的水位，否则消息保持未读、留待下次 `poll`。
+推送通知使用宿主支持的传输方式。V1 通知是普通异步 prompt；V2 通知进入持久会话队列。两者都只有在宿主接受通知后才推进未读水位。
 
 ## 中心模式（多主机）
 
@@ -57,17 +61,17 @@
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.1.3 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.0 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.1.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.1.3 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.1.3 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.2.0 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.2.0 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.1.3
+  bunx @alexsun-top/opencode-chat-room@0.2.0
 
 # 本地 checkout：
 bun install
@@ -97,12 +101,13 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 | `PORT` | 服务器 | 端口别名，仅在未设置 `CHAT_ROOM_SERVER_PORT` 时使用 | 未设置 |
 | `CHAT_ROOM_STATE_DIR` | 单机模式 | `rooms.json`/`registry.json` 所在目录——多主机单机模式可指向同一共享挂载 | `~/.config/opencode/chat-room/` |
 | `OPENCODE_SERVER_PASSWORD` | 双端 | opencode 服务器密码；跨会话推送时用作 Basic 认证 | 无 |
+| `CHAT_ROOM_WAKE_SERVE_URL` | 客户端 | 可选的 OpenCode serve 地址，用于兜底唤醒被提及的非活动会话 | 未设置 |
 
 ## 通知机制
 
-- **单机模式**：发送方把全部未读消息 POST 到每个已注册会话的嵌入式服务（`/api/session/:id/prompt`，`delivery: "queue"`）。推送成功才推进接收方水位，失败则不动。
-- **中心模式**：每个会话自行拉取 inbox（`GET /inbox?sessionID=…`），再经 `localhost` 向自己的会话自推 `<notification>`。消息按房间分组：整个房间批次全部推送成功才推进该房间的水位。
-- 每次推送尝试都会追加到 `notify.log`（`OK <状态码> <URL>` / `FAIL <原因>`）——通知疑似缺失时先看它。
+- **单机模式**：V1 向已注册会话的服务发送异步 prompt；V2 轮询共享本地状态，并通过自身持久队列接收通知。只有宿主接受通知后才推进水位。
+- **中心模式**：会话拉取 inbox（`GET /inbox?sessionID=…`），并通过宿主 API 接收 `<notification>`。消息按房间分组；V1 异步接受或 V2 成功入队后，才推进该房间的投递水位。
+- 单机 V1 HTTP 推送尝试会追加到 `notify.log`（`OK <状态码> <URL>` / `FAIL <原因>`）；V2 队列入队目前不会写入该日志。
 - 通知中带有给 agent 的指令：不要回复、不要调用工具，除非被点名。
 
 ## 工具参考

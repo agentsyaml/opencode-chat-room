@@ -112,6 +112,7 @@ export async function saveRooms(svc: RoomService): Promise<void> {
 export type RegistryEntry = {
   serverUrl: string;
   apiPrefix: string;
+  protocol?: "v1" | "v2";
   name: string;
   lastReadTs?: number;
   lastQueuedTs?: number;
