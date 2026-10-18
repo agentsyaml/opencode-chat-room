@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import plugin, { id, pollKnownSessions, server, setup } from "../plugin";
+import { runInNewContext } from "node:vm";
 import { pushItemsToSession } from "./center-inbox";
 import { createQueueTransport, sendAsyncNotification, sendQueue, type QueueTransport } from "./queue-transport";
 import { loadRegistry, saveRegistry } from "./store";
@@ -12,8 +12,15 @@ import { wakeSessions } from "./center-wake";
 
 const originalFetch = globalThis.fetch;
 const originalStateDir = process.env.CHAT_ROOM_STATE_DIR;
+const originalCenterUrl = process.env.CHAT_ROOM_SERVER_URL;
+const originalCenterToken = process.env.CHAT_ROOM_SERVER_TOKEN;
+const originalWakeUrl = process.env.CHAT_ROOM_WAKE_SERVE_URL;
 const temp = await mkdtemp(path.join(os.tmpdir(), "chat-room-compat-"));
 process.env.CHAT_ROOM_STATE_DIR = temp;
+delete process.env.CHAT_ROOM_SERVER_URL;
+delete process.env.CHAT_ROOM_SERVER_TOKEN;
+delete process.env.CHAT_ROOM_WAKE_SERVE_URL;
+const { default: plugin, id, pollKnownSessions, server, setup } = await import("../plugin");
 
 beforeEach(() => {
   process.env.CHAT_ROOM_STATE_DIR = temp;
@@ -22,6 +29,18 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
+
+async function browserAuth(storage: Storage, fetcher: typeof fetch) {
+  const html = await readFile(path.join(process.cwd(), "server/chat.html"), "utf8");
+  const storeStart = html.indexOf("  const memStore = Object.create(null);");
+  const storeEnd = html.indexOf("\n\n  const I18N", storeStart);
+  const apiStart = html.indexOf("  async function api(");
+  const apiEnd = html.indexOf("\n\n  /* ---------- 状态", apiStart);
+  if ([storeStart, storeEnd, apiStart, apiEnd].some((index) => index < 0)) throw new Error("chat auth code not found");
+  const context: any = { localStorage: storage, fetch: fetcher, t: (key: string) => key };
+  runInNewContext(`${html.slice(storeStart, storeEnd)}\n${html.slice(apiStart, apiEnd)}\nglobalThis.auth = { LS, saveToken, api };`, context);
+  return context.auth as { LS: { token: string }; saveToken(value: string): string; api(path: string, options?: RequestInit): Promise<any> };
+}
 
 function wakeTransport(sessionID: string, sent: () => void): QueueTransport {
   return {
@@ -56,12 +75,65 @@ function centerFetch(options: { beforeSummary?: (count: number) => Promise<void>
   return { fetcher: fetcher as unknown as typeof fetch, summaries: () => summaries };
 }
 
-describe("OpenCode compatibility transports", () => {
-  test("transport does not guess a local server URL", () => {
+describe.serial("OpenCode compatibility transports", () => {
+  test.serial("web auth saves through storage failure, recovers 401, reloads token, and supports open servers", async () => {
+    const requests: Array<{ path: string; authorization: string }> = [];
+    const protectedFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get("Authorization") ?? "";
+      requests.push({ path: String(input), authorization });
+      return authorization === "Bearer valid-token"
+        ? Response.json({ ok: true })
+        : Response.json({ error: "unauthorized" }, { status: 401 });
+    }) as unknown as typeof fetch;
+    const brokenStorage = {
+      getItem: () => null,
+      setItem: () => { throw new Error("quota exceeded"); },
+      removeItem: () => { throw new Error("storage unavailable"); },
+    } as unknown as Storage;
+    const brokenAuth = await browserAuth(brokenStorage, protectedFetch);
+    await expect(brokenAuth.api("/rooms")).rejects.toMatchObject({ status: 401 });
+    const tokenInput = { value: " valid-token " };
+    tokenInput.value = brokenAuth.saveToken(tokenInput.value);
+    expect(tokenInput.value).toBe("valid-token");
+    expect(brokenAuth.LS.token).toBe("valid-token");
+    await brokenAuth.api("/rooms");
+    await brokenAuth.api("/rooms/room-id/join", { method: "POST", body: "{}" });
+    await brokenAuth.api("/inbox?sessionID=session-id");
+    expect(requests.map((request) => request.authorization)).toEqual([
+      "", "Bearer valid-token", "Bearer valid-token", "Bearer valid-token",
+    ]);
+
+    const values = new Map<string, string>();
+    const persistentStorage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+    } as unknown as Storage;
+    const staleAuth = await browserAuth(persistentStorage, protectedFetch);
+    staleAuth.saveToken("stale-token");
+    await expect(staleAuth.api("/rooms")).rejects.toMatchObject({ status: 401 });
+    staleAuth.saveToken("valid-token");
+    await staleAuth.api("/rooms");
+    const reloadedAuth = await browserAuth(persistentStorage, protectedFetch);
+    expect(reloadedAuth.LS.token).toBe("valid-token");
+    await reloadedAuth.api("/rooms/room-id/join", { method: "POST", body: "{}" });
+
+    const openRequests: string[] = [];
+    const openAuth = await browserAuth({
+      getItem: () => null, setItem: () => {}, removeItem: () => {},
+    } as unknown as Storage, (async (_input: string | URL | Request, init?: RequestInit) => {
+      openRequests.push(new Headers(init?.headers).get("Authorization") ?? "");
+      return Response.json({ ok: true });
+    }) as unknown as typeof fetch);
+    await openAuth.api("/rooms");
+    expect(openRequests).toEqual([""]);
+  });
+
+  test.serial("transport does not guess a local server URL", () => {
     expect(createQueueTransport().serverUrl).toBeUndefined();
   });
 
-  test("V1 server entrypoint registers the room tool", async () => {
+  test.serial("V1 server entrypoint registers the room tool", async () => {
     const hooks = await server({
       serverUrl: new URL("http://v1.example"),
       directory: temp,
@@ -71,7 +143,7 @@ describe("OpenCode compatibility transports", () => {
     await hooks.dispose?.();
   });
 
-  test("V1 chat hook awaits metadata but not the inbox fetch", async () => {
+  test.serial("V1 chat hook awaits metadata but not the inbox fetch", async () => {
     let finishObserve!: () => void;
     let finishInbox!: () => void;
     let inboxStarted = false;
@@ -100,7 +172,7 @@ describe("OpenCode compatibility transports", () => {
     await hooks.dispose?.();
   });
 
-  test("V1 chat hook handles a rejected fire-and-forget inbox check", async () => {
+  test.serial("V1 chat hook handles a rejected fire-and-forget inbox check", async () => {
     const runtime: any = { protocol: "v1", selfServerUrl: "", selfDirectory: temp, transport: {}, center: { center: "", token: "", directory: temp } };
     const hooks = await createV1Server({
       runtime: () => runtime,
@@ -124,7 +196,7 @@ describe("OpenCode compatibility transports", () => {
     }
   });
 
-  test("V1 async HTTP acceptance and failure are distinguished", async () => {
+  test.serial("V1 async HTTP acceptance and failure are distinguished", async () => {
     let body = "";
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       expect(String(input)).toBe("http://v1.example/session/sess/prompt_async");
@@ -139,7 +211,7 @@ describe("OpenCode compatibility transports", () => {
     expect(await sendAsyncNotification({ serverUrl: "http://v1.example" }, "sess", "notice")).toBe("rejected");
   });
 
-  test("central inbox dispatches V1 notifications asynchronously and keeps failures unread", async () => {
+  test.serial("central inbox dispatches V1 notifications asynchronously and keeps failures unread", async () => {
     const item = { roomId: "r", roomName: "room", senderId: "alice", text: "hello", createdAt: 10 };
     const calls: string[] = [];
     globalThis.fetch = (async (input: string | URL | Request) => {
@@ -168,7 +240,7 @@ describe("OpenCode compatibility transports", () => {
     expect(calls.some((url) => url.endsWith("/queued"))).toBe(false);
   });
 
-  test("V1 notification logs the root prompt_async endpoint", async () => {
+  test.serial("V1 notification logs the root prompt_async endpoint", async () => {
     await saveRegistry({ logged: {
       "v1-log-target": { name: "target", serverUrl: "http://v1.example/", apiPrefix: "", protocol: "v1", lastReadTs: 0 },
     } });
@@ -188,7 +260,7 @@ describe("OpenCode compatibility transports", () => {
     expect(await readFile(path.join(temp, "notify.log"), "utf8")).toContain(sentUrl);
   });
 
-  test("V2 exposes tool and command and uses persistent queue prompt", async () => {
+  test.serial("V2 exposes tool and command and uses persistent queue prompt", async () => {
     expect(plugin).toMatchObject({ id: "chat-room", server, setup });
     expect(id).toBe("chat-room");
     let registeredTool: any;
@@ -212,7 +284,7 @@ describe("OpenCode compatibility transports", () => {
     await cleanup();
   });
 
-  test("V2 queue acceptance requires the returned admission identity", async () => {
+  test.serial("V2 queue acceptance requires the returned admission identity", async () => {
     const seen: unknown[] = [];
     const transport = {
       promptQueue: async (sessionID: string, id: string, text: string) => {
@@ -225,7 +297,7 @@ describe("OpenCode compatibility transports", () => {
     expect(await sendQueue({ promptQueue: async () => ({}) }, "s", "notice", "admission")).toBe("rejected");
   });
 
-  test("V2 HTTP queue request uses the flat public payload", async () => {
+  test.serial("V2 HTTP queue request uses the flat public payload", async () => {
     let received: unknown;
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
       received = JSON.parse(String(init?.body));
@@ -238,7 +310,7 @@ describe("OpenCode compatibility transports", () => {
     expect(received).toEqual({ id: "http-admission", text: "notice", delivery: "queue", resume: true });
   });
 
-  test("concurrent V2 wake scans remain isolated by runtime", async () => {
+  test.serial("concurrent V2 wake scans remain isolated by runtime", async () => {
     let started!: () => void;
     let release!: () => void;
     const firstStarted = new Promise<void>((resolve) => { started = resolve; });
@@ -258,7 +330,7 @@ describe("OpenCode compatibility transports", () => {
     expect(fake.summaries()).toBe(2);
   });
 
-  test("wake scans still suppress overlap for the same runtime", async () => {
+  test.serial("wake scans still suppress overlap for the same runtime", async () => {
     let started!: () => void;
     let release!: () => void;
     const firstStarted = new Promise<void>((resolve) => { started = resolve; });
@@ -277,7 +349,7 @@ describe("OpenCode compatibility transports", () => {
     expect(sent).toBe(1);
   });
 
-  test("a failed wake scan releases its runtime guard for retry", async () => {
+  test.serial("a failed wake scan releases its runtime guard for retry", async () => {
     const fake = centerFetch({ failFirst: true });
     globalThis.fetch = fake.fetcher;
     let sent = 0;
@@ -289,7 +361,7 @@ describe("OpenCode compatibility transports", () => {
     expect(sent).toBe(1);
   });
 
-  test("V2 local polling does not send an empty notification", async () => {
+  test.serial("V2 local polling does not send an empty notification", async () => {
     let roomTool: any;
     const sessionID = "idle-session";
     const context: any = {
@@ -313,7 +385,7 @@ describe("OpenCode compatibility transports", () => {
     }
   });
 
-  test("V2 setup runtimes retain separate directories", async () => {
+  test.serial("V2 setup runtimes retain separate directories", async () => {
     const makeInstance = async (directory: string, sessionID: string) => {
       let roomTool: any;
       const context: any = {
@@ -341,7 +413,7 @@ describe("OpenCode compatibility transports", () => {
     }
   });
 
-  test("observed memberships refresh only their transport metadata", async () => {
+  test.serial("observed memberships refresh only their transport metadata", async () => {
     const preserved = { name: "same-name", lastReadTs: 42, lastQueuedTs: 51 };
     await saveRegistry({ room: {
       ownV2: { ...preserved, serverUrl: "http://old", apiPrefix: "/api", protocol: "v1", directory: "old" },
@@ -378,7 +450,7 @@ describe("OpenCode compatibility transports", () => {
     }
   });
 
-  test("each V2 setup cleans up only its own poller", async () => {
+  test.serial("each V2 setup cleans up only its own poller", async () => {
     const setIntervalOriginal = globalThis.setInterval;
     const clearIntervalOriginal = globalThis.clearInterval;
     const timers: number[] = [];
@@ -408,5 +480,11 @@ describe("OpenCode compatibility transports", () => {
 afterAll(async () => {
   if (originalStateDir === undefined) delete process.env.CHAT_ROOM_STATE_DIR;
   else process.env.CHAT_ROOM_STATE_DIR = originalStateDir;
+  if (originalCenterUrl === undefined) delete process.env.CHAT_ROOM_SERVER_URL;
+  else process.env.CHAT_ROOM_SERVER_URL = originalCenterUrl;
+  if (originalCenterToken === undefined) delete process.env.CHAT_ROOM_SERVER_TOKEN;
+  else process.env.CHAT_ROOM_SERVER_TOKEN = originalCenterToken;
+  if (originalWakeUrl === undefined) delete process.env.CHAT_ROOM_WAKE_SERVE_URL;
+  else process.env.CHAT_ROOM_WAKE_SERVE_URL = originalWakeUrl;
   await rm(temp, { recursive: true, force: true });
 });

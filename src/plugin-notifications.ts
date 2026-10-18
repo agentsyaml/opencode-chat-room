@@ -10,6 +10,8 @@ import {
   timeOf,
 } from "./store";
 import { sendAsyncNotification, sendQueue, type QueueTransport } from "./queue-transport";
+import { explicitlyMentions } from "./mentions";
+import { serializeSessionPush } from "./center-inbox";
 import {
   getOrCreatePendingAdmission,
   markPendingAdmissionAdmitted,
@@ -43,6 +45,15 @@ export function createNotifier(deps: {
     sessionID: string,
     batch: NotifyBatch,
     transport: QueueTransport = deps.transport(),
+  ): Promise<NotifyAttempt | undefined> {
+    if (transport.protocol !== "v2") return notifyTargetUnlocked(sessionID, batch, transport);
+    return serializeSessionPush(sessionID, () => notifyTargetUnlocked(sessionID, batch, transport));
+  }
+
+  async function notifyTargetUnlocked(
+    sessionID: string,
+    batch: NotifyBatch,
+    transport: QueueTransport,
   ): Promise<NotifyAttempt | undefined> {
     const entry = (await loadRegistry())[batch.roomId]?.[sessionID];
     if (!entry || (entry.protocol !== "v2" && !entry.serverUrl)) return undefined;
@@ -80,8 +91,11 @@ export function createNotifier(deps: {
       serverUrl: entry.serverUrl,
       directory: entry.directory ?? transport.directory,
     };
+    const mentioned = entry.protocol === "v2" && admission.items.some((message) => explicitlyMentions(message, entry.name, sessionID));
+    const delivery = mentioned && targetTransport.backgroundSession &&
+      await targetTransport.backgroundSession(sessionID) ? "steer" : "queue";
     const result = entry.protocol === "v2"
-      ? await sendQueue(targetTransport, sessionID, admission.prompt, admission.id)
+      ? await sendQueue(targetTransport, sessionID, admission.prompt, admission.id, delivery)
       : await sendAsyncNotification(targetTransport, sessionID, admission.prompt);
     if (result !== "delivered") {
       if (result === "rejected") rejectPendingAdmission(sessionID, batch.roomId, admission.id);

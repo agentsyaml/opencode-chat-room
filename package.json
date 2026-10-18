@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A chat-room plugin and central server for OpenCode.",
   "repository": {
     "type": "git",
@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.29",
+    "@opencode/client": "2.0.32",
     "zod": "4.1.8"
   }
 }

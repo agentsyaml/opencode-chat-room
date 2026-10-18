@@ -9,6 +9,7 @@ import {
   type QueueItem,
 } from "./queue";
 import { request, markQueued, type CenterOpts } from "./center-client";
+import { explicitlyMentions } from "./mentions";
 import {
   sendAsyncNotification,
   sendQueue,
@@ -18,12 +19,12 @@ import {
 
 export type InboxItem = QueueItem & { roomId: string; roomName: string };
 const inboxChecks = new Set<string>();
-const sessionPushes = new Map<string, Promise<void>>();
+const sessionPushes = new Map<string, Promise<unknown>>();
 
-export function serializeSessionPush(sessionID: string, task: () => Promise<void>): Promise<void> {
+export function serializeSessionPush<T>(sessionID: string, task: () => Promise<T>): Promise<T> {
   const previous = sessionPushes.get(sessionID) ?? Promise.resolve();
   const run = previous.catch(() => {}).then(task);
-  let current: Promise<void>;
+  let current: Promise<T>;
   current = run.finally(() => {
     if (sessionPushes.get(sessionID) === current) sessionPushes.delete(sessionID);
   });
@@ -88,9 +89,19 @@ export async function pushItemsToSession(
     const { lines, capped } = formatNotificationLines(delta);
     const prompt = `<notification>\nNew messages in room ${delta[0]!.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
     const admission = getOrCreatePendingAdmission(sessionID, roomId, delta, prompt, deltaTs, capped);
+    let delivery: "queue" | "steer" = "queue";
+    if (transport.protocol === "v2" && transport.backgroundSession) {
+      let name = "";
+      try {
+        const registry = await request(opts, `/rooms/${encodeURIComponent(roomId)}/registry`, "GET") as Record<string, { name?: string }>;
+        name = registry[sessionID]?.name ?? "";
+      } catch { /* Backgrounding is optional; preserve queued delivery. */ }
+      if (name && admission.items.some((item) => explicitlyMentions(item, name, sessionID)) &&
+        await transport.backgroundSession(sessionID)) delivery = "steer";
+    }
     const result = transport.protocol === "v1"
       ? await sendAsyncNotification(transport, sessionID, admission.prompt)
-      : await sendQueue(transport, sessionID, admission.prompt, admission.id);
+      : await sendQueue(transport, sessionID, admission.prompt, admission.id, delivery);
     if (result !== "delivered") {
       if (result === "rejected") rejectPendingAdmission(sessionID, roomId, admission.id);
       if (result === "rejected" || worst === "delivered") worst = result;

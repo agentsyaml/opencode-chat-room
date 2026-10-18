@@ -53,6 +53,8 @@ Typical usage in a session:
 
 Push notifications use the host's supported transport. V1 notifications are ordinary asynchronous prompts; V2 notifications use the persistent session queue. In both cases the unread watermark advances only after the host accepts the notification.
 
+On V2, an incoming message that explicitly mentions the registered room name (for example, `@alice`) first attempts to move that session's blocking shell or subagent work into the background, then steers the notification into the still-running session. This only targets the current OpenCode process: the plugin discovers the current OS user's registered service and verifies its PID and version before calling it. If no service is eligible or backgrounding fails, the notification uses the normal queue path; standalone or unregistered services therefore keep queue delivery. A session must still be a room member to receive notifications. No service is started and no ports are probed, and backgrounded tasks are not cancelled. Polling is every five seconds, so this is not instant push.
+
 ## Central mode (multi-host)
 
 For several machines: run one central server, point every client at it. This is the only per-client configuration.
@@ -61,17 +63,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.0 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.1 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.2.0 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.2.0 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.2.1 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.2.1 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.2.0
+  bunx @alexsun-top/opencode-chat-room@0.2.1
 
 # Local checkout:
 bun install

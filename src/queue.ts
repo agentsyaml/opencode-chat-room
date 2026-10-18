@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 export type QueueItem = {
   id?: string;
   senderId: string;
+  senderSessionID?: string;
   text: string;
   createdAt: number;
 };
@@ -10,7 +11,7 @@ export type QueueItem = {
 export type QueueBody = {
   id: string;
   prompt: { text: string };
-  delivery: "queue";
+  delivery: "queue" | "steer";
   resume: true;
 };
 
@@ -21,6 +22,7 @@ export type PendingAdmission = {
   maxTs: number;
   capped: boolean;
   state: "pending" | "admitted";
+  items: QueueItem[];
 };
 
 type PendingEntry = {
@@ -121,6 +123,7 @@ export function getOrCreatePendingAdmission(
     maxTs,
     capped,
     state: "pending",
+    items: items.slice(-20).map((item) => ({ ...item })),
   };
   if (maxTs > 0) {
     rememberPending(key, admission, now);
@@ -177,7 +180,7 @@ export function admissionMatches(
   if (
     record.id === body.id &&
     record.sessionID === sessionID &&
-    record.delivery === "queue"
+    (record.delivery === "queue" || record.delivery === "steer")
   ) {
     return true;
   }

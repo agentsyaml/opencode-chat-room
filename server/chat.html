@@ -722,14 +722,19 @@
   const $ = (s) => document.querySelector(s);
 
   /* ---------- 本地存储（隐私模式下 localStorage 可能抛错，回退到内存） ---------- */
-  const memStore = {};
+  const memStore = Object.create(null);
   function lsGet(k) {
+    if (Object.prototype.hasOwnProperty.call(memStore, k)) return memStore[k];
     try { return localStorage.getItem(k); }
-    catch { return k in memStore ? memStore[k] : null; }
+    catch { return null; }
   }
   function lsSet(k, v) {
-    try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); }
-    catch { if (v == null) delete memStore[k]; else memStore[k] = v; }
+    const value = v == null ? null : String(v);
+    try {
+      if (value == null) localStorage.removeItem(k);
+      else localStorage.setItem(k, value);
+      delete memStore[k];
+    } catch { memStore[k] = value; }
   }
   function newSessionID() {
     const webCrypto = globalThis.crypto;
@@ -766,6 +771,10 @@
     get locale() { return lsGet("chat.locale") || "en"; },
     set locale(v) { lsSet("chat.locale", v || null); },
   };
+  function saveToken(value) {
+    LS.token = String(value ?? "").trim();
+    return LS.token;
+  }
 
   const I18N = {
     en: {
@@ -2049,8 +2058,7 @@
       const save = e.target.closest("[data-token-save]");
       if (save) {
         const input = document.getElementById(save.dataset.tokenSave);
-        LS.token = input.value.trim();
-        input.value = LS.token;
+        input.value = saveToken(input.value);
         $("#inToken").value = LS.token;
         $("#inTokenChat").value = LS.token;
         flash(save, "saved");

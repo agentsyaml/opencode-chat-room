@@ -3,7 +3,8 @@ import { admissionMatches, type QueueBody } from "./queue";
 
 export type PushResult = "delivered" | "unreachable" | "rejected";
 export type QueueTransport = {
-  promptQueue?: (sessionID: string, id: string, text: string) => Promise<unknown>;
+  promptQueue?: (sessionID: string, id: string, text: string, delivery: "queue" | "steer") => Promise<unknown>;
+  backgroundSession?: (sessionID: string) => Promise<boolean>;
   serverUrl?: string;
   directory?: string;
   protocol?: "v1" | "v2";
@@ -42,7 +43,7 @@ async function sendQueueInProcess(
 ): Promise<PushResult> {
   let result: unknown;
   try {
-    result = await transport.promptQueue!(sessionID, body.id, body.prompt.text);
+    result = await transport.promptQueue!(sessionID, body.id, body.prompt.text, body.delivery);
   } catch (error) {
     const status = statusOf(error);
     return status === undefined || status === 404 ? "unreachable" : "rejected";
@@ -114,11 +115,12 @@ export async function sendQueue(
   sessionID: string,
   text: string,
   admissionID: string,
+  delivery: "queue" | "steer" = "queue",
 ): Promise<PushResult> {
   const body: QueueBody = {
     id: admissionID,
     prompt: { text },
-    delivery: "queue",
+    delivery,
     resume: true,
   };
   if (transport.promptQueue) {

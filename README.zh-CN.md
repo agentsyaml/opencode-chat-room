@@ -53,6 +53,8 @@
 
 推送通知使用宿主支持的传输方式。V1 通知是普通异步 prompt；V2 通知进入持久会话队列。两者都只有在宿主接受通知后才推进未读水位。
 
+V2 收到明确提及房间注册名称的消息（例如 `@alice`）时，会先尝试将该会话中正在阻塞的 shell 或子 agent 工作移至后台，再将通知导向仍在运行的会话。此操作只针对当前 OpenCode 进程：插件发现当前操作系统用户注册的服务，并在调用前验证进程 PID 和版本。没有符合条件的服务或后台操作失败时，通知仍走普通队列；独立运行或未注册的服务会保留队列投递。会话仍需加入房间才能收到通知。插件不会启动服务或扫描端口，移至后台的任务也不会被取消。消息每五秒轮询一次，并非即时推送。
+
 ## 中心模式（多主机）
 
 多台机器时：跑一个中心服务器，所有客户端指向它。**每个客户端只需要这一个环境变量**。
@@ -61,17 +63,17 @@
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.0 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.1 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.2.0 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.2.0 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.2.1 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.2.1 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.2.0
+  bunx @alexsun-top/opencode-chat-room@0.2.1
 
 # 本地 checkout：
 bun install

@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode/plugin";
 import { z } from "zod";
 import type { QueueTransport } from "./center-client";
+import { backgroundOwnSession } from "./background";
 
 type CenterOptions = { center: string; token: string; directory: string };
 export type V2Runtime = {
@@ -26,8 +27,9 @@ export function createV2Setup(deps: {
     const transport: QueueTransport = {
       directory,
       protocol: "v2",
-      promptQueue: (sessionID, id, text) => context.session.prompt({
-        sessionID, id, text, delivery: "queue", resume: true,
+      backgroundSession: (sessionID) => backgroundOwnSession(sessionID, context.app?.version ?? ""),
+      promptQueue: (sessionID, id, text, delivery) => context.session.prompt({
+        sessionID, id, text, delivery, resume: true,
       }),
     };
     const runtime = deps.runtime(directory, transport);
