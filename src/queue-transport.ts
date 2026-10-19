@@ -1,10 +1,14 @@
 import { authHeader } from "./store";
 import { admissionMatches, type QueueBody } from "./queue";
+import { assertDeliveryLease } from "./session-delivery";
 
 export type PushResult = "delivered" | "unreachable" | "rejected";
 export type QueueTransport = {
   promptQueue?: (sessionID: string, id: string, text: string, delivery: "queue" | "steer") => Promise<unknown>;
   backgroundSession?: (sessionID: string) => Promise<boolean>;
+  receiverOwnerID?: string;
+  verifySession?: (sessionID: string) => Promise<string | undefined>;
+  mentionOnlySessions?: ReadonlySet<string>;
   serverUrl?: string;
   directory?: string;
   protocol?: "v1" | "v2";
@@ -123,9 +127,11 @@ export async function sendQueue(
     delivery,
     resume: true,
   };
+  assertDeliveryLease();
   if (transport.promptQueue) {
     const result = await sendQueueInProcess(transport, sessionID, body);
     if (result !== "unreachable") return result;
+    assertDeliveryLease();
   }
   return sendQueueHttp(transport, sessionID, body);
 }

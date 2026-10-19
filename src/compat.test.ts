@@ -5,7 +5,7 @@ import path from "node:path";
 import { runInNewContext } from "node:vm";
 import { pushItemsToSession } from "./center-inbox";
 import { createQueueTransport, sendAsyncNotification, sendQueue, type QueueTransport } from "./queue-transport";
-import { loadRegistry, saveRegistry } from "./store";
+import { loadRegistry, writeState } from "./store";
 import { createNotifier } from "./plugin-notifications";
 import { createV1Server } from "./v1-plugin";
 import { wakeSessions } from "./center-wake";
@@ -15,12 +15,15 @@ const originalStateDir = process.env.CHAT_ROOM_STATE_DIR;
 const originalCenterUrl = process.env.CHAT_ROOM_SERVER_URL;
 const originalCenterToken = process.env.CHAT_ROOM_SERVER_TOKEN;
 const originalWakeUrl = process.env.CHAT_ROOM_WAKE_SERVE_URL;
+const originalStateHome = process.env.XDG_STATE_HOME;
 const temp = await mkdtemp(path.join(os.tmpdir(), "chat-room-compat-"));
 process.env.CHAT_ROOM_STATE_DIR = temp;
+process.env.XDG_STATE_HOME = path.join(temp, "xdg-state");
 delete process.env.CHAT_ROOM_SERVER_URL;
 delete process.env.CHAT_ROOM_SERVER_TOKEN;
 delete process.env.CHAT_ROOM_WAKE_SERVE_URL;
 const { default: plugin, id, pollKnownSessions, server, setup } = await import("../plugin");
+const { closeReceiverState } = await import("./receiver-state");
 
 beforeEach(() => {
   process.env.CHAT_ROOM_STATE_DIR = temp;
@@ -30,6 +33,16 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+async function setRegistry(snapshot: import("./store").Registry) {
+  await writeState((service, registry) => {
+    for (const roomId of Object.keys(snapshot)) {
+      try { service.getRoom(roomId); }
+      catch { service.hydrate([{ id: roomId, name: roomId, ownerId: "test", createdAt: 0, participants: new Map(), messages: [] }]); }
+    }
+    for (const room of Object.keys(registry)) delete registry[room];
+    Object.assign(registry, structuredClone(snapshot));
+  });
+}
 async function browserAuth(storage: Storage, fetcher: typeof fetch) {
   const html = await readFile(path.join(process.cwd(), "server/chat.html"), "utf8");
   const storeStart = html.indexOf("  const memStore = Object.create(null);");
@@ -128,11 +141,9 @@ describe.serial("OpenCode compatibility transports", () => {
     await openAuth.api("/rooms");
     expect(openRequests).toEqual([""]);
   });
-
   test.serial("transport does not guess a local server URL", () => {
     expect(createQueueTransport().serverUrl).toBeUndefined();
   });
-
   test.serial("V1 server entrypoint registers the room tool", async () => {
     const hooks = await server({
       serverUrl: new URL("http://v1.example"),
@@ -142,7 +153,6 @@ describe.serial("OpenCode compatibility transports", () => {
     expect(await hooks.tool!.room!.execute({ action: "list" }, { sessionID: "v1-entry" } as any)).toBe("no rooms yet");
     await hooks.dispose?.();
   });
-
   test.serial("V1 chat hook awaits metadata but not the inbox fetch", async () => {
     let finishObserve!: () => void;
     let finishInbox!: () => void;
@@ -239,9 +249,8 @@ describe.serial("OpenCode compatibility transports", () => {
     })).toBe("rejected");
     expect(calls.some((url) => url.endsWith("/queued"))).toBe(false);
   });
-
   test.serial("V1 notification logs the root prompt_async endpoint", async () => {
-    await saveRegistry({ logged: {
+    await setRegistry({ logged: {
       "v1-log-target": { name: "target", serverUrl: "http://v1.example/", apiPrefix: "", protocol: "v1", lastReadTs: 0 },
     } });
     let sentUrl = "";
@@ -348,7 +357,6 @@ describe.serial("OpenCode compatibility transports", () => {
     await first;
     expect(sent).toBe(1);
   });
-
   test.serial("a failed wake scan releases its runtime guard for retry", async () => {
     const fake = centerFetch({ failFirst: true });
     globalThis.fetch = fake.fetcher;
@@ -360,7 +368,6 @@ describe.serial("OpenCode compatibility transports", () => {
     expect(fake.summaries()).toBe(2);
     expect(sent).toBe(1);
   });
-
   test.serial("V2 local polling does not send an empty notification", async () => {
     let roomTool: any;
     const sessionID = "idle-session";
@@ -413,9 +420,9 @@ describe.serial("OpenCode compatibility transports", () => {
     }
   });
 
-  test.serial("observed memberships refresh only their transport metadata", async () => {
+  test.serial("V2 observation does not take ownership of other project entries", async () => {
     const preserved = { name: "same-name", lastReadTs: 42, lastQueuedTs: 51 };
-    await saveRegistry({ room: {
+    await setRegistry({ room: {
       ownV2: { ...preserved, serverUrl: "http://old", apiPrefix: "/api", protocol: "v1", directory: "old" },
       ownLegacy: { ...preserved, serverUrl: "http://legacy", apiPrefix: "/api", directory: "legacy" },
       ownV1: { ...preserved, serverUrl: "", apiPrefix: "/api", protocol: "v2", directory: "old-v2" },
@@ -436,8 +443,8 @@ describe.serial("OpenCode compatibility transports", () => {
       await onPrompt?.({ sessionID: "ownV2" });
       await onPrompt?.({ sessionID: "ownLegacy" });
       let registry = await loadRegistry();
-      expect(registry.room!.ownV2).toMatchObject({ protocol: "v2", serverUrl: "", directory: "v2-project", apiPrefix: "/api", ...preserved });
-      expect(registry.room!.ownLegacy).toMatchObject({ protocol: "v2", serverUrl: "", directory: "v2-project", apiPrefix: "/api", ...preserved });
+      expect(registry.room!.ownV2).toMatchObject({ protocol: "v1", serverUrl: "http://old", directory: "old", apiPrefix: "/api", ...preserved });
+      expect(registry.room!.ownLegacy).toMatchObject({ serverUrl: "http://legacy", directory: "legacy", apiPrefix: "/api", ...preserved });
       expect(registry.room!.foreign).toMatchObject({ protocol: "v1", serverUrl: "http://foreign", directory: "foreign", ...preserved });
 
       const hooks = await server({ serverUrl: new URL("http://v1-project"), directory: "v1-project" } as any);
@@ -450,7 +457,7 @@ describe.serial("OpenCode compatibility transports", () => {
     }
   });
 
-  test.serial("each V2 setup cleans up only its own poller", async () => {
+  test.serial("V2 setups share one poller until the last cleanup", async () => {
     const setIntervalOriginal = globalThis.setInterval;
     const clearIntervalOriginal = globalThis.clearInterval;
     const timers: number[] = [];
@@ -467,9 +474,9 @@ describe.serial("OpenCode compatibility transports", () => {
       const first = await setup(makeContext());
       const second = await setup(makeContext());
       first();
-      expect(cleared).toEqual([1]);
+      expect(cleared).toEqual([]);
       second();
-      expect(cleared).toEqual([1, 2]);
+      expect(cleared).toEqual([1]);
     } finally {
       globalThis.setInterval = setIntervalOriginal;
       globalThis.clearInterval = clearIntervalOriginal;
@@ -486,5 +493,8 @@ afterAll(async () => {
   else process.env.CHAT_ROOM_SERVER_TOKEN = originalCenterToken;
   if (originalWakeUrl === undefined) delete process.env.CHAT_ROOM_WAKE_SERVE_URL;
   else process.env.CHAT_ROOM_WAKE_SERVE_URL = originalWakeUrl;
+  if (originalStateHome === undefined) delete process.env.XDG_STATE_HOME;
+  else process.env.XDG_STATE_HOME = originalStateHome;
+  closeReceiverState();
   await rm(temp, { recursive: true, force: true });
 });

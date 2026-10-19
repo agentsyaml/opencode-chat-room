@@ -8,8 +8,8 @@
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
 - 通知以 `<notification>…</notification>` 包裹；V2 使用持久会话队列，V1 使用异步 prompt
 - 增量阅读水位：`poll` 返回未读消息；通知投递失败后仍可重试。V1 的异步接受不保证通知已持久化送达。
-- 两种部署模式：**单机模式**（本地/共享文件，零配置）与**中心模式**（一个 HTTP 服务 + 每个客户端一个环境变量）
-- 防损坏的 JSON 持久化（临时文件 + 原子 rename 写入，解析失败自动备份重建）
+- 两种部署模式：**单机模式**（本地 SQLite，零配置）与**中心模式**（一个 HTTP 服务 + 每个客户端一个环境变量）
+- 规范化 SQLite 持久化、事务式迁移旧 JSON，并保留完整追加式消息历史
 
 ## 安装
 
@@ -37,11 +37,13 @@
 
 ## OpenCode 兼容性
 
-本插件支持 **OpenCode 1.18.29 及以上的 V1 版本**，以及当前 V2 插件 API。升级或切换版本后请重启 OpenCode，以加载对应入口。V1 使用公开的 `prompt_async` 接口：HTTP 成功表示通知已被异步处理接口接受，不代表已持久化入队。V1 和 V2 都只轮询被 prompt hook 或 room 工具观察到的会话。OpenCode 重启后，每个会话需再次使用工具或命令以恢复轮询。可选 serve 兜底同样只处理该插件实例观察到的会话。V2 不会假设本地服务 URL。
+本插件支持 **OpenCode 1.18.29 及以上的 V1 版本**，以及当前 V2 插件 API。升级或切换版本后请重启 OpenCode，以加载对应入口。V1 使用公开的 `prompt_async` 接口：HTTP 成功表示通知已被异步处理接口接受，不代表已持久化入队。V1 仅轮询被 prompt hook 或 room 工具观察到的会话。V2 还会恢复绑定到当前用户已验证本地服务的显式加入会话。旧版本已有的成员关系不会自动认领：请在希望接收通知的会话中将每个房间重新加入一次。不使用可选 watcher 时，至少需要一个已加载插件的项目保持打开，以运行接收器。所有者绑定范围是当前用户的服务 URL 和端口；修改端口后需重新加入。若配置文件同时复制了 OpenCode 会话数据库和此私有绑定文件，插件无法区分这些配置文件。
 
 ## 单机模式（默认）
 
-无需任何配置。同一台机器上的所有会话共享 `~/.config/opencode/chat-room/` 下的状态（`rooms.json`、`registry.json`、`notify.log`）。
+无需任何配置。同一台机器上的会话将状态保存在 `~/.config/opencode/chat-room/chat-room.sqlite`（也可用 `CHAT_ROOM_STATE_DIR` 指定目录）。首次使用时会在一个事务中迁移有效的 `rooms.json`/`registry.json`，原文件保留。SQLite 保存完整消息历史；`room poll` 每次最多返回 100 条未读消息。
+
+SQLite WAL 需要本地文件系统。不要把单机状态放在 NFS/SMB 等网络共享盘；多主机请使用中心模式。旧 JSON 已经裁剪掉的消息无法恢复。中心模式提供需认证的历史分页接口 `GET /rooms/<房间ID>/history?beforeSeq=<序号>&limit=<1-200>`，响应包含 `messages`、`nextBeforeSeq` 和 `hasMore`。
 
 典型用法：
 
@@ -55,6 +57,10 @@
 
 V2 收到明确提及房间注册名称的消息（例如 `@alice`）时，会先尝试将该会话中正在阻塞的 shell 或子 agent 工作移至后台，再将通知导向仍在运行的会话。此操作只针对当前 OpenCode 进程：插件发现当前操作系统用户注册的服务，并在调用前验证进程 PID 和版本。没有符合条件的服务或后台操作失败时，通知仍走普通队列；独立运行或未注册的服务会保留队列投递。会话仍需加入房间才能收到通知。插件不会启动服务或扫描端口，移至后台的任务也不会被取消。消息每五秒轮询一次，并非即时推送。
 
+### V2 常驻 watcher
+
+运行 `opencode-chat-room watch start`，即可在关闭加载插件的项目后继续轮询 V2 消息。Watcher 使用当前用户已注册的 OpenCode 服务及已加入房间的所有者绑定，不会启动 OpenCode。中心模式下会继承执行该命令时的 `CHAT_ROOM_SERVER_URL` 和 `CHAT_ROOM_SERVER_TOKEN`。服务离线时，watcher 会继续运行并重试。`watch status` 检查经过认证的本机回环控制接口，`watch stop` 会优雅停止，`watch run` 则在前台运行。可手动启动，也可交由操作系统的进程管理器监督；包不会安装开机启动服务，也不会在消息收发时自动启动 watcher。私有控制状态和跨进程投递租约保存在用户的 XDG 状态目录中。若状态显示控制文件无法读取，请确认 watcher 已停止后，仅删除该用户的 `watch-*.json`；默认目录为 `~/.local/state/opencode/chat-room`。
+
 ## 中心模式（多主机）
 
 多台机器时：跑一个中心服务器，所有客户端指向它。**每个客户端只需要这一个环境变量**。
@@ -63,17 +69,17 @@ V2 收到明确提及房间注册名称的消息（例如 `@alice`）时，会�
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.1 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.2 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.2.1 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.2.1 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.2.2 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.2.2 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.2.1
+  bunx @alexsun-top/opencode-chat-room@0.2.2
 
 # 本地 checkout：
 bun install
@@ -101,7 +107,7 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 | `HOST` | 服务器 | 主机名别名，仅在未设置 `CHAT_ROOM_SERVER_HOST` 时使用 | 未设置 |
 | `CHAT_ROOM_SERVER_PORT` | 服务器 | 中心服务器监听端口；优先于 `PORT` | `4399` |
 | `PORT` | 服务器 | 端口别名，仅在未设置 `CHAT_ROOM_SERVER_PORT` 时使用 | 未设置 |
-| `CHAT_ROOM_STATE_DIR` | 单机模式 | `rooms.json`/`registry.json` 所在目录——多主机单机模式可指向同一共享挂载 | `~/.config/opencode/chat-room/` |
+| `CHAT_ROOM_STATE_DIR` | 单机模式 | SQLite 数据库及迁移源 JSON 文件所在目录；必须位于本地文件系统 | `~/.config/opencode/chat-room/` |
 | `OPENCODE_SERVER_PASSWORD` | 双端 | opencode 服务器密码；跨会话推送时用作 Basic 认证 | 无 |
 | `CHAT_ROOM_WAKE_SERVE_URL` | 客户端 | 可选的 OpenCode serve 地址，用于兜底唤醒被提及的非活动会话 | 未设置 |
 
@@ -128,9 +134,8 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 
 ## 已知限制
 
-- 单机模式状态存于本地文件；跨进程并发写入是 last-writer-wins。多主机场景请使用中心模式（或共享 `CHAT_ROOM_STATE_DIR`）。
-- 共享目录的多主机单机模式依赖时间戳比较，各机器需 NTP 对时。中心模式不受影响（由服务器统一打时间戳）。
+- 单机模式通过 SQLite WAL 和跨进程事务保存状态。数据库必须位于本地文件系统；多主机场景请使用中心模式，不要共享 WAL 数据库目录。
 - 同一台机器的会话共享 `user@host` 身份；用不同的 `name` 加入以区分成员。
 - 中心服务器不设 `CHAT_ROOM_SERVER_TOKEN` 时无认证——任何能访问端口的人都能读写房间。服务端另有输入限制：房间/成员名 ≤ 64 字符、消息文本 ≤ 2000 字符（超限返回 400）。
-- 每房间历史消息最多保留最近 500 条（更旧的会被裁剪——水位机制下旧消息本就不可达）。后果：会话闲置期间若累积超过 500 条消息，其未读消息会被裁掉；请把该上限视为保留期限而非无损归档。
+- SQLite 持续保留历史消息，不自动删除。500 条只是内存工作窗口，不是磁盘保留上限；未读消息和历史记录均分页读取。请定期备份数据库。
 - `notify.log` 会持续增长，暂无轮转。

@@ -4,14 +4,14 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
 import RoomService, { RoomError, type Message } from "./src/room-service";
 import {
-  enqueue,
   formatRoom,
   identity,
   loadRegistry,
   loadRooms,
   NOTIFY_INSTRUCTION,
-  saveRegistry,
-  saveRooms,
+  writeState,
+  readState,
+  readUnreadMessages,
   senderName,
   timeOf,
   type Registry,
@@ -20,11 +20,13 @@ import {
 import { centerAction } from "./src/center-client";
 import { createQueueTransport, type QueueTransport } from "./src/queue-transport";
 import { checkCenterInbox } from "./src/center-inbox";
+import { assertDeliveryLease } from "./src/session-delivery";
 import { wakeSessions } from "./src/center-wake";
 import {
   clearPendingAdmission,
 } from "./src/queue";
 import { createNotifier } from "./src/plugin-notifications";
+import { explicitlyMentions } from "./src/mentions";
 import { createV2Setup, type V2Runtime } from "./src/v2-plugin";
 import { createV1Server } from "./src/v1-plugin";
 
@@ -47,45 +49,39 @@ const defaultRuntime: PluginRuntime = {
 const currentRuntime = (): PluginRuntime => runtimeContext.getStore() ?? defaultRuntime;
 
 async function withRooms<T>(
-  fn: (svc: RoomService) => T,
+  fn: (svc: RoomService, registry: Registry) => T,
   readOnly = false,
 ): Promise<T> {
-  return enqueue(async () => {
-    const svc = new RoomService();
-    svc.hydrate(await loadRooms());
+  const run = (svc: RoomService, registry: Registry): T => {
     try {
-      const result = fn(svc);
-      if (!readOnly) {
-        await saveRooms(svc);
-      }
-      return result;
+      return fn(svc, registry);
     } catch (err) {
       if (err instanceof RoomError) {
         return `error: ${err.message}` as unknown as T;
       }
       throw err;
     }
-  });
+  };
+  return readOnly ? readState(run) : writeState(run);
 }
 
-async function registerSelf(
+function registerSelfInState(
+  service: RoomService,
+  reg: Registry,
+  runtime: PluginRuntime,
   roomId: string,
   sessionID: string,
   name = identity(),
-): Promise<void> {
-  const runtime = currentRuntime();
-  return enqueue(async () => {
-    try {
-      const reg = await loadRegistry();
-      const latestMessageTs =
-        (await loadRooms()).find((room) => room.id === roomId)?.messages.at(-1)
-          ?.createdAt ?? 0;
+  receiverOwnerID?: string,
+): void {
+      const latestMessageTs = service.listRooms().find((room) => room.id === roomId)?.messages.at(-1)?.createdAt ?? 0;
       const regRoom = (reg[roomId] =
         reg[roomId] ?? Object.create(null) as Record<string, RegistryEntry>);
       regRoom[sessionID] = {
         serverUrl: runtime.selfServerUrl,
         apiPrefix: runtime.protocol === "v1" ? "" : "/api",
         protocol: runtime.protocol,
+        ...(receiverOwnerID ? { receiverOwnerID } : regRoom[sessionID]?.receiverOwnerID ? { receiverOwnerID: regRoom[sessionID]!.receiverOwnerID } : {}),
         name,
         directory: runtime.selfDirectory || undefined,
         // ponytail: re-join must not rewind the read watermark (unread
@@ -96,50 +92,29 @@ async function registerSelf(
           Math.max(Date.now(), latestMessageTs),
         lastQueuedTs: regRoom[sessionID]?.lastQueuedTs,
       };
-      await saveRegistry(reg);
-    } catch {
-      // ponytail: registry failure only disables push, never blocks room ops
-    }
-  });
+}
+
+function unregisterSelfInState(reg: Registry, roomId: string, sessionID: string): void {
+  if (!reg[roomId]) return;
+  delete reg[roomId][sessionID];
+  if (!Object.keys(reg[roomId]).length) delete reg[roomId];
 }
 
 async function refreshSelf(runtime: PluginRuntime, sessionID: string): Promise<void> {
-  await enqueue(async () => {
+  await writeState((_svc, registry) => {
     try {
-      const registry = await loadRegistry();
-      let changed = false;
       for (const members of Object.values(registry)) {
         const entry = members[sessionID];
         if (!entry) continue;
+        if (runtime.protocol === "v2" && (entry.directory !== runtime.selfDirectory ||
+          entry.receiverOwnerID && entry.receiverOwnerID !== runtime.transport.receiverOwnerID)) continue;
         entry.serverUrl = runtime.selfServerUrl;
         entry.apiPrefix = runtime.protocol === "v1" ? "" : "/api";
         entry.protocol = runtime.protocol;
-        entry.directory = runtime.selfDirectory || undefined;
-        changed = true;
+        if (runtime.protocol !== "v2") entry.directory = runtime.selfDirectory || undefined;
       }
-      if (changed) await saveRegistry(registry);
     } catch {
       // Existing watermarks and identities remain untouched if refresh fails.
-    }
-  });
-}
-
-async function unregisterSelf(
-  roomId: string,
-  sessionID: string,
-): Promise<void> {
-  return enqueue(async () => {
-    try {
-      const reg = await loadRegistry();
-      if (reg[roomId]) {
-        delete reg[roomId][sessionID];
-        if (Object.keys(reg[roomId]).length === 0) {
-          delete reg[roomId];
-        }
-        await saveRegistry(reg);
-      }
-    } catch {
-      // ponytail: registry failure only disables push, never blocks room ops
     }
   });
 }
@@ -150,15 +125,13 @@ async function bumpLastRead(
   sessionID: string,
   ts: number,
 ): Promise<boolean> {
-  return enqueue(async () => {
+  assertDeliveryLease();
+  const updated = await writeState((_svc, reg) => {
     try {
-      const reg = await loadRegistry();
       const entry = reg[roomId]?.[sessionID];
       if (entry) {
         // never rewind: an older in-flight push must not lower the watermark
         entry.lastReadTs = Math.max(entry.lastReadTs ?? 0, ts);
-        await saveRegistry(reg);
-        clearPendingAdmission(sessionID, roomId, ts);
         return true;
       }
       return false;
@@ -167,6 +140,8 @@ async function bumpLastRead(
       return false;
     }
   });
+  if (updated) clearPendingAdmission(sessionID, roomId, ts);
+  return updated;
 }
 
 async function bumpLastQueued(
@@ -174,14 +149,12 @@ async function bumpLastQueued(
   sessionID: string,
   ts: number,
 ): Promise<boolean> {
-  return enqueue(async () => {
+  assertDeliveryLease();
+  const updated = await writeState((_svc, reg) => {
     try {
-      const reg = await loadRegistry();
       const entry = reg[roomId]?.[sessionID];
       if (entry) {
         entry.lastQueuedTs = Math.max(entry.lastQueuedTs ?? 0, ts);
-        await saveRegistry(reg);
-        clearPendingAdmission(sessionID, roomId, ts);
         return true;
       }
       return false;
@@ -189,6 +162,8 @@ async function bumpLastQueued(
       return false;
     }
   });
+  if (updated) clearPendingAdmission(sessionID, roomId, ts);
+  return updated;
 }
 
 const notifier = createNotifier({
@@ -196,6 +171,8 @@ const notifier = createNotifier({
   bumpQueued: (roomId, sessionID, ts) => bumpLastQueued(roomId, sessionID, ts),
 });
 const { notifyRoom, notifyTarget } = notifier;
+const restoreScans = new Map<string, { afterTs: number; untilTs?: number }>();
+const restoreKey = (sid: string, roomID: string, ownerID = "") => JSON.stringify([ownerID, sid, roomID]);
 
 export async function pollKnownSessions(
   sessions: ReadonlySet<string>,
@@ -210,13 +187,45 @@ export async function pollKnownSessions(
   }
   const [rooms, registry] = await Promise.all([loadRooms(), loadRegistry()]);
   for (const sessionID of sessions) {
+    const mentionOnly = transport.mentionOnlySessions?.has(sessionID) ?? false;
     for (const room of rooms) {
-      if (!registry[room.id]?.[sessionID]) continue;
+      const entry = registry[room.id]?.[sessionID];
+      if (!entry) continue;
+      if (transport.protocol === "v2" && entry.receiverOwnerID &&
+        (entry.protocol !== "v2" || entry.receiverOwnerID !== transport.receiverOwnerID)) continue;
+      if (mentionOnly && (entry.protocol !== "v2" || entry.receiverOwnerID !== transport.receiverOwnerID)) continue;
+      const cursor = Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0);
+      const key = restoreKey(sessionID, room.id, transport.receiverOwnerID);
+      let scan = restoreScans.get(key) ?? { afterTs: cursor };
+      if (scan.afterTs < cursor) scan = { ...scan, afterTs: cursor };
+      if (mentionOnly && (scan.untilTs === undefined || scan.untilTs <= cursor)) {
+        scan.untilTs = undefined;
+        const tail = await readUnreadMessages(room.id, cursor, 20, sessionID, entry.name, true);
+        if (tail.items.some((message) => explicitlyMentions(message, entry.name, sessionID))) {
+          scan.untilTs = tail.items.at(-1)!.createdAt;
+          scan.afterTs = Math.max(scan.afterTs, scan.untilTs);
+        } else {
+          const candidates = await readUnreadMessages(room.id, scan.afterTs, 20, sessionID, entry.name);
+          if (!candidates.items.length) { restoreScans.set(key, scan); continue; }
+          scan.afterTs = candidates.items.at(-1)!.createdAt;
+          if (candidates.items.some((message) => explicitlyMentions(message, entry.name, sessionID))) scan.untilTs = scan.afterTs;
+          restoreScans.set(key, scan);
+          if (scan.untilTs === undefined) continue;
+        }
+      }
+      if (mentionOnly) restoreScans.set(key, scan);
+      const page = await readUnreadMessages(room.id, cursor, 20, sessionID, entry.name);
+      if (!page.items.length) continue;
+      const target = mentionOnly ? { ...transport, mentionOnlySessions: new Set([...transport.mentionOnlySessions!].filter((id) => id !== sessionID)) } : transport;
       await notifyTarget(sessionID, {
         roomId: room.id,
         roomName: room.name,
-        messages: room.messages,
-      }, transport);
+        messages: page.items,
+      }, target);
+      if (mentionOnly && scan.untilTs !== undefined) {
+        const queued = (await loadRegistry())[room.id]?.[sessionID]?.lastQueuedTs ?? cursor;
+        if (queued >= scan.untilTs) restoreScans.delete(key);
+      }
     }
   }
 }
@@ -237,6 +246,9 @@ const roomExecute = async (
 ) => {
     try {
       const runtime = currentRuntime();
+      const explicitV2Join = runtime.protocol === "v2" && (args.action === "create" || args.action === "join");
+      const receiverOwnerID = explicitV2Join && runtime.transport.verifySession
+        ? await runtime.transport.verifySession(context.sessionID) : undefined;
       if (runtime.center.center) {
         // ponytail: central mode — self-pull inbox first, then act via HTTP
         // (skipped for poll: poll itself pulls the inbox, so racing the
@@ -244,7 +256,10 @@ const roomExecute = async (
         if (args.action !== "poll") {
           void checkCenterInbox(runtime.center, context.sessionID, runtime.transport);
         }
-        return await centerAction(runtime.center, args, context.sessionID);
+        return await centerAction(runtime.center, {
+          ...args,
+          ...(runtime.protocol === "v2" ? { protocol: "v2" as const, receiverOwnerID } : {}),
+        }, context.sessionID);
       }
       // ponytail: act as the identity this session registered with on join
       let selfName = identity();
@@ -253,46 +268,34 @@ const roomExecute = async (
       let leaveNameShared = false;
       let pollLastRead = 0;
       let pollEntry = false;
-      if (args.roomId) {
-        const reg = await loadRegistry().catch(() => ({} as Registry));
-        if (args.action === "send" || args.action === "leave") {
-          selfName = reg[args.roomId]?.[context.sessionID]?.name ?? selfName;
-        }
-        if (args.action === "leave") {
-          // Keep the participant while another session still uses this name.
-          leaveNameShared = Object.entries(reg[args.roomId] ?? {}).some(
-            ([sid, e]) => sid !== context.sessionID && e.name === selfName,
-          );
-        }
-        if (args.action === "join") {
-          joinPrevName = reg[args.roomId]?.[context.sessionID]?.name;
-          // ponytail: don't retire the old participant if another session
-          // still uses it (default same-host identity is shared)
-          joinPrevShared =
-            joinPrevName !== undefined &&
-            Object.entries(reg[args.roomId] ?? {}).some(
-              ([sid, e]) => sid !== context.sessionID && e.name === joinPrevName,
-            );
-        }
-        if (args.action === "poll") {
-          pollEntry = reg[args.roomId]?.[context.sessionID] !== undefined;
-          selfName = reg[args.roomId]?.[context.sessionID]?.name ?? selfName;
-          pollLastRead = reg[args.roomId]?.[context.sessionID]?.lastReadTs ?? 0;
-        }
-      }
-      let actedRoomId: string | undefined;
-      let newMemberName: string | undefined;
-      let leftRoomId: string | undefined;
+      let pollPage: Awaited<ReturnType<typeof readUnreadMessages>> | undefined;
       let pollMaxTs: number | undefined;
+      const notifications: Array<{ roomId: string; roomName: string; messages: Message[] }> = [];
+      if (args.action === "poll" && args.roomId) {
+        const entry = (await loadRegistry())[args.roomId]?.[context.sessionID];
+        pollEntry = entry !== undefined;
+        selfName = entry?.name ?? selfName;
+        pollLastRead = entry?.lastReadTs ?? 0;
+        if (entry) pollPage = await readUnreadMessages(args.roomId, pollLastRead, 100);
+      }
       const result = await withRooms<string>(
-        (svc) => {
+        (svc, registry) => {
+        notifications.length = 0;
+        if (args.roomId) {
+          const members = registry[args.roomId] ?? {};
+          if (args.action === "send" || args.action === "leave" || args.action === "poll") selfName = members[context.sessionID]?.name ?? selfName;
+          if (args.action === "join") joinPrevName = members[context.sessionID]?.name;
+          if (args.action === "join" && joinPrevName) joinPrevShared = Object.entries(members).some(([sid, entry]) => sid !== context.sessionID && entry.name === joinPrevName);
+          if (args.action === "leave") leaveNameShared = Object.entries(members).some(([sid, entry]) => sid !== context.sessionID && entry.name === selfName);
+          if (args.action === "poll") pollEntry = members[context.sessionID] !== undefined;
+        }
         switch (args.action) {
           case "create": {
             if (!args.name?.trim()) {
               return "error: name is required";
             }
             const created = svc.createRoom(args.name.trim(), identity());
-            actedRoomId = created.id;
+            registerSelfInState(svc, registry, runtime, created.id, context.sessionID, undefined, receiverOwnerID);
             return formatRoom(svc, created);
           }
           case "join": {
@@ -314,19 +317,12 @@ const roomExecute = async (
             const already = svc.containsParticipant(args.roomId, me);
             svc.joinRoom(args.roomId, { id: me, name: me });
             const room = svc.getRoom(args.roomId);
-            actedRoomId = args.roomId;
-            newMemberName = me;
+            registerSelfInState(svc, registry, runtime, args.roomId, context.sessionID, me, receiverOwnerID);
             if (!already) {
               // ponytail: membership events live in the message stream, so
               // the join notification rides the normal unread push
               svc.addEvent(args.roomId, `${me} joined the room`);
-              void notifyRoom(
-                args.roomId,
-                room.name,
-                NOTIFY_INSTRUCTION,
-                context.sessionID,
-                room.messages,
-              ).catch(() => {});
+              notifications.push({ roomId: args.roomId, roomName: room.name, messages: [...room.messages] });
             }
             return formatRoom(svc, room);
           }
@@ -342,15 +338,9 @@ const roomExecute = async (
               svc.leaveRoom(args.roomId, selfName);
               const room = svc.getRoom(args.roomId);
               svc.addEvent(args.roomId, `${selfName} left the room`);
-              void notifyRoom(
-                args.roomId,
-                room.name,
-                NOTIFY_INSTRUCTION,
-                context.sessionID,
-                room.messages,
-              ).catch(() => {});
+              notifications.push({ roomId: args.roomId, roomName: room.name, messages: [...room.messages] });
             }
-            leftRoomId = args.roomId;
+            unregisterSelfInState(registry, args.roomId, context.sessionID);
             return `left room ${args.roomId}`;
           }
           case "list": {
@@ -388,13 +378,7 @@ const roomExecute = async (
               context.sessionID,
             );
             const room = svc.getRoom(args.roomId);
-            void notifyRoom(
-              args.roomId,
-              room.name,
-              NOTIFY_INSTRUCTION,
-              context.sessionID,
-              room.messages,
-            ).catch(() => {});
+            notifications.push({ roomId: args.roomId, roomName: room.name, messages: [...room.messages] });
             return `sent: ${args.text}\n${formatRoom(svc, room)}`;
           }
           case "poll": {
@@ -412,9 +396,7 @@ const roomExecute = async (
             }
             // ponytail: only messages newer than this session's last read (or
             // last successful push) — queue-notified messages don't repeat
-            const messages = svc
-              .getMessages(args.roomId)
-              .filter((m) => m.createdAt > pollLastRead);
+            const messages = pollPage?.items ?? [];
             if (messages.length === 0) {
               return "no new messages";
             }
@@ -427,17 +409,13 @@ const roomExecute = async (
                 (m) =>
                   `[${timeOf(m.createdAt)}] ${senderName(svc, m)}: ${m.text}`,
               )
-              .join("\n");
+              .join("\n") + (pollPage?.hasMore ? "\nMore unread messages remain; poll again." : "");
           }
         }
-      },
-      READ_ONLY_ACTIONS.has(args.action));
-      const joinedRoom = actedRoomId;
-      if (joinedRoom !== undefined) {
-        await registerSelf(joinedRoom, context.sessionID, newMemberName);
-      }
-      if (leftRoomId !== undefined) {
-        await unregisterSelf(leftRoomId, context.sessionID);
+      }, READ_ONLY_ACTIONS.has(args.action));
+      for (const notification of notifications) {
+        void notifyRoom(notification.roomId, notification.roomName, NOTIFY_INSTRUCTION,
+          context.sessionID, notification.messages).catch(() => {});
       }
       if (args.action === "poll" && pollMaxTs !== undefined && pollMaxTs > 0) {
         await bumpLastRead(args.roomId!, context.sessionID, pollMaxTs);
@@ -482,8 +460,6 @@ export const setup = createV2Setup({
   execute: (args, sessionID) => roomExecute(args, { sessionID }),
   observe: refreshSelf,
   poll: pollKnownSessions,
-  wake: (center, transport, sessions) => wakeSessions(center, transport, serveWakeUrl, sessions),
-  central: Boolean(centerUrl),
 });
 
 export const id = "chat-room";

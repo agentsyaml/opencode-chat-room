@@ -1,112 +1,42 @@
-// ponytail: shared primitives for the chat room plugin — file persistence
+// Shared state facade for the standalone SQLite database.
 // (rooms + registry), identity, and formatting. Used by plugin.ts (standalone
 // mode) and server/chat-server.ts (central mode).
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import RoomService, { type Message, type Room } from "./room-service";
+import { readHistoryPage, readInboxPage as sqliteInboxPage, readSqliteState, readUnreadPage, writeSqliteState, type HistoryMessage } from "./sqlite-state";
 
 export function statePath(): string {
-  // ponytail: shared mount for multi-host rooms (NFS/sshfs); default is local
+  // JSON path remains the migration source; SQLite lives beside it.
   if (process.env.CHAT_ROOM_STATE_DIR) {
     return path.join(process.env.CHAT_ROOM_STATE_DIR, "rooms.json");
   }
-  const base =
-    process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config");
+  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
   return path.join(base, "opencode", "chat-room", "rooms.json");
 }
 
-// ponytail: in-process serialization of load->mutate->save; cross-process
-// concurrent writers are still last-writer-wins (unique tmp name below makes
-// the failure clean instead of mis-assigned)
-let storeQueue: Promise<unknown> = Promise.resolve();
-
-export function enqueue<T>(fn: () => Promise<T>): Promise<T> {
-  const run = storeQueue.then(fn);
-  storeQueue = run.catch(() => {});
-  return run;
+export function databasePath(): string { return path.join(path.dirname(statePath()), "chat-room.sqlite"); }
+export function writeState<T>(callback: (service: RoomService, registry: Registry) => T): Promise<T> {
+  return writeSqliteState(databasePath(), callback);
+}
+export async function readState<T>(callback: (service: RoomService, registry: Registry) => T): Promise<T> {
+  const state = await readSqliteState(databasePath());
+  const service = new RoomService();
+  service.hydrate(state.rooms);
+  return callback(service, state.registry);
+}
+export async function readUnreadMessages(roomID: string, afterTs: number, limit = 100, sessionID?: string, senderName?: string, newest = false) {
+  return readUnreadPage(databasePath(), roomID, afterTs, limit, sessionID, senderName, newest);
+}
+export async function readInboxMessages(sessionID: string, roomID: string | null, excludeSelf: boolean, limit = 100) {
+  return sqliteInboxPage(databasePath(), sessionID, roomID, excludeSelf, limit);
+}
+export async function readHistory(roomID: string, beforeSeq?: number, limit = 100, exclude?: { sessionID: string; name: string }): Promise<{ messages: HistoryMessage[]; nextBeforeSeq: number | null; hasMore: boolean }> {
+  return readHistoryPage(databasePath(), roomID, beforeSeq, limit, exclude?.sessionID, exclude?.name);
 }
 
 export async function loadRooms(): Promise<Room[]> {
-  const file = statePath();
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  let raw: string;
-  try {
-    raw = await fs.readFile(file, "utf8");
-  } catch (err) {
-    const code = (err as { code?: unknown } | undefined)?.code;
-    if (code === "ENOENT") {
-      return [];
-    }
-    throw err;
-  }
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch (err) {
-    // ponytail: corrupt file -> back it up and start fresh instead of bricking the tool
-    await fs.rename(file, `${file}.corrupt-${Date.now()}`).catch(() => {});
-    return [];
-  }
-  if (!Array.isArray(data)) {
-    return [];
-  }
-  return data.flatMap((entry): Room[] => {
-    if (entry === null || typeof entry !== "object") {
-      return [];
-    }
-    const r = entry as Record<string, unknown>;
-    const room: Room = {
-      id: String(r.id ?? ""),
-      name: String(r.name ?? ""),
-      ownerId: String(r.ownerId ?? ""),
-      createdAt: Number(r.createdAt ?? 0),
-      participants: new Map(),
-      messages: [],
-    };
-    if (!room.id) {
-      return [];
-    }
-    if (Array.isArray(r.participants)) {
-      for (const p of r.participants) {
-        if (p && typeof p.id === "string" && typeof p.name === "string") {
-          room.participants.set(p.id, p);
-        }
-      }
-    }
-    if (Array.isArray(r.messages)) {
-      // ponytail: keep only well-formed entries so one corrupt message
-      // can't crash formatting (or lose a pending send)
-      room.messages = (r.messages as Message[]).filter(
-        (m) =>
-          m !== null &&
-          typeof m === "object" &&
-          typeof m.id === "string" &&
-          typeof m.roomId === "string" &&
-          typeof m.senderId === "string" &&
-          typeof m.text === "string" &&
-          typeof m.createdAt === "number" &&
-          (m.senderSessionID === undefined ||
-            typeof m.senderSessionID === "string"),
-      );
-    }
-    return [room];
-  });
-}
-
-export async function saveRooms(svc: RoomService): Promise<void> {
-  const file = statePath();
-  const data = svc.listRooms().map((r) => ({
-    id: r.id,
-    name: r.name,
-    ownerId: r.ownerId,
-    createdAt: r.createdAt,
-    participants: [...r.participants.values()],
-    messages: r.messages,
-  }));
-  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
-  await fs.rename(tmp, file);
+  return (await readSqliteState(databasePath())).rooms;
 }
 
 export type RegistryEntry = {
@@ -119,55 +49,12 @@ export type RegistryEntry = {
   directory?: string;
   // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行；web 条目不填
   host?: string;
+  receiverOwnerID?: string;
 };
 export type Registry = Record<string, Record<string, RegistryEntry>>;
 
-function registryPath(): string {
-  return path.join(path.dirname(statePath()), "registry.json");
-}
-
 export async function loadRegistry(): Promise<Registry> {
-  const file = registryPath();
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  let raw: string;
-  try {
-    raw = await fs.readFile(file, "utf8");
-  } catch (err) {
-    const code = (err as { code?: unknown } | undefined)?.code;
-    if (code === "ENOENT") {
-      return {};
-    }
-    throw err;
-  }
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch (err) {
-    // ponytail: corrupt file -> back it up and start fresh instead of bricking the tool
-    await fs.rename(file, `${file}.corrupt-${Date.now()}`).catch(() => {});
-    return {};
-  }
-  if (data === null || typeof data !== "object" || Array.isArray(data)) {
-    return {};
-  }
-  // ponytail: null-proto at both levels so hostile keys ("__proto__",
-  // "constructor") can't touch Object.prototype or shadow lookups
-  const reg = Object.assign(Object.create(null), data);
-  for (const key of Object.keys(reg)) {
-    const room = reg[key] as Record<string, unknown> | undefined;
-    if (room !== null && typeof room === "object" && !Array.isArray(room)) {
-      reg[key] = Object.assign(Object.create(null), room);
-    }
-  }
-  return reg as Registry;
-}
-
-export async function saveRegistry(reg: Registry): Promise<void> {
-  const file = registryPath();
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(reg, null, 2), "utf8");
-  await fs.rename(tmp, file);
+  return (await readSqliteState(databasePath())).registry;
 }
 
 export function identity(name?: string): string {

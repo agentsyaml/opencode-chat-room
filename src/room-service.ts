@@ -42,14 +42,12 @@ export class RoomError extends Error {
 export default class RoomService {
   private rooms: Map<string, Room> = new Map();
 
-  // ponytail: per-room history ceiling — everything above the watermark is
-  // unreachable anyway; this bounds rooms.json and every serialized response
+  // Keep only a working window in memory; SQLite retains the full message history.
   static readonly MAX_MESSAGES = 500;
 
   hydrate(rooms: Room[]): void {
     for (const room of rooms) {
-      // ponytail: cap pre-existing rooms.json files on load so an old
-      // oversized file doesn't stay heavy until the next event
+      // Hydrated message arrays are only the in-memory working window.
       this.trimMessages(room);
       this.rooms.set(room.id, room);
     }

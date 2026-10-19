@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { deletePendingAdmission, readPendingAdmission, savePendingAdmission } from "./receiver-state";
+import { assertDeliveryLease } from "./session-delivery";
 
 export type QueueItem = {
   id?: string;
@@ -25,51 +27,9 @@ export type PendingAdmission = {
   items: QueueItem[];
 };
 
-type PendingEntry = {
-  admission: PendingAdmission;
-  expiresAt: number;
-};
-
-// ponytail: lazy expiry avoids one timer per admission; the hard cap keeps the
-// module-level map bounded even when no later queue activity triggers pruning.
 const PENDING_TTL_MS = 5 * 60_000;
-const MAX_PENDING_ADMISSIONS = 1024;
-const pending = new Map<string, PendingEntry>();
-
-function keyFor(sessionID: string, roomId: string): string {
-  return `${sessionID}|${roomId}`;
-}
-
-function pruneExpired(now: number): void {
-  for (const [key, entry] of pending) {
-    if (entry.expiresAt <= now) {
-      pending.delete(key);
-    }
-  }
-}
-
-function pendingEntry(key: string, now: number): PendingEntry | undefined {
-  pruneExpired(now);
-  return pending.get(key);
-}
-
-function rememberPending(
-  key: string,
-  admission: PendingAdmission,
-  now: number,
-): void {
-  pending.delete(key);
-  pending.set(key, {
-    admission,
-    expiresAt: now + PENDING_TTL_MS,
-  });
-  while (pending.size > MAX_PENDING_ADMISSIONS) {
-    const oldest = pending.keys().next();
-    if (oldest.done) {
-      break;
-    }
-    pending.delete(oldest.value);
-  }
+function save(sessionID: string, roomID: string, admission: PendingAdmission, now: number): void {
+  savePendingAdmission(sessionID, roomID, admission, now + PENDING_TTL_MS, now);
 }
 
 export function queueAdmissionId(
@@ -96,7 +56,7 @@ export function pendingAdmission(
   sessionID: string,
   roomId: string,
 ): PendingAdmission | undefined {
-  return pendingEntry(keyFor(sessionID, roomId), Date.now())?.admission;
+  return readPendingAdmission<PendingAdmission>(sessionID, roomId, Date.now());
 }
 
 export function getOrCreatePendingAdmission(
@@ -107,9 +67,8 @@ export function getOrCreatePendingAdmission(
   maxTs: number,
   capped: boolean,
 ): PendingAdmission {
-  const key = keyFor(sessionID, roomId);
   const now = Date.now();
-  const existing = pendingEntry(key, now)?.admission;
+  const existing = readPendingAdmission<PendingAdmission>(sessionID, roomId, now);
   if (
     existing &&
     (existing.state !== "admitted" || maxTs <= existing.maxTs)
@@ -126,7 +85,7 @@ export function getOrCreatePendingAdmission(
     items: items.slice(-20).map((item) => ({ ...item })),
   };
   if (maxTs > 0) {
-    rememberPending(key, admission, now);
+    save(sessionID, roomId, admission, now);
   }
   return admission;
 }
@@ -136,10 +95,10 @@ export function rejectPendingAdmission(
   roomId: string,
   admissionID: string,
 ): void {
-  const key = keyFor(sessionID, roomId);
-  const admission = pendingEntry(key, Date.now())?.admission;
+  assertDeliveryLease();
+  const admission = pendingAdmission(sessionID, roomId);
   if (admission?.state === "pending" && admission.id === admissionID) {
-    pending.delete(key);
+    deletePendingAdmission(sessionID, roomId);
   }
 }
 
@@ -148,9 +107,12 @@ export function markPendingAdmissionAdmitted(
   roomId: string,
   admissionID?: string,
 ): PendingAdmission | undefined {
-  const admission = pendingEntry(keyFor(sessionID, roomId), Date.now())?.admission;
+  assertDeliveryLease();
+  const now = Date.now();
+  const admission = pendingAdmission(sessionID, roomId);
   if (admission && (admissionID === undefined || admission.id === admissionID)) {
     admission.state = "admitted";
+    save(sessionID, roomId, admission, now);
   }
   return admission;
 }
@@ -160,12 +122,12 @@ export function clearPendingAdmission(
   roomId: string,
   confirmedTs: number,
 ): void {
-  const key = keyFor(sessionID, roomId);
-  const admission = pendingEntry(key, Date.now())?.admission;
+  assertDeliveryLease();
+  const admission = pendingAdmission(sessionID, roomId);
   if (!admission || confirmedTs < admission.maxTs) {
     return;
   }
-  pending.delete(key);
+  deletePendingAdmission(sessionID, roomId);
 }
 
 export function admissionMatches(

@@ -5,7 +5,6 @@ import {
   formatNotificationLines,
   loadRegistry,
   NOTIFY_INSTRUCTION,
-  saveRegistry,
   statePath,
   timeOf,
 } from "./store";
@@ -57,16 +56,23 @@ export function createNotifier(deps: {
   ): Promise<NotifyAttempt | undefined> {
     const entry = (await loadRegistry())[batch.roomId]?.[sessionID];
     if (!entry || (entry.protocol !== "v2" && !entry.serverUrl)) return undefined;
+    const mentionOnly = transport.mentionOnlySessions?.has(sessionID) ?? false;
+    if (transport.protocol === "v2" && entry.receiverOwnerID &&
+      (entry.protocol !== "v2" || entry.receiverOwnerID !== transport.receiverOwnerID)) return undefined;
+    if (mentionOnly && (entry.protocol !== "v2" || entry.receiverOwnerID !== transport.receiverOwnerID)) return undefined;
     const unread = batch.messages.filter((m) =>
       m.createdAt > Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0) &&
       (m.senderSessionID !== undefined ? m.senderSessionID !== sessionID : m.senderId !== entry.name),
-    );
+    ).slice(0, 20);
     if (!unread.length) return undefined;
     const maxTs = unread.reduce((max, m) => Math.max(max, m.createdAt), 0);
     const existing = pendingAdmission(sessionID, batch.roomId);
     const delta = existing?.state === "admitted" && maxTs > existing.maxTs
       ? unread.filter((m) => m.createdAt > existing.maxTs)
       : unread;
+    const eligibleItems = existing?.state === "pending" ? existing.items : delta.slice(-20);
+    if (mentionOnly && !eligibleItems.some((message) => explicitlyMentions(message, entry.name, sessionID)) &&
+      !delta.slice(-20).some((message) => explicitlyMentions(message, entry.name, sessionID))) return undefined;
     const base = entry.serverUrl ? new URL(entry.serverUrl) : undefined;
     const prefix = entry.protocol === "v2" ? (entry.apiPrefix || "/api").replace(/^\/+|\/+$/g, "") : "";
     const endpoint = entry.protocol === "v2" ? "prompt" : "prompt_async";

@@ -1,9 +1,11 @@
 import type { Plugin } from "@opencode/plugin";
 import { z } from "zod";
 import type { QueueTransport } from "./center-client";
-import { backgroundOwnSession } from "./background";
+import { backgroundOwnSession, discoverVerifiedHost, verifyHostSession } from "./background";
+import { receiverOwnerID } from "./receiver-owner";
+import { attachV2Receiver } from "./v2-receiver";
 
-type CenterOptions = { center: string; token: string; directory: string };
+type CenterOptions = { center: string; token: string; directory?: string };
 export type V2Runtime = {
   protocol: "v1" | "v2";
   selfServerUrl: string;
@@ -18,16 +20,19 @@ export function createV2Setup(deps: {
   execute(args: z.infer<ReturnType<typeof roomSchema>>, sessionID: string): Promise<string>;
   observe(runtime: V2Runtime, sessionID: string): Promise<void>;
   poll(sessions: ReadonlySet<string>, transport: QueueTransport, center: CenterOptions): Promise<void>;
-  wake(center: CenterOptions, transport: QueueTransport, sessions: ReadonlySet<string>): Promise<void>;
-  central: boolean;
 }) {
   return async (context: Plugin.Context): Promise<() => Promise<void>> => {
     const sessions = new Set<string>();
     const directory = context.location.directory;
+    const version = context.app?.version ?? "";
+    const host = version ? await discoverVerifiedHost(version).catch(() => undefined) : undefined;
+    const ownerID = host ? await receiverOwnerID(host.origin) : undefined;
     const transport: QueueTransport = {
       directory,
       protocol: "v2",
-      backgroundSession: (sessionID) => backgroundOwnSession(sessionID, context.app?.version ?? ""),
+      receiverOwnerID: ownerID,
+      verifySession: (sessionID) => verifyHostSession(sessionID, version),
+      backgroundSession: (sessionID) => backgroundOwnSession(sessionID, version),
       promptQueue: (sessionID, id, text, delivery) => context.session.prompt({
         sessionID, id, text, delivery, resume: true,
       }),
@@ -36,21 +41,7 @@ export function createV2Setup(deps: {
     let toolRegistration: { dispose(): Promise<void> } | undefined;
     let commandRegistration: { dispose(): Promise<void> } | undefined;
     let promptRegistration: { dispose(): Promise<void> } | undefined;
-    let pollTimer: ReturnType<typeof setInterval> | undefined;
-    let wakeTimer: ReturnType<typeof setInterval> | undefined;
-    let polling = false;
-    let stopped = false;
-    const poll = async () => {
-      if (stopped || polling) return;
-      polling = true;
-      try {
-        await deps.run(runtime, () => deps.poll(sessions, transport, runtime.center));
-      } catch {
-        // Retry transient polling failures on the next interval.
-      } finally {
-        polling = false;
-      }
-    };
+    let releaseReceiver: (() => void) | undefined;
 
     try {
       promptRegistration = await context.session.hook("prompt", async (input) => {
@@ -86,23 +77,17 @@ export function createV2Setup(deps: {
           });
         },
       }));
-      pollTimer = setInterval(() => void poll(), 5000);
-      if (deps.central) {
-        const wake = () => deps.run(runtime, () => deps.wake(runtime.center, transport, sessions)).catch(() => {});
-        void wake();
-        wakeTimer = setInterval(() => void wake(), 10000);
-      }
+      releaseReceiver = attachV2Receiver({
+        sessions, version, transport, center: runtime.center,
+        poll: (ids, target, center) => deps.run(runtime, () => deps.poll(ids, target, center)),
+      });
     } catch (error) {
-      stopped = true;
-      if (pollTimer) clearInterval(pollTimer);
-      if (wakeTimer) clearInterval(wakeTimer);
+      releaseReceiver?.();
       await dispose(toolRegistration, commandRegistration, promptRegistration);
       throw error;
     }
     return async () => {
-      stopped = true;
-      if (pollTimer) clearInterval(pollTimer);
-      if (wakeTimer) clearInterval(wakeTimer);
+      releaseReceiver?.();
       await dispose(toolRegistration, commandRegistration, promptRegistration);
     };
   };

@@ -15,6 +15,7 @@ import {
   clearPendingAdmission,
 } from "./queue";
 import type { InboxItem } from "./center-inbox";
+import { assertDeliveryLease } from "./session-delivery";
 export { queueAdmissionId } from "./queue";
 export { createQueueTransport, sendAsyncNotification, sendQueue } from "./queue-transport";
 export type { QueueTransport, PushResult } from "./queue-transport";
@@ -81,6 +82,7 @@ export async function markQueued(
   sessionID: string,
   ts: number,
 ): Promise<boolean> {
+  assertDeliveryLease();
   return request(opts, "/queued", "POST", { roomId, sessionID, ts })
     .then(() => true)
     .catch(() => false);
@@ -93,6 +95,8 @@ export async function centerAction(
     name?: string;
     roomId?: string;
     text?: string;
+    receiverOwnerID?: string;
+    protocol?: "v1" | "v2";
   },
   sessionID: string,
 ): Promise<string> {
@@ -123,6 +127,7 @@ export async function centerAction(
         // Record the owning host so only that host wakes this session.
         host: os.hostname(),
         directory: opts.directory,
+        ...(args.protocol === "v2" ? { protocol: "v2", receiverOwnerID: args.receiverOwnerID } : {}),
       });
       return formatRoom(svcOf(room), toRoom(room));
     }
@@ -142,6 +147,7 @@ export async function centerAction(
           // Record the owning host so only that host wakes this session.
           host: os.hostname(),
           directory: opts.directory,
+          ...(args.protocol === "v2" ? { protocol: "v2", receiverOwnerID: args.receiverOwnerID } : {}),
         },
       );
       return formatRoom(svcOf(room), toRoom(room));
@@ -197,7 +203,7 @@ export async function centerAction(
         opts,
         `/inbox?sessionID=${encodeURIComponent(sessionID)}&roomId=${encodeURIComponent(args.roomId)}&excludeSelf=0`,
         "GET",
-      )) as unknown as { member: boolean; items: InboxItem[] };
+      )) as unknown as { member: boolean; items: InboxItem[]; hasMore?: boolean };
       // ponytail: F6 — same gate as standalone: only members can read
       if (!result.member) {
         return "error: not joined";
@@ -220,7 +226,7 @@ export async function centerAction(
       })
         .then(() => clearPendingAdmission(sessionID, args.roomId!, maxTs))
         .catch(() => {});
-      return lines.join("\n");
+      return lines.join("\n") + (result.hasMore ? "\nMore unread messages remain; poll again." : "");
     }
     default:
       return "error: unknown action";

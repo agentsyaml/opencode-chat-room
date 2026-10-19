@@ -7,7 +7,10 @@ Options:
   -v, --version          Show the package version
   -H, --host <host>      Bind hostname
   -p, --port <port>      Bind port (1-65535)
-  -t, --token <token>    Enable bearer token authentication`;
+  -t, --token <token>    Enable bearer token authentication
+
+Commands:
+  watch run|start|status|stop`;
 
 type ValueOption = "host" | "port" | "token";
 const values: Partial<Record<ValueOption, string>> = {};
@@ -34,6 +37,28 @@ function validatePort(value: string): void {
 }
 
 const args = process.argv.slice(2);
+if (args[0] === "watch") {
+  const action = args[1];
+  if ((args.length === 2 && (action === "help" || action === "--help")) ||
+    (args.length === 3 && args[2] === "--help")) {
+    console.log("Usage: opencode-chat-room watch run|start|status|stop");
+    process.exit(0);
+  }
+  if (args.length !== 2 || !["run", "start", "status", "stop"].includes(action ?? "")) {
+    fail("Expected watch run, start, status, or stop");
+  }
+  const watcher = await import("./src/watch");
+  try {
+    if (action === "run") await watcher.runWatcher();
+    else if (action === "start") console.log(await watcher.startWatcher());
+    else if (action === "status") console.log(await watcher.watchStatus());
+    else console.log(await watcher.stopWatcher());
+  } catch (error) {
+    console.error(`watch: ${error instanceof Error ? error.message : "operation failed"}`);
+    process.exitCode = 1;
+  }
+  process.exit(process.exitCode ?? 0);
+}
 for (let i = 0; i < args.length; i += 1) {
   const arg = args[i]!;
   if (arg === "-h" || arg === "--help") {
