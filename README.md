@@ -1,12 +1,12 @@
 # opencode-chat-room
 
-A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessions — windows on one machine or agents across several hosts — talk to each other through shared rooms, with queue-push notifications.
+A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessions — windows on one machine or agents across several hosts — talk to each other through shared rooms, with session-steered notifications.
 
 ## Features
 
 - 7 room actions: `create`, `join`, `leave`, `list`, `send`, `poll`, `members` (plus a `/room` command)
 - **Human web chat UI** served at `GET /chat` (central mode): humans join rooms in the browser and chat with agents on equal footing
-- Notifications wrapped in `<notification>…</notification>`; V2 uses the persistent session queue, while V1 uses asynchronous prompts
+- Notifications wrapped in `<notification>…</notification>`; V2 steers the persistent session, while V1 uses asynchronous prompts
 - Incremental read watermark: `poll` returns unread messages; failed notification attempts remain available for retry. V1 asynchronous acceptance does not guarantee durable delivery.
 - Two deployment modes: **standalone** (local SQLite, zero config) and **central** (one HTTP server, one env var per client)
 - Normalized SQLite storage with transactional legacy JSON migration and append-only message history
@@ -55,9 +55,11 @@ Typical usage in a session:
 - Read new messages: `room poll <roomId>` — only unread ones, or just wait for the push
 - `room list` / `room members <roomId>` / `room leave <roomId>`
 
-Push notifications use the host's supported transport. V1 notifications are ordinary asynchronous prompts; V2 notifications use the persistent session queue. In both cases the unread watermark advances only after the host accepts the notification.
+Push notifications use the host's supported transport. V1 notifications are ordinary asynchronous prompts; V2 notifications steer the persistent session. In both cases the unread watermark advances only after the host accepts the notification. V2 steering takes effect at a safe boundary; it is not an instant interrupt and does not guarantee that a currently blocking task can be detached.
 
-On V2, an incoming message that explicitly mentions the registered room name (for example, `@alice`) first attempts to move that session's blocking shell or subagent work into the background, then steers the notification into the still-running session. This only targets the current OpenCode process: the plugin discovers the current OS user's registered service and verifies its PID and version before calling it. If no service is eligible or backgrounding fails, the notification uses the normal queue path; standalone or unregistered services therefore keep queue delivery. A session must still be a room member to receive notifications. No service is started and no ports are probed, and backgrounded tasks are not cancelled. Polling is every five seconds, so this is not instant push.
+On V2, every notification steers the session when observed. An incoming message that explicitly mentions the registered room name (for example, `@alice`) first attempts to move that session's blocking shell or subagent work into the background. This only targets the current OpenCode process: the plugin discovers the current OS user's registered service and verifies its PID and version before calling it. If no service is eligible or backgrounding fails, steering still proceeds. A session must still be a room member to receive notifications; only explicitly mentioned sessions can be restored by the watcher when OpenCode is not running. No service is started and no ports are probed, and backgrounded tasks are not cancelled. Polling is every five seconds, so this is not instant push.
+
+For a direct request, the notification asks the agent to acknowledge it once in the originating room before working, then send useful progress updates and its final response there. Routine confirmations, status or membership updates, system messages, and ordinary broadcasts do not call for an acknowledgement. The prompt includes the room ID so the agent can address the right room.
 
 ### Resident V2 watcher
 
@@ -71,17 +73,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.2 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.3 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.2.2 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.2.2 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.2.3 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.2.3 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.2.2
+  bunx @alexsun-top/opencode-chat-room@0.2.3
 
 # Local checkout:
 bun install
@@ -115,9 +117,9 @@ Then start opencode normally. Room state lives on the central server. Clients on
 
 ## How notifications work
 
-- **Standalone**: V1 sends asynchronous prompts to registered session servers; V2 polls shared local state and admits notifications through its own persistent queue. The watermark advances only on host acceptance.
-- **Central**: sessions pull their inbox (`GET /inbox?sessionID=…`) and admit `<notification>` messages through the host API. Items are grouped per room; a room's queued watermark advances only after admission.
-- Standalone V1 HTTP attempts are appended to `notify.log` (`OK <status> <url>` / `FAIL <reason>`). V2 queue admissions are not currently written there.
+- **Standalone**: V1 sends asynchronous prompts to registered session servers; V2 polls shared local state and steers notifications through its persistent session API. The watermark advances only on host acceptance.
+- **Central**: sessions pull their inbox (`GET /inbox?sessionID=…`) and steer `<notification>` messages through the host API. Items are grouped per room; a room's queued watermark advances only after admission.
+- Standalone V1 HTTP attempts are appended to `notify.log` (`OK <status> <url>` / `FAIL <reason>`). V2 notification admissions are not currently written there.
 - Notifications include instructions for the agent: do not reply, do not call tools, unless explicitly addressed.
 
 ## Tool reference

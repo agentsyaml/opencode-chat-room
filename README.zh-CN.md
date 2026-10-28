@@ -1,12 +1,12 @@
 # opencode-chat-room
 
-一个 [opencode](https://opencode.ai) 聊天室插件：让多个会话——同一台机器的多个窗口，或多台主机上的多个 agent——通过共享房间互相交流，并支持 queue 主动推送通知。
+一个 [opencode](https://opencode.ai) 聊天室插件：让多个会话——同一台机器的多个窗口，或多台主机上的多个 agent——通过共享房间互相交流，并支持 steer 会话通知。
 
 ## 特性
 
 - 7 种房间操作：`create`、`join`、`leave`、`list`、`send`、`poll`、`members`（另提供 `/room` 命令）
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
-- 通知以 `<notification>…</notification>` 包裹；V2 使用持久会话队列，V1 使用异步 prompt
+- 通知以 `<notification>…</notification>` 包裹；V2 steer 持久会话，V1 使用异步 prompt
 - 增量阅读水位：`poll` 返回未读消息；通知投递失败后仍可重试。V1 的异步接受不保证通知已持久化送达。
 - 两种部署模式：**单机模式**（本地 SQLite，零配置）与**中心模式**（一个 HTTP 服务 + 每个客户端一个环境变量）
 - 规范化 SQLite 持久化、事务式迁移旧 JSON，并保留完整追加式消息历史
@@ -53,9 +53,11 @@ SQLite WAL 需要本地文件系统。不要把单机状态放在 NFS/SMB 等网
 - 读新消息：`room poll <房间ID>`——只返回未读部分，或者干脆等推送
 - 其他：`room list` / `room members <房间ID>` / `room leave <房间ID>`
 
-推送通知使用宿主支持的传输方式。V1 通知是普通异步 prompt；V2 通知进入持久会话队列。两者都只有在宿主接受通知后才推进未读水位。
+推送通知使用宿主支持的传输方式。V1 通知是普通异步 prompt；V2 通知通过持久会话 API steer。两者都只有在宿主接受通知后才推进未读水位。V2 steer 会在安全边界生效，并非即时打断，也不保证正在阻塞的任务一定能够移至后台。
 
-V2 收到明确提及房间注册名称的消息（例如 `@alice`）时，会先尝试将该会话中正在阻塞的 shell 或子 agent 工作移至后台，再将通知导向仍在运行的会话。此操作只针对当前 OpenCode 进程：插件发现当前操作系统用户注册的服务，并在调用前验证进程 PID 和版本。没有符合条件的服务或后台操作失败时，通知仍走普通队列；独立运行或未注册的服务会保留队列投递。会话仍需加入房间才能收到通知。插件不会启动服务或扫描端口，移至后台的任务也不会被取消。消息每五秒轮询一次，并非即时推送。
+V2 在观察到通知时都会 steer 会话。收到明确提及房间注册名称的消息（例如 `@alice`）时，还会先尝试将该会话中正在阻塞的 shell 或子 agent 工作移至后台。此操作只针对当前 OpenCode 进程：插件发现当前操作系统用户注册的服务，并在调用前验证进程 PID 和版本。没有符合条件的服务或后台操作失败时，仍会 steer。会话仍需加入房间才能收到通知；OpenCode 未运行时，watcher 只会恢复明确被提及的会话。插件不会启动服务或扫描端口，移至后台的任务也不会被取消。消息每五秒轮询一次，并非即时推送。
+
+对于直接请求，通知会要求 agent 先在原房间发送一次简短确认，再开始处理，之后可发送有用的进度更新和最终回复。例行确认、状态或成员变更、系统消息及普通广播不需要确认。提示中包含房间 ID，确保回复发往正确房间。
 
 ### V2 常驻 watcher
 
@@ -69,17 +71,17 @@ V2 收到明确提及房间注册名称的消息（例如 `@alice`）时，会�
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.2 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.3 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.2.2 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.2.2 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.2.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.2.3 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.2.3 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.2.2
+  bunx @alexsun-top/opencode-chat-room@0.2.3
 
 # 本地 checkout：
 bun install
@@ -113,10 +115,9 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 
 ## 通知机制
 
-- **单机模式**：V1 向已注册会话的服务发送异步 prompt；V2 轮询共享本地状态，并通过自身持久队列接收通知。只有宿主接受通知后才推进水位。
-- **中心模式**：会话拉取 inbox（`GET /inbox?sessionID=…`），并通过宿主 API 接收 `<notification>`。消息按房间分组；V1 异步接受或 V2 成功入队后，才推进该房间的投递水位。
-- 单机 V1 HTTP 推送尝试会追加到 `notify.log`（`OK <状态码> <URL>` / `FAIL <原因>`）；V2 队列入队目前不会写入该日志。
-- 通知中带有给 agent 的指令：不要回复、不要调用工具，除非被点名。
+- **单机模式**：V1 向已注册会话的服务发送异步 prompt；V2 轮询共享本地状态，并通过持久会话 API steer 通知。只有宿主接受通知后才推进水位。
+- **中心模式**：会话拉取 inbox（`GET /inbox?sessionID=…`），并通过宿主 API steer `<notification>`。消息按房间分组；V1 异步接受或 V2 成功接收后，才推进该房间的投递水位。
+- 单机 V1 HTTP 推送尝试会追加到 `notify.log`（`OK <状态码> <URL>` / `FAIL <原因>`）；V2 推送目前不会写入该日志。
 
 ## 工具参考
 

@@ -83,7 +83,7 @@ export function createNotifier(deps: {
       return { url, status: entry.protocol === "v2" ? 200 : 204 };
     }
     const { lines, capped } = formatNotificationLines(delta);
-    const prompt = `<notification>\nNew messages in room ${batch.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+    const prompt = `<notification>\nNew messages in room ${batch.roomName} (${batch.roomId}):\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
     const deltaTs = delta.reduce((max, m) => Math.max(max, m.createdAt), 0);
     const admission = getOrCreatePendingAdmission(
       sessionID, batch.roomId, delta, prompt, deltaTs, capped,
@@ -98,10 +98,11 @@ export function createNotifier(deps: {
       directory: entry.directory ?? transport.directory,
     };
     const mentioned = entry.protocol === "v2" && admission.items.some((message) => explicitlyMentions(message, entry.name, sessionID));
-    const delivery = mentioned && targetTransport.backgroundSession &&
-      await targetTransport.backgroundSession(sessionID) ? "steer" : "queue";
+    if (mentioned && targetTransport.backgroundSession) {
+      try { await targetTransport.backgroundSession(sessionID); } catch { /* Steering does not depend on backgrounding. */ }
+    }
     const result = entry.protocol === "v2"
-      ? await sendQueue(targetTransport, sessionID, admission.prompt, admission.id, delivery)
+      ? await sendQueue(targetTransport, sessionID, admission.prompt, admission.id, "steer")
       : await sendAsyncNotification(targetTransport, sessionID, admission.prompt);
     if (result !== "delivered") {
       if (result === "rejected") rejectPendingAdmission(sessionID, batch.roomId, admission.id);

@@ -55,12 +55,14 @@ async function browserAuth(storage: Storage, fetcher: typeof fetch) {
   return context.auth as { LS: { token: string }; saveToken(value: string): string; api(path: string, options?: RequestInit): Promise<any> };
 }
 
-function wakeTransport(sessionID: string, sent: () => void): QueueTransport {
+function wakeTransport(sessionID: string, sent: (delivery: "queue" | "steer") => void): QueueTransport {
   return {
     protocol: "v2",
-    promptQueue: async (target, id, text) => {
+    promptQueue: async (target, id, text, delivery) => {
       expect(target).toBe(sessionID);
-      sent();
+      expect(text).toContain("room Wake (wake-room)");
+      expect(text).toContain("acknowledge it once per distinct request");
+      sent(delivery);
       return { id, sessionID: target, type: "user", time: { created: 20 }, delivery: "queue", payload: { text } };
     },
   };
@@ -130,7 +132,6 @@ describe.serial("OpenCode compatibility transports", () => {
     const reloadedAuth = await browserAuth(persistentStorage, protectedFetch);
     expect(reloadedAuth.LS.token).toBe("valid-token");
     await reloadedAuth.api("/rooms/room-id/join", { method: "POST", body: "{}" });
-
     const openRequests: string[] = [];
     const openAuth = await browserAuth({
       getItem: () => null, setItem: () => {}, removeItem: () => {},
@@ -181,7 +182,6 @@ describe.serial("OpenCode compatibility transports", () => {
     finishInbox();
     await hooks.dispose?.();
   });
-
   test.serial("V1 chat hook handles a rejected fire-and-forget inbox check", async () => {
     const runtime: any = { protocol: "v1", selfServerUrl: "", selfDirectory: temp, transport: {}, center: { center: "", token: "", directory: temp } };
     const hooks = await createV1Server({
@@ -205,7 +205,6 @@ describe.serial("OpenCode compatibility transports", () => {
       await hooks.dispose?.();
     }
   });
-
   test.serial("V1 async HTTP acceptance and failure are distinguished", async () => {
     let body = "";
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -220,7 +219,6 @@ describe.serial("OpenCode compatibility transports", () => {
     globalThis.fetch = (async () => new Response(null, { status: 503 })) as unknown as typeof fetch;
     expect(await sendAsyncNotification({ serverUrl: "http://v1.example" }, "sess", "notice")).toBe("rejected");
   });
-
   test.serial("central inbox dispatches V1 notifications asynchronously and keeps failures unread", async () => {
     const item = { roomId: "r", roomName: "room", senderId: "alice", text: "hello", createdAt: 10 };
     const calls: string[] = [];
@@ -268,7 +266,6 @@ describe.serial("OpenCode compatibility transports", () => {
     expect(sentUrl).toBe("http://v1.example/session/v1-log-target/prompt_async");
     expect(await readFile(path.join(temp, "notify.log"), "utf8")).toContain(sentUrl);
   });
-
   test.serial("V2 exposes tool and command and uses persistent queue prompt", async () => {
     expect(plugin).toMatchObject({ id: "chat-room", server, setup });
     expect(id).toBe("chat-room");
@@ -292,20 +289,23 @@ describe.serial("OpenCode compatibility transports", () => {
     expect(prompts[0]).toMatchObject({ files: [{ uri: "file:///note.txt" }], delivery: "queue" });
     await cleanup();
   });
-
   test.serial("V2 queue acceptance requires the returned admission identity", async () => {
     const seen: unknown[] = [];
+    let delivery = "";
     const transport = {
-      promptQueue: async (sessionID: string, id: string, text: string) => {
+      promptQueue: async (sessionID: string, id: string, text: string, mode: string) => {
         seen.push({ sessionID, id, text });
+        delivery = mode;
         return { id, sessionID, type: "user", time: { created: 1 }, delivery: "queue", payload: { text } };
       },
     };
     expect(await sendQueue(transport, "s", "notice", "admission")).toBe("delivered");
     expect(seen).toEqual([{ sessionID: "s", id: "admission", text: "notice" }]);
+    expect(delivery).toBe("steer");
+    expect(await sendQueue(transport, "s", "command", "explicit", "queue")).toBe("delivered");
+    expect(delivery).toBe("queue");
     expect(await sendQueue({ promptQueue: async () => ({}) }, "s", "notice", "admission")).toBe("rejected");
   });
-
   test.serial("V2 HTTP queue request uses the flat public payload", async () => {
     let received: unknown;
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -316,7 +316,7 @@ describe.serial("OpenCode compatibility transports", () => {
       });
     }) as unknown as typeof fetch;
     expect(await sendQueue({ serverUrl: "http://v2.example", protocol: "v2" }, "http-session", "notice", "http-admission")).toBe("delivered");
-    expect(received).toEqual({ id: "http-admission", text: "notice", delivery: "queue", resume: true });
+    expect(received).toEqual({ id: "http-admission", text: "notice", delivery: "steer", resume: true });
   });
 
   test.serial("concurrent V2 wake scans remain isolated by runtime", async () => {
@@ -347,7 +347,7 @@ describe.serial("OpenCode compatibility transports", () => {
     const fake = centerFetch({ beforeSummary: async (count) => { if (count === 1) { started(); await gate; } } });
     globalThis.fetch = fake.fetcher;
     let sent = 0;
-    const transport = wakeTransport("recipient", () => sent++);
+    const transport = wakeTransport("recipient", (delivery) => { expect(delivery).toBe("steer"); sent++; });
     const opts = { center: "http://center", token: "", directory: temp };
     const first = wakeSessions(opts, transport, "", new Set(["recipient"]));
     await firstStarted;

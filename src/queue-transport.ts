@@ -119,7 +119,7 @@ export async function sendQueue(
   sessionID: string,
   text: string,
   admissionID: string,
-  delivery: "queue" | "steer" = "queue",
+  delivery: "queue" | "steer" = "steer",
 ): Promise<PushResult> {
   const body: QueueBody = {
     id: admissionID,

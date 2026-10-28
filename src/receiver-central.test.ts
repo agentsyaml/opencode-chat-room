@@ -1,5 +1,5 @@
 import { mkdtempSync, promises as fs } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
 
@@ -16,6 +16,7 @@ const store = await import("./store");
 const { centerAction } = await import("./center-client");
 const { closeReceiverState } = await import("./receiver-state");
 const { checkCenterInbox } = await import("./center-inbox");
+const { wakeMentionedSessions } = await import("../server/wake");
 const ownerID = "123e4567-e89b-42d3-a456-426614174000";
 
 async function call(pathname: string, method = "GET", body?: unknown) {
@@ -25,7 +26,7 @@ async function call(pathname: string, method = "GET", body?: unknown) {
   }));
 }
 
-describe("central receiver membership scope", () => {
+describe.serial("central receiver membership scope", () => {
   test("returns only V2 sessions owned by the authenticated host ID", async () => {
     const created = await call("/rooms", "POST", { name: "receiver", ownerId: "alice", sessionID: "owned", protocol: "v2", receiverOwnerID: ownerID });
     expect(created.status).toBe(201);
@@ -107,6 +108,38 @@ describe("central receiver membership scope", () => {
     } finally { globalThis.fetch = previousFetch; }
   });
 
+  test("serve wake fallback steers and names the originating room", async () => {
+    const sessionID = "wake-target";
+    const { roomID, message } = await store.writeState((service, registry) => {
+      const room = service.createRoom("wake", "alice");
+      const message = service.sendMessage(room.id, "alice", "@bob please handle this", "origin");
+      registry[room.id] = { [sessionID]: {
+        serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "bob", host: hostname(),
+        lastReadTs: 0, lastQueuedTs: 0,
+      } };
+      return { roomID: room.id, message, sessionID };
+    });
+    expect(await store.readInboxMessages(sessionID, roomID, true)).toMatchObject({
+      member: true, items: [{ id: message.id }],
+    });
+    let finish!: () => void;
+    const posted = new Promise<void>((resolve) => { finish = resolve; });
+    const previousFetch = globalThis.fetch;
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      finish();
+      return Response.json({ id: body.id, sessionID, delivery: "steer" });
+    }) as unknown as typeof fetch;
+    try {
+      await wakeMentionedSessions("http://serve.invalid", roomID, "wake", "@bob please handle this", "origin", message);
+      await posted;
+    } finally { globalThis.fetch = previousFetch; }
+    expect(body.delivery).toBe("steer");
+    expect((body.prompt as { text: string }).text).toContain(`room wake (${roomID})`);
+    expect((body.prompt as { text: string }).text).toContain("acknowledge it once per distinct request");
+  });
+
   test("scans a bounded central backlog and drains through a later mention", async () => {
     const created = await call("/rooms", "POST", { name: "restored-burst", ownerId: "bob", sessionID: "restored", protocol: "v2", receiverOwnerID: ownerID });
     const roomID = (await created.json() as { id: string }).id;
@@ -149,7 +182,7 @@ describe("central receiver membership scope", () => {
     expect(sent[4]!.text).toContain("ordinary-99");
     expect(sent[5]!.text).toContain("@bob peer session");
     expect(sent[5]!.text).not.toContain("@bob own session");
-    expect(sent[0]!.delivery).toBe("queue");
+    expect(sent[0]!.delivery).toBe("steer");
     expect(sent[5]!.delivery).toBe("steer");
     expect(backgrounds).toBe(1);
     expect(traced.some((route) => route.includes(`/history?limit=20&excludeSessionID=restored 200`))).toBe(true);

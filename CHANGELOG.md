@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- V2 room notifications steer the running session by default. Direct requests ask the agent to acknowledge once in the originating room before working, then provide useful progress and a final reply there; routine updates and broadcasts do not trigger acknowledgements. Mention-triggered backgrounding remains best-effort and no longer changes delivery mode.
+- Notification prompts include the originating room ID. Steering takes effect at a safe boundary and does not cancel or guarantee detachment of blocking work; V1 `prompt_async` behavior is unchanged.
+
+### Verification
+
+The sanitized unit suite passed (68 tests). The production-only 0.2.3 archive installed with `--omit=dev`; isolated CLI version and watcher start/status/stop checks passed. An isolated OpenCode V2 `2.0.29` service with a deterministic local model admitted both a routine notification and an explicit mention as durable inbox events with `steer`. The scripted request used the room tool to acknowledge first, check membership, send progress, and send the final reply; the original shell task continued and completed. This exercises the prompt and tool flow with a deterministic model, not arbitrary model compliance. V1 `prompt_async` compatibility remains covered by tests.
+
 ## 0.2.2
 
 - Replaced standalone and central room state with normalized SQLite, using cross-process write transactions. Valid legacy `rooms.json`/`registry.json` data is imported once; the originals remain untouched. Full message history is retained and read in bounded pages. SQLite WAL requires a local filesystem, not NFS/SMB.

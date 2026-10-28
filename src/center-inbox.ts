@@ -165,21 +165,21 @@ export async function pushItemsToSession(
     }
     const deltaTs = delta.reduce((max, item) => Math.max(max, item.createdAt), 0);
     const { lines, capped } = formatNotificationLines(delta);
-    const prompt = `<notification>\nNew messages in room ${delta[0]!.roomName}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+    const prompt = `<notification>\nNew messages in room ${delta[0]!.roomName} (${roomId}):\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
     const admission = getOrCreatePendingAdmission(sessionID, roomId, delta, prompt, deltaTs, capped);
-    let delivery: "queue" | "steer" = "queue";
     if (transport.protocol === "v2" && transport.backgroundSession) {
       let name = "";
       try {
         const registry = await request(opts, `/rooms/${encodeURIComponent(roomId)}/registry`, "GET") as Record<string, { name?: string }>;
         name = registry[sessionID]?.name ?? "";
-      } catch { /* Backgrounding is optional; preserve queued delivery. */ }
-      if (name && admission.items.some((item) => explicitlyMentions(item, name, sessionID)) &&
-        await transport.backgroundSession(sessionID)) delivery = "steer";
+      } catch { /* Backgrounding is optional; preserve steer delivery. */ }
+      if (name && admission.items.some((item) => explicitlyMentions(item, name, sessionID))) {
+        try { await transport.backgroundSession(sessionID); } catch { /* Steering does not depend on backgrounding. */ }
+      }
     }
     const result = transport.protocol === "v1"
       ? await sendAsyncNotification(transport, sessionID, admission.prompt)
-      : await sendQueue(transport, sessionID, admission.prompt, admission.id, delivery);
+      : await sendQueue(transport, sessionID, admission.prompt, admission.id, "steer");
     if (result !== "delivered") {
       if (result === "rejected") rejectPendingAdmission(sessionID, roomId, admission.id);
       if (result === "rejected" || worst === "delivered") worst = result;

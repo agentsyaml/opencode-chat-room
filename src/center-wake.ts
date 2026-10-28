@@ -40,7 +40,7 @@ async function wakeViaServe(
   const target: QueueTransport = { serverUrl: serveUrl, directory: transport.directory, protocol: transport.protocol };
   const result = transport.protocol === "v1"
     ? await sendAsyncNotification(target, sessionID, admission.prompt)
-    : await sendQueue(target, sessionID, admission.prompt, admission.id);
+    : await sendQueue(target, sessionID, admission.prompt, admission.id, "steer");
   if (result === "delivered") {
     void request(opts, "/active", "POST", { sessionID }).catch(() => {});
     markPendingAdmissionAdmitted(sessionID, roomId, admission.id);
@@ -100,7 +100,7 @@ export async function wakeSessions(
               ? items.filter((item) => item.createdAt > existing.maxTs) : items;
             if (existing?.state === "admitted" && (currentMax <= existing.maxTs || !delta.length)) return;
             const { lines, capped } = formatNotificationLines(delta);
-            const prompt = formatServeWakePrompt(delta[0]!.roomName, lines);
+            const prompt = formatServeWakePrompt(delta[0]!.roomName, roomId, lines);
             const maxTs = delta.reduce((max, item) => Math.max(max, item.createdAt), 0);
             const admission = getOrCreatePendingAdmission(sessionID, roomId, delta, prompt, maxTs, capped);
             await wakeViaServe(serveUrl, sessionID, roomId, opts, target, admission);

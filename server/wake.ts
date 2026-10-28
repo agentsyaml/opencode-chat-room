@@ -68,10 +68,10 @@ async function deliverWake(
     return;
   }
   const { lines, capped } = formatNotificationLines(delta);
-  const prompt = formatServeWakePrompt(roomName, lines);
+  const prompt = formatServeWakePrompt(roomName, roomId, lines);
   const admission = getOrCreatePendingAdmission(sid, roomId, delta as QueueItem[], prompt,
     delta.reduce((max, item) => Math.max(max, item.createdAt), 0), capped);
-  const body: QueueBody = { id: admission.id, prompt: { text: admission.prompt }, delivery: "queue", resume: true };
+  const body: QueueBody = { id: admission.id, prompt: { text: admission.prompt }, delivery: "steer", resume: true };
   const directory = entry.directory ?? process.env.OPENCODE_DIRECTORY;
   const auth = authHeader();
   try {

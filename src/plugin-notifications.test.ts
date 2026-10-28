@@ -49,12 +49,14 @@ describe.serial("local V2 notification admission", () => {
     let backgrounds = 0;
     let bumps = 0;
     const ids: string[] = [];
+    const deliveries: string[] = [];
     let send = 0;
     const transport = {
       protocol: "v2" as const,
       backgroundSession: async () => { backgrounds++; return true; },
       promptQueue: async (_sid: string, id: string, _text: string, delivery: "queue" | "steer") => {
         ids.push(id);
+        deliveries.push(delivery);
         if (send++ === 0) throw Error("temporary refusal");
         return { id, sessionID, delivery };
       },
@@ -70,7 +72,49 @@ describe.serial("local V2 notification admission", () => {
     expect((await target.notifyTarget(sessionID, { roomId: roomID, roomName: "dev", messages: [msg] }))?.status).toBe(200);
     expect(backgrounds).toBe(2);
     expect(ids[0]).toBe(ids[1]);
+    expect(deliveries).toEqual(["steer", "steer"]);
     expect(bumps).toBe(1);
+  });
+
+  test("steers ordinary notifications and identifies the originating room", async () => {
+    const room = `room-${crypto.randomUUID()}`;
+    await setRegistry({ [room]: { [sessionID]: {
+      serverUrl: "", apiPrefix: "/api", protocol: "v2", name: "bob", lastReadTs: 0,
+    } } });
+    let text = "";
+    let delivery = "";
+    const target = notifier({ protocol: "v2", backgroundSession: async () => false,
+      promptQueue: async (sid, id, prompt, mode) => {
+        text = prompt; delivery = mode;
+        return { id, sessionID: sid, delivery: mode };
+      },
+    }, async () => true);
+    await target.notifyTarget(sessionID, { roomId: room, roomName: "dev", messages: [
+      { ...msg, roomId: room, text: "routine update", createdAt: 101 },
+    ] });
+    expect(delivery).toBe("steer");
+    expect(text).toContain(`room dev (${room})`);
+    expect(text).toContain("acknowledge it once per distinct request");
+    expect(text).toContain("before doing the work");
+    expect(text).toContain("same room");
+  });
+
+  test("steers a direct mention even when backgrounding throws", async () => {
+    const room = `room-${crypto.randomUUID()}`;
+    await setRegistry({ [room]: { [sessionID]: {
+      serverUrl: "", apiPrefix: "/api", protocol: "v2", name: "bob", lastReadTs: 0,
+    } } });
+    let delivery = "";
+    const target = notifier({ protocol: "v2", backgroundSession: async () => { throw Error("unavailable"); },
+      promptQueue: async (sid, id, _prompt, mode) => {
+        delivery = mode;
+        return { id, sessionID: sid, delivery: mode };
+      },
+    }, async () => true);
+    await target.notifyTarget(sessionID, { roomId: room, roomName: "dev", messages: [
+      { ...msg, roomId: room, createdAt: 102 },
+    ] });
+    expect(delivery).toBe("steer");
   });
 
   test("serializes local delivery across notifier instances and commits only once", async () => {
@@ -222,11 +266,12 @@ describe.serial("local V2 notification admission", () => {
     await target.notifyTarget(sessionID, { roomId: room, roomName: "dev", messages: [ordinary, mention] }, restored);
     expect(ids[0]).toBe(ids[1]);
     expect(texts[1]).not.toContain("@bob please");
-    expect(deliveries[1]).toBe("queue");
+    expect(deliveries[1]).toBe("steer");
     expect(backgrounds).toBe(0);
     await target.notifyTarget(sessionID, { roomId: room, roomName: "dev", messages: [ordinary, mention] }, restored);
     expect(ids[2]).not.toBe(ids[1]);
     expect(deliveries[2]).toBe("steer");
+    expect(texts[2]).toContain(`room dev (${room})`);
     expect(backgrounds).toBe(1);
   });
 
@@ -286,11 +331,12 @@ describe.serial("local V2 notification admission", () => {
       expect(await inbox.pushItemsToSession(opts, sessionID, [ordinary, mention], restored)).toBe("delivered");
       expect(prompts[0]).toBe(prompts[1]);
       expect(prompts[1]).not.toContain("@bob please");
-      expect(deliveries[1]).toBe("queue");
+      expect(deliveries[1]).toBe("steer");
       expect(postBodies.some((body) => body.ts === 10)).toBe(true);
       await inbox.pushItemsToSession(opts, sessionID, [ordinary, mention], restored, { [room]: 10 });
       expect(prompts[2]).toContain("@bob please");
       expect(deliveries[2]).toBe("steer");
+      expect(prompts[2]).toContain(`room dev (${room})`);
       expect(backgrounds).toBe(1);
       expect(postBodies.some((body) => body.ts === 20)).toBe(true);
     } finally { globalThis.fetch = originalFetch; }
