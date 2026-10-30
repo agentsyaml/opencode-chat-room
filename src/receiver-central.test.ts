@@ -3,6 +3,21 @@ import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, test } from "bun:test";
 
+const childMode = process.env.CHAT_ROOM_RECEIVER_TEST_CHILD === "1";
+if (!childMode) {
+  test("runs central receiver fixtures in an isolated process", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "receiver-test-"));
+    const child = Bun.spawn([process.execPath, "test", import.meta.path], {
+      env: { ...process.env, CHAT_ROOM_RECEIVER_TEST_CHILD: "1", CHAT_ROOM_STATE_DIR: dir,
+        HOME: path.join(dir, "home"), XDG_STATE_HOME: path.join(dir, "state"),
+        XDG_CONFIG_HOME: path.join(dir, "config"), CHAT_ROOM_SERVER_TOKEN: "receiver-test-token",
+        CHAT_ROOM_SERVER_URL: "", CHAT_ROOM_WAKE_SERVE_URL: "" }, stdout: "pipe", stderr: "pipe",
+    });
+    const code = await child.exited;
+    if (code !== 0) throw new Error(`${await new Response(child.stdout).text()}${await new Response(child.stderr).text()}`);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+} else {
 const envKeys = ["CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL", "CHAT_ROOM_STATE_DIR", "XDG_STATE_HOME"] as const;
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 delete process.env.CHAT_ROOM_SERVER_URL;
@@ -62,7 +77,7 @@ describe.serial("central receiver membership scope", () => {
     const page1 = await first.json() as { messages: Array<{ seq: number; text: string; senderSessionID?: string }>; nextBeforeSeq: number; hasMore: boolean };
     expect(page1.messages.map((message) => message.text)).toEqual(["m3", "m4"]);
     expect(page1.hasMore).toBe(true);
-    expect(page1.messages[0]?.senderSessionID).toBeUndefined();
+    expect(page1.messages[0]?.senderSessionID).toBe("private-session");
     const page2 = await call(`/rooms/${roomID}/history?beforeSeq=${page1.nextBeforeSeq}&limit=2`);
     expect((await page2.json() as typeof page1).messages.map((message) => message.text)).toEqual(["m1", "m2"]);
     expect((await call(`/rooms/${roomID}/history?limit=201`)).status).toBe(400);
@@ -140,6 +155,60 @@ describe.serial("central receiver membership scope", () => {
     expect((body.prompt as { text: string }).text).toContain("acknowledge it once per distinct request");
   });
 
+  test("immediately wakes direct peers and group @all recipients", async () => {
+    const created = await store.writeState((service, registry) => {
+      const room = service.createRoom("direct wake", "sender-dm");
+      room.kind = "direct";
+      room.directSessionIDs = ["sender-dm", "target-dm"];
+      room.directPair = JSON.stringify([...room.directSessionIDs].sort());
+      service.joinRoom(room.id, { id: "target-dm", name: "agent" });
+      const entry = (name: string) => ({ serverUrl: "", apiPrefix: "/api", protocol: "v1" as const, name, host: hostname(), lastReadTs: 0, lastQueuedTs: 0 });
+      registry[room.id] = { "sender-dm": entry("sender"), "target-dm": entry("agent") };
+      const message = service.sendMessage(room.id, "sender-dm", "Please handle this", "sender-dm");
+      return { roomID: room.id, message };
+    });
+    const oldFetch = globalThis.fetch;
+    const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    let finish!: () => void;
+    const posted = new Promise<void>((resolve) => { finish = resolve; });
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      posts.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      if (posts.length === 1) finish();
+      return Response.json({ id: (posts.at(-1)!.body as { id: string }).id, sessionID: "target-dm", delivery: "steer" });
+    }) as unknown as typeof fetch;
+    try {
+      await wakeMentionedSessions("http://serve.invalid", created.roomID, "direct wake", "Please handle this", "sender-dm", created.message);
+      await posted;
+    } finally { globalThis.fetch = oldFetch; }
+    expect(posts[0]!.url).toContain("target-dm");
+    expect(((posts[0]!.body.prompt as { text: string }).text)).toContain("direct conversation");
+    const broadcast = await store.writeState((service, registry) => {
+      const room = service.createRoom("broadcast", "sender-all");
+      service.joinRoom(room.id, { id: "all-one", name: "one" });
+      service.joinRoom(room.id, { id: "all-two", name: "two" });
+      const entry = (name: string) => ({ serverUrl: "", apiPrefix: "/api", protocol: "v1" as const, name, host: hostname(), lastReadTs: 0, lastQueuedTs: 0 });
+      registry[room.id] = { "all-one": entry("one"), "all-two": entry("two") };
+      const message = service.sendMessage(room.id, "sender-all", "@all please respond", "sender-all");
+      return { roomID: room.id, message };
+    });
+    posts.length = 0;
+    let finishAll!: () => void;
+    const allPosted = new Promise<void>((resolve) => { finishAll = resolve; });
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { id: string };
+      posts.push({ url: String(input), body });
+      if (posts.length === 2) finishAll();
+      const sessionID = String(input).includes("all-one") ? "all-one" : "all-two";
+      return Response.json({ id: body.id, sessionID, delivery: "steer" });
+    }) as unknown as typeof fetch;
+    try {
+      await wakeMentionedSessions("http://serve.invalid", broadcast.roomID, "broadcast", "@all please respond", "sender-all", broadcast.message);
+      await allPosted;
+    } finally { globalThis.fetch = oldFetch; }
+    expect(posts.map((post) => post.url).some((url) => url.includes("all-one"))).toBe(true);
+    expect(posts.map((post) => post.url).some((url) => url.includes("all-two"))).toBe(true);
+  });
+
   test("scans a bounded central backlog and drains through a later mention", async () => {
     const created = await call("/rooms", "POST", { name: "restored-burst", ownerId: "bob", sessionID: "restored", protocol: "v2", receiverOwnerID: ownerID });
     const roomID = (await created.json() as { id: string }).id;
@@ -197,3 +266,4 @@ afterAll(async () => {
   }
   await fs.rm(stateDir, { recursive: true, force: true });
 });
+}

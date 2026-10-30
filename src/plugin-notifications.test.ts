@@ -16,7 +16,7 @@ process.env.CHAT_ROOM_STATE_DIR = `${sandbox}/chat-room`;
 const [{ createNotifier }, store, queue, inbox] = await Promise.all([
   import("./plugin-notifications"), import("./store"), import("./queue"), import("./center-inbox"),
 ]);
-const { closeReceiverState } = await import("./receiver-state");
+const { claimBackgroundAttempt, closeReceiverState } = await import("./receiver-state");
 
 const sessionID = "notifier-session";
 const roomID = `room-${crypto.randomUUID()}`;
@@ -44,7 +44,15 @@ function notifier(transport: QueueTransport, bumpQueued: (ts: number) => Promise
 }
 
 describe.serial("local V2 notification admission", () => {
-  test("retries backgrounding per pending attempt and retains the admission ID", async () => {
+  test("claims one attempt through a message watermark and permits a newer trigger", () => {
+    const room = `room-${crypto.randomUUID()}`;
+    expect(claimBackgroundAttempt(sessionID, room, "service", 100)).toBe(true);
+    expect(claimBackgroundAttempt(sessionID, room, "service", 100)).toBe(false);
+    expect(claimBackgroundAttempt(sessionID, room, "service", 99)).toBe(false);
+    expect(claimBackgroundAttempt(sessionID, room, "service", 101)).toBe(true);
+  });
+
+  test("does not re-background a retried pending notification and retains its ID", async () => {
     await registry();
     let backgrounds = 0;
     let bumps = 0;
@@ -70,7 +78,7 @@ describe.serial("local V2 notification admission", () => {
     expect((await target.notifyTarget(sessionID, { roomId: roomID, roomName: "dev", messages: [msg] }))?.status).toBe(0);
     expect((await store.loadRegistry())[roomID]![sessionID]!.lastQueuedTs).toBeUndefined();
     expect((await target.notifyTarget(sessionID, { roomId: roomID, roomName: "dev", messages: [msg] }))?.status).toBe(200);
-    expect(backgrounds).toBe(2);
+    expect(backgrounds).toBe(1);
     expect(ids[0]).toBe(ids[1]);
     expect(deliveries).toEqual(["steer", "steer"]);
     expect(bumps).toBe(1);
@@ -117,9 +125,95 @@ describe.serial("local V2 notification admission", () => {
     expect(delivery).toBe("steer");
   });
 
+  test("accepted steer is not re-backgrounded by empty sweeps; a new admission gets one attempt", async () => {
+    const room = `room-${crypto.randomUUID()}`;
+    const ownerID = "123e4567-e89b-42d3-a456-426614174099";
+    await setRegistry({ [room]: { [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v2", receiverOwnerID: ownerID, name: "bob", lastReadTs: 0 } } });
+    let backgrounds = 0;
+    const prompts: string[] = [];
+    const transport: QueueTransport = {
+      protocol: "v2", receiverOwnerID: ownerID,
+      backgroundSession: async () => { backgrounds++; return false; },
+      promptQueue: async (sid, id, text, delivery) => { prompts.push(text); return { id, sessionID: sid, delivery }; },
+    };
+    const target = notifier(transport, async (ts) => {
+      await store.writeState((_svc, registry) => { registry[room]![sessionID]!.lastQueuedTs = ts; });
+      queue.clearPendingAdmission(sessionID, room, ts);
+      return true;
+    });
+    const first = { ...msg, roomId: room, createdAt: 101 };
+    const batch = { roomId: room, roomName: "dev", messages: [first] };
+    await target.notifyTarget(sessionID, batch);
+    await target.notifyTarget(sessionID, batch);
+    expect(backgrounds).toBe(1);
+    expect(prompts).toHaveLength(1);
+    const second = { ...msg, id: "message-2", roomId: room, createdAt: 102, text: "@bob new task" };
+    await target.notifyTarget(sessionID, { ...batch, messages: [first, second] });
+    expect(backgrounds).toBe(2);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("@bob new task");
+    expect(prompts[1]).not.toContain("@bob please look");
+    expect((await store.loadRegistry())[room]![sessionID]!.lastQueuedTs).toBe(second.createdAt);
+  });
+
+  test("does not retry a background obligation through another receiver", async () => {
+    const room = `room-${crypto.randomUUID()}`;
+    await setRegistry({ [room]: { [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v2", receiverOwnerID: "owner-a", name: "bob", lastReadTs: 0 } } });
+    let backgrounds = 0;
+    let prompts = 0;
+    const base: QueueTransport = { protocol: "v2", receiverOwnerID: "owner-a",
+      backgroundSession: async () => { backgrounds++; return false; },
+      promptQueue: async (sid, id, _text, delivery) => { prompts++; return { id, sessionID: sid, delivery }; },
+    };
+    const target = notifier(base, async () => true);
+    const batch = { roomId: room, roomName: "dev", messages: [{ ...msg, roomId: room }] };
+    await target.notifyTarget(sessionID, batch);
+    await target.notifyTarget(sessionID, batch, { ...base, receiverOwnerID: "owner-b" });
+    expect(backgrounds).toBe(1);
+    expect(prompts).toBe(1);
+  });
+
+  test("broadcast aliases fan out to two peers but not the sender", async () => {
+    const room = `room-${crypto.randomUUID()}`;
+    await setRegistry({ [room]: {
+      sender: { serverUrl: "", apiPrefix: "/api", protocol: "v2", name: "alice", lastReadTs: 0 },
+      peer1: { serverUrl: "", apiPrefix: "/api", protocol: "v2", name: "bob", lastReadTs: 0 },
+      peer2: { serverUrl: "", apiPrefix: "/api", protocol: "v2", name: "carol", lastReadTs: 0 },
+    } });
+    const delivered: string[] = [];
+    const transport: QueueTransport = { protocol: "v2", promptQueue: async (sid, id, text, delivery) => {
+      delivered.push(`${sid}:${text}`); return { id, sessionID: sid, delivery };
+    } };
+    const target = notifier(transport, async () => true);
+    const batch = { roomId: room, roomName: "dev", messages: [
+      { ...msg, senderId: "sender", senderSessionID: "sender", text: "@all hello", createdAt: 201 },
+      { ...msg, id: "broadcast-2", senderId: "sender", senderSessionID: "sender", text: "<at>@所有人</at> please", createdAt: 202 },
+    ] };
+    for (const sid of ["sender", "peer1", "peer2"]) await target.notifyTarget(sid, batch);
+    expect(delivered).toHaveLength(2);
+    expect(delivered.every((value) => value.includes("@all hello") && value.includes("@所有人"))).toBe(true);
+    expect(delivered.some((value) => value.startsWith("sender:"))).toBe(false);
+  });
+
+  test("delivers an unmentioned direct message to the other session", async () => {
+    const room = `direct-${crypto.randomUUID()}`;
+    await store.writeState((service) => service.hydrate([{ id: room, name: "private", ownerId: "test", createdAt: 0, kind: "direct", participants: new Map(), messages: [] }]));
+    await setRegistry({ [room]: { [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v2", name: "bob", lastReadTs: 0 } } });
+    let prompt = "";
+    const target = notifier({ protocol: "v2", promptQueue: async (sid, id, text, delivery) => {
+      prompt = text; return { id, sessionID: sid, delivery };
+    } }, async () => true);
+    await target.notifyTarget(sessionID, { roomId: room, roomName: "private", messages: [
+      { ...msg, senderId: "peer-session", senderSessionID: "peer-session", text: "can you review this?", createdAt: 203 },
+    ] });
+    expect(prompt).toContain("Direct conversation with bob");
+    expect(prompt).toContain("can you review this?");
+  });
+
   test("serializes local delivery across notifier instances and commits only once", async () => {
     const concurrentRoom = `room-${crypto.randomUUID()}`;
-    await setRegistry({ [concurrentRoom]: { [sessionID]: {
+    const concurrentSession = `session-${crypto.randomUUID()}`;
+    await setRegistry({ [concurrentRoom]: { [concurrentSession]: {
       serverUrl: "", apiPrefix: "/api", protocol: "v2", name: "bob", lastReadTs: 0,
     } } });
     let backgrounds = 0;
@@ -135,14 +229,14 @@ describe.serial("local V2 notification admission", () => {
     };
     const bump = async (ts: number) => {
       bumps++;
-      await store.writeState((_svc, registry) => { registry[concurrentRoom]![sessionID]!.lastQueuedTs = ts; });
-      queue.clearPendingAdmission(sessionID, concurrentRoom, ts);
+      await store.writeState((_svc, registry) => { registry[concurrentRoom]![concurrentSession]!.lastQueuedTs = ts; });
+      queue.clearPendingAdmission(concurrentSession, concurrentRoom, ts);
       return true;
     };
     const batch = { roomId: concurrentRoom, roomName: "dev", messages: [{ ...msg, roomId: concurrentRoom }] };
     await Promise.all([
-      notifier(transport, bump).notifyTarget(sessionID, batch),
-      notifier(transport, bump).notifyTarget(sessionID, batch),
+      notifier(transport, bump).notifyTarget(concurrentSession, batch),
+      notifier(transport, bump).notifyTarget(concurrentSession, batch),
     ]);
     expect(backgrounds).toBe(1);
     expect(sends).toBe(1);
@@ -298,6 +392,51 @@ describe.serial("local V2 notification admission", () => {
     expect(notification).toContain("ordinary note");
     expect(notification).toContain("@bob please");
     expect(postBodies.find((body) => body.sessionID === sessionID && body.ts === 20)).toBeDefined();
+  });
+
+  test("central empty-inbox sweeps do not repeat a failed background attempt", async () => {
+    const room = `room-${crypto.randomUUID()}`;
+    const ownerID = "123e4567-e89b-42d3-a456-426614174099";
+    const opts = { center: "http://center.invalid/api", token: "test" };
+    let backgrounds = 0;
+    let prompts = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("/registry")) return Response.json({ [sessionID]: { name: "bob", protocol: "v2", receiverOwnerID: ownerID, roomKind: "group" } });
+      if (String(input).includes("/inbox")) return Response.json({ items: [], queuedTs: {}, hasMore: false });
+      return Response.json({ ok: true });
+    }) as unknown as typeof fetch;
+    const transport: QueueTransport = { protocol: "v2", receiverOwnerID: ownerID,
+      backgroundSession: async () => { backgrounds++; return false; },
+      promptQueue: async (sid, id, _text, delivery) => { prompts++; return { id, sessionID: sid, delivery }; },
+    };
+    try {
+      expect(await inbox.pushItemsToSession(opts, sessionID, [
+        { ...msg, roomId: room, roomName: "dev", text: "@bob help", createdAt: 204 },
+      ], transport)).toBe("delivered");
+      await inbox.checkCenterInbox(opts, sessionID, transport);
+    } finally { globalThis.fetch = originalFetch; }
+    expect(backgrounds).toBe(1);
+    expect(prompts).toBe(1);
+  });
+
+  test("central direct inbox messages need no @ mention and keep the peer context", async () => {
+    const room = `direct-${crypto.randomUUID()}`;
+    const ownerID = "123e4567-e89b-42d3-a456-426614174099";
+    let prompt = "";
+    const oldFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => String(input).includes("/registry")
+      ? Response.json({ [sessionID]: { name: "bob", protocol: "v2", receiverOwnerID: ownerID, roomKind: "direct" } })
+      : Response.json({ ok: true })) as unknown as typeof fetch;
+    try {
+      await inbox.pushItemsToSession({ center: "http://center.invalid", token: "test" }, sessionID, [
+        { ...msg, roomId: room, roomName: "private", roomKind: "direct", senderId: "peer-session", text: "please review", createdAt: 205 },
+      ], { protocol: "v2", receiverOwnerID: ownerID, backgroundSession: async () => true,
+        promptQueue: async (sid, id, text, delivery) => { prompt = text; return { id, sessionID: sid, delivery }; },
+      });
+    } finally { globalThis.fetch = oldFetch; }
+    expect(prompt).toContain("Direct conversation with bob");
+    expect(prompt).toContain("please review");
   });
 
   test("a later mention retries the original central admission before a fresh steer", async () => {

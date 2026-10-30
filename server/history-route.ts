@@ -15,11 +15,12 @@ export async function historyRoute(url: URL): Promise<Response | undefined> {
     return Response.json({ error: "invalid history cursor or limit" }, { status: 400 });
   }
   const access = await readState((service, registry) => ({
+    kind: service.listRooms().find((room) => room.id === roomID)?.kind ?? "group",
     exists: service.listRooms().some((room) => room.id === roomID),
     member: excludeSessionID ? registry[roomID]?.[excludeSessionID] : undefined,
   }));
   if (!access.exists || excludeSessionID && !access.member) return Response.json({ error: "room not found" }, { status: 404 });
   const page = await readHistory(roomID, before, limit, access.member && excludeSessionID
     ? { sessionID: excludeSessionID, name: access.member.name } : undefined);
-  return Response.json({ ...page, messages: page.messages.map(({ senderSessionID: _sid, ...message }) => message) });
+  return Response.json({ ...page, roomKind: access.kind });
 }

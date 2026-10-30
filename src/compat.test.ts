@@ -2,13 +2,13 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { runInNewContext } from "node:vm";
 import { pushItemsToSession } from "./center-inbox";
 import { createQueueTransport, sendAsyncNotification, sendQueue, type QueueTransport } from "./queue-transport";
 import { loadRegistry, writeState } from "./store";
 import { createNotifier } from "./plugin-notifications";
 import { createV1Server } from "./v1-plugin";
 import { wakeSessions } from "./center-wake";
+import { createAuth } from "../server/assets/chat/state.js";
 
 const originalFetch = globalThis.fetch;
 const originalStateDir = process.env.CHAT_ROOM_STATE_DIR;
@@ -43,16 +43,8 @@ async function setRegistry(snapshot: import("./store").Registry) {
     Object.assign(registry, structuredClone(snapshot));
   });
 }
-async function browserAuth(storage: Storage, fetcher: typeof fetch) {
-  const html = await readFile(path.join(process.cwd(), "server/chat.html"), "utf8");
-  const storeStart = html.indexOf("  const memStore = Object.create(null);");
-  const storeEnd = html.indexOf("\n\n  const I18N", storeStart);
-  const apiStart = html.indexOf("  async function api(");
-  const apiEnd = html.indexOf("\n\n  /* ---------- 状态", apiStart);
-  if ([storeStart, storeEnd, apiStart, apiEnd].some((index) => index < 0)) throw new Error("chat auth code not found");
-  const context: any = { localStorage: storage, fetch: fetcher, t: (key: string) => key };
-  runInNewContext(`${html.slice(storeStart, storeEnd)}\n${html.slice(apiStart, apiEnd)}\nglobalThis.auth = { LS, saveToken, api };`, context);
-  return context.auth as { LS: { token: string }; saveToken(value: string): string; api(path: string, options?: RequestInit): Promise<any> };
+function browserAuth(storage: Storage, fetcher: typeof fetch) {
+  return createAuth(storage, fetcher, (key: string) => key);
 }
 
 function wakeTransport(sessionID: string, sent: (delivery: "queue" | "steer") => void): QueueTransport {
@@ -79,7 +71,7 @@ function centerFetch(options: { beforeSummary?: (count: number) => Promise<void>
       return Response.json([{ id: "wake-room", latestMsgTs: 20 }]);
     }
     if (url.pathname === "/rooms/wake-room/registry") return Response.json({
-      recipient: { name: "recipient", host: os.hostname(), lastReadTs: 0, directory: temp },
+      recipient: { name: "recipient", protocol: "v2", host: os.hostname(), lastReadTs: 0, directory: temp },
     });
     if (url.pathname === "/inbox") return Response.json({
       items: [{ id: "wake-message", roomId: "wake-room", roomName: "Wake", senderId: "sender", text: "hello", createdAt: 20 }],
@@ -226,6 +218,7 @@ describe.serial("OpenCode compatibility transports", () => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith("/prompt_async")) return new Response(null, { status: 204 });
+      if (url.endsWith("/registry")) return Response.json({ "v1-session": { name: "agent", lastReadTs: 0 } });
       return Response.json({});
     }) as unknown as typeof fetch;
     expect(await pushItemsToSession({ center: "http://center", token: "" }, "v1-session", [item], {
@@ -240,6 +233,7 @@ describe.serial("OpenCode compatibility transports", () => {
       const url = String(input);
       calls.push(url);
       if (url.endsWith("/prompt_async")) return new Response(null, { status: 503 });
+      if (url.endsWith("/registry")) return Response.json({ "v1-failed": { name: "agent", lastReadTs: 0 } });
       return Response.json({});
     }) as unknown as typeof fetch;
     expect(await pushItemsToSession({ center: "http://center", token: "" }, "v1-failed", [item], {

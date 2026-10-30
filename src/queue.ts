@@ -8,6 +8,7 @@ export type QueueItem = {
   senderSessionID?: string;
   text: string;
   createdAt: number;
+  roomKind?: "group" | "direct";
 };
 
 export type QueueBody = {
@@ -19,6 +20,7 @@ export type QueueBody = {
 
 export type PendingAdmission = {
   id: string;
+  createdAt: number;
   prompt: string;
   itemCount: number;
   maxTs: number;
@@ -29,7 +31,8 @@ export type PendingAdmission = {
 
 const PENDING_TTL_MS = 5 * 60_000;
 function save(sessionID: string, roomID: string, admission: PendingAdmission, now: number): void {
-  savePendingAdmission(sessionID, roomID, admission, now + PENDING_TTL_MS, now);
+  admission.createdAt ??= now;
+  savePendingAdmission(sessionID, roomID, admission, admission.createdAt + PENDING_TTL_MS, now);
 }
 
 export function queueAdmissionId(
@@ -45,8 +48,10 @@ export function queueAdmissionId(
     items: items.map((item) => [
       item.id ?? "",
       item.senderId,
+      item.senderSessionID ?? "",
       item.text,
       item.createdAt,
+      item.roomKind ?? "",
     ]),
   });
   return `msg_${createHash("sha256").update(fingerprint).digest("hex")}`;
@@ -56,7 +61,13 @@ export function pendingAdmission(
   sessionID: string,
   roomId: string,
 ): PendingAdmission | undefined {
-  return readPendingAdmission<PendingAdmission>(sessionID, roomId, Date.now());
+  const now = Date.now();
+  const admission = readPendingAdmission<PendingAdmission>(sessionID, roomId, now);
+  if (admission && !Number.isFinite(admission.createdAt)) {
+    admission.createdAt = now;
+    save(sessionID, roomId, admission, now);
+  }
+  return admission;
 }
 
 export function getOrCreatePendingAdmission(
@@ -77,6 +88,7 @@ export function getOrCreatePendingAdmission(
   }
   const admission: PendingAdmission = {
     id: queueAdmissionId(sessionID, roomId, items, prompt),
+    createdAt: now,
     prompt,
     itemCount: items.length,
     maxTs,
@@ -87,6 +99,28 @@ export function getOrCreatePendingAdmission(
   if (maxTs > 0) {
     save(sessionID, roomId, admission, now);
   }
+  return admission;
+}
+
+export function prunePendingAdmission(
+  sessionID: string,
+  roomId: string,
+  throughTs: number,
+  rebuild: (items: QueueItem[]) => { prompt: string; capped: boolean },
+): PendingAdmission | undefined {
+  const existing = pendingAdmission(sessionID, roomId);
+  if (!existing) return undefined;
+  if (existing.state === "admitted") {
+    if (existing.maxTs <= throughTs) deletePendingAdmission(sessionID, roomId);
+    return existing.maxTs <= throughTs ? undefined : existing;
+  }
+  const items = existing.items.filter((item) => item.createdAt > throughTs);
+  if (items.length === existing.items.length) return existing;
+  if (!items.length) { deletePendingAdmission(sessionID, roomId); return undefined; }
+  const { prompt, capped } = rebuild(items);
+  const admission = { ...existing, id: queueAdmissionId(sessionID, roomId, items, prompt), prompt,
+    itemCount: items.length, maxTs: Math.max(...items.map((item) => item.createdAt)), capped, items };
+  save(sessionID, roomId, admission, Date.now());
   return admission;
 }
 

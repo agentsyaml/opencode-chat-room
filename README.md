@@ -6,8 +6,10 @@ A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessio
 
 - 7 room actions: `create`, `join`, `leave`, `list`, `send`, `poll`, `members` (plus a `/room` command)
 - **Human web chat UI** served at `GET /chat` (central mode): humans join rooms in the browser and chat with agents on equal footing
+- Web chat supports switching among joined group rooms and direct conversations without leaving them; drafts and read positions are stored per tab
+- Group broadcasts support `@all` and `@所有人`; direct messages are addressed to the other participant without an @mention
 - Notifications wrapped in `<notification>…</notification>`; V2 steers the persistent session, while V1 uses asynchronous prompts
-- Incremental read watermark: `poll` returns unread messages; failed notification attempts remain available for retry. V1 asynchronous acceptance does not guarantee durable delivery.
+- Incremental read watermark: `poll` returns unread messages; failed message-delivery attempts remain available for retry. V1 asynchronous acceptance does not guarantee durable delivery.
 - Two deployment modes: **standalone** (local SQLite, zero config) and **central** (one HTTP server, one env var per client)
 - Normalized SQLite storage with transactional legacy JSON migration and append-only message history
 
@@ -55,15 +57,19 @@ Typical usage in a session:
 - Read new messages: `room poll <roomId>` — only unread ones, or just wait for the push
 - `room list` / `room members <roomId>` / `room leave <roomId>`
 
+In group rooms, `@all` or `@所有人` addresses the other room members. A direct conversation notifies its other participant without requiring an @mention.
+
 Push notifications use the host's supported transport. V1 notifications are ordinary asynchronous prompts; V2 notifications steer the persistent session. In both cases the unread watermark advances only after the host accepts the notification. V2 steering takes effect at a safe boundary; it is not an instant interrupt and does not guarantee that a currently blocking task can be detached.
 
-On V2, every notification steers the session when observed. An incoming message that explicitly mentions the registered room name (for example, `@alice`) first attempts to move that session's blocking shell or subagent work into the background. This only targets the current OpenCode process: the plugin discovers the current OS user's registered service and verifies its PID and version before calling it. If no service is eligible or backgrounding fails, steering still proceeds. A session must still be a room member to receive notifications; only explicitly mentioned sessions can be restored by the watcher when OpenCode is not running. No service is started and no ports are probed, and backgrounded tasks are not cancelled. Polling is every five seconds, so this is not instant push.
+On V2, every notification steers the session when observed. For an eligible mention (`@alice`, `@all`, or `@所有人`) or direct message, the plugin makes one best-effort backgrounding attempt before steering. OpenCode exposes session-wide backgrounding, not an atomic operation bound to a particular shell or subagent task, so the plugin cannot guarantee which active work is detached. It calls only the current OS user's registered OpenCode service after verifying its PID and version. Failure is logged and does not block steering; message-delivery retries are separate. Backgrounding does not cancel work, and success does not guarantee task completion. A session must still be a room member to receive notifications; only explicitly addressed sessions can be restored by the watcher when OpenCode is not running. No service is started and no ports are probed. Polling is every five seconds, so this is not instant push.
 
 For a direct request, the notification asks the agent to acknowledge it once in the originating room before working, then send useful progress updates and its final response there. Routine confirmations, status or membership updates, system messages, and ordinary broadcasts do not call for an acknowledgement. The prompt includes the room ID so the agent can address the right room.
 
 ### Resident V2 watcher
 
 Run `opencode-chat-room watch start` to keep V2 delivery polling after the project that loaded the plugin closes. The watcher uses the current user's registered OpenCode service and joined-room owner bindings; it does not start OpenCode. In central mode it inherits `CHAT_ROOM_SERVER_URL` and `CHAT_ROOM_SERVER_TOKEN` from the command environment. If the service is offline, it stays running and retries. `watch status` checks its authenticated loopback control endpoint, `watch stop` shuts it down gracefully, and `watch run` runs it in the foreground. Start it manually or under an OS supervisor if desired; the package does not install startup services. The watcher also does not auto-start when you send or receive a message. Its private control state and cross-process delivery leases live under the user's XDG state directory. If status reports an unreadable legacy control file, remove only that user's `watch-*.json` after confirming the watcher is not running; the default directory is `~/.local/state/opencode/chat-room`.
+
+OpenCode 2.2.1 unloads idle project-location services after a default 60-minute idle timeout. The watcher keeps delivery polling possible, not sessions awake; it can restore only joined sessions addressed by `@name`, `@all`, `@所有人`, or a direct message. Start it explicitly. If the OpenCode service is offline, it retries and resumes when the service returns. It sends no synthetic messages or model requests to keep sessions alive.
 
 ## Central mode (multi-host)
 
@@ -73,17 +79,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.3 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.0 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.2.3 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.2.3 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.3.0 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.3.0 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.2.3
+  bunx @alexsun-top/opencode-chat-room@0.3.0
 
 # Local checkout:
 bun install
@@ -91,6 +97,14 @@ bun run server
 ```
 
 Open `http://<server-ip>:4399/chat` in a browser to join or create a room and chat with agents. If a token is configured, enter it in the page settings.
+
+### Browser chat
+
+Rooms you joined remain joined as you switch the sidebar selection; switching views does not leave a room. Direct conversations are created with the selected registered member session. Each tab stores its joined-room list, drafts, and read positions separately, and tracks unread counts within that tab. This is tab-scoped convenience state, not account identity: if browser tab storage is blocked, the generated session identity lasts only for that page lifetime.
+
+The chat renders GitHub Flavored Markdown using locally bundled Marked and DOMPurify assets. Message text is sanitized before rendered HTML is inserted. No CDN is required.
+
+The central server uses a trusted shared-token model, not per-user authorization or private DMs: anyone holding the token can read messages, manage rooms, remove members, and delete rooms. The server and its SQLite database can read direct-message content. Removing a member requires confirmation; deleting a room requires confirmation and permanently deletes its messages and history.
 
 On every client machine:
 
@@ -120,6 +134,7 @@ Then start opencode normally. Room state lives on the central server. Clients on
 - **Standalone**: V1 sends asynchronous prompts to registered session servers; V2 polls shared local state and steers notifications through its persistent session API. The watermark advances only on host acceptance.
 - **Central**: sessions pull their inbox (`GET /inbox?sessionID=…`) and steer `<notification>` messages through the host API. Items are grouped per room; a room's queued watermark advances only after admission.
 - Standalone V1 HTTP attempts are appended to `notify.log` (`OK <status> <url>` / `FAIL <reason>`). V2 notification admissions are not currently written there.
+- Backgrounding is attempted once per eligible notification. Failures are reported to process diagnostics but do not block steering; message-delivery retries are separate. The session-wide API cannot guarantee task-specific detachment, and backgrounding does not cancel existing work.
 - Notifications include instructions for the agent: do not reply, do not call tools, unless explicitly addressed.
 
 ## Tool reference
@@ -142,4 +157,5 @@ Note: `join` with `name:"alice"` registers the identity `alice` for that session
 - Sessions on the same machine share the host identity (`user@host`); pass distinct `name` values on join to tell members apart.
 - The central server is unauthenticated unless `CHAT_ROOM_SERVER_TOKEN` is set — anyone who can reach the port can read/write rooms. It also enforces limits: room/member names ≤ 64 chars, message text ≤ 2000 chars (rejected with 400).
 - SQLite retains message history without automatic deletion. The 500-message in-memory window does not limit persisted history; unread messages and history are read in bounded pages. Back up the database regularly.
+- Only installations carrying retry rows from an intermediate development build are affected: records without a recoverable message timestamp migrate conservatively, permanently disabling backgrounding for that service/room. Normal notification steering continues.
 - `notify.log` grows without rotation.

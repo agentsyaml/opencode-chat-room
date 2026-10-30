@@ -38,11 +38,10 @@ describe.serial("durable session delivery coordination", () => {
     expect(result).toBe("false");
     expect(ownsDeliveryLease("s", "first", Date.now())).toBe(true);
     releaseDeliveryLease("s", "first");
-    const crashed = await spawnCode(`const s=await import(${JSON.stringify(stateUrl)}); const t=Date.now(); console.log(s.acquireDeliveryLease("s","crashed",t,t+100));`);
+    const crashed = await spawnCode(`const s=await import(${JSON.stringify(stateUrl)}); const t=${now}; console.log(s.acquireDeliveryLease("s","crashed",t,t+100));`);
     expect(crashed).toBe("true");
-    expect(acquireDeliveryLease("s", "successor", Date.now(), Date.now() + 1000)).toBe(false);
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    const later = Date.now();
+    expect(acquireDeliveryLease("s", "successor", now + 99, now + 1000)).toBe(false);
+    const later = now + 100;
     expect(acquireDeliveryLease("s", "successor", later, later + 1000)).toBe(true);
     expect(renewDeliveryLease("s", "crashed", later, later + 2000)).toBe(false);
     releaseDeliveryLease("s", "crashed");

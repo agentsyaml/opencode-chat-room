@@ -2,16 +2,47 @@ name: Publish package
 
 on:
   push:
+    branches: ["**"]
     tags:
       - "v*"
+  pull_request:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  publish:
+  unit:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2.2.0
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - name: Run all unit tests
+        run: bun test
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2.2.0
+      - run: bun install --frozen-lockfile
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: Run browser tests
+        env:
+          CHAT_UI_BROWSER_MODULE: ${{ github.workspace }}/node_modules/playwright/index.mjs
+        run: |
+          test -f "$CHAT_UI_BROWSER_MODULE"
+          bun test src/web-ui.test.ts src/web-lifecycle.test.ts
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [unit, browser]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -20,22 +51,20 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - uses: oven-sh/setup-bun@v2.2.0
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Run unit tests
-        run: bun test src/compat.test.ts src/background.test.ts src/plugin-notifications.test.ts src/receiver-owner.test.ts src/receiver-central.test.ts src/v2-receiver.test.ts src/sqlite-state.test.ts src/session-delivery.test.ts src/watch.test.ts
-
       - name: Verify tag matches package version
         run: node -e 'const fs = require("node:fs"); const { version } = JSON.parse(fs.readFileSync("package.json", "utf8")); const expected = `v${version}`; if (process.env.GITHUB_REF_NAME !== expected) { console.error(`Expected tag ${expected}, got ${process.env.GITHUB_REF_NAME}`); process.exit(1); }'
 
       - name: Validate package contents
-        run: npm pack --dry-run
+        run: |
+          npm pack --dry-run --json > npm-pack.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const files = JSON.parse(fs.readFileSync("npm-pack.json", "utf8"))[0].files.map(file => file.path);
+            const required = ["server/newrooms.ts", "server/assets/NOTICE.txt", "server/assets/MARKED-LICENSE", "server/assets/DOMPURIFY-LICENSE", "server/assets/marked-18.0.4.js", "server/assets/dompurify-3.4.7.js"];
+            const missing = required.filter(file => !files.includes(file));
+            const leaked = files.filter(file => /(?:\.test\.[cm]?[jt]sx?$|\.fixture(?:\.|\/)|(?:^|\/)fixtures?\/)/i.test(file));
+            if (missing.length || leaked.length) { console.error({ missing, leaked }); process.exit(1); }
+          '
 
       - name: Publish to npm
         run: npm publish --access public

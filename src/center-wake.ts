@@ -3,11 +3,13 @@ import {
   formatNotificationLines,
   formatServeWakePrompt,
 } from "./store";
+import { explicitlyAddresses } from "./mentions";
 import {
   clearPendingAdmission,
   getOrCreatePendingAdmission,
   markPendingAdmissionAdmitted,
   pendingAdmission,
+  prunePendingAdmission,
   rejectPendingAdmission,
   type PendingAdmission,
 } from "./queue";
@@ -24,6 +26,10 @@ async function wakeViaServe(
   opts: CenterOpts,
   transport: QueueTransport,
   admission: PendingAdmission,
+  roomName: string,
+  expectedHost: string | undefined,
+  expectedDirectory: string | undefined,
+  expectedRoomKind: "group" | "direct",
 ): Promise<boolean> {
   try {
     const response = await fetch(`${opts.center}/wake-claim`, {
@@ -35,6 +41,25 @@ async function wakeViaServe(
     const claim = await response.json().catch(() => ({})) as { ok?: boolean };
     if (!claim.ok) return false;
   } catch {
+    return false;
+  }
+  const registry = await request(opts, `/rooms/${encodeURIComponent(roomId)}/registry`, "GET") as Record<string, {
+    protocol?: "v1" | "v2"; receiverOwnerID?: string; lastReadTs?: number; lastQueuedTs?: number;
+    name?: string; roomKind?: "group" | "direct"; host?: string; directory?: string;
+  }>;
+  const current = registry[sessionID];
+  const cutoff = Math.max(current?.lastReadTs ?? 0, current?.lastQueuedTs ?? 0);
+  const fresh = prunePendingAdmission(sessionID, roomId, cutoff, (items) => {
+    const { lines, capped } = formatNotificationLines(items);
+    return { prompt: formatServeWakePrompt(roomName, roomId, lines), capped };
+  });
+  if (!current || (current.protocol ?? "v1") !== (transport.protocol ?? "v1") ||
+    (transport.protocol === "v2" && current.receiverOwnerID !== transport.receiverOwnerID) ||
+    current.host !== expectedHost || current.directory !== expectedDirectory ||
+    (current.roomKind ?? "group") !== expectedRoomKind ||
+    !fresh || fresh.id !== admission.id || admission.maxTs <= cutoff) {
+    rejectPendingAdmission(sessionID, roomId, admission.id);
+    clearPendingAdmission(sessionID, roomId, Number.MAX_SAFE_INTEGER);
     return false;
   }
   const target: QueueTransport = { serverUrl: serveUrl, directory: transport.directory, protocol: transport.protocol };
@@ -70,7 +95,8 @@ export async function wakeSessions(
         const latest = Number(room.latestMsgTs ?? 0);
         if (!roomId || latest === 0) continue;
         const registry = await request(opts, `/rooms/${encodeURIComponent(roomId)}/registry`, "GET") as Record<string, {
-          name: string; lastReadTs?: number; lastQueuedTs?: number; host?: string; directory?: string;
+          name: string; protocol?: "v1" | "v2"; receiverOwnerID?: string; lastReadTs?: number; lastQueuedTs?: number;
+          host?: string; directory?: string; roomKind?: "group" | "direct";
         }>;
         for (const [sessionID, entry] of Object.entries(registry)) {
           if (eligibleSessions && !eligibleSessions.has(sessionID)) continue;
@@ -88,22 +114,30 @@ export async function wakeSessions(
             const target = { ...transport, directory: entry.directory ?? transport.directory };
             const pushed = await pushItemsToSession(opts, sessionID, items, target, inbox.queuedTs);
             if (pushed !== "unreachable" || !serveUrl) return;
-            const mentioned = items.some((item) => {
-              if (item.text.includes(`<at>@${entry.name}</at>`)) return true;
-              const escaped = entry.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-              return new RegExp(`@${escaped}(?![\\p{L}\\p{N}_])`, "u").test(item.text);
-            });
+            const currentRegistry = await request(opts, `/rooms/${encodeURIComponent(roomId)}/registry`, "GET") as Record<string, typeof entry>;
+            const current = currentRegistry[sessionID];
+            if (!current || (current.protocol ?? "v1") !== (entry.protocol ?? "v1") || current.host !== entry.host ||
+              current.directory !== entry.directory || (transport.protocol === "v2" && current.receiverOwnerID !== transport.receiverOwnerID)) return;
+            const roomKind = current.roomKind ?? "group";
+            const currentCursor = Math.max(current.lastReadTs ?? 0, current.lastQueuedTs ?? 0);
+            const unread = items.filter((item) => item.createdAt > currentCursor);
+            const mentioned = unread.some((item) => explicitlyAddresses(item, current.name, sessionID, roomKind));
             if (!mentioned) return;
-            const currentMax = items.reduce((max, item) => Math.max(max, item.createdAt), 0);
+            const currentMax = unread.reduce((max, item) => Math.max(max, item.createdAt), 0);
+            prunePendingAdmission(sessionID, roomId, currentCursor, (pending) => {
+              const { lines, capped } = formatNotificationLines(pending);
+              return { prompt: formatServeWakePrompt(unread[0]!.roomName, roomId, lines), capped };
+            });
             const existing = pendingAdmission(sessionID, roomId);
             const delta = existing?.state === "admitted" && currentMax > existing.maxTs
-              ? items.filter((item) => item.createdAt > existing.maxTs) : items;
+              ? unread.filter((item) => item.createdAt > existing.maxTs) : unread;
             if (existing?.state === "admitted" && (currentMax <= existing.maxTs || !delta.length)) return;
             const { lines, capped } = formatNotificationLines(delta);
             const prompt = formatServeWakePrompt(delta[0]!.roomName, roomId, lines);
             const maxTs = delta.reduce((max, item) => Math.max(max, item.createdAt), 0);
             const admission = getOrCreatePendingAdmission(sessionID, roomId, delta, prompt, maxTs, capped);
-            await wakeViaServe(serveUrl, sessionID, roomId, opts, target, admission);
+            await wakeViaServe(serveUrl, sessionID, roomId, opts, target, admission,
+              delta[0]!.roomName, entry.host, entry.directory, roomKind);
           });
         }
       } catch {

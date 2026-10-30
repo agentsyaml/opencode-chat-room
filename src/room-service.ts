@@ -22,12 +22,16 @@ export type Room = {
   participants: Map<string, Participant>;
   messages: Message[];
   createdAt: number;
+  kind?: "group" | "direct";
+  directSessionIDs?: string[];
+  directPair?: string;
 };
 
 export type RoomErrorCode =
   | "ROOM_NOT_FOUND"
   | "NOT_JOINED"
-  | "EMPTY_MESSAGE";
+  | "EMPTY_MESSAGE"
+  | "DIRECT_ROOM_FULL";
 
 export class RoomError extends Error {
   readonly code: RoomErrorCode;
@@ -71,6 +75,15 @@ export default class RoomService {
     return room;
   }
 
+  createDirectRoom(name: string, ownerId: string, sessions: [string, string]): Room {
+    const pair = JSON.stringify([...sessions].sort());
+    const existing = [...this.rooms.values()].find((room) => room.directPair === pair);
+    if (existing) return existing;
+    const room: Room = { id: randomUUID(), name, ownerId, participants: new Map(), messages: [], createdAt: Date.now(), kind: "direct", directSessionIDs: sessions, directPair: pair };
+    this.rooms.set(room.id, room);
+    return room;
+  }
+
   getRoom(roomId: string): Room {
     const room = this.rooms.get(roomId);
     if (!room) {
@@ -88,6 +101,7 @@ export default class RoomService {
     participant: { id: string; name: string },
   ): Participant {
     const room = this.getRoom(roomId);
+    if (room.kind === "direct" && !room.directSessionIDs?.includes(participant.id)) throw new RoomError("DIRECT_ROOM_FULL");
     // ponytail: the same identity from another session is the same member —
     // a second window on the same machine must not be locked out
     const existing = room.participants.get(participant.id);
@@ -170,5 +184,9 @@ export default class RoomService {
 
   containsParticipant(roomId: string, participantId: string): boolean {
     return this.rooms.get(roomId)?.participants.has(participantId) ?? false;
+  }
+
+  deleteRoom(roomId: string): void {
+    if (!this.rooms.delete(roomId)) throw new RoomError("ROOM_NOT_FOUND", `room not found: ${roomId}`);
   }
 }

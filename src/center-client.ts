@@ -36,6 +36,8 @@ function toRoom(r: Json): Room {
     name: String(r.name ?? ""),
     ownerId: String(r.ownerId ?? ""),
     createdAt: Number(r.createdAt ?? 0),
+    kind: r.kind === "direct" ? "direct" : "group",
+    ...(Array.isArray(r.directSessionIDs) ? { directSessionIDs: r.directSessionIDs as string[] } : {}),
     participants,
     messages: Array.isArray(r.messages) ? (r.messages as Message[]) : [],
   };
@@ -103,7 +105,7 @@ export async function centerAction(
   const { center, token } = opts;
   switch (args.action) {
     case "list": {
-      const rooms = (await request(opts, "/rooms", "GET")) as unknown as Json[];
+      const rooms = (await request(opts, `/rooms?sessionID=${encodeURIComponent(sessionID)}`, "GET")) as unknown as Json[];
       if (!Array.isArray(rooms) || rooms.length === 0) {
         return "no rooms yet";
       }

@@ -17,6 +17,7 @@ import { readInbox } from "./inbox";
 import { isReceiverOwnerID } from "../src/receiver-owner";
 import { claimWake, touchActive, wakeMentionedSessions } from "./wake";
 import { historyRoute } from "./history-route";
+import { roomManagement } from "./newrooms";
 
 function parsePort(value: string): number {
   const port = Number(value);
@@ -53,7 +54,9 @@ const serializeRoom = (r: Room) => ({
   ownerId: r.ownerId,
   createdAt: r.createdAt,
   participants: [...r.participants.values()],
-  messages: r.messages.map(({ senderSessionID: _senderSessionID, ...message }) => message),
+  messages: r.messages,
+  kind: r.kind ?? "group",
+  ...(r.directSessionIDs ? { directSessionIDs: r.directSessionIDs } : {}),
 });
 
 function mutate<T>(fn: (svc: RoomService, registry: Registry) => T): Promise<T> {
@@ -91,10 +94,22 @@ async function handle(req: Request): Promise<Response> {
       },
     });
   }
+  if (req.method === "GET" && p.startsWith("/assets/")) {
+    let relative: string;
+    try { relative = decodeURIComponent(p.slice("/assets/".length)); }
+    catch { return json({ error: "invalid asset path" }, 400); }
+    const root = path.resolve(import.meta.dir, "assets");
+    const file = path.resolve(root, relative);
+    if (!relative || !file.startsWith(`${root}${path.sep}`) || !/\.(?:css|js|mjs|svg|png|jpg|woff2?)$/i.test(file)) return json({ error: "not found" }, 404);
+    const data = await fs.readFile(file).catch(() => null);
+    if (!data) return json({ error: "not found" }, 404);
+    const type = file.endsWith(".css") ? "text/css" : file.endsWith(".svg") ? "image/svg+xml" : /\.(?:js|mjs)$/.test(file) ? "text/javascript" : file.endsWith(".png") ? "image/png" : file.endsWith(".jpg") ? "image/jpeg" : "font/woff2";
+    return new Response(data, { headers: { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+  }
   // ponytail: F1 — reject non-JSON POSTs; a text/plain simple request from a
   // malicious page would otherwise mutate rooms cross-origin (no preflight)
   if (
-    req.method === "POST" &&
+    ["POST", "DELETE"].includes(req.method) &&
     !req.headers.get("content-type")?.includes("application/json")
   ) {
     return json({ error: "content-type must be application/json" }, 415);
@@ -128,9 +143,12 @@ async function handle(req: Request): Promise<Response> {
       return json({ sessionIDs });
     }
     if (req.method === "GET" && p === "/rooms") {
-      const rooms = await read((svc) => svc.listRooms());
+      const caller = url.searchParams.get("sessionID");
+      const rooms = await read((svc) => svc.listRooms().filter((room) => room.kind !== "direct" ? true : !!caller && room.directSessionIDs?.includes(caller)));
       return json(rooms.map(serializeRoom));
     }
+    const management = await roomManagement(req, url);
+    if (management) return management;
     if (req.method === "POST" && p === "/rooms") {
       const body = (await req.json()) as Record<string, string>;
       if (body.protocol !== undefined && body.protocol !== "v2" || body.receiverOwnerID !== undefined && !isReceiverOwnerID(body.receiverOwnerID)) {
@@ -295,12 +313,14 @@ async function handle(req: Request): Promise<Response> {
           return json({ error: "name too long (max 64)" }, 400);
         }
         const room = await mutate((svc, reg) => {
+          const currentRoom = svc.getRoom(roomId);
+          const participantId = currentRoom.kind === "direct" ? sessionID : id;
           const regRoom = (reg[roomId] =
             reg[roomId] ?? Object.create(null) as Record<string, RegistryEntry>);
           // retire the participant this session previously held, if renamed
           // — skipped when another session still uses the old name
           const prevEntry = regRoom[sessionID];
-          if (prevEntry && prevEntry.name !== name) {
+          if (currentRoom.kind !== "direct" && prevEntry && prevEntry.name !== name) {
             const shared = Object.entries(regRoom).some(
               ([sid, e]) => sid !== sessionID && e.name === prevEntry.name,
             );
@@ -308,19 +328,19 @@ async function handle(req: Request): Promise<Response> {
               svc.leaveRoom(roomId, prevEntry.name);
             }
           }
-          const already = svc.containsParticipant(roomId, id);
+          const already = svc.containsParticipant(roomId, participantId);
           // ponytail: prune a stale registry entry for the same participant
           // name from another session (closed tab / cleared localStorage) —
           // but only when the identity is NOT already present, otherwise two
           // live sessions sharing a nickname would evict each other forever
-          if (!already) {
+          if (!already && currentRoom.kind !== "direct") {
             for (const [sid, e] of Object.entries(regRoom)) {
               if (sid !== sessionID && e.name === name) {
                 delete regRoom[sid];
               }
             }
           }
-          svc.joinRoom(roomId, { id, name });
+          svc.joinRoom(roomId, { id: participantId, name });
           if (!already) {
             svc.addEvent(roomId, `${name} joined the room`);
           }
@@ -352,7 +372,7 @@ async function handle(req: Request): Promise<Response> {
       if (req.method === "POST" && m[2] === "leave") {
         await mutate((svc, reg) => {
           const entry = reg[roomId]?.[sessionID];
-          const participantId = entry?.name ?? sessionID;
+          const participantId = svc.getRoom(roomId).kind === "direct" ? sessionID : entry?.name ?? sessionID;
           // ponytail: orc-2 #2——共享名守卫：还有别的 session 持有同名时，
           // 只移除本 entry，不移除参与者（否则兄弟 tab 发送会 NOT_JOINED）
           const shared = Object.entries(reg[roomId] ?? {}).some(
@@ -381,7 +401,9 @@ async function handle(req: Request): Promise<Response> {
           return json({ error: "text too long (max 2000)" }, 400);
         }
         const room = await mutate((svc, reg) => {
-          const sender = reg[roomId]?.[sessionID]?.name ?? sessionID;
+          const senderEntry = reg[roomId]?.[sessionID];
+          if (!senderEntry) throw new RoomError("NOT_JOINED", "session is not a room member");
+          const sender = svc.getRoom(roomId).kind === "direct" ? sessionID : senderEntry.name;
           svc.sendMessage(roomId, sender, text, sessionID);
           return svc.getRoom(roomId);
         });
@@ -414,7 +436,7 @@ async function handle(req: Request): Promise<Response> {
       // plugin find which sessions have unread messages without polling every
       // session's inbox; host is included for the @-wake ownership gate
       const roomId = decodeURIComponent(r[1]!);
-      const reg = await readState((_svc, registry) => {
+      const reg = await readState((svc, registry) => {
         const entries = registry[roomId] ?? {};
         return Object.fromEntries(
           Object.entries(entries).map(([sid, e]) => [
@@ -427,6 +449,7 @@ async function handle(req: Request): Promise<Response> {
               lastQueuedTs: e.lastQueuedTs ?? 0,
               host: e.host ?? "",
               directory: e.directory,
+              roomKind: svc.getRoom(roomId).kind ?? "group",
             },
           ]),
         );
@@ -435,6 +458,7 @@ async function handle(req: Request): Promise<Response> {
     }
     return json({ error: "not found" }, 404);
   } catch (err) {
+    if (err instanceof SyntaxError) return json({ error: "invalid JSON body" }, 400);
     if (err instanceof RoomError) {
       return json(
         { error: err.message },

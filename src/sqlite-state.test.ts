@@ -115,6 +115,123 @@ describe("SQLite local state", () => {
     expect((await store.loadRegistry())[roomIDs[1]!]![sessionIDs[1]!]!.lastQueuedTs).toBeGreaterThan(0);
   });
 
+  test("backgrounds once per admission and treats restored DMs as addressed", async () => {
+    const dir = await directory("background-retry");
+    process.env.CHAT_ROOM_STATE_DIR = dir;
+    const ownerID = "123e4567-e89b-42d3-a456-426614174000";
+    const sessionID = "retry-session";
+    const roomID = await store.writeState((service, registry) => {
+      const room = service.createRoom("retry", "owner");
+      service.joinRoom(room.id, { id: "alice", name: "alice" });
+      service.sendMessage(room.id, "alice", "@agent first", "sender");
+      registry[room.id] = { [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v2", receiverOwnerID: ownerID, name: "agent", lastReadTs: 0, lastQueuedTs: 0 } };
+      return room.id;
+    });
+    let backgrounded = 0, prompted = 0;
+    const prompts: string[] = [];
+    const transport = { protocol: "v2" as const, receiverOwnerID: ownerID,
+      backgroundSession: async () => { backgrounded++; return false; },
+      promptQueue: async (target: string, id: string, text: string, delivery: "queue" | "steer") => {
+        prompted++; prompts.push(text); return { id, sessionID: target, delivery };
+      } };
+    await pollKnownSessions(new Set([sessionID]), transport, { center: "", token: "" });
+    expect(backgrounded).toBe(1);
+    expect(prompted).toBe(1);
+    for (let i = 0; i < 5; i++) await pollKnownSessions(new Set([sessionID]), transport, { center: "", token: "" });
+    expect(backgrounded).toBe(1);
+    expect(prompted).toBe(1);
+    await store.writeState((service) => service.sendMessage(roomID, "alice", "@agent second", "sender"));
+    await pollKnownSessions(new Set([sessionID]), transport, { center: "", token: "" });
+    expect(backgrounded).toBe(2);
+    expect(prompted).toBe(2);
+    expect(prompts[1]).toContain("@agent second");
+    expect(prompts[1]).not.toContain("@agent first");
+
+    await store.writeState((service, registry) => {
+      const room = service.createDirectRoom("direct", "same", ["dm-sender", "dm-target"]);
+      service.joinRoom(room.id, { id: "dm-sender", name: "same" });
+      service.joinRoom(room.id, { id: "dm-target", name: "same" });
+      service.sendMessage(room.id, "dm-sender", "Please reply", "dm-sender");
+      registry[room.id] = {
+        "dm-sender": { serverUrl: "", apiPrefix: "/api", protocol: "v2", receiverOwnerID: ownerID, name: "same", lastReadTs: 0 },
+        "dm-target": { serverUrl: "", apiPrefix: "/api", protocol: "v2", receiverOwnerID: ownerID, name: "same", lastReadTs: 0 },
+      };
+    });
+    await pollKnownSessions(new Set(["dm-target"]), { ...transport, mentionOnlySessions: new Set(["dm-target"]) }, { center: "", token: "" });
+    expect(prompted).toBe(3);
+    expect(prompts[2]).toContain("Direct conversation");
+    expect(prompts[2]).toContain("Please reply");
+  });
+
+  test("read cursor trims old items from a pending admission before retrying it", async () => {
+    const dir = await directory("read-prunes-pending-admission");
+    process.env.CHAT_ROOM_STATE_DIR = dir;
+    const ownerID = "123e4567-e89b-42d3-a456-426614174002";
+    const sessionID = "read-target";
+    const firstTs = Date.now() - 30_000, secondTs = firstTs + 1;
+    const roomID = await store.writeState((service, registry) => {
+      const room = service.createRoom("read", "owner");
+      service.joinRoom(room.id, { id: "alice", name: "alice" });
+      service.sendMessage(room.id, "alice", "@agent old work", "sender");
+      room.messages.at(-1)!.createdAt = firstTs;
+      service.sendMessage(room.id, "alice", "@agent new work", "sender");
+      room.messages.at(-1)!.createdAt = secondTs;
+      registry[room.id] = { [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v2", receiverOwnerID: ownerID, name: "agent", lastReadTs: 0 } };
+      return room.id;
+    });
+    let backgrounds = 0, sends = 0;
+    const ids: string[] = [], prompts: string[] = [];
+    const transport = { protocol: "v2" as const, receiverOwnerID: ownerID,
+      backgroundSession: async () => { backgrounds++; return false; },
+      promptQueue: async (sid: string, id: string, text: string, delivery: "queue" | "steer") => {
+        ids.push(id); prompts.push(text);
+        if (sends++ === 0) throw Error("offline");
+        return { id, sessionID: sid, delivery };
+      },
+    };
+    await pollKnownSessions(new Set([sessionID]), transport, { center: "", token: "" });
+    expect(backgrounds).toBe(1);
+    expect(prompts).toHaveLength(1);
+    await store.writeState((_service, registry) => { registry[roomID]![sessionID]!.lastReadTs = firstTs; });
+    await pollKnownSessions(new Set([sessionID]), transport, { center: "", token: "" });
+    expect(backgrounds).toBe(1);
+    expect(prompts).toHaveLength(2);
+    expect(ids[1]).not.toBe(ids[0]);
+    expect(prompts[1]).not.toContain("@agent old work");
+    expect(prompts[1]).toContain("@agent new work");
+  });
+
+  test("local polling advances past a full page of system events to a later mention", async () => {
+    const dir = await directory("events-before-mention");
+    process.env.CHAT_ROOM_STATE_DIR = dir;
+    const ownerID = "123e4567-e89b-42d3-a456-426614174001";
+    const sessionID = "events-target";
+    const roomID = await store.writeState((service, registry) => {
+      const room = service.createRoom("events", "owner");
+      service.joinRoom(room.id, { id: "alice", name: "alice" });
+      for (let index = 0; index < 20; index++) service.addEvent(room.id, `member-${index} joined`);
+      service.sendMessage(room.id, "alice", "@agent please handle this", "sender");
+      registry[room.id] = { [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v2", receiverOwnerID: ownerID, name: "agent", lastReadTs: 0, lastQueuedTs: 0 } };
+      return room.id;
+    });
+    const prompts: string[] = [];
+    let backgrounds = 0;
+    const transport = { protocol: "v2" as const, receiverOwnerID: ownerID,
+      backgroundSession: async () => { backgrounds++; return true; },
+      promptQueue: async (sid: string, id: string, text: string, delivery: "queue" | "steer") => {
+        prompts.push(text); return { id, sessionID: sid, delivery };
+      },
+    };
+    await pollKnownSessions(new Set([sessionID]), transport, { center: "", token: "" });
+    await pollKnownSessions(new Set([sessionID]), transport, { center: "", token: "" });
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toContain("member-0 joined");
+    expect(prompts[0]).not.toContain("@agent please");
+    expect(prompts[1]).toContain("@agent please");
+    expect(backgrounds).toBe(1);
+    expect((await store.loadRegistry())[roomID]![sessionID]!.lastQueuedTs).toBeGreaterThan(0);
+  });
+
   test("serializes concurrent process registry updates without losing rows", async () => {
     const dir = await directory("multiprocess");
     process.env.CHAT_ROOM_STATE_DIR = dir;

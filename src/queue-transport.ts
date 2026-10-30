@@ -3,9 +3,10 @@ import { admissionMatches, type QueueBody } from "./queue";
 import { assertDeliveryLease } from "./session-delivery";
 
 export type PushResult = "delivered" | "unreachable" | "rejected";
+export type BackgroundResult = { status: "done" | "failed" | "skip"; reason?: string };
 export type QueueTransport = {
   promptQueue?: (sessionID: string, id: string, text: string, delivery: "queue" | "steer") => Promise<unknown>;
-  backgroundSession?: (sessionID: string) => Promise<boolean>;
+  backgroundSession?: (sessionID: string) => Promise<boolean | BackgroundResult>;
   receiverOwnerID?: string;
   verifySession?: (sessionID: string) => Promise<string | undefined>;
   mentionOnlySessions?: ReadonlySet<string>;
@@ -13,6 +14,21 @@ export type QueueTransport = {
   directory?: string;
   protocol?: "v1" | "v2";
 };
+
+export function backgroundResult(value: boolean | BackgroundResult): BackgroundResult {
+  return typeof value === "boolean" ? value ? { status: "done" } : { status: "failed", reason: "unclassified-failure" } : value;
+}
+
+export function backgroundServiceKey(transport: QueueTransport, serviceURL = transport.serverUrl ?? ""): string {
+  let origin = serviceURL;
+  try {
+    if (serviceURL) {
+      const url = new URL(serviceURL);
+      origin = `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+    }
+  } catch { /* Keep non-URL identifiers distinct. */ }
+  return JSON.stringify([transport.receiverOwnerID ?? "", origin]);
+}
 
 export function createQueueTransport(input: { directory?: string; serverUrl?: URL | string } = {}): QueueTransport {
   const serverUrl = String(input.serverUrl ?? "").trim();

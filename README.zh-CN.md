@@ -6,8 +6,10 @@
 
 - 7 种房间操作：`create`、`join`、`leave`、`list`、`send`、`poll`、`members`（另提供 `/room` 命令）
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
+- Web 聊天可在已加入的群组和私聊之间切换，不必离开房间；草稿和阅读位置按标签页保存
+- 群组广播支持 `@all` 和 `@所有人`；私聊会直接通知另一位成员，无需 @ 提及
 - 通知以 `<notification>…</notification>` 包裹；V2 steer 持久会话，V1 使用异步 prompt
-- 增量阅读水位：`poll` 返回未读消息；通知投递失败后仍可重试。V1 的异步接受不保证通知已持久化送达。
+- 增量阅读水位：`poll` 返回未读消息；消息投递失败后仍可重试。V1 的异步接受不保证通知已持久化送达。
 - 两种部署模式：**单机模式**（本地 SQLite，零配置）与**中心模式**（一个 HTTP 服务 + 每个客户端一个环境变量）
 - 规范化 SQLite 持久化、事务式迁移旧 JSON，并保留完整追加式消息历史
 
@@ -53,15 +55,19 @@ SQLite WAL 需要本地文件系统。不要把单机状态放在 NFS/SMB 等网
 - 读新消息：`room poll <房间ID>`——只返回未读部分，或者干脆等推送
 - 其他：`room list` / `room members <房间ID>` / `room leave <房间ID>`
 
+群组中可用 `@all` 或 `@所有人` 寻址其他成员。私聊会直接通知另一位成员，无需 @ 提及。
+
 推送通知使用宿主支持的传输方式。V1 通知是普通异步 prompt；V2 通知通过持久会话 API steer。两者都只有在宿主接受通知后才推进未读水位。V2 steer 会在安全边界生效，并非即时打断，也不保证正在阻塞的任务一定能够移至后台。
 
-V2 在观察到通知时都会 steer 会话。收到明确提及房间注册名称的消息（例如 `@alice`）时，还会先尝试将该会话中正在阻塞的 shell 或子 agent 工作移至后台。此操作只针对当前 OpenCode 进程：插件发现当前操作系统用户注册的服务，并在调用前验证进程 PID 和版本。没有符合条件的服务或后台操作失败时，仍会 steer。会话仍需加入房间才能收到通知；OpenCode 未运行时，watcher 只会恢复明确被提及的会话。插件不会启动服务或扫描端口，移至后台的任务也不会被取消。消息每五秒轮询一次，并非即时推送。
+V2 在观察到通知时都会 steer 会话。对于符合条件的提及（例如 `@alice`、`@all` 或 `@所有人`）及私聊，插件会在 steer 前尝试一次尽力而为的后台操作。OpenCode 提供的是会话级后台接口，并非与某个 shell 或子 agent 任务原子绑定的操作，因此无法保证具体移走哪项活动任务。插件只会调用当前操作系统用户注册、且已验证 PID 和版本的 OpenCode 服务。失败会记入诊断信息，但不会阻止 steer；消息投递重试与后台操作无关。后台操作不会取消任务，成功也不保证任务完成。会话仍需加入房间才能收到通知；OpenCode 未运行时，watcher 只会恢复明确收到寻址的会话。插件不会启动服务或扫描端口。消息每五秒轮询一次，并非即时推送。
 
 对于直接请求，通知会要求 agent 先在原房间发送一次简短确认，再开始处理，之后可发送有用的进度更新和最终回复。例行确认、状态或成员变更、系统消息及普通广播不需要确认。提示中包含房间 ID，确保回复发往正确房间。
 
 ### V2 常驻 watcher
 
 运行 `opencode-chat-room watch start`，即可在关闭加载插件的项目后继续轮询 V2 消息。Watcher 使用当前用户已注册的 OpenCode 服务及已加入房间的所有者绑定，不会启动 OpenCode。中心模式下会继承执行该命令时的 `CHAT_ROOM_SERVER_URL` 和 `CHAT_ROOM_SERVER_TOKEN`。服务离线时，watcher 会继续运行并重试。`watch status` 检查经过认证的本机回环控制接口，`watch stop` 会优雅停止，`watch run` 则在前台运行。可手动启动，也可交由操作系统的进程管理器监督；包不会安装开机启动服务，也不会在消息收发时自动启动 watcher。私有控制状态和跨进程投递租约保存在用户的 XDG 状态目录中。若状态显示控制文件无法读取，请确认 watcher 已停止后，仅删除该用户的 `watch-*.json`；默认目录为 `~/.local/state/opencode/chat-room`。
+
+OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。Watcher 维持消息投递轮询，但不会阻止项目服务卸载；它只会恢复被 `@昵称`、`@all`、`@所有人` 或私聊寻址的已加入会话。Watcher 需要显式启动。OpenCode 服务离线时会持续重试，并在服务恢复后继续；它不会发送虚构消息或调用模型来保持会话活跃。
 
 ## 中心模式（多主机）
 
@@ -71,17 +77,17 @@ V2 在观察到通知时都会 steer 会话。收到明确提及房间注册名�
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.3 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.0 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.2.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.2.3 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.2.3 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.3.0 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.3.0 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.2.3
+  bunx @alexsun-top/opencode-chat-room@0.3.0
 
 # 本地 checkout：
 bun install
@@ -89,6 +95,14 @@ bun run server
 ```
 
 在浏览器打开 `http://<服务器IP>:4399/chat`，即可加入或创建房间并与 agent 聊天。若设置了 token，请在页面设置中填入。
+
+### 浏览器聊天
+
+侧栏切换房间只切换当前视图，不会离开已加入的房间。私聊由你在成员列表中选中的已注册会话创建。每个标签页分别保存已加入房间、草稿和阅读位置，并在各自标签页中跟踪未读计数；这些只是标签页级的便捷状态，并非账户身份。若浏览器阻止标签页存储，生成的会话身份只在当前页面生命周期内有效。
+
+聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
+
+中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
 
 每台客户端机器上：
 
@@ -118,6 +132,7 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 - **单机模式**：V1 向已注册会话的服务发送异步 prompt；V2 轮询共享本地状态，并通过持久会话 API steer 通知。只有宿主接受通知后才推进水位。
 - **中心模式**：会话拉取 inbox（`GET /inbox?sessionID=…`），并通过宿主 API steer `<notification>`。消息按房间分组；V1 异步接受或 V2 成功接收后，才推进该房间的投递水位。
 - 单机 V1 HTTP 推送尝试会追加到 `notify.log`（`OK <状态码> <URL>` / `FAIL <原因>`）；V2 推送目前不会写入该日志。
+- 每条符合条件的通知只尝试一次后台操作。失败会写入进程诊断信息，但不会阻止 steer；消息投递重试与后台操作无关。会话级接口无法保证移走特定任务，后台操作也不会取消现有工作。
 
 ## 工具参考
 
@@ -139,4 +154,5 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 - 同一台机器的会话共享 `user@host` 身份；用不同的 `name` 加入以区分成员。
 - 中心服务器不设 `CHAT_ROOM_SERVER_TOKEN` 时无认证——任何能访问端口的人都能读写房间。服务端另有输入限制：房间/成员名 ≤ 64 字符、消息文本 ≤ 2000 字符（超限返回 400）。
 - SQLite 持续保留历史消息，不自动删除。500 条只是内存工作窗口，不是磁盘保留上限；未读消息和历史记录均分页读取。请定期备份数据库。
+- 仅包含某个过渡开发版重试记录的安装会受影响：若旧后台重试记录无法恢复消息时间戳，迁移会采取保守处理，永久停用该服务/房间的后台操作；正常通知 steer 仍会继续。
 - `notify.log` 会持续增长，暂无轮转。

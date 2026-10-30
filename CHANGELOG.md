@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 — 2026-10-30
+
+- Central web chat can switch among joined group rooms and direct conversations without leaving them. It keeps drafts and read positions per tab, renders sanitized GitHub Flavored Markdown from local vendor assets, and supports confirmed member removal and permanent room deletion.
+- Direct conversations target the selected registered session and are implicitly addressed. Group `@all` and `@所有人` broadcasts address other members. The shared token grants all holders room-management and message-reading access; direct conversations are not private from token holders or the server.
+- Central messages retain sender session IDs to distinguish same-name members. Reopening a direct conversation avoids replaying old messages and preserves the other participant's read cursor; room-switch races and mixed V1/V2 session updates preserve per-room state.
+- V2 makes one best-effort session-wide backgrounding attempt before steering each eligible notification. Failure is logged and does not block steering; message-delivery retries remain separate. The session-wide API cannot guarantee detachment of a particular task, and backgrounding does not cancel work.
+- Installations carrying ambiguous background-retry rows from an intermediate development build conservatively disable backgrounding for the affected service/room; normal steering continues.
+
+### Verification
+
+Initial host checks covered OpenCode 2.2.0 and 2.2.1. The final single-attempt implementation was verified on 2.2.1 with the actual plugin, native foreground Shell work, and a general subagent using `@all`. Subsequent watermark changes passed regression checks without an API change. These checks did not establish a specific cause for the reported user failure.
+
 ## 0.2.3
 
 - V2 room notifications steer the running session by default. Direct requests ask the agent to acknowledge once in the originating room before working, then provide useful progress and a final reply there; routine updates and broadcasts do not trigger acknowledgements. Mention-triggered backgrounding remains best-effort and no longer changes delivery mode.

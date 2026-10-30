@@ -4,21 +4,26 @@ import type { Message } from "./room-service";
 import {
   formatNotificationLines,
   loadRegistry,
+  loadRooms,
   NOTIFY_INSTRUCTION,
   statePath,
   timeOf,
 } from "./store";
-import { sendAsyncNotification, sendQueue, type QueueTransport } from "./queue-transport";
-import { explicitlyMentions } from "./mentions";
+import { backgroundResult, backgroundServiceKey, sendAsyncNotification, sendQueue, type BackgroundResult, type QueueTransport } from "./queue-transport";
+import { explicitlyAddresses } from "./mentions";
+import { claimBackgroundAttempt } from "./receiver-state";
 import { serializeSessionPush } from "./center-inbox";
 import {
   getOrCreatePendingAdmission,
+  clearPendingAdmission,
   markPendingAdmissionAdmitted,
   pendingAdmission,
   rejectPendingAdmission,
+  prunePendingAdmission,
+  type QueueItem,
 } from "./queue";
 
-type NotifyBatch = { roomId: string; roomName: string; messages: Message[] };
+type NotifyBatch = { roomId: string; roomName: string; roomKind?: "group" | "direct"; messages: Message[] };
 type NotifyAttempt = { url: string; status: number };
 type TargetQueue = { latest?: NotifyBatch; latestTs: number; running: Promise<NotifyAttempt[]> };
 
@@ -40,6 +45,21 @@ export function createNotifier(deps: {
     await fs.appendFile(notifyPath(), lines.join("\n") + "\n", "utf8").catch(() => {});
   }
 
+  function render(batch: NotifyBatch, name: string, roomKind: "group" | "direct", items: QueueItem[]) {
+    const { lines, capped } = formatNotificationLines(items);
+    const context = roomKind === "direct" ? `Direct conversation with ${name} in room ${batch.roomName} (${batch.roomId})` : `New messages in room ${batch.roomName} (${batch.roomId})`;
+    return { prompt: `<notification>\n${context}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`, capped };
+  }
+
+  async function tryBackground(transport: QueueTransport, sessionID: string) {
+    try { return backgroundResult(await transport.backgroundSession!(sessionID)); }
+    catch { return { status: "failed" as const, reason: "request-threw" }; }
+  }
+
+  function logBackgroundResult(roomId: string, status: string, reason?: string) {
+    if (status !== "done") console.warn(`[chat-room] background ${status} room=${roomId} reason=${reason ?? "unknown"}`);
+  }
+
   async function notifyTarget(
     sessionID: string,
     batch: NotifyBatch,
@@ -54,25 +74,37 @@ export function createNotifier(deps: {
     batch: NotifyBatch,
     transport: QueueTransport,
   ): Promise<NotifyAttempt | undefined> {
-    const entry = (await loadRegistry())[batch.roomId]?.[sessionID];
+    const [registry, rooms] = await Promise.all([loadRegistry(), loadRooms()]);
+    const entry = registry[batch.roomId]?.[sessionID];
+    const roomKind = batch.roomKind ?? rooms.find((room) => room.id === batch.roomId)?.kind ?? "group";
     if (!entry || (entry.protocol !== "v2" && !entry.serverUrl)) return undefined;
+    const protocol = entry.protocol ?? "v1";
+    if (protocol !== (transport.protocol ?? "v1") && !(transport.protocol === "v2" && protocol === "v1")) return undefined;
     const mentionOnly = transport.mentionOnlySessions?.has(sessionID) ?? false;
-    if (transport.protocol === "v2" && entry.receiverOwnerID &&
-      (entry.protocol !== "v2" || entry.receiverOwnerID !== transport.receiverOwnerID)) return undefined;
+    if (protocol === "v2" && (transport.protocol !== "v2" || entry.receiverOwnerID !== transport.receiverOwnerID)) return undefined;
     if (mentionOnly && (entry.protocol !== "v2" || entry.receiverOwnerID !== transport.receiverOwnerID)) return undefined;
+    const targetTransport = {
+      ...transport,
+      protocol,
+      serverUrl: entry.serverUrl,
+      directory: entry.directory ?? transport.directory,
+    };
+    const service = backgroundServiceKey(targetTransport);
+    const cutoff = Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0);
+    prunePendingAdmission(sessionID, batch.roomId, cutoff, (items) => render(batch, entry.name, roomKind, items));
     const unread = batch.messages.filter((m) =>
-      m.createdAt > Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0) &&
-      (m.senderSessionID !== undefined ? m.senderSessionID !== sessionID : m.senderId !== entry.name),
-    ).slice(0, 20);
-    if (!unread.length) return undefined;
-    const maxTs = unread.reduce((max, m) => Math.max(max, m.createdAt), 0);
+      m.createdAt > cutoff &&
+      (m.senderSessionID !== undefined ? m.senderSessionID !== sessionID : m.senderId !== (roomKind === "direct" ? sessionID : entry.name)),
+    ).slice(0, 20).map((item) => ({ ...item, roomKind }));
     const existing = pendingAdmission(sessionID, batch.roomId);
+    if (!unread.length && existing?.state !== "pending") return undefined;
+    const maxTs = unread.reduce((max, m) => Math.max(max, m.createdAt), 0);
     const delta = existing?.state === "admitted" && maxTs > existing.maxTs
       ? unread.filter((m) => m.createdAt > existing.maxTs)
       : unread;
     const eligibleItems = existing?.state === "pending" ? existing.items : delta.slice(-20);
-    if (mentionOnly && !eligibleItems.some((message) => explicitlyMentions(message, entry.name, sessionID)) &&
-      !delta.slice(-20).some((message) => explicitlyMentions(message, entry.name, sessionID))) return undefined;
+    if (mentionOnly && !eligibleItems.some((message) => explicitlyAddresses(message, entry.name, sessionID, roomKind)) &&
+      !delta.slice(-20).some((message) => explicitlyAddresses(message, entry.name, sessionID, roomKind))) return undefined;
     const base = entry.serverUrl ? new URL(entry.serverUrl) : undefined;
     const prefix = entry.protocol === "v2" ? (entry.apiPrefix || "/api").replace(/^\/+|\/+$/g, "") : "";
     const endpoint = entry.protocol === "v2" ? "prompt" : "prompt_async";
@@ -82,8 +114,7 @@ export function createNotifier(deps: {
       if (existing.maxTs > 0) await deps.bumpQueued(batch.roomId, sessionID, existing.maxTs);
       return { url, status: entry.protocol === "v2" ? 200 : 204 };
     }
-    const { lines, capped } = formatNotificationLines(delta);
-    const prompt = `<notification>\nNew messages in room ${batch.roomName} (${batch.roomId}):\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+    const { prompt, capped } = render(batch, entry.name, roomKind, delta);
     const deltaTs = delta.reduce((max, m) => Math.max(max, m.createdAt), 0);
     const admission = getOrCreatePendingAdmission(
       sessionID, batch.roomId, delta, prompt, deltaTs, capped,
@@ -92,14 +123,29 @@ export function createNotifier(deps: {
       await deps.bumpQueued(batch.roomId, sessionID, admission.maxTs);
       return { url, status: entry.protocol === "v2" ? 200 : 204 };
     }
-    const targetTransport = {
-      ...transport,
-      serverUrl: entry.serverUrl,
-      directory: entry.directory ?? transport.directory,
-    };
-    const mentioned = entry.protocol === "v2" && admission.items.some((message) => explicitlyMentions(message, entry.name, sessionID));
-    if (mentioned && targetTransport.backgroundSession) {
-      try { await targetTransport.backgroundSession(sessionID); } catch { /* Steering does not depend on backgrounding. */ }
+    const addressedTs = admission.items.filter((message) => explicitlyAddresses(message, entry.name, sessionID, roomKind))
+      .reduce((max, message) => Math.max(max, message.createdAt), 0);
+    if (entry.protocol === "v2" && addressedTs > 0 && targetTransport.backgroundSession && claimBackgroundAttempt(
+      sessionID, batch.roomId, service, addressedTs,
+    )) {
+      const attempt = await tryBackground(targetTransport, sessionID);
+      logBackgroundResult(batch.roomId, attempt.status, attempt.reason);
+    }
+    const [currentRegistry, currentRooms] = await Promise.all([loadRegistry(), loadRooms()]);
+    const currentEntry = currentRegistry[batch.roomId]?.[sessionID];
+    const currentKind = currentRooms.find((room) => room.id === batch.roomId)?.kind ?? "group";
+    if (!currentEntry || (currentEntry.protocol ?? "v1") !== protocol || currentEntry.serverUrl !== entry.serverUrl ||
+      currentEntry.directory !== entry.directory ||
+      (protocol === "v2" && currentEntry.receiverOwnerID !== transport.receiverOwnerID) || currentKind !== roomKind) {
+      rejectPendingAdmission(sessionID, batch.roomId, admission.id);
+      clearPendingAdmission(sessionID, batch.roomId, Number.MAX_SAFE_INTEGER);
+      return undefined;
+    }
+    const currentCutoff = Math.max(currentEntry.lastReadTs ?? 0, currentEntry.lastQueuedTs ?? 0);
+    const currentAdmission = prunePendingAdmission(sessionID, batch.roomId, currentCutoff,
+      (items) => render(batch, entry.name, roomKind, items));
+    if (!currentAdmission || currentAdmission.id !== admission.id) {
+      return notifyTargetUnlocked(sessionID, batch, transport);
     }
     const result = entry.protocol === "v2"
       ? await sendQueue(targetTransport, sessionID, admission.prompt, admission.id, "steer")

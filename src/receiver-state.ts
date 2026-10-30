@@ -5,6 +5,56 @@ import path from "node:path";
 
 const databases = new Map<string, Database>();
 const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function initialize(db: Database): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      db.exec("PRAGMA journal_mode=WAL; BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS delivery_leases(session_id TEXT PRIMARY KEY,holder TEXT NOT NULL,expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS pending_admissions(session_id TEXT NOT NULL,room_id TEXT NOT NULL,admission TEXT NOT NULL,expires_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(session_id,room_id)); CREATE INDEX IF NOT EXISTS pending_admissions_expiry ON pending_admissions(expires_at); CREATE TABLE IF NOT EXISTS background_attempted_through(session_id TEXT NOT NULL,room_id TEXT NOT NULL,service TEXT NOT NULL,through_ts INTEGER NOT NULL,PRIMARY KEY(session_id,room_id,service)); CREATE TABLE IF NOT EXISTS watcher_claims(identity TEXT PRIMARY KEY,instance_id TEXT NOT NULL,pid INTEGER NOT NULL);");
+      migrateLegacyBackgroundAttempts(db);
+      db.exec("COMMIT");
+      return;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* No transaction remained open. */ }
+      const err = error as { code?: string };
+      if (!/SQLITE_(BUSY|LOCKED)/.test(err.code ?? "") || attempt >= 7) throw error;
+      pause(Math.min(20 * 2 ** attempt, 250));
+    }
+  }
+}
+
+function migrateLegacyBackgroundAttempts(db: Database): void {
+  const tables = db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
+  const names = new Set(tables.map((table) => table.name));
+  if (names.has("background_attempts")) {
+    const rows = db.query("SELECT session_id,room_id,service,admission_id FROM background_attempts").all() as Array<{ session_id: string; room_id: string; service: string; admission_id: string }>;
+    for (const row of rows) {
+      const pending = db.query("SELECT admission FROM pending_admissions WHERE session_id=? AND room_id=?").get(row.session_id, row.room_id) as { admission: string } | null;
+      let through = Number.MAX_SAFE_INTEGER;
+      try {
+        const value = pending ? JSON.parse(pending.admission) as { id?: string; maxTs?: number } : undefined;
+        if (value?.id === row.admission_id && Number.isSafeInteger(value.maxTs) && value.maxTs! > 0) through = value.maxTs!;
+      } catch { /* Ambiguous old claims stay fail-closed. */ }
+      saveBackgroundWatermark(db, row.session_id, row.room_id, row.service, through);
+    }
+    db.exec("DROP TABLE background_attempts");
+  }
+  if (names.has("background_retries")) {
+    const columns = db.query("PRAGMA table_info(background_retries)").all() as Array<{ name: string }>;
+    const hasTrigger = columns.some((column) => column.name === "trigger_ts");
+    const query = hasTrigger
+      ? "SELECT session_id,room_id,service,trigger_ts AS trigger FROM background_retries"
+      : "SELECT session_id,room_id,service,0 AS trigger FROM background_retries";
+    const rows = db.query(query).all() as Array<{ session_id: string; room_id: string; service: string; trigger: number }>;
+    for (const row of rows) saveBackgroundWatermark(db, row.session_id, row.room_id, row.service,
+      Number.isSafeInteger(row.trigger) && row.trigger > 0 ? row.trigger : Number.MAX_SAFE_INTEGER);
+    db.exec("DROP TABLE background_retries");
+  }
+}
+
+function saveBackgroundWatermark(db: Database, sessionID: string, roomID: string, service: string, throughTs: number): void {
+  db.query("INSERT INTO background_attempted_through VALUES(?,?,?,?) ON CONFLICT(session_id,room_id,service) DO UPDATE SET through_ts=max(through_ts,excluded.through_ts)")
+    .run(sessionID, roomID, service, throughTs);
+}
+
 export function receiverStateDirectory(): string {
   const configured = process.env.XDG_STATE_HOME;
   const base = configured && path.isAbsolute(configured) ? configured : path.join(os.homedir(), ".local", "state");
@@ -18,7 +68,8 @@ function database(): Database {
   chmodSync(path.dirname(file), 0o700);
   db = new Database(file, { create: true });
   chmodSync(file, 0o600);
-  db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=100; CREATE TABLE IF NOT EXISTS delivery_leases(session_id TEXT PRIMARY KEY,holder TEXT NOT NULL,expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS pending_admissions(session_id TEXT NOT NULL,room_id TEXT NOT NULL,admission TEXT NOT NULL,expires_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(session_id,room_id)); CREATE INDEX IF NOT EXISTS pending_admissions_expiry ON pending_admissions(expires_at); CREATE TABLE IF NOT EXISTS watcher_claims(identity TEXT PRIMARY KEY,instance_id TEXT NOT NULL,pid INTEGER NOT NULL);");
+  try { db.exec("PRAGMA busy_timeout=100"); initialize(db); }
+  catch (error) { db.close(); throw error; }
   databases.set(file, db);
   return db;
 }
@@ -51,6 +102,12 @@ export function savePendingAdmission(sessionID: string, roomID: string, value: u
 }
 export function deletePendingAdmission(sessionID: string, roomID: string): void {
   immediate((db) => db.query("DELETE FROM pending_admissions WHERE session_id=? AND room_id=?").run(sessionID, roomID));
+}
+
+export function claimBackgroundAttempt(sessionID: string, roomID: string, service: string, throughTs: number): boolean {
+  return immediate((db) => Number.isSafeInteger(throughTs) && throughTs > 0 &&
+    db.query("INSERT INTO background_attempted_through VALUES(?,?,?,?) ON CONFLICT(session_id,room_id,service) DO UPDATE SET through_ts=excluded.through_ts WHERE excluded.through_ts>background_attempted_through.through_ts")
+      .run(sessionID, roomID, service, throughTs).changes === 1);
 }
 
 export function acquireDeliveryLease(sessionID: string, holder: string, now: number, expiresAt: number): boolean {

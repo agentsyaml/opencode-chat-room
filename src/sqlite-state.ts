@@ -27,12 +27,13 @@ async function initialize(file: string): Promise<Database> {
       try {
         db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=50; PRAGMA foreign_keys=ON;");
         db.exec(`CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY,name TEXT NOT NULL,owner_id TEXT NOT NULL,created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY,name TEXT NOT NULL,owner_id TEXT NOT NULL,created_at INTEGER NOT NULL,kind TEXT NOT NULL DEFAULT 'group',direct_sessions TEXT,direct_pair TEXT UNIQUE);
     CREATE TABLE IF NOT EXISTS participants(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,id TEXT NOT NULL,name TEXT NOT NULL,joined_at INTEGER NOT NULL,PRIMARY KEY(room_id,id));
     CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,sender_id TEXT NOT NULL,sender_session_id TEXT,text TEXT NOT NULL,created_at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS messages_room_seq ON messages(room_id,seq DESC);
     CREATE INDEX IF NOT EXISTS messages_room_time ON messages(room_id,created_at,seq);
     CREATE TABLE IF NOT EXISTS registry(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,session_id TEXT NOT NULL,server_url TEXT NOT NULL,api_prefix TEXT NOT NULL,protocol TEXT,name TEXT NOT NULL,last_read_ts INTEGER,last_queued_ts INTEGER,directory TEXT,host TEXT,receiver_owner_id TEXT,PRIMARY KEY(room_id,session_id));`);
+        await ensureRoomColumns(db);
         await migrate(db, file);
         return db;
       } catch (error) {
@@ -41,6 +42,16 @@ async function initialize(file: string): Promise<Database> {
       }
     }
   } catch (error) { db.close(); throw error; }
+}
+
+async function ensureRoomColumns(db: Database): Promise<void> {
+  await immediate(db, () => {
+    const columns = db.query("PRAGMA table_info(rooms)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "kind")) db.exec("ALTER TABLE rooms ADD COLUMN kind TEXT NOT NULL DEFAULT 'group'");
+    if (!columns.some((column) => column.name === "direct_sessions")) db.exec("ALTER TABLE rooms ADD COLUMN direct_sessions TEXT");
+    if (!columns.some((column) => column.name === "direct_pair")) db.exec("ALTER TABLE rooms ADD COLUMN direct_pair TEXT");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS rooms_direct_pair ON rooms(direct_pair) WHERE direct_pair IS NOT NULL");
+  });
 }
 
 function readLegacy(file: string): unknown | undefined {
@@ -139,7 +150,7 @@ function validateRegistry(value: unknown): Registry {
 }
 
 function insertRoom(db: Database, room: Room): void {
-  db.query("INSERT INTO rooms VALUES(?,?,?,?)").run(room.id, room.name, room.ownerId, room.createdAt);
+  db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair) VALUES(?,?,?,?,?,?,?)").run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null);
   const participant = db.query("INSERT INTO participants VALUES(?,?,?,?)");
   for (const p of room.participants.values()) participant.run(room.id, p.id, p.name, p.joinedAt);
   const message = db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at) VALUES(?,?,?,?,?,?)");
@@ -156,12 +167,16 @@ function replaceRegistry(db: Database, registry: Registry): void {
 }
 
 function persistState(db: Database, rooms: Room[], registry: Registry): void {
-  const roomRow = db.query("INSERT INTO rooms VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,owner_id=excluded.owner_id,created_at=excluded.created_at");
+  const roomRow = db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,owner_id=excluded.owner_id,created_at=excluded.created_at,kind=excluded.kind,direct_sessions=excluded.direct_sessions,direct_pair=excluded.direct_pair");
   const participant = db.query("INSERT INTO participants VALUES(?,?,?,?)");
   const message = db.query("INSERT OR IGNORE INTO messages(id,room_id,sender_id,sender_session_id,text,created_at) VALUES(?,?,?,?,?,?)");
   const removeParticipants = db.query("DELETE FROM participants WHERE room_id=?");
+  const keep = new Set(rooms.map((room) => room.id));
+  const existing = db.query("SELECT id FROM rooms").all() as Array<{ id: string }>;
+  const deleteRoom = db.query("DELETE FROM rooms WHERE id=?");
+  for (const row of existing) if (!keep.has(row.id)) deleteRoom.run(row.id);
   for (const room of rooms) {
-    roomRow.run(room.id, room.name, room.ownerId, room.createdAt);
+    roomRow.run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null);
     removeParticipants.run(room.id);
     for (const p of room.participants.values()) participant.run(room.id, p.id, p.name, p.joinedAt);
     for (const m of room.messages) message.run(m.id, room.id, m.senderId, m.senderSessionID ?? null, m.text, m.createdAt);
@@ -170,14 +185,14 @@ function persistState(db: Database, rooms: Room[], registry: Registry): void {
 }
 
 function readState(db: Database): State {
-  const roomRows = db.query("SELECT id,name,owner_id,created_at FROM rooms ORDER BY created_at,id").all() as Array<Record<string, string | number>>;
+  const roomRows = db.query("SELECT id,name,owner_id,created_at,kind,direct_sessions,direct_pair FROM rooms ORDER BY created_at,id").all() as Array<Record<string, string | number | null>>;
   const rooms = roomRows.map((r): Room => {
     const participants = new Map<string, Participant>();
     for (const p of db.query("SELECT id,name,joined_at FROM participants WHERE room_id=?").all(String(r.id)) as Array<Record<string, string | number>>) {
       participants.set(String(p.id), { id: String(p.id), name: String(p.name), joinedAt: Number(p.joined_at) });
     }
     const messages = db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 500").all(String(r.id)) as Array<Record<string, string | number | null>>;
-    return { id: String(r.id), name: String(r.name), ownerId: String(r.owner_id), createdAt: Number(r.created_at), participants,
+    return { id: String(r.id), name: String(r.name), ownerId: String(r.owner_id), createdAt: Number(r.created_at), kind: r.kind === "direct" ? "direct" : "group", ...(r.direct_sessions ? { directSessionIDs: JSON.parse(String(r.direct_sessions)) as string[] } : {}), ...(r.direct_pair ? { directPair: String(r.direct_pair) } : {}), participants,
       messages: messages.reverse().map((m) => ({ id: String(m.id), roomId: String(m.room_id), senderId: String(m.sender_id),
         text: String(m.text), createdAt: Number(m.created_at), ...(m.sender_session_id ? { senderSessionID: String(m.sender_session_id) } : {}) })) };
   });
@@ -230,7 +245,7 @@ export async function readInboxPage(file: string, sessionID: string, roomFilter:
   return db.transaction(() => {
   const take = Math.min(200, Math.max(1, limit));
   const members = db.query("SELECT room_id,last_queued_ts FROM registry WHERE session_id=? AND (? IS NULL OR room_id=?)").all(sessionID, roomFilter, roomFilter) as Array<{ room_id: string; last_queued_ts: number | null }>;
-  const rows = db.query(`SELECT m.id,m.room_id,m.sender_id,m.sender_session_id,m.text,m.created_at,r.name AS room_name
+  const rows = db.query(`SELECT m.id,m.room_id,m.sender_id,m.sender_session_id,m.text,m.created_at,r.name AS room_name,r.kind AS room_kind
     FROM messages m JOIN registry g ON g.room_id=m.room_id JOIN rooms r ON r.id=m.room_id
     WHERE g.session_id=? AND (? IS NULL OR m.room_id=?) AND
     m.created_at > CASE WHEN ? THEN max(coalesce(g.last_read_ts,0),coalesce(g.last_queued_ts,0)) ELSE coalesce(g.last_read_ts,0) END AND
@@ -239,8 +254,8 @@ export async function readInboxPage(file: string, sessionID: string, roomFilter:
     excludeSelf ? 1 : 0, sessionID, take + 1) as Array<Record<string, string | number | null>>;
   const hasMore = rows.length > take;
   const items = rows.slice(0, take).map((row) => {
-    const { senderSessionID: _sessionID, ...message } = rowMessage(row);
-    return { ...message, roomName: String(row.room_name) };
+    const message = rowMessage(row);
+    return { ...message, roomName: String(row.room_name), roomKind: (row.room_kind === "direct" ? "direct" : "group") as "direct" | "group" };
   });
   const queuedTs = Object.fromEntries(members.map((member) => [member.room_id, member.last_queued_ts ?? 0]));
     return { member: members.length > 0, items, queuedTs, hasMore };

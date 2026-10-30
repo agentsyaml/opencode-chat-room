@@ -26,7 +26,7 @@ import {
   clearPendingAdmission,
 } from "./src/queue";
 import { createNotifier } from "./src/plugin-notifications";
-import { explicitlyMentions } from "./src/mentions";
+import { explicitlyAddresses } from "./src/mentions";
 import { createV2Setup, type V2Runtime } from "./src/v2-plugin";
 import { createV1Server } from "./src/v1-plugin";
 
@@ -201,14 +201,14 @@ export async function pollKnownSessions(
       if (mentionOnly && (scan.untilTs === undefined || scan.untilTs <= cursor)) {
         scan.untilTs = undefined;
         const tail = await readUnreadMessages(room.id, cursor, 20, sessionID, entry.name, true);
-        if (tail.items.some((message) => explicitlyMentions(message, entry.name, sessionID))) {
+        if (tail.items.some((message) => explicitlyAddresses(message, entry.name, sessionID, room.kind))) {
           scan.untilTs = tail.items.at(-1)!.createdAt;
           scan.afterTs = Math.max(scan.afterTs, scan.untilTs);
         } else {
           const candidates = await readUnreadMessages(room.id, scan.afterTs, 20, sessionID, entry.name);
           if (!candidates.items.length) { restoreScans.set(key, scan); continue; }
           scan.afterTs = candidates.items.at(-1)!.createdAt;
-          if (candidates.items.some((message) => explicitlyMentions(message, entry.name, sessionID))) scan.untilTs = scan.afterTs;
+          if (candidates.items.some((message) => explicitlyAddresses(message, entry.name, sessionID, room.kind))) scan.untilTs = scan.afterTs;
           restoreScans.set(key, scan);
           if (scan.untilTs === undefined) continue;
         }
@@ -219,8 +219,9 @@ export async function pollKnownSessions(
       const target = mentionOnly ? { ...transport, mentionOnlySessions: new Set([...transport.mentionOnlySessions!].filter((id) => id !== sessionID)) } : transport;
       await notifyTarget(sessionID, {
         roomId: room.id,
-        roomName: room.name,
-        messages: page.items,
+          roomName: room.name,
+          roomKind: room.kind ?? "group",
+          messages: page.items,
       }, target);
       if (mentionOnly && scan.untilTs !== undefined) {
         const queued = (await loadRegistry())[room.id]?.[sessionID]?.lastQueuedTs ?? cursor;
