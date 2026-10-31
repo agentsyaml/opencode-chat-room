@@ -64,16 +64,23 @@
   .panel .btn { margin-top: 10px; }
   #memberList { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
   #memberList li {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px 8px;
     padding: 7px 0;
     border-bottom: 1px solid var(--line);
     font-size: 14px;
   }
+  #memberList li > span:first-child { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
+  #memberList .member-actions { grid-column: 1 / -1; justify-content: flex-end; flex-wrap: wrap; }
+  #memberList .member-activity + .member-actions { grid-column: 2; grid-row: 2; }
+  #memberList .member-action { white-space: normal; }
   #memberList li:last-child { border-bottom: none; }
   .m-time { font-size: 11.5px; color: var(--ink-3); }
+  .member-activity { flex: none; padding: 2px 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 10px; }
+  .member-activity.working { color: var(--accent); background: var(--accent-soft); }
+  .member-activity.offline { color: var(--danger); background: var(--danger-soft); }
 
   .conn-bar {
     display: flex;
@@ -99,10 +106,11 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overflow-anchor: none;
     overscroll-behavior: contain;
     padding: 22px 22px 6px;
   }
-  #msgList { list-style: none; margin: 0; padding: 0; }
+  #msgList { width: min(100%, 940px); list-style: none; margin: 0 auto; padding: 0; }
 
   .thread, #roomList, #memberList {
     scrollbar-width: thin;
@@ -173,6 +181,12 @@
     overflow-wrap: anywhere;
   }
   .msg.own .msg-text { background: var(--accent-soft); border-bottom-left-radius: 14px; border-bottom-right-radius: 4px; }
+  .message-readers { margin-top: 4px; color: var(--ink-3); font-size: 11px; }
+  .message-readers summary { cursor: pointer; }
+  .receipt-reader-list { margin: 4px 0 0; padding: 5px 8px; list-style: none; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .receipt-reader-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
+  .receipt-reader-list li + li { margin-top: 4px; }
+  .receipt-reader-list li span:last-child { color: var(--ink-3); }
 
   /* Markdown content */
   .msg-text p, .msg-text pre, .msg-text blockquote, .msg-text ul, .msg-text ol { margin: 0; }

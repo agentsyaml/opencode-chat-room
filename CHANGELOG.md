@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 — 2026-10-31
+
+- Added owner-sequenced V2 foreground presence and exact per-message receipts with `displayed`, `tool`, and `context` evidence. Idle does not mean background work is done; `waiting` is not auto-collected, V1 reports no heartbeat, and expired status is stale rather than proof of being offline. Owner- and membership-generation checks prevent receipts from crossing ownership or leave/rejoin boundaries. Capped previews do not count as full-message evidence.
+- Added the member and receipt APIs and SQLite schema for membership generations, presence, and message receipts. Migrations preserve message history and do not invent receipts from old read or queued cursors.
+- Improved chat scroll anchoring and layout. Made pending-admission reads lock-free to reduce plugin/watcher contention.
+- Verified against OpenCode 2.2.1 source and in an isolated runtime; this does not verify every supported OpenCode version.
+- Upgrade the central server and each client plugin separately; no automatic server deployment or service configuration changes occur.
+- Known issue: a report of users being unable to select their own text in Edge on macOS and Windows remains unverified. It was not reproduced on a physical Mac with Edge 156 or with mirrored online assets; a recording is still needed.
+
 ## 0.3.0 — 2026-10-30
 
 - Central web chat can switch among joined group rooms and direct conversations without leaving them. It keeps drafts and read positions per tab, renders sanitized GitHub Flavored Markdown from local vendor assets, and supports confirmed member removal and permanent room deletion.

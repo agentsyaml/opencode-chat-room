@@ -18,6 +18,7 @@ import { isReceiverOwnerID } from "../src/receiver-owner";
 import { claimWake, touchActive, wakeMentionedSessions } from "./wake";
 import { historyRoute } from "./history-route";
 import { roomManagement } from "./newrooms";
+import { memberRoutes } from "./member-routes";
 
 function parsePort(value: string): number {
   const port = Number(value);
@@ -147,6 +148,8 @@ async function handle(req: Request): Promise<Response> {
       const rooms = await read((svc) => svc.listRooms().filter((room) => room.kind !== "direct" ? true : !!caller && room.directSessionIDs?.includes(caller)));
       return json(rooms.map(serializeRoom));
     }
+    const members = await memberRoutes(req, url);
+    if (members) return members;
     const management = await roomManagement(req, url);
     if (management) return management;
     if (req.method === "POST" && p === "/rooms") {
@@ -213,38 +216,6 @@ async function handle(req: Request): Promise<Response> {
         result = await readInbox(sessionID, roomFilter, excludeSelf);
       }
       return json(result);
-    }
-    if (req.method === "POST" && p === "/read") {
-      // ponytail: trusted-client-only — any caller can advance any session's
-      // watermark (sessionIDs are unguessable UUIDs and never exposed);
-      // accepted as a limitation until real session auth exists
-      const body = (await req.json()) as Record<string, unknown>;
-      const ts = Number(body.ts);
-      const roomId = String(body.roomId ?? "");
-      const sessionID = String(body.sessionID ?? "");
-      if (
-        body.ts === undefined ||
-        body.ts === null ||
-        !roomId ||
-        !sessionID ||
-        !Number.isFinite(ts)
-      ) {
-        return json({ error: "roomId/sessionID/finite ts are required" }, 400);
-      }
-      const updated = await writeState((_svc, reg) => {
-        const entry = reg[roomId]?.[sessionID];
-        if (!entry) {
-          return false;
-        }
-        entry.lastReadTs = Math.max(entry.lastReadTs ?? 0, ts);
-        return true;
-      });
-      if (!updated) {
-        return json({ error: "registry entry not found" }, 404);
-      }
-      clearPendingAdmission(sessionID, roomId, ts);
-      touchActive(sessionID); // poll 推进 = 活跃
-      return json({ ok: true });
     }
     if (req.method === "POST" && p === "/queued") {
       const body = (await req.json()) as Record<string, unknown>;
@@ -353,9 +324,9 @@ async function handle(req: Request): Promise<Response> {
             serverUrl: "",
             apiPrefix: "/api",
             ...(body.protocol === "v2" ? { protocol: "v2" as const } : {}),
-            ...(prevEntry?.receiverOwnerID ? { receiverOwnerID: prevEntry.receiverOwnerID } : {}),
             ...(body.protocol === "v2" && isReceiverOwnerID(body.receiverOwnerID) ? { receiverOwnerID: body.receiverOwnerID } : {}),
             name,
+            ...(prevEntry?.membershipID ? { membershipID: prevEntry.membershipID } : {}),
             directory: body.directory || undefined,
             // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行
             host: body.host ?? "",
@@ -443,6 +414,7 @@ async function handle(req: Request): Promise<Response> {
             sid,
             {
               name: e.name,
+              membershipID: e.membershipID,
               protocol: e.protocol,
               receiverOwnerID: e.receiverOwnerID,
               lastReadTs: e.lastReadTs ?? 0,

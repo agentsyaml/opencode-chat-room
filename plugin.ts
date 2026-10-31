@@ -5,6 +5,7 @@ import { z } from "zod";
 import RoomService, { RoomError, type Message } from "./src/room-service";
 import {
   formatRoom,
+  acknowledgeReadWithReceipts,
   identity,
   loadRegistry,
   loadRooms,
@@ -17,6 +18,7 @@ import {
   type Registry,
   type RegistryEntry,
 } from "./src/store";
+import { flushReceiptCandidates, receiptDestination } from "./src/agent-receipts";
 import { centerAction } from "./src/center-client";
 import { createQueueTransport, type QueueTransport } from "./src/queue-transport";
 import { checkCenterInbox } from "./src/center-inbox";
@@ -144,6 +146,14 @@ async function bumpLastRead(
   return updated;
 }
 
+export async function acknowledgeStandalonePoll(roomID: string, sessionID: string, throughTs: number,
+  messages: Message[], identityForReceipt?: { membershipID: string; receiverOwnerID?: string }): Promise<void> {
+  if (!identityForReceipt) { await bumpLastRead(roomID, sessionID, throughTs); return; }
+  if (!messages.length || !messages.every((message) => typeof message.id === "string" && message.id)) return;
+  const result = await acknowledgeReadWithReceipts(roomID, sessionID, throughTs, messages.map((message) => message.id!), "tool", identityForReceipt);
+  if (result.status === "ok") clearPendingAdmission(sessionID, roomID, result.readThroughTs ?? 0);
+}
+
 async function bumpLastQueued(
   roomId: string,
   sessionID: string,
@@ -183,6 +193,7 @@ export async function pollKnownSessions(
     await Promise.all([...sessions].map((sessionID) =>
       checkCenterInbox(opts, sessionID, transport),
     ));
+    if (transport.receiverOwnerID) await flushReceiptCandidates({ destination: receiptDestination(opts.center), receiverOwnerID: transport.receiverOwnerID, center: opts.center, token: opts.token }).catch(() => {});
     return;
   }
   const [rooms, registry] = await Promise.all([loadRooms(), loadRegistry()]);
@@ -229,6 +240,7 @@ export async function pollKnownSessions(
       }
     }
   }
+  await flushReceiptCandidates({ destination: receiptDestination(""), receiverOwnerID: transport.receiverOwnerID }).catch(() => {});
 }
 
 const READ_ONLY_ACTIONS = new Set(["list", "members", "poll"]);
@@ -269,12 +281,14 @@ const roomExecute = async (
       let leaveNameShared = false;
       let pollLastRead = 0;
       let pollEntry = false;
+      let pollIdentity: { membershipID: string; receiverOwnerID?: string } | undefined;
       let pollPage: Awaited<ReturnType<typeof readUnreadMessages>> | undefined;
       let pollMaxTs: number | undefined;
       const notifications: Array<{ roomId: string; roomName: string; messages: Message[] }> = [];
       if (args.action === "poll" && args.roomId) {
         const entry = (await loadRegistry())[args.roomId]?.[context.sessionID];
         pollEntry = entry !== undefined;
+        if (entry?.membershipID) pollIdentity = { membershipID: entry.membershipID, ...(entry.receiverOwnerID ? { receiverOwnerID: entry.receiverOwnerID } : {}) };
         selfName = entry?.name ?? selfName;
         pollLastRead = entry?.lastReadTs ?? 0;
         if (entry) pollPage = await readUnreadMessages(args.roomId, pollLastRead, 100);
@@ -419,7 +433,7 @@ const roomExecute = async (
           context.sessionID, notification.messages).catch(() => {});
       }
       if (args.action === "poll" && pollMaxTs !== undefined && pollMaxTs > 0) {
-        await bumpLastRead(args.roomId!, context.sessionID, pollMaxTs);
+        await acknowledgeStandalonePoll(args.roomId!, context.sessionID, pollMaxTs, pollPage?.items ?? [], pollIdentity);
       }
       return result;
     } catch (err) {

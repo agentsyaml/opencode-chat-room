@@ -73,7 +73,7 @@ export async function request(
   });
   const data = (await res.json().catch(() => ({}))) as Json;
   if (!res.ok) {
-    throw new Error(String(data.error ?? `center error ${res.status}`));
+    throw Object.assign(new Error(String(data.error ?? `center error ${res.status}`)), { status: res.status });
   }
   return data;
 }
@@ -201,6 +201,13 @@ export async function centerAction(
       if (!args.roomId) {
         return "error: roomId is required";
       }
+      let member: { membershipID?: string; receiverOwnerID?: string } | undefined;
+      let legacyCenter = false;
+      try {
+        const registry = await request(opts, `/rooms/${encodeURIComponent(args.roomId)}/registry`, "GET") as Record<string, { membershipID?: string; receiverOwnerID?: string }>;
+        member = registry[sessionID];
+        legacyCenter = Boolean(member && !member.membershipID);
+      } catch (error) { legacyCenter = (error as { status?: number }).status === 404; }
       const result = (await request(
         opts,
         `/inbox?sessionID=${encodeURIComponent(sessionID)}&roomId=${encodeURIComponent(args.roomId)}&excludeSelf=0`,
@@ -221,13 +228,23 @@ export async function centerAction(
       // following action cannot race the read watermark update. A failure only
       // repeats the messages, never loses them.
       const maxTs = items.reduce((mx, it) => Math.max(mx, it.createdAt), 0);
-      await request(opts, "/read", "POST", {
+      const exactIDs = items.map((item) => item.id);
+      const body = {
         roomId: args.roomId,
         sessionID,
         ts: maxTs,
-      })
-        .then(() => clearPendingAdmission(sessionID, args.roomId!, maxTs))
-        .catch(() => {});
+        ...(member?.membershipID && exactIDs.every((id) => typeof id === "string" && id)
+          ? { messageIDs: exactIDs, membershipID: member.membershipID, evidence: "tool",
+              ...(member.receiverOwnerID ? { receiverOwnerID: member.receiverOwnerID } : {}) }
+          : {}),
+      };
+      if (member?.membershipID && !exactIDs.every((id) => typeof id === "string" && id)) {
+        // Without stable IDs, do not perform an unguarded watermark update.
+      } else if (member?.membershipID || legacyCenter) {
+        await request(opts, "/read", "POST", body)
+          .then(() => clearPendingAdmission(sessionID, args.roomId!, maxTs))
+          .catch(() => {});
+      }
       return lines.join("\n") + (result.hasMore ? "\nMore unread messages remain; poll again." : "");
     }
     default:

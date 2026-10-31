@@ -25,6 +25,7 @@ describe.serial("resident V2 watcher", () => {
       discover: async () => available ? host : undefined,
       owner: async () => "owner",
       memberships: async () => new Set(["joined"]),
+      presence: async () => {},
       poll: async (ids: ReadonlySet<string>) => { expect([...ids]).toEqual(["joined"]); delivered++; },
     };
     expect(await watcherSweep(deps)).toBe(false);
@@ -32,6 +33,29 @@ describe.serial("resident V2 watcher", () => {
     available = true;
     expect(await watcherSweep(deps)).toBe(true);
     expect(delivered).toBe(1);
+  });
+
+  test("runs the shared presence reporter for joined sessions even when inbox polling is empty", async () => {
+    const host = { origin: "http://127.0.0.1:54321", pid: 42, version: "2.0.29" } as never;
+    let presence = 0, polls = 0;
+    const fetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response("missing", { status: 404 })) as unknown as typeof fetch;
+    const deps = {
+      discover: async () => host, owner: async () => "owner",
+      memberships: async () => new Set(["joined"]),
+      presence: async (ids: ReadonlySet<string>) => {
+        const { reportAgentPresence } = await import("./agent-presence");
+        presence++;
+        await reportAgentPresence({
+          host: { client: { session: { active: async () => { throw new Error("active unavailable"); } } } }, ownerID: "owner",
+          center: { center: "http://presence.invalid", token: "" }, sessionIDs: ids, current: async () => true,
+        });
+      },
+      poll: async () => { polls++; },
+    };
+    try { await watcherSweep(deps); } finally { globalThis.fetch = fetch; }
+    expect(presence).toBe(1);
+    expect(polls).toBe(1);
   });
 
   test("starts idempotently, authenticates control, and stops gracefully", async () => {

@@ -4,6 +4,7 @@ import type { QueueTransport } from "./center-client";
 import { backgroundOwnSession, discoverVerifiedHost, verifyHostSession } from "./background";
 import { receiverOwnerID } from "./receiver-owner";
 import { attachV2Receiver } from "./v2-receiver";
+import { observeReceiptContext, receiptDestination } from "./agent-receipts";
 
 type CenterOptions = { center: string; token: string; directory?: string };
 export type V2Runtime = {
@@ -41,12 +42,19 @@ export function createV2Setup(deps: {
     let toolRegistration: { dispose(): Promise<void> } | undefined;
     let commandRegistration: { dispose(): Promise<void> } | undefined;
     let promptRegistration: { dispose(): Promise<void> } | undefined;
+    let contextRegistration: { dispose(): Promise<void> } | undefined;
     let releaseReceiver: (() => void) | undefined;
 
     try {
       promptRegistration = await context.session.hook("prompt", async (input) => {
         sessions.add(input.sessionID);
         await deps.run(runtime, () => deps.observe(runtime, input.sessionID));
+      });
+      contextRegistration = await context.session.hook("context", (input) => {
+        try {
+          if (transport.receiverOwnerID) observeReceiptContext(input.sessionID, input.messages,
+            receiptDestination(runtime.center.center), transport.receiverOwnerID);
+        } catch { /* Context evidence never fails model preparation. */ }
       });
       toolRegistration = await context.tool.transform((editor) => editor.add({
         name: "room",
@@ -83,12 +91,12 @@ export function createV2Setup(deps: {
       });
     } catch (error) {
       releaseReceiver?.();
-      await dispose(toolRegistration, commandRegistration, promptRegistration);
+      await dispose(toolRegistration, commandRegistration, promptRegistration, contextRegistration);
       throw error;
     }
     return async () => {
       releaseReceiver?.();
-      await dispose(toolRegistration, commandRegistration, promptRegistration);
+      await dispose(toolRegistration, commandRegistration, promptRegistration, contextRegistration);
     };
   };
 }

@@ -3,7 +3,8 @@ import { mkdtempSync, promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { QueueTransport } from "./queue-transport";
-import { attachV2Receiver, pollOwnedSessions, pollWithMembershipFallback, receiverState } from "./v2-receiver";
+import { attachV2Receiver, groupByCenter, pollAttachmentGroup, pollAttachmentsByCenter, pollOwnedSessions, receiverState, type Attachment } from "./v2-receiver";
+import type { CenterOpts } from "./center-client";
 
 const envKeys = ["CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL", "XDG_STATE_HOME"] as const;
 const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
@@ -13,14 +14,38 @@ process.env.XDG_STATE_HOME = stateHome;
 const { createV2Setup } = await import("./v2-plugin");
 
 const noop = async () => {};
-function attach(sessions: ReadonlySet<string>) {
-  return attachV2Receiver({
-    sessions, version: "2.0.32", transport: { protocol: "v2" } satisfies QueueTransport,
-    center: { center: "", token: "" }, poll: noop,
-  });
+function attachment(sessions: ReadonlySet<string>, center: CenterOpts, poll: Attachment["poll"] = noop): Attachment {
+  return { sessions, version: "2.0.32", transport: { protocol: "v2" }, center, poll };
+}
+function attach(sessions: ReadonlySet<string>, center: CenterOpts = { center: "", token: "" }, poll = noop) {
+  return attachV2Receiver(attachment(sessions, center, poll));
 }
 
 describe("shared V2 receiver lifecycle", () => {
+  test("groups by normalized base URL and token, not just origin", () => {
+    const a = { center: { center: "https://a.invalid/api", token: "a" } };
+    const sameA = { center: { center: "https://a.invalid/api/", token: "a" } };
+    const pathA = { center: { center: "https://a.invalid/other", token: "a" } };
+    const tokenA = { center: { center: "https://a.invalid/api", token: "b" } };
+    const b = { center: { center: "https://b.invalid", token: "b" } };
+    const localA = { center: { center: "", token: "one" } }, localB = { center: { center: "", token: "two" } };
+    expect([...groupByCenter([a, sameA, pathA, tokenA, b, localA, localB]).values()].map((items) => items.length)).toEqual([2, 1, 1, 1, 2]);
+  });
+
+  test("actual grouped polling keeps same-origin center paths and tokens isolated", async () => {
+    const polls: Array<[string, string[]]> = [], lookups: string[] = [];
+    const a = attachment(new Set(["session-a"]), { center: "https://center.invalid/one", token: "token-a" }, async (ids, _t, c) => { polls.push([c.center, [...ids]]); });
+    const b = attachment(new Set(["session-b"]), { center: "https://center.invalid/two", token: "token-b" }, async (ids, _t, c) => { polls.push([c.center, [...ids]]); });
+    const releaseA = attachV2Receiver(a), releaseB = attachV2Receiver(b);
+    try {
+      await pollAttachmentsByCenter([a, b], async (item) => { lookups.push(item.center.center); return new Set([item.sessions.values().next().value!]); },
+        async (owned, restored, primary) => { expect([...restored]).toEqual([]); await primary.poll(owned, primary.transport, primary.center); });
+      expect(lookups.sort()).toEqual([a.center.center, b.center.center].sort());
+      const expected: Array<[string, string[]]> = [[a.center.center, ["session-a"]], [b.center.center, ["session-b"]]];
+      expect(polls.sort((x, y) => x[0].localeCompare(y[0]))).toEqual(expected.sort((x, y) => x[0].localeCompare(y[0])));
+    } finally { releaseA(); releaseB(); }
+  });
+
   test("keeps one timer until both setups detach in either order", () => {
     const first = attach(new Set());
     const second = attach(new Set());
@@ -77,13 +102,34 @@ describe("shared V2 receiver lifecycle", () => {
     expect(cursors.has("missing")).toBe(false);
   });
 
-  test("keeps observed polling alive when central owner lookup returns 404", async () => {
-    let observed = 0;
-    let restore = 0;
-    await pollWithMembershipFallback(async () => { throw Error("404"); }, async () => { restore++; },
-      async () => { observed++; }, async () => { observed++; });
-    expect(observed).toBe(1);
-    expect(restore).toBe(0);
+  test("unions observed sessions before restore and never repolls owned IDs after failure", async () => {
+    const center = { center: "https://center.invalid/base", token: "token" }, calls: Array<[string, string[]]> = [];
+    const poll = async (ids: ReadonlySet<string>, _transport: QueueTransport, opts: CenterOpts) => {
+      calls.push([opts.center, [...ids].sort()]);
+      if (ids.has("local-a")) throw Error("observed transport failed");
+    };
+    const a = attachment(new Set(["owned-a", "local-a"]), center, poll);
+    const b = attachment(new Set(["owned-b", "local-b"]), center, poll);
+    const releaseA = attachV2Receiver(a), releaseB = attachV2Receiver(b);
+    try {
+      await pollAttachmentGroup([a, b], async () => new Set(["owned-a", "owned-b", "restored"]), async (owned, restored, primary) => {
+        expect([...restored]).toEqual(["restored"]);
+        await primary.poll(owned, primary.transport, primary.center);
+        throw Error("restore transport failed");
+      });
+      expect(calls).toEqual([[center.center, ["owned-a", "owned-b", "restored"]], [center.center, ["local-a"]], [center.center, ["local-b"]]]);
+    } finally { releaseA(); releaseB(); }
+  });
+
+  test("membership failure polls every live attachment using its own center", async () => {
+    const calls: Array<[string, string[]]> = [];
+    const a = attachment(new Set(["session-a"]), { center: "https://one.invalid/a", token: "one" }, async (ids, _t, c) => { calls.push([c.center, [...ids]]); });
+    const b = attachment(new Set(["session-b"]), { center: "https://two.invalid/b", token: "two" }, async (ids, _t, c) => { calls.push([c.center, [...ids]]); });
+    const releaseA = attachV2Receiver(a), releaseB = attachV2Receiver(b);
+    try {
+      await pollAttachmentGroup([a, b], async () => { throw Error("center unavailable"); }, async () => { throw Error("must not restore"); });
+      expect(calls).toEqual([["https://one.invalid/a", ["session-a"]], ["https://two.invalid/b", ["session-b"]]]);
+    } finally { releaseA(); releaseB(); }
   });
 });
 

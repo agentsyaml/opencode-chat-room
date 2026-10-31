@@ -1,16 +1,30 @@
 import { backgroundOwnSession, discoverVerifiedHost } from "./background";
+import { createHash } from "node:crypto";
 import { receiverOwnerID } from "./receiver-owner";
 import { loadRegistry } from "./store";
 import { request, type CenterOpts } from "./center-client";
 import type { QueueTransport } from "./queue-transport";
+import { locallyOwnedSessions, reportAgentPresence } from "./agent-presence";
+import { flushReceiptCandidates, receiptDestination } from "./agent-receipts";
 
-type Attachment = {
+export type Attachment = {
   sessions: ReadonlySet<string>;
   version: string;
   transport: QueueTransport;
   center: CenterOpts;
   poll(ids: ReadonlySet<string>, transport: QueueTransport, center: CenterOpts): Promise<void>;
 };
+export function groupByCenter<T extends { center: CenterOpts }>(values: readonly T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const value of values) {
+    const base = value.center.center ? new URL(value.center.center).href.replace(/\/+$/, "") : `local:${receiptDestination("")}`;
+    const key = createHash("sha256").update(JSON.stringify([base, value.center.center ? value.center.token : ""])).digest("hex");
+    const group = groups.get(key) ?? [];
+    group.push(value);
+    groups.set(key, group);
+  }
+  return groups;
+}
 const attached = new Set<Attachment>();
 let timer: ReturnType<typeof setInterval> | undefined;
 let sweeping = false;
@@ -26,6 +40,34 @@ export function attachV2Receiver(value: Attachment): () => void {
   };
 }
 
+export async function pollAttachmentGroup(
+  members: readonly Attachment[],
+  memberships: (attachment: Attachment) => Promise<Set<string>>,
+  restore: (owned: Set<string>, restored: Set<string>, attachment: Attachment) => Promise<void>,
+): Promise<void> {
+  const live = members.filter((member) => attached.has(member));
+  const primary = live[0];
+  if (!primary) return;
+  let owned: Set<string>;
+  try { owned = await memberships(primary); }
+  catch { await pollObserved(members.filter((member) => attached.has(member)), new Set()); return; }
+  const current = members.filter((member) => attached.has(member));
+  const activePrimary = current[0];
+  if (!activePrimary) return;
+  const observed = new Set(current.flatMap((member) => [...member.sessions]));
+  const restored = new Set([...owned].filter((id) => !observed.has(id)));
+  try { await restore(owned, restored, activePrimary); } catch { /* Never redeliver owned sessions on restore failure. */ }
+  await pollObserved(current, owned);
+}
+
+export async function pollAttachmentsByCenter(
+  members: readonly Attachment[],
+  memberships: (attachment: Attachment) => Promise<Set<string>>,
+  restore: (owned: Set<string>, restored: Set<string>, attachment: Attachment) => Promise<void>,
+): Promise<void> {
+  await Promise.all([...groupByCenter(members).values()].map((group) => pollAttachmentGroup(group, memberships, restore)));
+}
+
 async function sweep(): Promise<void> {
   if (sweeping || !attached.size) return;
   sweeping = true;
@@ -37,42 +79,35 @@ async function sweep(): Promise<void> {
     if (!host) { await pollObserved(values, new Set()); observedPolled = true; return; }
     const ownerID = await receiverOwnerID(host.origin);
     if (!ownerID) { await pollObserved(values, new Set()); observedPolled = true; return; }
-    const primary = values.find((value) => attached.has(value));
-    if (!primary) return;
-    await pollWithMembershipFallback(async () => {
-      const owned = new Set<string>();
-      for (const value of values) {
-        if (!attached.has(value)) continue;
-        if (value.center.center) {
-          const result = await request(value.center, `/receiver/memberships?ownerID=${encodeURIComponent(ownerID)}`, "GET") as { sessionIDs?: string[] };
-          for (const id of result.sessionIDs ?? []) owned.add(id);
-        } else {
-          const registry = await loadRegistry();
-          for (const entries of Object.values(registry)) for (const [id, entry] of Object.entries(entries)) {
-            if (entry.protocol === "v2" && entry.receiverOwnerID === ownerID) owned.add(id);
-          }
-        }
+    await pollAttachmentsByCenter(values, async (attachment) => {
+      if (attachment.center.center) {
+        const result = await request(attachment.center, `/receiver/memberships?ownerID=${encodeURIComponent(ownerID)}`, "GET") as { sessionIDs?: string[] };
+        return new Set(result.sessionIDs ?? []);
       }
-      return owned;
-    }, async (owned) => {
-      const observed = new Set(values.flatMap((item) => [...item.sessions]));
-      const restored = new Set([...owned].filter((id) => !observed.has(id)));
-      if (!attached.size) return;
+      const registry = await loadRegistry();
+      return locallyOwnedSessions(registry, ownerID);
+    }, async (owned, restored, attachment) => {
+      await reportAgentPresence({ host, ownerID, center: attachment.center, sessionIDs: owned,
+        current: async () => {
+          const current = await discoverVerifiedHost(attachment.version);
+          if (!current || current.origin !== host.origin) return false;
+          const info = await current.client.server.info({ signal: AbortSignal.timeout(1500) });
+          return info.pid === process.pid && info.version === attachment.version;
+        } });
       const target: QueueTransport = {
-        ...primary.transport,
-        directory: undefined,
-        receiverOwnerID: ownerID,
-        backgroundSession: (id) => backgroundOwnSession(id, primary.version),
+        ...attachment.transport, directory: undefined, receiverOwnerID: ownerID,
+        backgroundSession: (id) => backgroundOwnSession(id, attachment.version),
         promptQueue: async (sessionID, id, text, delivery) => {
           const info = await host.client.server.info({ signal: AbortSignal.timeout(1500) });
-          if (info.pid !== process.pid || info.version !== primary.version) throw Error("OpenCode service changed");
+          if (info.pid !== process.pid || info.version !== attachment.version) throw Error("OpenCode service changed");
           return host.client.session.prompt({ sessionID, id, text, delivery, resume: true }, { signal: AbortSignal.timeout(1500) });
-        },
-        mentionOnlySessions: restored,
+        }, mentionOnlySessions: restored,
       };
-      await pollOwnedSessions(owned, (ids) => attached.has(primary)
-        ? primary.poll(ids, target, primary.center) : Promise.resolve());
-    }, async (owned) => pollObserved(values, owned), async () => pollObserved(values, new Set()));
+      await pollOwnedSessions(owned, (ids) => attached.has(attachment)
+        ? attachment.poll(ids, target, attachment.center) : Promise.resolve());
+      if (!owned.size) await flushReceiptCandidates({ destination: receiptDestination(attachment.center.center), receiverOwnerID: ownerID,
+        ...(attachment.center.center ? { center: attachment.center.center, token: attachment.center.token } : {}) }).catch(() => {});
+    });
     observedPolled = true;
   } catch {
     if (!observedPolled) await pollObserved(values, new Set()).catch(() => {});
@@ -85,25 +120,12 @@ export async function pollOwnedSessions(
   if (ids.size) await poll(ids);
 }
 
-export async function pollWithMembershipFallback(
-  memberships: () => Promise<Set<string>>,
-  restore: (ids: Set<string>) => Promise<void>,
-  observed: (ids: ReadonlySet<string>) => Promise<void>,
-  onMembershipFailure: () => Promise<void>,
-): Promise<void> {
-  let ids: Set<string>;
-  try { ids = await memberships(); }
-  catch { await onMembershipFailure(); return; }
-  try { if (ids.size) await restore(ids); } catch { /* Observed polling remains independent. */ }
-  await observed(ids);
-}
-
 async function pollObserved(values: Attachment[], owned: ReadonlySet<string>): Promise<void> {
   const seen = new Set<string>();
   for (const value of values) {
     if (!attached.has(value)) continue;
     const local = new Set([...value.sessions].filter((id) => !owned.has(id) && !seen.has(id)));
     local.forEach((id) => seen.add(id));
-    if (local.size) await value.poll(local, value.transport, value.center);
+    if (local.size) await value.poll(local, value.transport, value.center).catch(() => {});
   }
 }

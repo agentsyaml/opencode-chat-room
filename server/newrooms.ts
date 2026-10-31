@@ -1,5 +1,5 @@
 import RoomService, { RoomError, type Room } from "../src/room-service";
-import { readState, writeState } from "../src/store";
+import { writeState } from "../src/store";
 import { clearPendingAdmission } from "../src/queue";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -29,9 +29,13 @@ export async function roomManagement(req: Request, url: URL): Promise<Response |
       const members = (registry[direct.id] ??= Object.create(null));
       const tail = direct.messages.at(-1)?.createdAt ?? 0;
       for (const [sid, entry] of [[sessionID, actor], [targetSessionID, target]] as const) {
+        const { membershipID: _sourceMembershipID, lastSeenAt: _sourceSeenAt, workState: _sourceWorkState, ...binding } = entry;
         svc.joinRoom(direct.id, { id: sid, name: entry.name });
         const previous = members[sid];
-        members[sid] = { ...entry, lastReadTs: previous ? previous.lastReadTs ?? 0 : tail, lastQueuedTs: previous?.lastQueuedTs ?? 0 };
+        members[sid] = { ...binding, ...(previous?.membershipID ? { membershipID: previous.membershipID } : {}),
+          ...(previous?.lastSeenAt !== undefined ? { lastSeenAt: previous.lastSeenAt } : {}),
+          ...(previous?.workState !== undefined ? { workState: previous.workState } : {}),
+          lastReadTs: previous ? previous.lastReadTs ?? 0 : tail, lastQueuedTs: previous?.lastQueuedTs ?? 0 };
       }
       return { room: direct, created: !existing };
     });
@@ -77,14 +81,6 @@ export async function roomManagement(req: Request, url: URL): Promise<Response |
     });
     for (const sid of sessions) clearPendingAdmission(sid, roomId, Number.MAX_SAFE_INTEGER);
     return json({ ok: true });
-  }
-  const members = p.match(/^\/rooms\/([^/]+)\/members$/);
-  if (members && req.method === "GET") {
-    const roomId = decodeURIComponent(members[1]!);
-    return json(await readState((svc, registry) => {
-      svc.getRoom(roomId);
-      return Object.entries(registry[roomId] ?? {}).map(([sessionID, entry]) => ({ sessionID, name: entry.name, ...(entry.protocol ? { protocol: entry.protocol } : {}), ...(entry.host ? { host: entry.host } : {}) }));
-    }));
   }
   return undefined;
 }

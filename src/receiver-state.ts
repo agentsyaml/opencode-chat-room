@@ -8,7 +8,7 @@ const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(
 function initialize(db: Database): void {
   for (let attempt = 0; ; attempt++) {
     try {
-      db.exec("PRAGMA journal_mode=WAL; BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS delivery_leases(session_id TEXT PRIMARY KEY,holder TEXT NOT NULL,expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS pending_admissions(session_id TEXT NOT NULL,room_id TEXT NOT NULL,admission TEXT NOT NULL,expires_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(session_id,room_id)); CREATE INDEX IF NOT EXISTS pending_admissions_expiry ON pending_admissions(expires_at); CREATE TABLE IF NOT EXISTS background_attempted_through(session_id TEXT NOT NULL,room_id TEXT NOT NULL,service TEXT NOT NULL,through_ts INTEGER NOT NULL,PRIMARY KEY(session_id,room_id,service)); CREATE TABLE IF NOT EXISTS watcher_claims(identity TEXT PRIMARY KEY,instance_id TEXT NOT NULL,pid INTEGER NOT NULL);");
+      db.exec("PRAGMA journal_mode=WAL; BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS delivery_leases(session_id TEXT PRIMARY KEY,holder TEXT NOT NULL,expires_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS pending_admissions(session_id TEXT NOT NULL,room_id TEXT NOT NULL,admission TEXT NOT NULL,expires_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(session_id,room_id)); CREATE INDEX IF NOT EXISTS pending_admissions_expiry ON pending_admissions(expires_at); CREATE TABLE IF NOT EXISTS background_attempted_through(session_id TEXT NOT NULL,room_id TEXT NOT NULL,service TEXT NOT NULL,through_ts INTEGER NOT NULL,PRIMARY KEY(session_id,room_id,service)); CREATE TABLE IF NOT EXISTS watcher_claims(identity TEXT PRIMARY KEY,instance_id TEXT NOT NULL,pid INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS presence_sequences(owner_id TEXT PRIMARY KEY,sequence INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS presence_throttle(owner_id TEXT NOT NULL,target TEXT NOT NULL,last_report_at INTEGER NOT NULL,PRIMARY KEY(owner_id,target)); CREATE TABLE IF NOT EXISTS receipt_candidates(candidate_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,admission_id TEXT NOT NULL,destination TEXT NOT NULL,owner_id TEXT NOT NULL,candidate TEXT NOT NULL,ready INTEGER NOT NULL,expires_at INTEGER NOT NULL);");
       migrateLegacyBackgroundAttempts(db);
       db.exec("COMMIT");
       return;
@@ -86,11 +86,10 @@ function immediate<T>(fn: (db: Database) => T): T {
 }
 
 export function readPendingAdmission<T>(sessionID: string, roomID: string, now: number): T | undefined {
-  return immediate((db) => {
-    db.query("DELETE FROM pending_admissions WHERE expires_at<=?").run(now);
-    const row = db.query("SELECT admission FROM pending_admissions WHERE session_id=? AND room_id=?").get(sessionID, roomID) as { admission: string } | null;
-    return row ? JSON.parse(row.admission) as T : undefined;
-  });
+  // Keep notification reads lock-free; saves reclaim expired rows.
+  const row = database().query("SELECT admission FROM pending_admissions WHERE session_id=? AND room_id=? AND expires_at>?")
+    .get(sessionID, roomID, now) as { admission: string } | null;
+  return row ? JSON.parse(row.admission) as T : undefined;
 }
 export function savePendingAdmission(sessionID: string, roomID: string, value: unknown, expiresAt: number, now: number): void {
   immediate((db) => {
@@ -104,10 +103,56 @@ export function deletePendingAdmission(sessionID: string, roomID: string): void 
   immediate((db) => db.query("DELETE FROM pending_admissions WHERE session_id=? AND room_id=?").run(sessionID, roomID));
 }
 
+export function saveReceiptCandidate(id: string, value: unknown, expiresAt: number): void {
+  immediate((db) => {
+    db.query("DELETE FROM receipt_candidates WHERE ready=0 AND expires_at<=?").run(Date.now());
+    const item = value as { sessionID: string; admissionID: string; destination: string; receiverOwnerID?: string };
+    db.query("INSERT INTO receipt_candidates VALUES(?,?,?,?,?,?,0,?) ON CONFLICT(candidate_id) DO UPDATE SET candidate=excluded.candidate")
+      .run(id, item.sessionID, item.admissionID, item.destination, item.receiverOwnerID ?? "", JSON.stringify(value), expiresAt);
+  });
+}
+export function receiptCandidates<T>(sessionID: string, admissionID: string, destination: string, ownerID: string, now: number): T[] {
+  return immediate((db) => {
+    db.query("DELETE FROM receipt_candidates WHERE ready=0 AND expires_at<=?").run(now);
+    return (db.query("SELECT candidate FROM receipt_candidates WHERE session_id=? AND admission_id=? AND destination=? AND owner_id=?").all(sessionID, admissionID, destination, ownerID) as Array<{ candidate: string }>).map((row) => JSON.parse(row.candidate) as T);
+  });
+}
+export function markReceiptCandidateReady(id: string): boolean {
+  return immediate((db) => db.query("UPDATE receipt_candidates SET ready=1,expires_at=? WHERE candidate_id=? AND ready=0")
+    .run(Number.MAX_SAFE_INTEGER, id).changes === 1);
+}
+export function readyReceiptCandidates<T>(destination: string, ownerID: string | undefined, now: number, limit?: number): Array<{ id: string; value: T }> {
+  return immediate((db) => {
+    db.query("DELETE FROM receipt_candidates WHERE ready=0 AND expires_at<=?").run(now);
+    const query = "SELECT candidate_id,candidate FROM receipt_candidates WHERE ready=1 AND destination=? AND owner_id=?" + (limit ? " LIMIT ?" : "");
+    const rows = (limit ? db.query(query).all(destination, ownerID ?? "", limit) : db.query(query).all(destination, ownerID ?? "")) as Array<{ candidate_id: string; candidate: string }>;
+    return rows.map((row) => ({ id: row.candidate_id, value: JSON.parse(row.candidate) as T }));
+  });
+}
+export function deleteReceiptCandidate(id: string): void {
+  immediate((db) => db.query("DELETE FROM receipt_candidates WHERE candidate_id=?").run(id));
+}
+
 export function claimBackgroundAttempt(sessionID: string, roomID: string, service: string, throughTs: number): boolean {
   return immediate((db) => Number.isSafeInteger(throughTs) && throughTs > 0 &&
     db.query("INSERT INTO background_attempted_through VALUES(?,?,?,?) ON CONFLICT(session_id,room_id,service) DO UPDATE SET through_ts=excluded.through_ts WHERE excluded.through_ts>background_attempted_through.through_ts")
       .run(sessionID, roomID, service, throughTs).changes === 1);
+}
+
+export function nextPresenceSequence(ownerID: string): number {
+  return immediate((db) => {
+    db.query("INSERT INTO presence_sequences VALUES(?,1) ON CONFLICT(owner_id) DO UPDATE SET sequence=sequence+1").run(ownerID);
+    return (db.query("SELECT sequence FROM presence_sequences WHERE owner_id=?").get(ownerID) as { sequence: number }).sequence;
+  });
+}
+
+export function claimPresenceReport(ownerID: string, target: string, now: number, interval: number): boolean {
+  return immediate((db) => {
+    const row = db.query("SELECT last_report_at FROM presence_throttle WHERE owner_id=? AND target=?").get(ownerID, target) as { last_report_at: number } | null;
+    if (row && now - row.last_report_at < interval) return false;
+    db.query("INSERT INTO presence_throttle VALUES(?,?,?) ON CONFLICT(owner_id,target) DO UPDATE SET last_report_at=excluded.last_report_at").run(ownerID, target, now);
+    return true;
+  });
 }
 
 export function acquireDeliveryLease(sessionID: string, holder: string, now: number, expiresAt: number): boolean {

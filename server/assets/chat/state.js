@@ -3,7 +3,10 @@ export const app = {
   state: {
     room: null, myName: "", unread: 0, drafts: new Map(), rooms: new Map(),
     pollGeneration: 0, navigationGeneration: 0, draftRevision: new Map(), memberSessions: new Map(),
-    retryingFailedIds: new Set(), pollController: null,
+    retryingFailedIds: new Set(), pollController: null, memberRefreshTimer: 0, receiptRefreshTimer: 0, receiptObservationFrame: 0,
+    receiptObservation: null,
+    memberApiUnavailable: new Set(), receiptApiUnavailable: new Set(),
+    receipts: new Map(), acknowledgedMessages: new Map(), pendingAcknowledgements: new Map(),
     pendingAction: null, watcherTimer: 0, restored: false,
   },
   rendered: 0,
@@ -163,6 +166,10 @@ const messages = {
     allMembers: "Everyone", messageCount: ({ count }) => `${count} / 2000`,
     privacyNote: "Anyone with the shared token can read direct messages and manage rooms; the server can read them too.",
     systemJoined: ({ name }) => `${name} joined the room`, systemLeft: ({ name }) => `${name} left the room`,
+    activity_working: "Working", activity_idle: "Foreground idle", activity_waiting: "Waiting", activity_unknown: "Status unknown", activity_offline: "Status stale",
+    activityHint_working: "The agent reports active work.", activityHint_idle: "Foreground is idle; background work may continue.", activityHint_waiting: "The agent reports that it is waiting.", activityHint_unknown: "No activity report is available.", activityHint_offline: "The last status is stale; this does not prove the agent is offline.",
+    receiptCount: ({ count }) => `Read by ${count}`, departedMember: "left",
+    receiptEvidence_displayed: "Shown on screen", receiptEvidence_tool: "Fetched with room tool", receiptEvidence_context: "Full message reached agent context preparation (not proof of understanding)",
   },
   "zh-CN": {
     brand: "闲叙", documentTitle: "闲叙 · 轻量聊天室", roomTitle: ({ name }) => `${name} · 闲叙`,
@@ -199,6 +206,10 @@ const messages = {
     allMembers: "所有人", messageCount: ({ count }) => `${count} / 2000`,
     privacyNote: "持有共享令牌的人都可以读取私聊内容和管理房间；服务器也可以读取私聊内容。",
     systemJoined: ({ name }) => `${name} 加入了房间`, systemLeft: ({ name }) => `${name} 离开了房间`,
+    activity_working: "工作中", activity_idle: "前台空闲", activity_waiting: "等待中", activity_unknown: "状态未知", activity_offline: "状态已过期",
+    activityHint_working: "Agent 正在报告工作状态。", activityHint_idle: "前台空闲；后台任务仍可能继续。", activityHint_waiting: "Agent 正在报告等待状态。", activityHint_unknown: "暂无活动状态报告。", activityHint_offline: "最近的状态已过期；这不能证明 Agent 已离线。",
+    receiptCount: ({ count }) => `已读 ${count} 人`, departedMember: "已离开",
+    receiptEvidence_displayed: "已显示在屏幕上", receiptEvidence_tool: "通过房间工具读取", receiptEvidence_context: "完整消息已进入 Agent 上下文准备阶段（不代表已理解）",
   },
 };
 

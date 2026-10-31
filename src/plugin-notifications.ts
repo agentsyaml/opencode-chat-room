@@ -13,6 +13,7 @@ import { backgroundResult, backgroundServiceKey, sendAsyncNotification, sendQueu
 import { explicitlyAddresses } from "./mentions";
 import { claimBackgroundAttempt } from "./receiver-state";
 import { serializeSessionPush } from "./center-inbox";
+import { prepareReceiptCandidate, receiptDestination } from "./agent-receipts";
 import {
   getOrCreatePendingAdmission,
   clearPendingAdmission,
@@ -147,6 +148,11 @@ export function createNotifier(deps: {
     if (!currentAdmission || currentAdmission.id !== admission.id) {
       return notifyTargetUnlocked(sessionID, batch, transport);
     }
+    if (protocol === "v2") prepareReceiptCandidate({
+      admissionID: admission.id, sessionID, roomID: batch.roomId, membershipID: currentEntry.membershipID,
+      receiverOwnerID: currentEntry.receiverOwnerID, destination: receiptDestination(""),
+      items: admission.items, prompt: admission.prompt, capped: admission.capped,
+    });
     const result = entry.protocol === "v2"
       ? await sendQueue(targetTransport, sessionID, admission.prompt, admission.id, "steer")
       : await sendAsyncNotification(targetTransport, sessionID, admission.prompt);

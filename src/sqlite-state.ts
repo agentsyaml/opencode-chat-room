@@ -1,8 +1,10 @@
 import { Database } from "bun:sqlite";
+import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import RoomService, { type Message, type Room, type Participant } from "./room-service";
-import type { Registry, RegistryEntry } from "./store";
+import type { MessageReceipt, PresenceReport, ReceiptEvidence, ReceiptIdentity, ReceiptWriteResult, Registry, RegistryEntry } from "./store";
+import { presenceOwnerMatches, receiptOwnerMatches } from "./member-state";
 
 type State = { rooms: Room[]; registry: Registry };
 type Page<T> = { items: T[]; hasMore: boolean };
@@ -32,7 +34,7 @@ async function initialize(file: string): Promise<Database> {
     CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,sender_id TEXT NOT NULL,sender_session_id TEXT,text TEXT NOT NULL,created_at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS messages_room_seq ON messages(room_id,seq DESC);
     CREATE INDEX IF NOT EXISTS messages_room_time ON messages(room_id,created_at,seq);
-    CREATE TABLE IF NOT EXISTS registry(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,session_id TEXT NOT NULL,server_url TEXT NOT NULL,api_prefix TEXT NOT NULL,protocol TEXT,name TEXT NOT NULL,last_read_ts INTEGER,last_queued_ts INTEGER,directory TEXT,host TEXT,receiver_owner_id TEXT,PRIMARY KEY(room_id,session_id));`);
+    CREATE TABLE IF NOT EXISTS registry(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,session_id TEXT NOT NULL,server_url TEXT NOT NULL,api_prefix TEXT NOT NULL,protocol TEXT,name TEXT NOT NULL,last_read_ts INTEGER,last_queued_ts INTEGER,directory TEXT,host TEXT,receiver_owner_id TEXT,membership_id TEXT,work_state TEXT,last_seen_at INTEGER,PRIMARY KEY(room_id,session_id));`);
         await ensureRoomColumns(db);
         await migrate(db, file);
         return db;
@@ -50,6 +52,16 @@ async function ensureRoomColumns(db: Database): Promise<void> {
     if (!columns.some((column) => column.name === "kind")) db.exec("ALTER TABLE rooms ADD COLUMN kind TEXT NOT NULL DEFAULT 'group'");
     if (!columns.some((column) => column.name === "direct_sessions")) db.exec("ALTER TABLE rooms ADD COLUMN direct_sessions TEXT");
     if (!columns.some((column) => column.name === "direct_pair")) db.exec("ALTER TABLE rooms ADD COLUMN direct_pair TEXT");
+    const registry = db.query("PRAGMA table_info(registry)").all() as Array<{ name: string }>;
+    if (!registry.some((column) => column.name === "membership_id")) db.exec("ALTER TABLE registry ADD COLUMN membership_id TEXT");
+    if (!registry.some((column) => column.name === "work_state")) db.exec("ALTER TABLE registry ADD COLUMN work_state TEXT");
+    if (!registry.some((column) => column.name === "last_seen_at")) db.exec("ALTER TABLE registry ADD COLUMN last_seen_at INTEGER");
+    db.exec("DROP TABLE IF EXISTS read_receipts");
+    db.exec("CREATE TABLE IF NOT EXISTS message_receipts(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,session_id TEXT NOT NULL,name TEXT NOT NULL,evidence TEXT NOT NULL,read_at INTEGER NOT NULL,PRIMARY KEY(room_id,message_id,session_id))");
+    db.exec("CREATE TABLE IF NOT EXISTS presence_sequences(owner_id TEXT PRIMARY KEY,last_sequence INTEGER NOT NULL)");
+    const missing = db.query("SELECT room_id,session_id FROM registry WHERE membership_id IS NULL OR membership_id=''").all() as Array<{ room_id: string; session_id: string }>;
+    const assign = db.query("UPDATE registry SET membership_id=? WHERE room_id=? AND session_id=? AND (membership_id IS NULL OR membership_id='')");
+    for (const row of missing) assign.run(randomUUID(), row.room_id, row.session_id);
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS rooms_direct_pair ON rooms(direct_pair) WHERE direct_pair IS NOT NULL");
   });
 }
@@ -133,8 +145,9 @@ function validateRegistry(value: unknown): Registry {
     for (const [sessionID, raw] of Object.entries(members)) {
       if (!sessionID || !record(raw) || typeof raw.serverUrl !== "string" || typeof raw.apiPrefix !== "string" ||
         typeof raw.name !== "string" || (raw.protocol !== undefined && raw.protocol !== "v1" && raw.protocol !== "v2") ||
-        (["lastReadTs", "lastQueuedTs"].some((key) => raw[key] !== undefined && !timestamp(raw[key]))) ||
-        (["directory", "host", "receiverOwnerID"].some((key) => raw[key] !== undefined && typeof raw[key] !== "string"))) {
+        (["lastReadTs", "lastQueuedTs", "lastSeenAt"].some((key) => raw[key] !== undefined && !timestamp(raw[key]))) ||
+        (raw.workState !== undefined && !["working", "idle", "waiting", "unknown"].includes(String(raw.workState))) ||
+        (["directory", "host", "receiverOwnerID", "membershipID"].some((key) => raw[key] !== undefined && typeof raw[key] !== "string"))) {
         throw new Error("Legacy registry.json contains an invalid entry");
       }
       result[roomId]![sessionID] = { serverUrl: raw.serverUrl, apiPrefix: raw.apiPrefix, name: raw.name,
@@ -143,7 +156,10 @@ function validateRegistry(value: unknown): Registry {
         ...(timestamp(raw.lastQueuedTs) ? { lastQueuedTs: raw.lastQueuedTs } : {}),
         ...(typeof raw.directory === "string" ? { directory: raw.directory } : {}),
         ...(typeof raw.host === "string" ? { host: raw.host } : {}),
-        ...(typeof raw.receiverOwnerID === "string" ? { receiverOwnerID: raw.receiverOwnerID } : {}) };
+        ...(typeof raw.receiverOwnerID === "string" ? { receiverOwnerID: raw.receiverOwnerID } : {}),
+        ...(typeof raw.membershipID === "string" ? { membershipID: raw.membershipID } : {}),
+        ...(typeof raw.workState === "string" ? { workState: raw.workState as RegistryEntry["workState"] } : {}),
+        ...(timestamp(raw.lastSeenAt) ? { lastSeenAt: raw.lastSeenAt } : {}) };
     }
   }
   return result;
@@ -159,10 +175,12 @@ function insertRoom(db: Database, room: Room): void {
 
 function replaceRegistry(db: Database, registry: Registry): void {
   db.exec("DELETE FROM registry");
-  const insert = db.query("INSERT INTO registry VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+  const insert = db.query("INSERT INTO registry(room_id,session_id,server_url,api_prefix,protocol,name,last_read_ts,last_queued_ts,directory,host,receiver_owner_id,membership_id,work_state,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
   for (const [roomID, members] of Object.entries(registry)) for (const [sessionID, r] of Object.entries(members)) {
+    r.membershipID ||= randomUUID();
     insert.run(roomID, sessionID, r.serverUrl, r.apiPrefix, r.protocol ?? null, r.name,
-      r.lastReadTs ?? null, r.lastQueuedTs ?? null, r.directory ?? null, r.host ?? null, r.receiverOwnerID ?? null);
+      r.lastReadTs ?? null, r.lastQueuedTs ?? null, r.directory ?? null, r.host ?? null, r.receiverOwnerID ?? null,
+      r.membershipID, r.workState ?? null, r.lastSeenAt ?? null);
   }
 }
 
@@ -205,6 +223,9 @@ function readState(db: Database): State {
     ...(r.last_queued_ts !== null ? { lastQueuedTs: Number(r.last_queued_ts) } : {}),
     ...(r.directory !== null ? { directory: String(r.directory) } : {}), ...(r.host !== null ? { host: String(r.host) } : {}),
     ...(r.receiver_owner_id !== null ? { receiverOwnerID: String(r.receiver_owner_id) } : {}),
+    ...(r.membership_id !== null ? { membershipID: String(r.membership_id) } : {}),
+    ...(r.work_state !== null ? { workState: String(r.work_state) as RegistryEntry["workState"] } : {}),
+    ...(r.last_seen_at !== null ? { lastSeenAt: Number(r.last_seen_at) } : {}),
   };
   return { rooms, registry };
 }
@@ -272,6 +293,77 @@ export async function readHistoryPage(file: string, roomID: string, beforeSeq?: 
   const hasMore = rows.length > take;
   const messages = rows.slice(0, take).reverse().map((row) => ({ ...rowMessage(row), seq: Number(row.seq) }));
   return { messages, nextBeforeSeq: hasMore ? messages[0]?.seq ?? null : null, hasMore };
+}
+
+export async function readMessageReceipts(file: string, roomID: string, messageIDs?: string[]): Promise<MessageReceipt[] | undefined> {
+  const db = await open(file);
+  return db.transaction(() => {
+    if (messageIDs && (!messageIDs.length || messageIDs.length > 500 || messageIDs.some((id) => !id))) return undefined;
+    const requested = messageIDs ? [...new Set(messageIDs)] : undefined;
+    const selected = requested
+      ? db.query(`SELECT id FROM messages WHERE room_id=? AND id IN (${requested.map(() => "?").join(",")}) ORDER BY seq`).all(roomID, ...requested) as Array<{ id: string }>
+      : db.query("SELECT id FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 500").all(roomID) as Array<{ id: string }>;
+    if (requested && selected.length !== requested.length) return undefined;
+    const ids = (requested ? selected : selected.reverse()).map((row) => row.id);
+    const rows = ids.length ? db.query(`SELECT message_id,session_id,name,evidence,read_at FROM message_receipts WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")}) ORDER BY read_at,session_id`).all(roomID, ...ids) as Array<Record<string, string | number>> : [];
+    const grouped = new Map<string, MessageReceipt["readers"]>(ids.map((id) => [id, []]));
+    for (const row of rows) grouped.get(String(row.message_id))?.push({ sessionID: String(row.session_id), name: String(row.name), evidence: String(row.evidence) as ReceiptEvidence, readAt: Number(row.read_at) });
+    return ids.map((messageID) => ({ messageID, readers: grouped.get(messageID)! }));
+  }).deferred();
+}
+
+export async function writeMessageReceipts(file: string, roomID: string, sessionID: string, messageIDs: string[], evidence: ReceiptEvidence, identity: ReceiptIdentity, readAt: number, readThroughTs?: number): Promise<ReceiptWriteResult> {
+  if (!messageIDs.length || messageIDs.length > 500 || messageIDs.some((id) => typeof id !== "string" || !id || id.length > 128) || !["displayed", "tool", "context"].includes(evidence)) return { status: "messageIDs", acceptedIDs: [] };
+  const ids = [...new Set(messageIDs)];
+  const db = await open(file);
+  return immediate(db, () => {
+    const member = db.query("SELECT membership_id,server_url,api_prefix,protocol,name,receiver_owner_id,host FROM registry WHERE room_id=? AND session_id=?").get(roomID, sessionID) as Record<string, string | null> | null;
+    if (!member || member.membership_id !== identity.membershipID || !receiptOwnerMatches({
+      serverUrl: String(member.server_url), apiPrefix: String(member.api_prefix), name: String(member.name),
+      ...(member.protocol ? { protocol: member.protocol as "v1" | "v2" } : {}),
+      ...(member.receiver_owner_id ? { receiverOwnerID: member.receiver_owner_id } : {}),
+      ...(member.host ? { host: member.host } : {}),
+    }, identity.receiverOwnerID)) return { status: "membership", acceptedIDs: [] };
+    const found = db.query(`SELECT id FROM messages WHERE room_id=? AND id IN (${ids.map(() => "?").join(",")})`).all(roomID, ...ids) as Array<{ id: string }>;
+    if (found.length !== ids.length) return { status: "messageIDs", acceptedIDs: [] };
+    let actualReadThrough: number | undefined;
+    if (readThroughTs !== undefined) {
+      const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(roomID) as { created_at: number } | null;
+      actualReadThrough = Math.min(readThroughTs, tail?.created_at ?? 0);
+      if (actualReadThrough > 0) db.query("UPDATE registry SET last_read_ts=max(coalesce(last_read_ts,0),?) WHERE room_id=? AND session_id=?").run(actualReadThrough, roomID, sessionID);
+    }
+    const insert = db.query(`INSERT INTO message_receipts VALUES(?,?,?,?,?,?) ON CONFLICT(room_id,message_id,session_id) DO UPDATE SET
+      name=excluded.name,evidence=CASE WHEN message_receipts.evidence='displayed' OR excluded.evidence='displayed' THEN 'displayed' WHEN message_receipts.evidence='tool' OR excluded.evidence='tool' THEN 'tool' ELSE 'context' END,
+      read_at=max(message_receipts.read_at,excluded.read_at)`);
+    for (const messageID of ids) insert.run(roomID, messageID, sessionID, String(member.name), evidence, readAt);
+    return { status: "ok", acceptedIDs: ids, ...(actualReadThrough !== undefined ? { readThroughTs: actualReadThrough } : {}) };
+  });
+}
+
+export async function writePresenceState(file: string, reports: PresenceReport[], ownerID: string | undefined, sequence: number | undefined, now: number): Promise<{ stale: boolean; updatedSessionIDs: string[] }> {
+  const db = await open(file);
+  return immediate(db, () => {
+    if (ownerID && sequence !== undefined) {
+      const current = db.query("SELECT last_sequence FROM presence_sequences WHERE owner_id=?").get(ownerID) as { last_sequence: number } | null;
+      if (current && sequence <= current.last_sequence) return { stale: true, updatedSessionIDs: [] };
+      db.query("INSERT INTO presence_sequences VALUES(?,?) ON CONFLICT(owner_id) DO UPDATE SET last_sequence=excluded.last_sequence").run(ownerID, sequence);
+    }
+    const entries = db.query("SELECT room_id,protocol,receiver_owner_id,server_url,api_prefix,name,host FROM registry WHERE session_id=?");
+    const update = db.query("UPDATE registry SET work_state=?,last_seen_at=? WHERE room_id=? AND session_id=?");
+    const updatedSessionIDs: string[] = [];
+    for (const report of reports) {
+      let matched = false;
+      for (const entry of entries.all(report.sessionID) as Array<Record<string, string | null>>) {
+        const value: RegistryEntry = { serverUrl: String(entry.server_url), apiPrefix: String(entry.api_prefix), name: String(entry.name),
+          ...(entry.protocol ? { protocol: entry.protocol as "v1" | "v2" } : {}), ...(entry.receiver_owner_id ? { receiverOwnerID: entry.receiver_owner_id } : {}), ...(entry.host ? { host: entry.host } : {}) };
+        if (!presenceOwnerMatches(value, ownerID)) continue;
+        update.run(report.state, now, String(entry.room_id), report.sessionID);
+        matched = true;
+      }
+      if (matched) updatedSessionIDs.push(report.sessionID);
+    }
+    return { stale: false, updatedSessionIDs };
+  });
 }
 
 function rowMessage(row: Record<string, string | number | null>): Message {

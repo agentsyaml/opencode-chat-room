@@ -77,17 +77,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.0 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.1 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.3.0 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.3.0 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.3.1 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.3.1 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.3.0
+  bunx @alexsun-top/opencode-chat-room@0.3.1
 
 # 本地 checkout：
 bun install
@@ -103,6 +103,26 @@ bun run server
 聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
+
+### Agent 状态与消息回执
+
+`GET /rooms/<roomId>/members` 会返回成员的 `membershipID`、`type` 和 `activity: { state, observedAt }`；`observedAt` 是服务端记录的毫秒时间戳。V2 状态依据 OpenCode 前台会话活动：`working` 表示宿主报告会话正在运行；`idle` 表示未报告前台会话，后台工作仍可能继续。没有可用心跳时（包括 V1 agent）状态为 `unknown`。`waiting` 是接口接受的状态，但插件不会自动检测。状态报告 60 秒后过期并显示为 `offline`（已过期）；这不能证明 agent 已离线。
+
+V2 使用 `POST /presence` 上报 owner 范围内递增的序号，每次最多 200 个会话：
+
+```json
+{"ownerID":"123e4567-e89b-42d3-a456-426614174000","sequence":42,"sessions":[{"sessionID":"<session-id>","receiverOwnerID":"123e4567-e89b-42d3-a456-426614174000","state":"working"}]}
+```
+
+较旧或重复的序号会被忽略，且不会刷新状态时间。插件大约每 10 秒上报一次前台活动。
+
+回执针对具体消息；加入、已读和排队游标都不会生成回执。`GET /rooms/<roomId>/receipts?messageIDs=<id>,<id>` 查询最多 500 条指定消息；省略 `messageIDs` 时返回最近 500 条。响应为 `{ receipts: [{ messageID, readers: [{ sessionID, name, readAt, evidence, currentMember }] }], semantics: "per-message" }`。`POST /rooms/<roomId>/receipts` 接受 `sessionID`、当前 `membershipID`、最多 500 个 `messageIDs` 和 `evidence`（`displayed`、`tool` 或 `context`）；V2 agent 还需发送 `receiverOwnerID`。`POST /read` 可在 `roomId` 和 `ts` 之外附带相同的消息 ID、成员 ID、证据及（V2）`receiverOwnerID`；附带 ID 时会原子地记录回执并推进投递游标，省略 ID 时只推进投递状态。
+
+`membershipID` 标识当前加入代次。离开后重新加入会生成新 ID；使用旧代次提交回执会被拒绝。
+
+`displayed` 表示消息出现在当前聚焦浏览器标签页的可视区域。`tool` 表示房间轮询已获取完整消息；V1 仅在显式轮询时产生此类回执。`context` 表示完整消息进入了 agent 的主要上下文准备阶段，不代表 agent 已理解。被截为 300 字符的推送预览不算完整消息证据；需轮询完整消息才能记录回执。成员离开后回执仍保留，并标记其已不是当前成员。这些接口使用中心服务器的共享令牌权限，不提供逐用户访问控制。
+
+需分别升级中心服务器和每台客户端的插件；只更新本地插件不会部署服务端 API。此包不会自动部署或重新配置服务器服务。
 
 每台客户端机器上：
 
@@ -156,3 +176,4 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 - SQLite 持续保留历史消息，不自动删除。500 条只是内存工作窗口，不是磁盘保留上限；未读消息和历史记录均分页读取。请定期备份数据库。
 - 仅包含某个过渡开发版重试记录的安装会受影响：若旧后台重试记录无法恢复消息时间戳，迁移会采取保守处理，永久停用该服务/房间的后台操作；正常通知 steer 仍会继续。
 - `notify.log` 会持续增长，暂无轮转。
+- 已知问题：有用户报告在 macOS 和 Windows 的 Edge 中无法选中自己的消息文本，但问题尚未复现。在实际 Mac 的 Edge 156 和镜像在线资源中均未复现；仍需用户提供录屏。

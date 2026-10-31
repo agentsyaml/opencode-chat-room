@@ -73,6 +73,7 @@ export function initRooms(app) {
     app.renderHead();
     $("#msgList").textContent = "";
     app.renderMessages(false);
+    app.startPolling();
     app.renderMembers();
     $("#thread").scrollTop = hasSavedPosition ? entry.position : entry.position || $("#thread").scrollHeight;
     $("#msgInput").disabled = false;
@@ -82,7 +83,6 @@ export function initRooms(app) {
     app.updateDraftCount();
     app.updateSendState();
     app.hideSendError();
-    app.startPolling();
     app.updateBadge();
     app.updateJump();
     app.markActiveRoomRead();

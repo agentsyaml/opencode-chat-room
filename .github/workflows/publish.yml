@@ -34,7 +34,7 @@ jobs:
           CHAT_UI_BROWSER_MODULE: ${{ github.workspace }}/node_modules/playwright/index.mjs
         run: |
           test -f "$CHAT_UI_BROWSER_MODULE"
-          bun test src/web-ui.test.ts src/web-lifecycle.test.ts
+          bun test src/web-*.test.ts
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -60,7 +60,7 @@ jobs:
           node --input-type=module -e '
             import fs from "node:fs";
             const files = JSON.parse(fs.readFileSync("npm-pack.json", "utf8"))[0].files.map(file => file.path);
-            const required = ["server/newrooms.ts", "server/assets/NOTICE.txt", "server/assets/MARKED-LICENSE", "server/assets/DOMPURIFY-LICENSE", "server/assets/marked-18.0.4.js", "server/assets/dompurify-3.4.7.js"];
+            const required = ["server/newrooms.ts", "server/member-routes.ts", "server/assets/NOTICE.txt", "server/assets/MARKED-LICENSE", "server/assets/DOMPURIFY-LICENSE", "server/assets/marked-18.0.4.js", "server/assets/dompurify-3.4.7.js"];
             const missing = required.filter(file => !files.includes(file));
             const leaked = files.filter(file => /(?:\.test\.[cm]?[jt]sx?$|\.fixture(?:\.|\/)|(?:^|\/)fixtures?\/)/i.test(file));
             if (missing.length || leaked.length) { console.error({ missing, leaked }); process.exit(1); }

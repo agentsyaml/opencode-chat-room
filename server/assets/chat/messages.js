@@ -142,20 +142,40 @@ export function initMessages(app) {
       const body = document.createElement("div");
       body.className = "msg-text";
       renderMarkdown(body, message.text, app);
-      row.append(meta, body);
+      row.append(meta, body, receiptDetails(message, app));
     }
     if (live) row.classList.add("in");
     return row;
   };
 
+  app.renderReceiptData = (roomId, receipts) => {
+    const thread = $("#thread"), edge = thread.getBoundingClientRect();
+    const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
+    const anchor = Array.from($("#msgList").querySelectorAll("[data-msg-id]")).find((node) => node.getBoundingClientRect().bottom > edge.top);
+    const anchorId = anchor?.dataset.msgId, anchorTop = anchor ? anchor.getBoundingClientRect().top - edge.top : 0;
+    for (const receipt of receipts) app.state.receipts.set(`${roomId}\0${receipt.messageID}`, receipt.readers);
+    for (const row of document.querySelectorAll(`#msgList [data-msg-id]`)) {
+      const message = app.state.room?.messages.find((item) => item.id === row.dataset.msgId);
+      if (message?.roomId === roomId || app.state.room?.id === roomId && message) updateReceiptDetails(row, message, app);
+    }
+    if (atBottom) thread.scrollTop = thread.scrollHeight;
+    else if (anchorId) {
+      const next = $("#msgList").querySelector(`[data-msg-id="${CSS.escape(anchorId)}"]`);
+      if (next) thread.scrollTop += next.getBoundingClientRect().top - thread.getBoundingClientRect().top - anchorTop;
+    }
+  };
+
   app.renderMessages = (live = false) => {
     const thread = $("#thread"), list = $("#msgList"), messages = app.state.room.messages;
-    const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
+    const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
     let last = list.lastElementChild, skipped = 0;
-    let anchorId = null;
+    let anchorId = null, anchorOffset = 0, oldTop = thread.scrollTop;
     let renderedIds = new Set([...list.children].map((node) => node.dataset.msgId).filter(Boolean));
+    const viewport = thread.getBoundingClientRect();
+    const firstVisible = [...list.children].find((node) => node.dataset.msgId && node.getBoundingClientRect().bottom > viewport.top);
+    anchorId = firstVisible?.dataset.msgId || null;
+    anchorOffset = firstVisible ? firstVisible.getBoundingClientRect().top - viewport.top : 0;
     if (messages.length && app.firstMessageId && messages[0].id !== app.firstMessageId) {
-      anchorId = [...list.children].find((node) => node.classList.contains("msg"))?.dataset.msgId || null;
       list.textContent = "";
       app.rendered = 0;
       last = null;
@@ -190,13 +210,29 @@ export function initMessages(app) {
     app.rendered = messages.length;
     app.firstMessageId = messages[0]?.id || app.firstMessageId;
     $("#msgEmpty").hidden = messages.length > 0;
-    if (anchorId) {
+    if (nearBottom) thread.scrollTop = thread.scrollHeight;
+    else if (anchorId) {
       const anchor = list.querySelector(`[data-msg-id="${CSS.escape(anchorId)}"]`);
-      if (anchor) thread.scrollTop += anchor.getBoundingClientRect().top - thread.getBoundingClientRect().top - 40;
-      else thread.scrollTop = thread.scrollHeight;
+      if (anchor) thread.scrollTop += anchor.getBoundingClientRect().top - viewport.top - anchorOffset;
+      else thread.scrollTop = oldTop;
     } else if (!live || nearBottom) thread.scrollTop = thread.scrollHeight;
     app.updateJump();
     trimMessages(list, app);
+    if (nearBottom) {
+      thread.scrollTop = thread.scrollHeight;
+      const roomId = app.state.room?.id, generation = app.state.pollGeneration;
+      requestAnimationFrame(() => {
+        if (app.state.room?.id === roomId && app.state.pollGeneration === generation
+            && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80) thread.scrollTop = thread.scrollHeight;
+      });
+    }
+    else if (anchorId) {
+      const anchor = list.querySelector(`[data-msg-id="${CSS.escape(anchorId)}"]`);
+      if (anchor) thread.scrollTop += anchor.getBoundingClientRect().top - thread.getBoundingClientRect().top - anchorOffset;
+      else thread.scrollTop = oldTop;
+    }
+    app.queueReceiptRefresh?.();
+    app.queueReceiptObservation?.();
     return { skipped };
   };
 
@@ -397,7 +433,7 @@ export function initMessages(app) {
     return { ...updated, messages: [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500) };
   }
 
-  function trimMessages(list, app) {
+function trimMessages(list, app) {
     if (list.children.length <= 400) return;
     while (list.children.length > 300) list.removeChild(list.firstChild);
     if (list.firstElementChild && !list.firstElementChild.classList.contains("gap")) {
@@ -406,9 +442,45 @@ export function initMessages(app) {
       app.setText(gap, "earlierMessages");
       list.insertBefore(gap, list.firstChild);
     }
-  }
+}
 
-  function systemMessage(text, app) {
+function receiptDetails(message, app) {
+  const details = document.createElement("details");
+  details.className = "message-readers";
+  const summary = document.createElement("summary"), count = document.createElement("span"), list = document.createElement("ul");
+  count.className = "receipt-count";
+  list.className = "receipt-reader-list";
+  summary.append(count);
+  details.append(summary, list);
+  updateReceiptDetails(details.closest("li") || details, message, app);
+  return details;
+}
+
+function updateReceiptDetails(row, message, app) {
+  const details = row.matches?.("details.message-readers") ? row : row.querySelector("details.message-readers");
+  if (!details) return;
+  const detailsKey = `${app.state.room?.id || message.roomId || ""}\0${message.id}`;
+  const senderID = message.senderSessionID || (app.state.room?.kind === "direct" ? message.senderId : "");
+  const readers = (app.state.receipts.get(detailsKey) || []).filter((reader) => reader.sessionID !== senderID);
+  details.hidden = readers.length === 0;
+  details.querySelector(".receipt-count").textContent = app.t("receiptCount", { count: readers.length });
+  const list = details.querySelector(".receipt-reader-list");
+  list.textContent = "";
+  const members = app.state.memberSessions.get(app.state.room?.id) || [];
+  for (const reader of readers) {
+    const row = document.createElement("li"), name = document.createElement("span"), evidence = document.createElement("span");
+    const duplicates = members.filter((member) => member.name === reader.name).length > 1 || readers.filter((item) => item.name === reader.name).length > 1;
+    name.textContent = `${reader.name}${duplicates ? ` · ${reader.sessionID.slice(0, 8)}` : ""}${reader.currentMember === false ? ` · ${app.t("departedMember")}` : ""}`;
+    evidence.textContent = app.t(`receiptEvidence_${reader.evidence}`);
+    evidence.title = evidence.textContent;
+    evidence.setAttribute("aria-label", evidence.textContent);
+    row.dataset.readerSessionId = reader.sessionID;
+    row.append(name, evidence);
+    list.append(row);
+  }
+}
+
+function systemMessage(text, app) {
     const joined = /^(.*?)\s+joined the room$/.exec(String(text));
     if (joined) return app.t("systemJoined", { name: joined[1] });
     const left = /^(.*?)\s+left the room$/.exec(String(text));

@@ -79,17 +79,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.0 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.1 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.3.0 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.3.0 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.3.1 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.3.1 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.3.0
+  bunx @alexsun-top/opencode-chat-room@0.3.1
 
 # Local checkout:
 bun install
@@ -105,6 +105,26 @@ Rooms you joined remain joined as you switch the sidebar selection; switching vi
 The chat renders GitHub Flavored Markdown using locally bundled Marked and DOMPurify assets. Message text is sanitized before rendered HTML is inserted. No CDN is required.
 
 The central server uses a trusted shared-token model, not per-user authorization or private DMs: anyone holding the token can read messages, manage rooms, remove members, and delete rooms. The server and its SQLite database can read direct-message content. Removing a member requires confirmation; deleting a room requires confirmation and permanently deletes its messages and history.
+
+### Agent presence and message receipts
+
+`GET /rooms/<roomId>/members` returns each member's `membershipID`, `type`, and `activity: { state, observedAt }`; `observedAt` is the server timestamp in milliseconds. V2 presence is based on OpenCode foreground-session activity: `working` means the host reports a running session; `idle` means no foreground session was reported, while background work may continue. `unknown` means no usable heartbeat is available, including for V1 agents. `waiting` is an accepted state but is not automatically detected. Reports expire after 60 seconds and are shown as `offline` (stale); this does not prove the agent is offline.
+
+V2 presence uses `POST /presence` with an owner-scoped increasing sequence and up to 200 sessions per request:
+
+```json
+{"ownerID":"123e4567-e89b-42d3-a456-426614174000","sequence":42,"sessions":[{"sessionID":"<session-id>","receiverOwnerID":"123e4567-e89b-42d3-a456-426614174000","state":"working"}]}
+```
+
+Older or repeated sequences are ignored and do not refresh presence. The plugin reports foreground activity about every 10 seconds.
+
+Receipts identify exact messages; join, read, and queued cursors do not create them. `GET /rooms/<roomId>/receipts?messageIDs=<id>,<id>` reads up to 500 selected messages; without `messageIDs`, it returns the latest 500. Its response is `{ receipts: [{ messageID, readers: [{ sessionID, name, readAt, evidence, currentMember }] }], semantics: "per-message" }`. `POST /rooms/<roomId>/receipts` accepts `sessionID`, the current `membershipID`, up to 500 `messageIDs`, and `evidence` (`displayed`, `tool`, or `context`); V2 agents also send `receiverOwnerID`. `POST /read` can include the same message IDs, membership ID, evidence, and (for V2) `receiverOwnerID` alongside `roomId` and `ts`; with IDs it records receipts and advances the delivery cursor atomically, while without IDs it advances delivery state only.
+
+`membershipID` identifies the current join generation. Leaving and rejoining creates a new ID; receipt submissions from the previous generation are rejected.
+
+`displayed` means the message intersected the visible area of a focused browser tab. `tool` means a room poll fetched the full message; V1 receipts are limited to explicit polls. `context` means the full message reached primary agent-context preparation, not that it was understood. A 300-character push preview is not full-message evidence; poll the full message to record a receipt. Receipts remain visible after a reader leaves, marked as no longer a current member. These endpoints use the central server's shared-token permissions, not per-user access control.
+
+Upgrade the central server and every client plugin separately; updating only a local plugin does not deploy the server APIs. The package does not automatically deploy or reconfigure the server service.
 
 On every client machine:
 
@@ -159,3 +179,4 @@ Note: `join` with `name:"alice"` registers the identity `alice` for that session
 - SQLite retains message history without automatic deletion. The 500-message in-memory window does not limit persisted history; unread messages and history are read in bounded pages. Back up the database regularly.
 - Only installations carrying retry rows from an intermediate development build are affected: records without a recoverable message timestamp migrate conservatively, permanently disabling backgrounding for that service/room. Normal notification steering continues.
 - `notify.log` grows without rotation.
+- Known issue: a report of users being unable to select their own text in Edge on macOS and Windows remains unverified. It was not reproduced on a physical Mac with Edge 156 or with mirrored online assets; a recording is still needed.

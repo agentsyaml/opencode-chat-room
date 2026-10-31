@@ -14,6 +14,8 @@ import { assertDeliveryLease } from "./session-delivery";
 import type { QueueTransport } from "./queue-transport";
 import { pollOwnedSessions } from "./v2-receiver";
 import { pollKnownSessions } from "../plugin";
+import { locallyOwnedSessions, reportAgentPresence } from "./agent-presence";
+import { flushReceiptCandidates, receiptDestination } from "./agent-receipts";
 
 type WatchRecord = { phase: "starting" | "running"; token: string; nonce: string; instanceID: string; pid: number; port?: number; createdAt?: number };
 function canonicalPath(value: string): string {
@@ -115,7 +117,9 @@ type Host = NonNullable<Awaited<ReturnType<typeof discoverCompatibleRegisteredHo
 export type WatchSweepDeps = {
   discover(): Promise<Host | undefined>;
   owner(host: Host): Promise<string | undefined>;
+  flush?(ownerID: string): Promise<void>;
   memberships(ownerID: string): Promise<Set<string>>;
+  presence?(ids: ReadonlySet<string>, host: Host, ownerID: string): Promise<void>;
   poll(ids: ReadonlySet<string>, host: Host, ownerID: string): Promise<void>;
 };
 export async function watcherSweep(deps: WatchSweepDeps = defaultSweepDeps()): Promise<boolean> {
@@ -124,7 +128,9 @@ export async function watcherSweep(deps: WatchSweepDeps = defaultSweepDeps()): P
   const ownerID = await deps.owner(host).catch(() => undefined);
   if (!ownerID) return false;
   const ids = await deps.memberships(ownerID).catch(() => undefined);
-  if (!ids?.size) return true;
+  if (!ids) return true;
+  await deps.presence?.(ids, host, ownerID).catch(() => {});
+  if (!ids.size) { await deps.flush?.(ownerID).catch(() => {}); return true; }
   await deps.poll(ids, host, ownerID);
   return true;
 }
@@ -137,15 +143,23 @@ function defaultSweepDeps(): WatchSweepDeps {
   return {
     discover: discoverCompatibleRegisteredHost,
     owner: (host) => receiverOwnerID(host.origin),
+    flush: (ownerID) => flushReceiptCandidates({ destination: receiptDestination(center.center), receiverOwnerID: ownerID,
+      ...(center.center ? { center: center.center, token: center.token } : {}) }),
     memberships: async (ownerID) => {
       if (center.center) {
         const result = await request(center, `/receiver/memberships?ownerID=${encodeURIComponent(ownerID)}`, "GET") as { sessionIDs?: string[] };
         return new Set(result.sessionIDs ?? []);
       }
       const registry = await loadRegistry();
-      return new Set(Object.values(registry).flatMap((entries) => Object.entries(entries)
-        .filter(([, entry]) => entry.protocol === "v2" && entry.receiverOwnerID === ownerID).map(([id]) => id)));
+      return locallyOwnedSessions(registry, ownerID);
     },
+    presence: (ids, host, ownerID) => reportAgentPresence({
+      host, ownerID, center, sessionIDs: ids,
+      current: async () => {
+        const current = await discoverCompatibleRegisteredHost();
+        return Boolean(current && current.origin === host.origin && current.pid === host.pid && current.version === host.version);
+      },
+    }),
     poll: (ids, host, ownerID) => {
       const transport: QueueTransport = {
         protocol: "v2", receiverOwnerID: ownerID, mentionOnlySessions: ids,

@@ -59,7 +59,7 @@
   #chatView > .msg-scroll { grid-column: 2; grid-row: 3; min-height: 0; }
   #chatView > .composer { grid-column: 2; grid-row: 4; }
   .chat-head-main h1 { font-size: 21px; }
-  .thread { padding: 28px clamp(20px, 5vw, 72px) 12px; }
+  .thread { padding: 28px 24px 12px; }
   .msg-text { max-width: min(82%, 680px); padding: 10px 14px; }
   .composer { padding: 14px 24px calc(14px + env(safe-area-inset-bottom)); }
   .composer-row { max-width: 940px; width: 100%; margin: 0 auto; }
@@ -72,7 +72,7 @@
   .code-copy:hover { color: var(--accent); border-color: var(--accent); }
   .msg-text table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
   .msg-text th, .msg-text td { padding: 5px 9px; border: 1px solid var(--line); text-align: left; }
-  .msg-text th { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+  .msg-text th { white-space: nowrap; background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
   .msg-text input[type="checkbox"] { accent-color: var(--accent); }
   .msg-text del { color: var(--ink-3); }
   .msg-text hr { border: 0; border-top: 1px solid var(--line); }
@@ -114,6 +114,6 @@
     #chatView > .chat-head { align-items: center; }
     .chat-head-actions { justify-content: flex-start; }
     .chat-head-actions .chip { width: 34px; height: 34px; padding: 0; font-size: 0; }
-    .chat-head-actions .panel { position: fixed; top: calc(env(safe-area-inset-top) + 180px); left: 12px; right: 12px; width: auto; max-height: min(55dvh, 420px); overflow: auto; }
+    .chat-head-actions .panel { position: fixed; top: calc(env(safe-area-inset-top) + 196px); left: 12px; right: 12px; width: auto; max-height: min(55dvh, 420px); overflow: auto; }
     .room-meta { max-width: 100px; overflow: hidden; }
   }

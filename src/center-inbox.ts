@@ -11,6 +11,7 @@ import {
 import { request, markQueued, type CenterOpts } from "./center-client";
 import { explicitlyAddresses } from "./mentions";
 import { claimBackgroundAttempt } from "./receiver-state";
+import { prepareReceiptCandidate, receiptDestination } from "./agent-receipts";
 import { serializeSessionPush } from "./session-delivery";
 export { serializeSessionPush } from "./session-delivery";
 import {
@@ -147,7 +148,7 @@ export async function pushItemsToSession(
   let worst: PushResult = "delivered";
   for (const [roomId, batch] of rooms) {
     const roomMentionOnly = mentionOnly && !qualifiedRooms.has(roomId);
-    type Recipient = { name?: string; protocol?: "v1" | "v2"; receiverOwnerID?: string; lastReadTs?: number; lastQueuedTs?: number; roomKind?: "group" | "direct"; host?: string; directory?: string };
+    type Recipient = { name?: string; protocol?: "v1" | "v2"; receiverOwnerID?: string; membershipID?: string; lastReadTs?: number; lastQueuedTs?: number; roomKind?: "group" | "direct"; host?: string; directory?: string };
     let recipient: Recipient | undefined;
     try {
       const registry = await request(opts, `/rooms/${encodeURIComponent(roomId)}/registry`, "GET") as Record<string, Recipient>;
@@ -211,6 +212,11 @@ export async function pushItemsToSession(
     if (!currentAdmission || currentAdmission.id !== admission.id) {
       continue;
     }
+    if (transport.protocol === "v2" && current.protocol === "v2") prepareReceiptCandidate({
+      admissionID: admission.id, sessionID, roomID: roomId, membershipID: current.membershipID,
+      receiverOwnerID: current.receiverOwnerID, destination: receiptDestination(opts.center),
+      items: admission.items, prompt: admission.prompt, capped: admission.capped,
+    });
     const result = transport.protocol === "v1"
       ? await sendAsyncNotification(target, sessionID, admission.prompt)
       : await sendQueue(target, sessionID, admission.prompt, admission.id, "steer");

@@ -4,7 +4,7 @@
 import path from "node:path";
 import os from "node:os";
 import RoomService, { type Message, type Room } from "./room-service";
-import { readHistoryPage, readInboxPage as sqliteInboxPage, readSqliteState, readUnreadPage, writeSqliteState, type HistoryMessage } from "./sqlite-state";
+import { readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state";
 
 export function statePath(): string {
   // JSON path remains the migration source; SQLite lives beside it.
@@ -39,6 +39,30 @@ export async function loadRooms(): Promise<Room[]> {
   return (await readSqliteState(databasePath())).rooms;
 }
 
+export async function readReceipts(roomID: string, messageIDs?: string[]): Promise<MessageReceipt[] | undefined> {
+  return readMessageReceipts(databasePath(), roomID, messageIDs);
+}
+
+export type WorkState = "working" | "idle" | "waiting" | "unknown";
+export type ReceiptEvidence = "displayed" | "tool" | "context";
+export type MessageReceiptReader = { sessionID: string; name: string; readAt: number; evidence: ReceiptEvidence };
+export type MessageReceipt = { messageID: string; readers: MessageReceiptReader[] };
+export type PresenceReport = { sessionID: string; state: WorkState };
+export type ReceiptIdentity = { membershipID: string; receiverOwnerID?: string };
+export type ReceiptWriteResult = { status: "ok"; acceptedIDs: string[]; readThroughTs?: number } | { status: "membership" | "messageIDs"; acceptedIDs: [] };
+
+export function recordMessageReceipts(roomID: string, sessionID: string, messageIDs: string[], evidence: ReceiptEvidence, identity: ReceiptIdentity): Promise<ReceiptWriteResult> {
+  return writeMessageReceipts(databasePath(), roomID, sessionID, messageIDs, evidence, identity, Date.now());
+}
+
+export function acknowledgeReadWithReceipts(roomID: string, sessionID: string, readThroughTs: number, messageIDs: string[], evidence: ReceiptEvidence, identity: ReceiptIdentity): Promise<ReceiptWriteResult> {
+  return writeMessageReceipts(databasePath(), roomID, sessionID, messageIDs, evidence, identity, Date.now(), readThroughTs);
+}
+
+export function reportPresence(reports: PresenceReport[], ownerID?: string, sequence?: number) {
+  return writePresenceState(databasePath(), reports, ownerID, sequence, Date.now());
+}
+
 export type RegistryEntry = {
   serverUrl: string;
   apiPrefix: string;
@@ -50,6 +74,9 @@ export type RegistryEntry = {
   // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行；web 条目不填
   host?: string;
   receiverOwnerID?: string;
+  membershipID?: string;
+  workState?: WorkState;
+  lastSeenAt?: number;
 };
 export type Registry = Record<string, Record<string, RegistryEntry>>;
 

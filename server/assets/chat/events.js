@@ -64,12 +64,14 @@ export function initEvents(app) {
   $("#thread").addEventListener("scroll", () => {
     const thread = $("#thread");
     if (thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80) void app.markActiveRoomRead();
+    app.queueReceiptRefresh();
+    app.queueReceiptObservation();
     app.updateJump();
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) void app.markActiveRoomRead();
+    if (!document.hidden) { void app.markActiveRoomRead(); void app.loadManageableMembers(); }
   });
-  window.addEventListener("focus", () => void app.markActiveRoomRead());
+  window.addEventListener("focus", () => { void app.markActiveRoomRead(); app.queueReceiptRefresh(); app.queueReceiptObservation(); });
   $("#msgList").addEventListener("click", (event) => {
     const button = event.target.closest("[data-copy-code]");
     if (button) void copyCodeFromButton(button, app);

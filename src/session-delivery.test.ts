@@ -59,6 +59,21 @@ test("pending admission identity and admitted state survive a separate process",
     expect(queue.pendingAdmission("session", "room")).toBeUndefined();
 });
 
+  test("pending admission reads do not contend with an unrelated SQLite writer", async () => {
+    const item = { senderId: "alice", senderSessionID: "sender", text: "hello", createdAt: 200 };
+    const expected = queue.getOrCreatePendingAdmission("read-session", "read-room", [item], "prompt", 200, false);
+    const file = path.join(stateHome, "opencode", "chat-room", "receiver.sqlite");
+    const script = `const {Database}=await import("bun:sqlite");const db=new Database(${JSON.stringify(file)});db.exec("PRAGMA busy_timeout=50;BEGIN IMMEDIATE;UPDATE delivery_leases SET expires_at=expires_at WHERE session_id='read-lock'");console.log("LOCKED");await new Promise(r=>setTimeout(r,1200));db.exec("ROLLBACK");db.close();`;
+    const child = Bun.spawn([process.execPath, "-e", script], { env: { ...process.env }, stdout: "pipe", stderr: "pipe" });
+    const reader = child.stdout.getReader(), decoder = new TextDecoder();
+    let output = "";
+    while (!output.includes("LOCKED")) { const chunk = await reader.read(); if (chunk.done) throw new Error("lock child exited early"); output += decoder.decode(chunk.value); }
+    const started = Date.now();
+    expect(queue.pendingAdmission("read-session", "read-room")?.id).toBe(expected.id);
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(await child.exited).toBe(0);
+  });
+
   test("plugin and daemon notification contenders admit one host prompt", async () => {
     const store = await import("./store");
     const roomID = `race-${crypto.randomUUID()}`;
