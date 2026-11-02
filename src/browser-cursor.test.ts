@@ -3,25 +3,34 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, expect, test } from "bun:test";
 
+const childMode = process.env.CHAT_ROOM_BROWSER_CURSOR_CHILD === "1";
+if (!childMode) {
+  test("runs browser cursor routes in an isolated server process", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "browser-cursor-test-")), token = "browser-cursor-test-token";
+    const env = { ...process.env };
+    for (const key of ["CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL"]) delete env[key];
+    const child = Bun.spawn([process.execPath, "test", import.meta.path], { env: { ...env,
+      CHAT_ROOM_BROWSER_CURSOR_CHILD: "1", CHAT_ROOM_STATE_DIR: path.join(root, "rooms"),
+      HOME: path.join(root, "home"), XDG_CONFIG_HOME: path.join(root, "config"), XDG_STATE_HOME: path.join(root, "state"),
+      CHAT_ROOM_SERVER_URL: "", CHAT_ROOM_SERVER_TOKEN: token, CHAT_ROOM_WAKE_SERVE_URL: "",
+      CHAT_ROOM_SERVER_HOST: "127.0.0.1", CHAT_ROOM_SERVER_PORT: "4399" }, stdout: "pipe", stderr: "pipe" });
+    try {
+      const code = await child.exited;
+      if (code !== 0) throw new Error(`${await new Response(child.stdout).text()}${await new Response(child.stderr).text()}`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+} else {
 const env = ["HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "CHAT_ROOM_STATE_DIR", "CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL"] as const;
 const previous = Object.fromEntries(env.map((key) => [key, process.env[key]]));
-const root = mkdtempSync(path.join(os.tmpdir(), "browser-cursor-"));
-for (const key of ["CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL"]) delete process.env[key];
-process.env.HOME = path.join(root, "home");
-process.env.XDG_CONFIG_HOME = path.join(root, "config");
-process.env.XDG_STATE_HOME = path.join(root, "state");
-process.env.CHAT_ROOM_STATE_DIR = path.join(root, "rooms");
+const root = process.env.CHAT_ROOM_STATE_DIR!;
+const token = process.env.CHAT_ROOM_SERVER_TOKEN!;
 const server = (await import("../server/chat-server")).default;
 const store = await import("./store");
-
-afterAll(() => {
-  for (const key of env) previous[key] === undefined ? delete process.env[key] : process.env[key] = previous[key];
-  rmSync(root, { recursive: true, force: true });
-});
+afterAll(() => { for (const key of env) previous[key] === undefined ? delete process.env[key] : process.env[key] = previous[key]; });
 
 function call(route: string, method = "GET", body?: unknown) {
   return server.fetch(new Request(`http://local${route}`, { method,
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body) }));
 }
 
@@ -115,3 +124,4 @@ test("afterTs validation requires an explicit member-room echo request", async (
   expect((await call(`/inbox?sessionID=reader-session&roomId=${fixture.roomID}&afterTs=0`)).status).toBe(400);
   expect((await call(`/inbox?sessionID=reader-session&roomId=${fixture.roomID}&excludeSelf=1&afterTs=0`)).status).toBe(400);
 });
+}
