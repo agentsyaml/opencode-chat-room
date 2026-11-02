@@ -29,7 +29,16 @@ export function createRandomId() {
 
 export function createAuth(storage, fetcher, translate = (key) => key, sessionStore) {
   const memory = Object.create(null);
-  let memorySessionID = "";
+  let browserIdentity, identityPersistent = false, identityConflict = false;
+  const identityKey = "chat.browserIdentity";
+  const validSessionID = (id) => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+  const parseIdentity = (value) => {
+    try {
+      const identity = JSON.parse(value);
+      return validSessionID(identity?.sessionID) && typeof identity.name === "string" && identity.name.length <= 64
+        ? { sessionID: identity.sessionID, name: identity.name } : undefined;
+    } catch { return undefined; }
+  };
   const read = (key) => {
     if (Object.hasOwn(memory, key)) return memory[key];
     try { return (storage ?? globalThis.localStorage).getItem(key); } catch { return null; }
@@ -53,19 +62,63 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
       else store.setItem(key, value);
     } catch { /* Tab-scoped state is best effort. */ }
   };
+  const syncTabIdentity = () => {
+    writeSession("chat.sessionID", browserIdentity.sessionID);
+    writeSession("chat.name", browserIdentity.name || null);
+  };
+  const ensureIdentity = () => {
+    if (browserIdentity) return browserIdentity;
+    let store;
+    try {
+      store = storage ?? globalThis.localStorage;
+      const canonical = parseIdentity(store.getItem(identityKey));
+      if (canonical) { browserIdentity = canonical; identityPersistent = true; syncTabIdentity(); return canonical; }
+    } catch { /* Keep this tab's identity in memory when storage is blocked. */ }
+    const previousID = readSession("chat.sessionID");
+    browserIdentity = { sessionID: validSessionID(previousID) ? previousID : createRandomId(), name: validSessionID(previousID) ? (readSession("chat.name") || "").slice(0, 64) : "" };
+    syncTabIdentity();
+    try {
+      store ||= storage ?? globalThis.localStorage;
+      store.setItem(identityKey, JSON.stringify(browserIdentity));
+      const saved = parseIdentity(store.getItem(identityKey));
+      if (saved?.sessionID === browserIdentity.sessionID) { browserIdentity = saved; identityPersistent = true; }
+      else if (saved) identityConflict = true;
+    } catch { /* This page keeps its in-memory identity without claiming persistence. */ }
+    return browserIdentity;
+  };
+  const identityError = () => {
+    const error = new Error(translate("identityChanged"));
+    error.identityConflict = true;
+    return error;
+  };
+  const assertIdentity = () => {
+    ensureIdentity();
+    if (identityConflict) throw identityError();
+    try {
+      const current = parseIdentity((storage ?? globalThis.localStorage).getItem(identityKey));
+      if (current && current.sessionID !== browserIdentity.sessionID || identityPersistent && !current) {
+        identityConflict = true;
+        throw identityError();
+      }
+      if (current) identityPersistent = true;
+    } catch (error) {
+      if (error?.identityConflict) throw error;
+      identityPersistent = false;
+    }
+  };
+  const saveIdentity = () => {
+    if (!identityPersistent) return;
+    try {
+      const store = storage ?? globalThis.localStorage;
+      const current = parseIdentity(store.getItem(identityKey));
+      if (current?.sessionID !== browserIdentity.sessionID) { identityConflict = true; return; }
+      store.setItem(identityKey, JSON.stringify(browserIdentity));
+      if (parseIdentity(store.getItem(identityKey))?.sessionID !== browserIdentity.sessionID) identityConflict = true;
+    } catch { /* Keep the preferred name in memory when persistence is blocked. */ }
+  };
   const auth = {
     get sessionID() {
-      if (memorySessionID) return memorySessionID;
-      try {
-        const store = sessionStore ?? globalThis.sessionStorage;
-        memorySessionID = store.getItem("chat.sessionID") || "";
-      } catch { /* Keep one identity in memory when tab storage is blocked. */ }
-      if (!memorySessionID) {
-        memorySessionID = createRandomId();
-        try { (sessionStore ?? globalThis.sessionStorage).setItem("chat.sessionID", memorySessionID); }
-        catch { /* In-memory identity remains stable. */ }
-      }
-      return memorySessionID;
+      return ensureIdentity().sessionID;
     },
     get roomId() {
       const active = readSession("chat.roomId");
@@ -75,8 +128,8 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
       return legacy || "";
     },
     set roomId(value) { writeSession("chat.roomId", value || null); write("chat.roomId", null); },
-    get name() { return readSession("chat.name") || read("chat.name") || ""; },
-    set name(value) { writeSession("chat.name", value || null); write("chat.name", null); },
+    get name() { return ensureIdentity().name; },
+    set name(value) { ensureIdentity(); browserIdentity.name = String(value ?? "").slice(0, 64); writeSession("chat.name", browserIdentity.name || null); saveIdentity(); },
     get token() { return read("chat.token") || ""; }, set token(value) { write("chat.token", value || null); },
     get locale() { return read("chat.locale") || "en"; }, set locale(value) { write("chat.locale", value || null); },
     get joinedRoomIds() {
@@ -102,6 +155,7 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
   };
   const saveToken = (value) => { auth.token = String(value ?? "").trim(); return auth.token; };
   const api = async (url, options = {}) => {
+    assertIdentity();
     const headers = { ...options.headers };
     if (options.body) headers["Content-Type"] = "application/json";
     if (auth.token) headers.Authorization = `Bearer ${auth.token}`;
@@ -113,6 +167,7 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
       throw error;
     }
     const data = await response.json().catch(() => ({}));
+    assertIdentity();
     if (!response.ok) {
       const error = new Error(data.error || translate("requestFailed", { status: response.status }));
       error.status = response.status;
@@ -149,6 +204,7 @@ const messages = {
     earlierMessages: "Earlier messages omitted", you: "You", saved: "Saved",
     savedMemory: "Saved for this tab only", copyFailed: ({ id }) => `Copy failed. Copy manually: ${id}`,
     copyCode: "Copy code", copiedCode: "Copied", copyCodeFailed: "Could not copy code. Select and copy it manually.",
+    identityChanged: "This browser identity changed in another tab. Reload this tab before continuing.",
     networkError: "Network connection failed", requestFailed: ({ status }) => `Request failed (HTTP ${status})`,
     roomIdRequired: "Enter a room ID", nameRequired: "Enter your name", authRetry: "The server requires an access token. Enter it and try again.",
     networkRetry: "Unable to connect to the server. Check your network and try again.",
@@ -165,7 +221,7 @@ const messages = {
     deleteRoom: "Delete room", deleteConfirm: ({ name }) => `Delete “${name}” and all its messages? This cannot be undone.`,
     allMembers: "Everyone", messageCount: ({ count }) => `${count} / 2000`,
     privacyNote: "Anyone with the shared token can read direct messages and manage rooms; the server can read them too.",
-    systemJoined: ({ name }) => `${name} joined the room`, systemLeft: ({ name }) => `${name} left the room`,
+    systemJoined: ({ name }) => `${name} joined the room`, systemLeft: ({ name }) => `${name} left the room`, systemRemoved: ({ name }) => `${name} was removed from the room`,
     activity_working: "Working", activity_idle: "Foreground idle", activity_waiting: "Waiting", activity_unknown: "Status unknown", activity_offline: "Status stale",
     activityHint_working: "The agent reports active work.", activityHint_idle: "Foreground is idle; background work may continue.", activityHint_waiting: "The agent reports that it is waiting.", activityHint_unknown: "No activity report is available.", activityHint_offline: "The last status is stale; this does not prove the agent is offline.",
     receiptCount: ({ count }) => `Read by ${count}`, departedMember: "left",
@@ -192,6 +248,7 @@ const messages = {
     today: "今天", yesterday: "昨天", earlierMessages: "更早的消息已省略", you: "我", saved: "已保存",
     savedMemory: "仅保存于当前标签页", copyFailed: ({ id }) => `复制失败，请手动复制：${id}`,
     copyCode: "复制代码", copiedCode: "已复制", copyCodeFailed: "复制失败，请手动选择并复制代码。",
+    identityChanged: "此浏览器身份已在另一个标签页中更改，请重新加载此标签页后继续。",
     networkError: "网络连接失败", requestFailed: ({ status }) => `请求失败（HTTP ${status}）`,
     roomIdRequired: "请输入房间 ID", nameRequired: "请输入你的昵称", authRetry: "服务器要求访问令牌，请填写后重试",
     networkRetry: "无法连接服务器，请检查网络后重试", joinFailed: ({ message }) => `加入失败：${message}`,
@@ -205,7 +262,7 @@ const messages = {
     deleteRoom: "删除房间", deleteConfirm: ({ name }) => `删除“${name}”及全部聊天记录？此操作无法撤销。`,
     allMembers: "所有人", messageCount: ({ count }) => `${count} / 2000`,
     privacyNote: "持有共享令牌的人都可以读取私聊内容和管理房间；服务器也可以读取私聊内容。",
-    systemJoined: ({ name }) => `${name} 加入了房间`, systemLeft: ({ name }) => `${name} 离开了房间`,
+    systemJoined: ({ name }) => `${name} 加入了房间`, systemLeft: ({ name }) => `${name} 离开了房间`, systemRemoved: ({ name }) => `${name} 被移出了房间`,
     activity_working: "工作中", activity_idle: "前台空闲", activity_waiting: "等待中", activity_unknown: "状态未知", activity_offline: "状态已过期",
     activityHint_working: "Agent 正在报告工作状态。", activityHint_idle: "前台空闲；后台任务仍可能继续。", activityHint_waiting: "Agent 正在报告等待状态。", activityHint_unknown: "暂无活动状态报告。", activityHint_offline: "最近的状态已过期；这不能证明 Agent 已离线。",
     receiptCount: ({ count }) => `已读 ${count} 人`, departedMember: "已离开",

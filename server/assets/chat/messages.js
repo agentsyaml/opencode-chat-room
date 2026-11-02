@@ -1,5 +1,7 @@
 import { createRandomId, LS } from "./state.js";
 import { renderMarkdown } from "./markdown.js";
+import { hasMessageSelection, pruneMessageRows } from "./message-window.js";
+import { formatSystemMessage, setRoomPreview } from "./system-messages.js";
 
 export function initMessages(app) {
   const $ = app.$;
@@ -52,7 +54,7 @@ export function initMessages(app) {
       if (entry) {
         entry.room = mergeRoom(entry.room, updated);
         const latest = entry.room.messages.at(-1);
-        if (latest && latest.createdAt >= entry.previewAt) { entry.preview = latest.text; entry.previewAt = latest.createdAt; }
+        if (latest && latest.createdAt >= entry.previewAt) setRoomPreview(entry, latest);
       }
       app.discardFailedMessage(roomId, failedId);
       if (app.state.room?.id === roomId && entry) {
@@ -120,7 +122,7 @@ export function initMessages(app) {
     if (message.senderId === "system") {
       row.className = "sys";
       const text = document.createElement("span");
-      text.textContent = systemMessage(message.text, app);
+      text.textContent = formatSystemMessage(message, app);
       row.append(text);
     } else {
       const direct = app.state.room.kind === "direct";
@@ -168,22 +170,21 @@ export function initMessages(app) {
   app.renderMessages = (live = false) => {
     const thread = $("#thread"), list = $("#msgList"), messages = app.state.room.messages;
     const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
-    let last = list.lastElementChild, skipped = 0;
+    let skipped = 0;
     let anchorId = null, anchorOffset = 0, oldTop = thread.scrollTop;
-    let renderedIds = new Set([...list.children].map((node) => node.dataset.msgId).filter(Boolean));
     const viewport = thread.getBoundingClientRect();
     const firstVisible = [...list.children].find((node) => node.dataset.msgId && node.getBoundingClientRect().bottom > viewport.top);
     anchorId = firstVisible?.dataset.msgId || null;
     anchorOffset = firstVisible ? firstVisible.getBoundingClientRect().top - viewport.top : 0;
-    if (messages.length && app.firstMessageId && messages[0].id !== app.firstMessageId) {
-      list.textContent = "";
-      app.rendered = 0;
-      last = null;
-      renderedIds = new Set();
-    }
-    for (let index = app.rendered; index < messages.length; index++) {
+    pruneMessageRows(list, messages);
+    let last = list.lastElementChild;
+    const renderedIds = new Set([...list.querySelectorAll("[data-msg-id]")].map((node) => node.dataset.msgId));
+    let startIndex = 0;
+    const lastId = [...list.querySelectorAll("[data-msg-id]")].at(-1)?.dataset.msgId;
+    if (lastId) for (let index = messages.length - 1; index >= 0; index--) if (messages[index].id === lastId) { startIndex = index + 1; break; }
+    for (let index = startIndex; index < messages.length; index++) {
       const message = messages[index];
-      if (renderedIds.has(message.id)) continue;
+      if (renderedIds.has(message.id) || app.failedRenderIds.has(message.id)) continue;
       try {
         const day = new Date(message.createdAt).toDateString();
         if (!last || last.dataset.day !== day) {
@@ -277,7 +278,7 @@ export function initMessages(app) {
       if (entry) {
         entry.room = updated;
         const latest = updated.messages.at(-1);
-        if (latest) { entry.preview = latest.text; entry.previewAt = latest.createdAt; }
+        if (latest) setRoomPreview(entry, latest);
       }
       app.renderMessages(true);
       $("#thread").scrollTop = $("#thread").scrollHeight;
@@ -334,15 +335,16 @@ export function initMessages(app) {
     const roomId = app.state.room?.id;
     if (!roomId || !isCurrentPoll(roomId, generation)) return;
     try {
-      const query = new URLSearchParams({ sessionID: LS.sessionID, roomId, excludeSelf: "0", timeout: "25000" });
+      const entry = app.state.rooms.get(roomId);
+      const query = new URLSearchParams({ sessionID: LS.sessionID, roomId, excludeSelf: "0", timeout: "25000", afterTs: String(entry?.receivedTs || 0) });
       const data = await app.api(`/inbox?${query}`, { signal });
       if (!isCurrentPoll(roomId, generation)) return;
-      if (!data.member) {
+      if (data.member === false) {
         void app.removeJoinedRoom(roomId, { reason: true });
         return;
       }
-      const items = Array.isArray(data.items) ? data.items : [];
-      const entry = app.state.rooms.get(roomId), messages = app.state.room.messages;
+      if (data.member !== true || !Array.isArray(data.items)) return;
+      const items = data.items, previousReceivedTs = entry?.receivedTs || 0, messages = app.state.room.messages;
       const known = new Set(messages.map((message) => message.id));
       let sawSystem = false, added = 0;
       for (const item of items) {
@@ -351,9 +353,10 @@ export function initMessages(app) {
         messages.push({ ...item, roomId });
         known.add(item.id);
         entry?.unreadIds.set(item.id, item);
-        if (entry && item.createdAt >= entry.previewAt) { entry.preview = item.text; entry.previewAt = item.createdAt; }
+        if (entry && item.createdAt >= entry.previewAt) setRoomPreview(entry, item);
         added++;
       }
+      if (entry) entry.receivedTs = items.reduce((latest, item) => Number.isSafeInteger(item.createdAt) ? Math.max(latest, item.createdAt) : latest, previousReceivedTs);
       if (entry) entry.unreadOverflow = Boolean(data.hasMore);
       if (messages.length > 500) messages.splice(0, messages.length - 500);
       const rendered = app.renderMessages(true);
@@ -373,7 +376,7 @@ export function initMessages(app) {
         void app.reconcileRoom(roomId, generation);
       }
       app.setOnline(true);
-      pollDelay = 2000;
+      pollDelay = data.hasMore && (entry?.receivedTs || 0) > previousReceivedTs ? 0 : 2000;
     } catch (error) {
       if (!isCurrentPoll(roomId, generation)) return;
       if (error.status === 401) {
@@ -434,7 +437,7 @@ export function initMessages(app) {
   }
 
 function trimMessages(list, app) {
-    if (list.children.length <= 400) return;
+    if (list.children.length <= 400 || hasMessageSelection(list)) return;
     while (list.children.length > 300) list.removeChild(list.firstChild);
     if (list.firstElementChild && !list.firstElementChild.classList.contains("gap")) {
       const gap = document.createElement("li");
@@ -480,10 +483,4 @@ function updateReceiptDetails(row, message, app) {
   }
 }
 
-function systemMessage(text, app) {
-    const joined = /^(.*?)\s+joined the room$/.exec(String(text));
-    if (joined) return app.t("systemJoined", { name: joined[1] });
-    const left = /^(.*?)\s+left the room$/.exec(String(text));
-    return left ? app.t("systemLeft", { name: left[1] }) : String(text);
-  }
 }

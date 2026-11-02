@@ -145,8 +145,10 @@ async function handle(req: Request): Promise<Response> {
     }
     if (req.method === "GET" && p === "/rooms") {
       const caller = url.searchParams.get("sessionID");
-      const rooms = await read((svc) => svc.listRooms().filter((room) => room.kind !== "direct" ? true : !!caller && room.directSessionIDs?.includes(caller)));
-      return json(rooms.map(serializeRoom));
+      const rooms = await readState((svc, registry) => svc.listRooms()
+        .filter((room) => room.kind !== "direct" ? true : !!caller && room.directSessionIDs?.includes(caller))
+        .map((room) => ({ ...serializeRoom(room), joined: Boolean(caller && registry[room.id]?.[caller]) })));
+      return json(rooms);
     }
     const members = await memberRoutes(req, url);
     if (members) return members;
@@ -197,6 +199,12 @@ async function handle(req: Request): Promise<Response> {
     if (req.method === "GET" && p === "/inbox") {
       const sessionID = url.searchParams.get("sessionID") ?? "";
       const roomFilter = url.searchParams.get("roomId");
+      const afterValue = url.searchParams.get("afterTs");
+      const afterTs = afterValue === null ? undefined : Number(afterValue);
+      if (url.searchParams.has("afterTs") && (afterValue === "" || !/^\d+$/.test(afterValue ?? "") ||
+        !Number.isSafeInteger(afterTs) || afterTs! < 0 || !roomFilter || url.searchParams.get("excludeSelf") !== "0")) {
+        return json({ error: "afterTs requires a roomId and excludeSelf=0, with a non-negative safe integer value" }, 400);
+      }
       // ponytail: poll includes the caller's own messages (echo), the
       // notification self-pull excludes them — aligned with standalone poll
       const excludeSelf = url.searchParams.get("excludeSelf") === "1";
@@ -208,12 +216,12 @@ async function handle(req: Request): Promise<Response> {
         30000,
       );
       const deadline = Date.now() + timeout;
-      let result = await readInbox(sessionID, roomFilter, excludeSelf);
+      let result = await readInbox(sessionID, roomFilter, excludeSelf, afterTs);
       while (result.items.length === 0 && Date.now() < deadline) {
         // ponytail: 2s between disk scans (orc-1 #7) — 1s × 25 iterations
         // doubles the file reads on shared-mount deployments
         await sleep(2000);
-        result = await readInbox(sessionID, roomFilter, excludeSelf);
+        result = await readInbox(sessionID, roomFilter, excludeSelf, afterTs);
       }
       return json(result);
     }

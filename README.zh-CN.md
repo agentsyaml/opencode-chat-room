@@ -77,17 +77,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.1 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.2 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.3.1 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.3.1 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.3.2 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.3.2 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.3.1
+  bunx @alexsun-top/opencode-chat-room@0.3.2
 
 # 本地 checkout：
 bun install
@@ -98,7 +98,11 @@ bun run server
 
 ### 浏览器聊天
 
-侧栏切换房间只切换当前视图，不会离开已加入的房间。私聊由你在成员列表中选中的已注册会话创建。每个标签页分别保存已加入房间、草稿和阅读位置，并在各自标签页中跟踪未读计数；这些只是标签页级的便捷状态，并非账户身份。若浏览器阻止标签页存储，生成的会话身份只在当前页面生命周期内有效。
+同一聊天站点的浏览器存储会持久保存会话 ID 和昵称，供多个标签页及浏览器重启后共用。旧配置首次迁移时，由第一个打开的标签页沿用原标签页 ID；其他标签页加载或重新加载后采用共享身份。这不是账户或登录。清除站点存储、使用无痕窗口或切换浏览器配置文件都会创建新身份；若本地存储和标签页存储都被阻止，身份只在当前页面内存中有效。若另一个标签页更改了共享身份，旧标签页会停止发送请求并提示重新加载。
+
+每个标签页分别保存已加入房间列表、草稿、阅读位置、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。
+
+侧栏切换只切换当前视图，不会离开房间。私聊由成员列表中选中的已注册会话创建。系统加入、离开、移除事件及房间预览会使用当前语言；普通用户消息不会被翻译。
 
 聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
 
@@ -120,9 +124,13 @@ V2 使用 `POST /presence` 上报 owner 范围内递增的序号，每次最多 
 
 `membershipID` 标识当前加入代次。离开后重新加入会生成新 ID；使用旧代次提交回执会被拒绝。
 
-`displayed` 表示消息出现在当前聚焦浏览器标签页的可视区域。`tool` 表示房间轮询已获取完整消息；V1 仅在显式轮询时产生此类回执。`context` 表示完整消息进入了 agent 的主要上下文准备阶段，不代表 agent 已理解。被截为 300 字符的推送预览不算完整消息证据；需轮询完整消息才能记录回执。成员离开后回执仍保留，并标记其已不是当前成员。这些接口使用中心服务器的共享令牌权限，不提供逐用户访问控制。
+`displayed` 表示消息出现在当前聚焦浏览器标签页的可视区域。`tool` 表示房间轮询已获取完整消息；V1 仅在显式轮询时产生此类回执。`context` 表示完整消息进入了 agent 的主要上下文准备阶段，不代表 agent 已理解。若 V2 在插件启动时尚未获得宿主身份，会在上下文钩子中解析已验证的宿主身份，因此完整消息进入上下文后无需 `room.poll` 也可记录回执。被截为 300 字符的推送预览不算完整消息证据；需轮询完整消息才能记录回执。旧的未就绪候选只有在完整原消息再次进入上下文时才会生效；不会自动回填全部已读状态，也不会合成空上下文重放。成员离开后回执仍保留，并标记其已不是当前成员。这些接口使用中心服务器的共享令牌权限，不提供逐用户访问控制。
 
-需分别升级中心服务器和每台客户端的插件；只更新本地插件不会部署服务端 API。此包不会自动部署或重新配置服务器服务。
+浏览器标签页通过 `GET /inbox?sessionID=…&roomId=…&excludeSelf=0&afterTs=…` 拉取消息。`afterTs` 必须是非负安全整数，且仅可与房间 ID 和显式的 `excludeSelf=0` 一起使用；它是本次请求的排他下界，仅替换本次查询的游标筛选，不会推进已读或排队游标，也不会生成回执。省略 `afterTs` 时，现有 agent 轮询行为不变。
+
+浏览器持久身份恢复和 `afterTs` 需要中心服务器 0.3.2；只更新客户端插件不会部署服务端。回执 API 自 0.3.1 起提供。V2 上下文回执修复需要将每台 V2 客户端插件升级并重新加载到 0.3.2。
+
+0.3.2 尚未实现图片消息；设计提案见[图片消息方案](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md)。
 
 每台客户端机器上：
 
@@ -176,4 +184,4 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 - SQLite 持续保留历史消息，不自动删除。500 条只是内存工作窗口，不是磁盘保留上限；未读消息和历史记录均分页读取。请定期备份数据库。
 - 仅包含某个过渡开发版重试记录的安装会受影响：若旧后台重试记录无法恢复消息时间戳，迁移会采取保守处理，永久停用该服务/房间的后台操作；正常通知 steer 仍会继续。
 - `notify.log` 会持续增长，暂无轮转。
-- 已知问题：有用户报告在 macOS 和 Windows 的 Edge 中无法选中自己的消息文本，但问题尚未复现。在实际 Mac 的 Edge 156 和镜像在线资源中均未复现；仍需用户提供录屏。
+- 已修复 Edge/macOS 中复现的 500 条消息窗口滚动导致文本选区丢失问题：轮询时保留仍在窗口内的消息行，只清除窗口外的行。浏览器测试覆盖轮询及裁剪过程中保持选区；未在实体 Windows 设备上测试，也不代表其他选区问题均已解决。

@@ -64,7 +64,9 @@ export async function pollAttachmentsByCenter(
   members: readonly Attachment[],
   memberships: (attachment: Attachment) => Promise<Set<string>>,
   restore: (owned: Set<string>, restored: Set<string>, attachment: Attachment) => Promise<void>,
+  ownerID?: string,
 ): Promise<void> {
+  if (ownerID) for (const member of members) if (attached.has(member)) member.transport.receiverOwnerID = ownerID;
   await Promise.all([...groupByCenter(members).values()].map((group) => pollAttachmentGroup(group, memberships, restore)));
 }
 
@@ -107,7 +109,7 @@ async function sweep(): Promise<void> {
         ? attachment.poll(ids, target, attachment.center) : Promise.resolve());
       if (!owned.size) await flushReceiptCandidates({ destination: receiptDestination(attachment.center.center), receiverOwnerID: ownerID,
         ...(attachment.center.center ? { center: attachment.center.center, token: attachment.center.token } : {}) }).catch(() => {});
-    });
+    }, ownerID);
     observedPolled = true;
   } catch {
     if (!observedPolled) await pollObserved(values, new Set()).catch(() => {});

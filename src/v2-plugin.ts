@@ -21,6 +21,8 @@ export function createV2Setup(deps: {
   execute(args: z.infer<ReturnType<typeof roomSchema>>, sessionID: string): Promise<string>;
   observe(runtime: V2Runtime, sessionID: string): Promise<void>;
   poll(sessions: ReadonlySet<string>, transport: QueueTransport, center: CenterOptions): Promise<void>;
+  resolveOwner?: () => Promise<string | undefined>;
+  attachReceiver?: typeof attachV2Receiver;
 }) {
   return async (context: Plugin.Context): Promise<() => Promise<void>> => {
     const sessions = new Set<string>();
@@ -50,8 +52,15 @@ export function createV2Setup(deps: {
         sessions.add(input.sessionID);
         await deps.run(runtime, () => deps.observe(runtime, input.sessionID));
       });
-      contextRegistration = await context.session.hook("context", (input) => {
+      contextRegistration = await context.session.hook("context", async (input) => {
         try {
+          if (!transport.receiverOwnerID) {
+            if (deps.resolveOwner) transport.receiverOwnerID = await deps.resolveOwner();
+            else if (version) {
+              const host = await discoverVerifiedHost(version).catch(() => undefined);
+              if (host) transport.receiverOwnerID = await receiverOwnerID(host.origin);
+            }
+          }
           if (transport.receiverOwnerID) observeReceiptContext(input.sessionID, input.messages,
             receiptDestination(runtime.center.center), transport.receiverOwnerID);
         } catch { /* Context evidence never fails model preparation. */ }
@@ -85,9 +94,13 @@ export function createV2Setup(deps: {
           });
         },
       }));
-      releaseReceiver = attachV2Receiver({
+      const attachReceiver = deps.attachReceiver ?? attachV2Receiver;
+      releaseReceiver = attachReceiver({
         sessions, version, transport, center: runtime.center,
-        poll: (ids, target, center) => deps.run(runtime, () => deps.poll(ids, target, center)),
+        poll: (ids, target, center) => {
+          if (target.receiverOwnerID) transport.receiverOwnerID = target.receiverOwnerID;
+          return deps.run(runtime, () => deps.poll(ids, target, center));
+        },
       });
     } catch (error) {
       releaseReceiver?.();

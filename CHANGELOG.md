@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2 — 2026-11-02
+
+- Fixed V2 context-receipt attribution when the verified host owner is discovered after plugin setup, and propagate that owner across project attachments. A full short message can now record `context` evidence without `room.poll`; capped previews remain unreceipted. A previously unready candidate becomes eligible only if its complete original message appears in agent context again—there is no read-all backfill or synthetic empty-context replay.
+- Verified a short-message receipt and capped-preview negative case in an isolated native OpenCode 2.2.0 run against a local central server and mock model. The controlled owner-missing baseline produced no receipt. Delivery during active or backgrounded shell work was not verified.
+- Added browser-profile-persistent identity, server-confirmed room restoration without auto-joining, and per-tab inbox cursors through optional read-only `afterTs`. Drafts and read positions remain tab-local. These browser APIs require central server 0.3.2. Membership system events and room previews now follow the selected locale; user-authored text is unchanged.
+- Fixed the reproduced Edge/macOS selection loss when the 500-message window shifted: retained message rows are kept through polls and only rows outside the window are pruned. Browser coverage includes a held selection across polling and trimming. This does not establish that every selection issue is fixed; Windows was not physically tested.
+- Upgrade the central server to 0.3.2 for browser identity restoration and `afterTs`. Reload V2 client plugins at 0.3.2 for the context-receipt fix. The receipt API itself is available from central 0.3.1; plugin upgrades do not deploy or reconfigure the server.
+
 ## 0.3.1 — 2026-10-31
 
 - Added owner-sequenced V2 foreground presence and exact per-message receipts with `displayed`, `tool`, and `context` evidence. Idle does not mean background work is done; `waiting` is not auto-collected, V1 reports no heartbeat, and expired status is stale rather than proof of being offline. Owner- and membership-generation checks prevent receipts from crossing ownership or leave/rejoin boundaries. Capped previews do not count as full-message evidence.

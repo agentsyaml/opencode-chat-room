@@ -64,6 +64,20 @@ test.skipIf(!browserModule)("browser selects own and peer message text", async (
     expect(peerSelection.text).toContain("peer words");
     await page.screenshot({ path: path.join(artifactDir, "edge-own-message-selection.png") });
     await writeFile(path.join(artifactDir, "edge-own-message-selection.json"), JSON.stringify({ shortSelection, longSelection, leftEdgeSelection, rightEdgeSelection, reverseSelection, codeSelection, selectedBeforePoll, peerSelection, afterPollSelection, edgeExecutable: process.env.CHAT_UI_BROWSER_EXECUTABLE, assetFixture: process.env.CHAT_UI_ASSET_FIXTURE_DIR || "working tree" }, null, 2));
+    await page.evaluate(async (url: string) => (await import(url)).app.stopPolling(), "/assets/chat/state.js");
+    let retainedID = "";
+    for (let index = 0; index < 510; index++) {
+      const text = index === 250 ? `LIVE-OWN-KEEP-250 ${"selection survives window updates ".repeat(4)}` : `Live history ${index} ${"retained words ".repeat(8)}`;
+      const room = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID, text });
+      if (index === 250) retainedID = room.messages.at(-1).id;
+    }
+    await page.reload();
+    await page.locator(`#roomListChat [data-room-id="${roomId}"]`).waitFor();
+    await page.locator(`#roomListChat [data-room-id="${roomId}"]`).click();
+    await page.locator(`#msgList [data-msg-id="${retainedID}"] .msg-text`).waitFor();
+    await page.waitForFunction(async (url: string) => (await import(url)).app.state.polling, "/assets/chat/state.js");
+    const shiftEvidence = await selectionWindowShifts(page, origin, roomId, sessionID, peerSession, retainedID, artifactDir);
+    await writeFile(path.join(artifactDir, "edge-live-selection-window-shifts.json"), JSON.stringify(shiftEvidence, null, 2));
     await context.close();
   } finally {
     await browser?.close(); server.kill("SIGTERM");
@@ -86,6 +100,127 @@ async function send(page: any, text: string, renderedText = text.slice(0, 24)) {
   await page.locator("#msgInput").fill(text);
   await page.locator("#btnSend").click();
   await page.locator("#msgList .msg-text").filter({ hasText: renderedText }).waitFor();
+}
+
+async function selectionWindowShifts(page: any, origin: string, roomId: string, sessionID: string, peerID: string, targetID: string, artifactDir: string) {
+  const selector = `#msgList [data-msg-id="${targetID}"] .msg-text`, target = page.locator(selector);
+  await target.scrollIntoViewIfNeeded();
+  const textLength = await target.evaluate((node: HTMLElement) => node.textContent!.trimEnd().length);
+  const full = await dragSelect(page, selector, 0, textLength - 1);
+  expect(full.text).toContain("LIVE-OWN-KEEP-250");
+  await page.evaluate((id: string) => { (window as any).__retainedRow = document.querySelector(`#msgList [data-msg-id="${id}"]`); }, targetID);
+  await page.screenshot({ path: path.join(artifactDir, "edge-live-own-before-poll.png") });
+  const fullPollText = "LIVE-POLL-FULL-1";
+  const fullPoll = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: peerID, text: fullPollText });
+  await page.locator("#msgList").getByText(fullPollText).waitFor({ timeout: 15000 });
+  const fullAfter = await selectionText(page), fullSameNode = await sameRetainedRow(page, targetID);
+  await writeFile(path.join(artifactDir, "edge-live-full-poll-metrics.json"), JSON.stringify({ fullBefore: full.text, fullAfter, fullSameNode }, null, 2));
+  await page.screenshot({ path: path.join(artifactDir, "edge-live-own-after-poll.png") });
+  expect(fullAfter).toBe(full.text);
+  expect(fullSameNode).toBe(true);
+  return heldAndTrimSelection(page, origin, roomId, sessionID, peerID, targetID, selector, textLength, fullPollText, fullPoll.messages.at(-1).id, fullAfter, artifactDir);
+}
+
+async function selectionText(page: any) {
+  return page.evaluate(() => getSelection()?.toString() || "");
+}
+
+async function sameRetainedRow(page: any, id: string) {
+  return page.evaluate((target: string) => (window as any).__retainedRow === document.querySelector(`#msgList [data-msg-id="${target}"]`), id);
+}
+
+async function heldAndTrimSelection(page: any, origin: string, roomId: string, sessionID: string, peerID: string, targetID: string, selector: string, textLength: number, fullPollText: string, fullPollID: string, fullAfter: string, artifactDir: string) {
+  const start = await textPoint(page, selector, 0), firstEnd = await textPoint(page, selector, 70, true);
+  await page.mouse.click(start.x, start.y);
+  await page.mouse.move(start.x, start.y); await page.mouse.down();
+  await page.mouse.move(firstEnd.x, firstEnd.y, { steps: 18 });
+  const heldBefore = await selectionText(page);
+  expect(heldBefore).toContain("LIVE-OWN-KEEP-250");
+  await page.evaluate((id: string) => { (window as any).__retainedRow = document.querySelector(`#msgList [data-msg-id="${id}"]`); }, targetID);
+  await page.screenshot({ path: path.join(artifactDir, "edge-live-held-before-poll.png") });
+  const heldPollText = "LIVE-POLL-HELD-2";
+  const heldPoll = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: peerID, text: heldPollText });
+  await page.locator("#msgList").getByText(heldPollText).waitFor({ timeout: 15000 });
+  const heldAfterPoll = await selectionText(page), heldSameNode = await sameRetainedRow(page, targetID);
+  expect(heldAfterPoll).toBe(heldBefore);
+  expect(heldSameNode).toBe(true);
+  const continued = await textPoint(page, selector, Math.min(125, textLength - 1), true);
+  await page.mouse.move(continued.x, continued.y, { steps: 12 }); await page.mouse.up();
+  const heldAfterMouseUp = await selectionText(page);
+  expect(heldAfterMouseUp).toContain("LIVE-OWN-KEEP-250");
+  expect(heldAfterMouseUp).not.toContain("Live history 251");
+  await page.screenshot({ path: path.join(artifactDir, "edge-live-held-after-poll-mouseup.png") });
+  const peerIDSelector = `#msgList [data-msg-id="${fullPollID}"] .msg-text`;
+  const peerLength = await page.locator(peerIDSelector).evaluate((node: HTMLElement) => node.textContent!.trimEnd().length);
+  const peer = await dragSelect(page, peerIDSelector, 0, Math.min(8, peerLength - 1));
+  expect(peer.text).toContain("LIVE-POLL");
+  await page.evaluate((id: string) => { (window as any).__retainedRow = document.querySelector(`#msgList [data-msg-id="${id}"]`); }, fullPollID);
+  await page.screenshot({ path: path.join(artifactDir, "edge-live-peer-before-poll.png") });
+  const nextPeerText = "LIVE-POLL-PEER-3";
+  await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: peerID, text: nextPeerText });
+  await page.locator("#msgList").getByText(nextPeerText).waitFor({ timeout: 15000 });
+  const peerAfter = await selectionText(page), peerSameNode = await sameRetainedRow(page, fullPollID);
+  expect(peerAfter).toContain(fullPollText);
+  expect(peerSameNode).toBe(true);
+  await page.screenshot({ path: path.join(artifactDir, "edge-live-peer-after-poll.png") });
+  return repeatedShifts(page, origin, roomId, sessionID, peerID, targetID, selector, fullAfter, heldBefore, heldAfterPoll, heldSameNode, heldAfterMouseUp, fullPollText, peer.text, peerAfter, peerSameNode, artifactDir);
+}
+
+async function repeatedShifts(page: any, origin: string, roomId: string, sessionID: string, peerID: string, targetID: string, selector: string, fullAfter: string, heldBefore: string, heldAfterPoll: string, heldSameNode: boolean, heldAfterMouseUp: string, fullPollText: string, peerBefore: string, peerAfter: string, peerSameNode: boolean, artifactDir: string) {
+  const full = await dragSelect(page, selector, 0, (await page.locator(selector).textContent())!.trimEnd().length - 1);
+  await page.evaluate((id: string) => { (window as any).__retainedRow = document.querySelector(`#msgList [data-msg-id="${id}"]`); }, targetID);
+  const before = await snapshotWindow(page, targetID);
+  await page.evaluate(async (url: string) => { const { app } = await import(url); app.stopPolling(); clearTimeout(app.state.memberRefreshTimer); }, "/assets/chat/state.js");
+  for (let index = 0; index < 100; index++) {
+    const text = `LIVE-TRIM-${index}`;
+    await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: peerID, text: `${text} ${"batch window shift ".repeat(3)}` });
+  }
+  await page.evaluate(async (url: string) => (await import(url)).app.startPolling(), "/assets/chat/state.js");
+  await page.locator("#msgList").getByText("LIVE-TRIM-99").waitFor({ timeout: 30000 });
+  const firstBurst = await snapshotWindow(page, targetID);
+  expect(firstBurst.domChildCount).toBeGreaterThan(400);
+  const after = firstBurst;
+  expect(full.text).toContain("LIVE-OWN-KEEP-250");
+  expect(after.firstMessageId).not.toBe(before.firstMessageId);
+  expect(after.roomMessageCount).toBe(500);
+  expect(after.domChildCount).toBeGreaterThan(400);
+  expect(after.targetExists).toBe(true);
+  expect(after.sameTargetNode).toBe(true);
+  expect(Math.abs(after.targetTop! - before.targetTop!)).toBeLessThan(3);
+  expect(after.selection).toBe(full.text);
+  expect(peerBefore).toContain("LIVE-POLL");
+  expect(peerAfter).toContain(fullPollText);
+  expect(heldSameNode).toBe(true);
+  expect(peerSameNode).toBe(true);
+  await page.screenshot({ path: path.join(artifactDir, "edge-live-held-across-400-row-trim.png") });
+  return { ownerSessionID: sessionID, fullAfterFirstPoll: fullAfter, heldBefore, heldDuringPoll: heldAfterPoll, heldSameNode, heldAfterMouseUp, peerBefore, peerAfter, peerSameNode, fullBeforeBurst: full.text, burstBefore: before, burstAt400: firstBurst, burstAfter: after, fullPollText };
+}
+
+async function textPoint(page: any, selector: string, offset: number, trailing = false) {
+  const target = page.locator(selector).first();
+  await target.scrollIntoViewIfNeeded();
+  return target.evaluate((element: HTMLElement, args: { offset: number; trailing: boolean }) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), nodes: Text[] = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+    let base = 0;
+    for (const node of nodes) {
+      if (args.offset < base + node.length) {
+        const range = document.createRange(), index = args.offset - base;
+        range.setStart(node, index); range.setEnd(node, index + 1);
+        const rect = range.getBoundingClientRect();
+        return { x: args.trailing ? rect.right - 0.5 : rect.left + 0.5, y: rect.top + rect.height / 2 };
+      }
+      base += node.length;
+    }
+    throw new Error(`Cannot locate text offset ${args.offset}`);
+  }, { offset, trailing });
+}
+
+async function snapshotWindow(page: any, id: string) {
+  return page.evaluate(async ({ targetID, url }: { targetID: string; url: string }) => {
+    const { app } = await import(url), row = document.querySelector(`#msgList [data-msg-id="${targetID}"]`);
+    return { selection: getSelection()?.toString() || "", firstMessageId: app.state.room.messages[0]?.id, roomMessageCount: app.state.room.messages.length, domChildCount: document.querySelector("#msgList")!.children.length, targetExists: Boolean(row), targetTop: row?.getBoundingClientRect().top, sameTargetNode: (window as any).__retainedRow === row };
+  }, { targetID: id, url: "/assets/chat/state.js" });
 }
 
 async function dragSelect(page: any, selector: string, start: number, end: number) {

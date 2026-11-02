@@ -267,7 +267,7 @@ async function reconciliationWaitsForVisibleBottom(page: any, origin: string, ar
 }
 
 async function stalePollCannotRemoveRejoinedRoom(browser: any, origin: string, screenshotDir: string) {
-  const sid = "poll-rejoin-session";
+  const sid = "66666666-6666-4666-8666-666666666666";
   const room = await api(origin, "/rooms", "POST", { name: "Poll race", ownerId: "Owner", sessionID: "poll-owner" });
   await api(origin, `/rooms/${room.id}/join`, "POST", { sessionID: sid, participantId: "Victim", participantName: "Victim" });
   const context = await browser.newContext(), page = await context.newPage();
@@ -306,7 +306,7 @@ async function stalePollCannotRemoveRejoinedRoom(browser: any, origin: string, s
 }
 
 async function inactivePreviewShowsNewestMessage(browser: any, origin: string, screenshotDir: string) {
-  const sid = "preview-watcher", sender = "preview-sender";
+  const sid = "77777777-7777-4777-8777-777777777777", sender = "preview-sender";
   const unread = await api(origin, "/rooms", "POST", { name: "Unread burst", ownerId: "Sender", sessionID: sender });
   const active = await api(origin, "/rooms", "POST", { name: "Active room", ownerId: "Sender", sessionID: sender });
   for (const room of [unread, active]) await api(origin, `/rooms/${room.id}/join`, "POST", { sessionID: sid, participantId: "Watcher", participantName: "Watcher" });
@@ -366,7 +366,7 @@ async function sameNameGroupIdentity(browser: any, origin: string) {
 }
 
 async function allJoinedRoomsReachable(browser: any, origin: string) {
-  const sid = "many-rooms-session", ids: string[] = [];
+  const sid = "88888888-8888-4888-8888-888888888888", ids: string[] = [];
   for (let index = 0; index < 41; index++) {
     const room = await api(origin, "/rooms", "POST", { name: `Room ${index}`, ownerId: `owner-${index}`, sessionID: `owner-session-${index}` });
     ids.push(room.id);

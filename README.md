@@ -79,17 +79,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.1 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.2 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.3.1 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.3.1 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.3.2 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.3.2 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.3.1
+  bunx @alexsun-top/opencode-chat-room@0.3.2
 
 # Local checkout:
 bun install
@@ -100,7 +100,11 @@ Open `http://<server-ip>:4399/chat` in a browser to join or create a room and ch
 
 ### Browser chat
 
-Rooms you joined remain joined as you switch the sidebar selection; switching views does not leave a room. Direct conversations are created with the selected registered member session. Each tab stores its joined-room list, drafts, and read positions separately, and tracks unread counts within that tab. This is tab-scoped convenience state, not account identity: if browser tab storage is blocked, the generated session identity lasts only for that page lifetime.
+For the same chat site, browser storage keeps a persistent session ID and preferred name shared by tabs and browser restarts. On an existing profile, the first tab migrates its prior tab ID; other tabs adopt the shared identity when loaded or reloaded. This is not an account or login. Clearing site storage, using a private window, or switching browser profiles creates a new identity; if both local and tab storage are blocked, the ID lasts only for the current page. A tab detects a conflicting identity change and asks to reload before making more requests.
+
+Each tab keeps its own joined-room list, drafts, read position, unread counts, and in-memory inbox receive timestamp. `GET /rooms?sessionID=…` returns a `joined` flag for each visible room; this server membership determines what is restored on reload, without automatically joining rooms. Temporary network, token, or server errors retain rooms for retry, while a server response that the membership is gone removes it. Leaving or removal affects membership in every tab using that profile's shared session ID.
+
+Switching the sidebar does not leave a room. Direct conversations are created with the selected registered member session. System join, leave, and removal events and their room previews use the selected locale; ordinary user messages are not translated.
 
 The chat renders GitHub Flavored Markdown using locally bundled Marked and DOMPurify assets. Message text is sanitized before rendered HTML is inserted. No CDN is required.
 
@@ -122,9 +126,13 @@ Receipts identify exact messages; join, read, and queued cursors do not create t
 
 `membershipID` identifies the current join generation. Leaving and rejoining creates a new ID; receipt submissions from the previous generation are rejected.
 
-`displayed` means the message intersected the visible area of a focused browser tab. `tool` means a room poll fetched the full message; V1 receipts are limited to explicit polls. `context` means the full message reached primary agent-context preparation, not that it was understood. A 300-character push preview is not full-message evidence; poll the full message to record a receipt. Receipts remain visible after a reader leaves, marked as no longer a current member. These endpoints use the central server's shared-token permissions, not per-user access control.
+`displayed` means the message intersected the visible area of a focused browser tab. `tool` means a room poll fetched the full message; V1 receipts are limited to explicit polls. `context` means the full message reached primary agent-context preparation, not that it was understood. V2 resolves the verified host owner on the context hook when it was unavailable during setup, allowing a full message in context to record a receipt without `room.poll`. A 300-character push preview is not full-message evidence; poll the full message to record a receipt. Older unready candidates qualify only if the complete original message appears in context again; there is no automatic read-all backfill or synthetic empty-context replay. Receipts remain visible after a reader leaves, marked as no longer a current member. These endpoints use the central server's shared-token permissions, not per-user access control.
 
-Upgrade the central server and every client plugin separately; updating only a local plugin does not deploy the server APIs. The package does not automatically deploy or reconfigure the server service.
+Browser tabs fetch messages with `GET /inbox?sessionID=…&roomId=…&excludeSelf=0&afterTs=…`. `afterTs` must be a non-negative safe integer and is accepted only with a room ID and explicit `excludeSelf=0`; it is an exclusive lower bound for that request, replacing the stored-cursor filter for selection only. It does not advance read or queued cursors or create receipts. Calls without `afterTs` keep the existing agent-poll behavior.
+
+Central server 0.3.2 is required for persistent browser identity restoration and `afterTs`; updating a client plugin does not deploy the server. Receipt APIs first appeared in 0.3.1. The V2 context-receipt fix requires upgrading and reloading each V2 client plugin to 0.3.2.
+
+Image messages are not implemented in 0.3.2; see the [image-message proposal](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md).
 
 On every client machine:
 
@@ -179,4 +187,4 @@ Note: `join` with `name:"alice"` registers the identity `alice` for that session
 - SQLite retains message history without automatic deletion. The 500-message in-memory window does not limit persisted history; unread messages and history are read in bounded pages. Back up the database regularly.
 - Only installations carrying retry rows from an intermediate development build are affected: records without a recoverable message timestamp migrate conservatively, permanently disabling backgrounding for that service/room. Normal notification steering continues.
 - `notify.log` grows without rotation.
-- Known issue: a report of users being unable to select their own text in Edge on macOS and Windows remains unverified. It was not reproduced on a physical Mac with Edge 156 or with mirrored online assets; a recording is still needed.
+- The reproduced Edge/macOS text-selection failure at the 500-message window shift is fixed: rows still in the window are retained during polling and rows outside it are pruned. Browser coverage includes selections held across polls and trimming. Windows was not physically tested, and this does not claim unrelated selection issues are resolved.

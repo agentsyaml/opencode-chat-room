@@ -261,7 +261,7 @@ export async function readUnreadPage(file: string, roomID: string, afterTs: numb
   return { items: newest ? items.reverse() : items, hasMore };
 }
 
-export async function readInboxPage(file: string, sessionID: string, roomFilter: string | null, excludeSelf: boolean, limit = 100) {
+export async function readInboxPage(file: string, sessionID: string, roomFilter: string | null, excludeSelf: boolean, limit = 100, afterTs?: number) {
   const db = await open(file);
   return db.transaction(() => {
   const take = Math.min(200, Math.max(1, limit));
@@ -269,9 +269,9 @@ export async function readInboxPage(file: string, sessionID: string, roomFilter:
   const rows = db.query(`SELECT m.id,m.room_id,m.sender_id,m.sender_session_id,m.text,m.created_at,r.name AS room_name,r.kind AS room_kind
     FROM messages m JOIN registry g ON g.room_id=m.room_id JOIN rooms r ON r.id=m.room_id
     WHERE g.session_id=? AND (? IS NULL OR m.room_id=?) AND
-    m.created_at > CASE WHEN ? THEN max(coalesce(g.last_read_ts,0),coalesce(g.last_queued_ts,0)) ELSE coalesce(g.last_read_ts,0) END AND
+    m.created_at > coalesce(?,CASE WHEN ? THEN max(coalesce(g.last_read_ts,0),coalesce(g.last_queued_ts,0)) ELSE coalesce(g.last_read_ts,0) END) AND
     (?=0 OR (m.sender_session_id IS NOT NULL AND m.sender_session_id!=?) OR (m.sender_session_id IS NULL AND m.sender_id!=g.name))
-    ORDER BY m.created_at,m.seq LIMIT ?`).all(sessionID, roomFilter, roomFilter, excludeSelf ? 1 : 0,
+    ORDER BY m.created_at,m.seq LIMIT ?`).all(sessionID, roomFilter, roomFilter, afterTs ?? null, excludeSelf ? 1 : 0,
     excludeSelf ? 1 : 0, sessionID, take + 1) as Array<Record<string, string | number | null>>;
   const hasMore = rows.length > take;
   const items = rows.slice(0, take).map((row) => {

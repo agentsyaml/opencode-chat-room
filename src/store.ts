@@ -28,8 +28,8 @@ export async function readState<T>(callback: (service: RoomService, registry: Re
 export async function readUnreadMessages(roomID: string, afterTs: number, limit = 100, sessionID?: string, senderName?: string, newest = false) {
   return readUnreadPage(databasePath(), roomID, afterTs, limit, sessionID, senderName, newest);
 }
-export async function readInboxMessages(sessionID: string, roomID: string | null, excludeSelf: boolean, limit = 100) {
-  return sqliteInboxPage(databasePath(), sessionID, roomID, excludeSelf, limit);
+export async function readInboxMessages(sessionID: string, roomID: string | null, excludeSelf: boolean, limit = 100, afterTs?: number) {
+  return sqliteInboxPage(databasePath(), sessionID, roomID, excludeSelf, limit, afterTs);
 }
 export async function readHistory(roomID: string, beforeSeq?: number, limit = 100, exclude?: { sessionID: string; name: string }): Promise<{ messages: HistoryMessage[]; nextBeforeSeq: number | null; hasMore: boolean }> {
   return readHistoryPage(databasePath(), roomID, beforeSeq, limit, exclude?.sessionID, exclude?.name);

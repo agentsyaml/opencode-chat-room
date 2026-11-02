@@ -46,6 +46,19 @@ describe("shared V2 receiver lifecycle", () => {
     } finally { releaseA(); releaseB(); }
   });
 
+  test("verified host owner reaches every project attachment", async () => {
+    const center = { center: "https://center.invalid", token: "token" };
+    const a = attachment(new Set(["session-a"]), center), b = attachment(new Set(["session-b"]), center);
+    const releaseA = attachV2Receiver(a), releaseB = attachV2Receiver(b);
+    try {
+      const primaries: Attachment[] = [];
+      await pollAttachmentsByCenter([a, b], async () => new Set(), async (_owned, _restored, primary) => { primaries.push(primary); }, "verified-owner");
+      expect(primaries).toEqual([a]);
+      expect(a.transport.receiverOwnerID).toBe("verified-owner");
+      expect(b.transport.receiverOwnerID).toBe("verified-owner");
+    } finally { releaseA(); releaseB(); }
+  });
+
   test("keeps one timer until both setups detach in either order", () => {
     const first = attach(new Set());
     const second = attach(new Set());

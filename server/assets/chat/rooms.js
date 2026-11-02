@@ -1,13 +1,15 @@
 import { LS } from "./state.js";
+import { formatRoomPreview, setRoomPreview } from "./system-messages.js";
 
 export function initRooms(app) {
   const $ = app.$;
 
-  app.showJoin = () => {
+  app.showJoin = (refresh = true) => {
+    if (!$("#inName").value) $("#inName").value = LS.name;
     $("#chatView").hidden = true;
     $("#joinView").hidden = false;
     app.updateTitle();
-    void app.refreshRoomList();
+    if (refresh) void app.refreshRoomList();
     $("#inRoomId").focus();
   };
   app.showChat = () => {
@@ -34,13 +36,15 @@ export function initRooms(app) {
   };
 
   app.ensureJoinedRoom = (room, name) => {
-    const entry = app.state.rooms.get(room.id) || { unreadIds: new Map(), unreadOverflow: false, preview: "", previewAt: 0, position: 0, readTs: 0 };
+    const existing = app.state.rooms.get(room.id);
+    const entry = existing || { unreadIds: new Map(), unreadOverflow: false, preview: "", previewAt: 0, position: 0, readTs: 0, receivedTs: room.messages.at(-1)?.createdAt ?? 0 };
     entry.unreadIds ||= new Map();
     entry.unreadOverflow ||= false;
     entry.room = room;
     entry.name = name;
-    entry.preview ||= room.messages.at(-1)?.text || "";
-    entry.previewAt ||= room.messages.at(-1)?.createdAt || 0;
+    const latest = room.messages.at(-1);
+    entry.receivedTs ??= latest?.createdAt ?? 0;
+    if (latest && (!existing || latest.createdAt >= entry.previewAt)) setRoomPreview(entry, latest);
     app.state.rooms.set(room.id, entry);
     app.state.roomNames.set(room.id, name);
     app.state.joinedIds.add(room.id);
@@ -68,7 +72,6 @@ export function initRooms(app) {
     app.firstMessageId = null;
     app.state.pendingAction = null;
     LS.roomId = roomId;
-    LS.name = entry.name;
     app.showChat();
     app.renderHead();
     $("#msgList").textContent = "";
@@ -102,6 +105,7 @@ export function initRooms(app) {
         method: "POST",
         body: JSON.stringify({ sessionID: LS.sessionID, participantId: name, participantName: name }),
       });
+      LS.name = name;
       app.enterRoom(room, name, intent);
     } catch (error) {
       if (error.status === 401) {
@@ -114,7 +118,7 @@ export function initRooms(app) {
 
   app.createRoom = async (pending) => {
     const fromChat = pending?.fromChat ?? Boolean(app.state.room);
-    const name = pending?.name || (fromChat ? app.state.myName : $("#inName").value.trim()) || app.t("guest");
+    const name = pending?.name || (fromChat ? app.state.myName : $("#inName").value.trim()) || LS.name || app.t("guest");
     const roomName = pending?.roomName || $(fromChat ? "#inRoomNameChat" : "#inRoomName").value.trim();
     if (!roomName) return fromChat ? app.showSendError("roomNameRequired") : app.showJoinError("roomNameRequired");
     const intent = ++app.state.navigationGeneration;
@@ -127,6 +131,7 @@ export function initRooms(app) {
         method: "POST",
         body: JSON.stringify({ name: roomName, ownerId: name, sessionID: LS.sessionID }),
       });
+      LS.name = name;
       if (fromChat) {
         $("#inRoomNameChat").value = "";
         $("#railRoomForm").hidden = true;
@@ -188,7 +193,6 @@ export function initRooms(app) {
       if (next) app.activateRoom(next);
       else {
         LS.roomId = "";
-        LS.name = "";
         app.showJoin();
         if (reason) app.showJoinError("roomNotFound");
       }
@@ -200,10 +204,11 @@ export function initRooms(app) {
 
   app.startRoomWatcher = () => {
     clearTimeout(app.state.watcherTimer);
-    if (!app.state.rooms.size) return;
+    if (!app.state.rooms.size && !app.state.restorePending?.size && !app.state.restoreRetry) return;
     app.state.watcherTimer = setTimeout(async () => {
       const inactive = [...app.state.rooms.keys()].filter((id) => id !== app.state.room?.id);
       await bounded(inactive, 3, (roomId) => watchRoom(roomId, app));
+      if (app.state.restorePending?.size || app.state.restoreRetry) void app.refreshRoomList();
       app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
       app.startRoomWatcher();
@@ -214,8 +219,9 @@ export function initRooms(app) {
     const empty = $("#roomListEmpty"), chatEmpty = $("#roomListChatEmpty");
     try {
       const rooms = await app.api(`/rooms?sessionID=${encodeURIComponent(LS.sessionID)}`);
+      app.state.restoreRetry = false;
       app.state.availableRooms = rooms;
-      if (!app.state.restored) await app.restoreJoinedRooms(rooms);
+      if (!app.state.restored || app.state.restorePending?.size) await app.restoreJoinedRooms(rooms);
       else {
         syncCachedRooms(rooms, app);
         await app.discoverDirectRooms(rooms);
@@ -232,6 +238,11 @@ export function initRooms(app) {
         empty.hidden = false;
         chatEmpty.hidden = false;
       }
+      if (!app.state.restored) {
+        app.state.restoreRetry = true;
+        app.state.restorePending = new Set([...app.state.joinedIds, LS.roomId].filter(Boolean));
+        app.startRoomWatcher();
+      }
     }
   };
 
@@ -244,8 +255,9 @@ export function initRooms(app) {
     try {
     const activeId = LS.roomId;
     const directIds = rooms.filter((room) => room.kind === "direct" && room.directSessionIDs?.includes(LS.sessionID)).map((room) => room.id);
-    const candidates = [...new Set([...app.state.joinedIds, ...directIds])];
+    const candidates = [...new Set([activeId, ...rooms.filter((room) => room.joined).map((room) => room.id), ...app.state.joinedIds, ...directIds].filter(Boolean))];
     const valid = new Set();
+    const unresolved = new Set();
     await bounded(candidates, 3, async (roomId) => {
       try {
         const room = rooms.find((item) => item.id === roomId) || await app.api(`/rooms/${encodeURIComponent(roomId)}`);
@@ -254,18 +266,24 @@ export function initRooms(app) {
         if (!me) return;
         valid.add(roomId);
         app.ensureJoinedRoom(room, me.name);
-      } catch { /* Missing or inaccessible rooms are removed without rejoining them. */ }
+      } catch (error) {
+        if (error.status !== 404) {
+          unresolved.add(roomId);
+          if (error.status === 401) app.state.room ? app.openChatSettings() : app.openTokenBox();
+        }
+      }
     });
-    app.state.joinedIds = valid;
+    app.state.joinedIds = new Set([...valid, ...unresolved]);
+    app.state.restorePending = unresolved;
     app.saveJoinedIds();
-    app.state.restored = true;
+    app.state.restored = unresolved.size === 0;
     if (activeId && valid.has(activeId)) app.activateRoom(activeId);
+    else if (activeId && unresolved.has(activeId)) app.showJoin(false);
     else {
       LS.roomId = "";
-      LS.name = "";
       const fallback = valid.values().next().value;
       if (fallback) app.activateRoom(fallback);
-      else app.showJoin();
+      else app.showJoin(false);
     }
     app.startRoomWatcher();
     } finally { app.state.restoring = false; }
@@ -278,8 +296,18 @@ export function initRooms(app) {
         const members = await app.api(`/rooms/${encodeURIComponent(room.id)}/members`);
         const me = members.find((member) => member.sessionID === LS.sessionID);
         if (me) app.ensureJoinedRoom(room, me.name);
-      } catch { /* A direct room can be deleted while the sidebar refreshes. */ }
+      } catch (error) {
+        if (error.status !== 404) {
+          app.state.restorePending ||= new Set();
+          app.state.restorePending.add(room.id);
+          app.state.joinedIds.add(room.id);
+          app.saveJoinedIds();
+          app.state.restored = false;
+          if (error.status === 401) app.state.room ? app.openChatSettings() : app.openTokenBox();
+        }
+      }
     });
+    if (app.state.restorePending?.size) app.startRoomWatcher();
   };
 
   app.renderRoomOptions = (list, rooms) => {
@@ -306,8 +334,7 @@ export function initRooms(app) {
       meta.textContent = app.t("roomMeta", { members: shownRoom.participants.length, count: shownRoom.messages.length });
       const preview = document.createElement("span");
       preview.className = "r-preview";
-      const lastMessage = entry?.preview || room.messages.at(-1)?.text || "";
-      preview.textContent = entry ? lastMessage : "";
+      preview.textContent = entry ? formatRoomPreview(entry, room.messages.at(-1), app) : "";
       const status = document.createElement("span");
       status.className = "r-status";
       app.setText(status, entry ? "joined" : "joinAction");
@@ -398,12 +425,12 @@ function syncCachedRooms(rooms, app) {
   const remote = new Map(rooms.map((room) => [room.id, room]));
   for (const [roomId, entry] of app.state.rooms) {
     const fresh = remote.get(roomId);
-    if (!fresh) { void app.removeJoinedRoom(roomId, { reason: app.state.room?.id === roomId }); continue; }
+    if (!fresh || fresh.joined === false) { void app.removeJoinedRoom(roomId, { reason: app.state.room?.id === roomId }); continue; }
     if (app.state.room?.id === roomId) continue;
     const messages = new Map([...entry.room.messages, ...fresh.messages].map((message) => [message.id, message]));
     entry.room = { ...fresh, messages: [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500) };
     const latest = entry.room.messages.at(-1);
-    if (latest) { entry.preview = latest.text; entry.previewAt = latest.createdAt; }
+    if (latest) setRoomPreview(entry, latest);
   }
 }
 
@@ -412,19 +439,22 @@ async function watchRoom(roomId, app) {
   if (!entry || app.state.room?.id === roomId) return;
   try {
     const query = new URLSearchParams({ sessionID: app.LS.sessionID, roomId, excludeSelf: "0", timeout: "0" });
+    query.set("afterTs", String(entry.receivedTs || 0));
     const result = await app.api(`/inbox?${query}`);
     if (app.state.rooms.get(roomId) !== entry) return;
-    if (!result.member) { await app.removeJoinedRoom(roomId, { reason: false }); return; }
+    if (result.member === false) { await app.removeJoinedRoom(roomId, { reason: false }); return; }
+    if (result.member !== true || !Array.isArray(result.items)) return;
     if (app.state.room?.id === roomId) return;
+    const previousReceivedTs = entry.receivedTs || 0;
     const sawSystem = (result.items || []).some((message) => message.senderId === "system");
     for (const message of result.items || []) {
       if (!entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
       if (!entry.room.messages.some((item) => item.id === message.id)) entry.room.messages.push({ ...message, roomId });
       if (message.createdAt >= entry.previewAt) {
-        entry.preview = message.text;
-        entry.previewAt = message.createdAt;
+        setRoomPreview(entry, message);
       }
     }
+    entry.receivedTs = (result.items || []).reduce((latest, message) => Number.isSafeInteger(message.createdAt) ? Math.max(latest, message.createdAt) : latest, previousReceivedTs);
     if (sawSystem || result.hasMore) {
       const latest = await app.api(`/rooms/${encodeURIComponent(roomId)}`);
       if (app.state.rooms.get(roomId) !== entry || app.state.room?.id === roomId) return;
@@ -432,10 +462,11 @@ async function watchRoom(roomId, app) {
       const messages = new Map([...entry.room.messages, ...latest.messages].map((message) => [message.id, message]));
       entry.room.messages = [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500);
       const newest = latest.messages.at(-1);
-      if (newest && newest.createdAt >= entry.previewAt) { entry.preview = newest.text; entry.previewAt = newest.createdAt; }
+      if (newest && newest.createdAt >= entry.previewAt) setRoomPreview(entry, newest);
     }
     entry.unreadOverflow = Boolean(result.hasMore);
     if (entry.room.messages.length > 500) entry.room.messages.splice(0, entry.room.messages.length - 500);
+    if (result.hasMore && entry.receivedTs > previousReceivedTs) await watchRoom(roomId, app);
   } catch (error) {
     if (error.status === 401) app.openChatSettings();
     else if (error.status === 404) await app.removeJoinedRoom(roomId, { reason: false });

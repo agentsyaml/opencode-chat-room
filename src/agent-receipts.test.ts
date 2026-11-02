@@ -2,8 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, expect, test } from "bun:test";
+import type { QueueTransport } from "./queue-transport";
 
-const keys = ["HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "CHAT_ROOM_STATE_DIR", "CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL"] as const;
+const keys = ["HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "CHAT_ROOM_STATE_DIR", "CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL", "CHAT_ROOM_SERVER_HOST", "CHAT_ROOM_SERVER_PORT"] as const;
 const prior = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
 for (const key of keys.slice(4)) delete process.env[key];
 const root = mkdtempSync(path.join(tmpdir(), "agent-receipts-"));
@@ -11,6 +12,8 @@ process.env.HOME = path.join(root, "home");
 process.env.XDG_CONFIG_HOME = path.join(root, "config");
 process.env.XDG_STATE_HOME = path.join(root, "state");
 process.env.CHAT_ROOM_STATE_DIR = path.join(root, "rooms");
+process.env.CHAT_ROOM_SERVER_HOST = "127.0.0.1";
+process.env.CHAT_ROOM_SERVER_PORT = String(50_000 + Math.floor(Math.random() * 10_000));
 const { prepareReceiptCandidate, observeReceiptContext: observeScoped, flushReceiptCandidates, receiptDestination } = await import("./agent-receipts");
 const state = await import("./receiver-state");
 const prompt = "<notification>full private text</notification>";
@@ -92,8 +95,10 @@ test("V2 prompt hook is not evidence; primary context hook marks the proof ready
     session: { hook: async (name: string, callback: (input: never) => unknown) => { hooks.set(name, callback); return registration; }, prompt: async () => {} },
     tool: { transform: async () => registration }, command: { transform: async () => registration },
   };
-  const setup = createV2Setup({ runtime: (_directory, transport) => { transport.receiverOwnerID = "owner"; return { protocol: "v2", selfServerUrl: "", selfDirectory: "", transport, center: { center: "https://hook.invalid", token: "" } }; },
-    run: (_runtime, callback) => callback(), execute: async () => "", observe: async () => {}, poll: async () => {} });
+  let receiverPoll: ((ids: ReadonlySet<string>, target: QueueTransport, center: { center: string; token: string; directory?: string }) => Promise<void>) | undefined;
+  const setup = createV2Setup({ runtime: (_directory, transport) => ({ protocol: "v2", selfServerUrl: "", selfDirectory: "", transport, center: { center: "https://hook.invalid", token: "" } }),
+    run: (_runtime, callback) => callback(), execute: async () => "", observe: async () => {}, poll: async () => {},
+    attachReceiver: (value) => { receiverPoll = value.poll; return async () => {}; } });
   const cleanup = await setup(context as never);
   let uploads = 0;
   globalThis.fetch = (async () => { uploads++; return Response.json({ acceptedIDs: ["message-1"] }); }) as unknown as typeof fetch;
@@ -102,8 +107,42 @@ test("V2 prompt hook is not evidence; primary context hook marks the proof ready
   expect(uploads).toBe(0);
   await hooks.get("context")!({ sessionID: "session", messages: [user("hook-admission")] } as never);
   await flushReceiptCandidates({ destination: candidate.destination, receiverOwnerID: "owner", center: "https://hook.invalid" });
+  expect(uploads).toBe(0);
+  await receiverPoll!(new Set(["session"]), { protocol: "v2", receiverOwnerID: "owner" }, { center: "https://hook.invalid", token: "" });
+  await hooks.get("context")!({ sessionID: "session", messages: [user("hook-admission")] } as never);
+  await flushReceiptCandidates({ destination: candidate.destination, receiverOwnerID: "owner", center: "https://hook.invalid" });
   expect(uploads).toBe(1);
   await cleanup();
+});
+
+test("first context lazily resolves the verified owner and marks its receipt", async () => {
+  const candidate = prepareReceiptCandidate(base({ admissionID: "first-context", destination: "https://first-context.invalid" }))!;
+  const { createV2Setup } = await import("./v2-plugin");
+  let hook!: (input: never) => void | Promise<void>, lookups = 0, uploads = 0;
+  const registration = { dispose: async () => {} };
+  const setup = createV2Setup({ runtime: (_directory, transport) => ({ protocol: "v2", selfServerUrl: "", selfDirectory: "", transport, center: { center: "https://first-context.invalid", token: "" } }),
+    run: (_runtime, callback) => callback(), execute: async () => "", observe: async () => {}, poll: async () => {},
+    resolveOwner: async () => { lookups++; return "owner"; }, attachReceiver: () => async () => {} });
+  const context = { app: { version: "" }, location: { directory: "/isolated" },
+    session: { hook: async (name: string, callback: (input: never) => unknown) => { if (name === "context") hook = callback as (input: never) => void | Promise<void>; return registration; }, prompt: async () => {} },
+    tool: { transform: async () => registration }, command: { transform: async () => registration } };
+  const cleanup = await setup(context as never);
+  globalThis.fetch = (async () => { uploads++; return Response.json({ acceptedIDs: ["message-1"] }); }) as unknown as typeof fetch;
+  await hook({ sessionID: "session", messages: [user("first-context")] } as never);
+  await flushReceiptCandidates({ destination: candidate.destination, receiverOwnerID: "owner", center: "https://first-context.invalid" });
+  expect(lookups).toBe(1);
+  expect(uploads).toBe(1);
+  await cleanup();
+});
+
+test("center delivery preserves the ownerless V2 fallback", async () => {
+  const { pushItemsToSession } = await import("./center-inbox");
+  let prompts = 0;
+  globalThis.fetch = (async () => Response.json({ session: { protocol: "v2", receiverOwnerID: "verified-owner", membershipID: "membership", name: "agent" } })) as unknown as typeof fetch;
+  await pushItemsToSession({ center: "https://owner-gate.invalid", token: "" }, "session", [
+    { id: "owner-gated-message", roomId: "owner-gated-room", roomName: "test", senderId: "alice", text: "full text", createdAt: 10 },
+  ], { protocol: "v2", promptQueue: async () => { prompts++; } });
+  expect(prompts).toBe(1);
 });
 
 test("ready proof survives queue cleanup and restart across transient center failure", async () => {

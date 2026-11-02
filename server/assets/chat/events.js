@@ -4,7 +4,12 @@ import { copyCodeFromButton } from "./markdown.js";
 export function initEvents(app) {
   const $ = app.$;
   document.querySelectorAll(".locale-select").forEach((select) => {
-    select.addEventListener("change", () => app.setLocale(select.value));
+    select.addEventListener("change", () => {
+      app.setLocale(select.value);
+      if (!app.state.availableRooms) return;
+      app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
+      app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
+    });
   });
   $("#joinForm").addEventListener("submit", (event) => {
     event.preventDefault();
