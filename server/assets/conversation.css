@@ -181,9 +181,29 @@
     overflow-wrap: anywhere;
   }
   .msg.own .msg-text { background: var(--accent-soft); border-bottom-left-radius: 14px; border-bottom-right-radius: 4px; }
-  .message-readers { margin-top: 4px; color: var(--ink-3); font-size: 11px; }
-  .message-readers summary { cursor: pointer; }
-  .receipt-reader-list { margin: 4px 0 0; padding: 5px 8px; list-style: none; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .msg-content { position: relative; display: flex; align-items: flex-end; gap: 6px; width: fit-content; max-width: 100%; }
+  .msg.own .msg-content { flex-direction: row-reverse; }
+  .message-copy {
+    align-self: flex-start;
+    margin: 2px 0 0 4px;
+    padding: 2px 6px;
+    border: 0;
+    border-radius: 5px;
+    color: var(--ink-3);
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .msg.own .message-copy { align-self: flex-end; margin-right: 4px; }
+  .message-copy:hover, .message-copy:focus-visible { color: var(--ink); background: var(--surface-2); }
+  .message-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .message-readers { position: static; flex: 0 0 22px; margin: 0 0 4px; color: var(--ink-3); font-size: 11px; }
+  .message-readers summary { display: grid; place-items: center; width: 22px; height: 22px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); cursor: pointer; list-style: none; }
+  .message-readers summary::-webkit-details-marker { display: none; }
+  .message-readers summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .receipt-reader-list { position: absolute; z-index: 5; left: 0; top: 100%; min-width: min(210px, calc(100vw - 32px)); max-width: calc(100vw - 24px); box-sizing: border-box; margin: 4px 0 0; padding: 5px 8px; list-style: none; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+  .msg.own .receipt-reader-list { right: 0; left: auto; }
   .receipt-reader-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
   .receipt-reader-list li + li { margin-top: 4px; }
   .receipt-reader-list li span:last-child { color: var(--ink-3); }
@@ -297,15 +317,18 @@
   }
 
   .sys {
+    position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     margin: 20px 0;
     font-size: 12.5px;
     color: var(--ink-2);
   }
-  .sys::before, .sys::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-  .sys span { flex-shrink: 0; }
+  .sys::before { content: ""; position: absolute; top: 9px; left: 0; right: 0; height: 1px; background: var(--line); }
+  .sys span { position: relative; padding: 0 10px; background: var(--surface); }
+  .sys .message-copy { align-self: center; margin: -8px 0 0; }
 
   .day-sep {
     display: flex;

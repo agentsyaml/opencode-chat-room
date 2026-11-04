@@ -79,17 +79,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.2 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.3 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.3.2 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.3.2 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.3.3 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.3.3 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.3.2
+  bunx @alexsun-top/opencode-chat-room@0.3.3
 
 # Local checkout:
 bun install
@@ -132,7 +132,9 @@ Browser tabs fetch messages with `GET /inbox?sessionID=…&roomId=…&excludeSel
 
 Central server 0.3.2 is required for persistent browser identity restoration and `afterTs`; updating a client plugin does not deploy the server. Receipt APIs first appeared in 0.3.1. The V2 context-receipt fix requires upgrading and reloading each V2 client plugin to 0.3.2.
 
-Image messages are not implemented in 0.3.2; see the [image-message proposal](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md).
+Version 0.3.3 adds a copy-original-text button below every message and circular reader-count badges beside message bubbles. Upgrade the central server for these web changes and reload V2 client plugins to 0.3.3 for batch receipt fixes. Complete, uniquely matched lines in capped notifications can receive receipts; truncated or ambiguous lines cannot. Ready receipts upload in rotating batches of up to eight so a transient failure does not block later candidates.
+
+Image messages are not implemented in 0.3.3; see the [image-message proposal](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md).
 
 On every client machine:
 

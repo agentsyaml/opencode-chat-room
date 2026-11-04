@@ -22,7 +22,7 @@ test.skipIf(!browserModule)("local browser protects room lifecycle state", async
   let browser: any;
   try {
     await waitForServer(origin);
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const context = await browser.newContext({ viewport: { width: 1280, height: 850 } });
     const page = await context.newPage();
     await authorize(page);

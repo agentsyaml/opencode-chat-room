@@ -121,11 +121,13 @@ export function markReceiptCandidateReady(id: string): boolean {
   return immediate((db) => db.query("UPDATE receipt_candidates SET ready=1,expires_at=? WHERE candidate_id=? AND ready=0")
     .run(Number.MAX_SAFE_INTEGER, id).changes === 1);
 }
-export function readyReceiptCandidates<T>(destination: string, ownerID: string | undefined, now: number, limit?: number): Array<{ id: string; value: T }> {
+export function readyReceiptCandidates<T>(destination: string, ownerID: string | undefined, now: number, limit?: number, afterID?: string): Array<{ id: string; value: T }> {
   return immediate((db) => {
     db.query("DELETE FROM receipt_candidates WHERE ready=0 AND expires_at<=?").run(now);
-    const query = "SELECT candidate_id,candidate FROM receipt_candidates WHERE ready=1 AND destination=? AND owner_id=?" + (limit ? " LIMIT ?" : "");
-    const rows = (limit ? db.query(query).all(destination, ownerID ?? "", limit) : db.query(query).all(destination, ownerID ?? "")) as Array<{ candidate_id: string; candidate: string }>;
+    const query = "SELECT candidate_id,candidate FROM receipt_candidates WHERE ready=1 AND destination=? AND owner_id=?" +
+      (afterID !== undefined ? " AND candidate_id>?" : "") + " ORDER BY candidate_id" + (limit ? " LIMIT ?" : "");
+    const args = [destination, ownerID ?? "", ...(afterID !== undefined ? [afterID] : []), ...(limit ? [limit] : [])];
+    const rows = db.query(query).all(...args) as Array<{ candidate_id: string; candidate: string }>;
     return rows.map((row) => ({ id: row.candidate_id, value: JSON.parse(row.candidate) as T }));
   });
 }

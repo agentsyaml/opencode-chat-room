@@ -52,6 +52,42 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID, text: "| Left | Right |\n| --- | --- |\n| One | Two |\n\n```js\nconst value = 42;\n```" });
     await page.locator(".msg-text table").waitFor();
     await page.locator(".msg-text pre code").waitFor();
+    expect(await page.locator("#msgList [data-msg-id]:not(.day-sep)").evaluateAll((rows: Element[]) => rows.every((row) => row.querySelector("[data-copy-message]")))).toBe(true);
+    await page.evaluate(() => {
+      let copied = "";
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { copied = text; } } });
+      (window as any).__copiedMessage = () => copied;
+    });
+    await page.locator(".msg-text table").locator("xpath=ancestor::li[@data-msg-id]").locator("[data-copy-message]").click();
+    expect(await page.evaluate(() => (window as any).__copiedMessage())).toBe("| Left | Right |\n| --- | --- |\n| One | Two |\n\n```js\nconst value = 42;\n```");
+    expect(await page.locator(".msg-text table").locator("xpath=ancestor::li[@data-msg-id]").locator("[data-copy-message]").textContent()).toBe("Copied");
+    const fallback = await page.evaluate(async (url: string) => {
+      const { copyTextToClipboard } = await import(url), button = document.querySelector<HTMLElement>(".msg-text table")!.closest("li")!.querySelector<HTMLElement>("[data-copy-message]")!;
+      const selection = getSelection()!, range = document.createRange();
+      range.selectNodeContents(document.querySelector(".msg-text table")!.closest("li")!.querySelector(".msg-text")!);
+      selection.removeAllRanges(); selection.addRange(range); button.focus();
+      const selectionBefore = selection.toString(), raw = (button as any)._copyText as string;
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new Error("denied"); } } });
+      let legacyText = "";
+      document.execCommand = ((command: string) => { if (command === "copy") legacyText = (document.activeElement as HTMLTextAreaElement).value; return true; }) as typeof document.execCommand;
+      const copied = await copyTextToClipboard(raw);
+      return { copied, legacyText, raw, selectionBefore, selectionAfter: selection.toString(), focused: document.activeElement === button };
+    }, "/assets/chat/markdown.js");
+    expect(fallback.copied).toBe(true);
+    expect(fallback.legacyText).toBe(fallback.raw);
+    expect(fallback.selectionAfter).toBe(fallback.selectionBefore);
+    expect(fallback.focused).toBe(true);
+    await page.evaluate(() => { document.execCommand = (() => false) as typeof document.execCommand; });
+    await page.locator(".msg-text table").locator("xpath=ancestor::li[@data-msg-id]").locator("[data-copy-message]").click();
+    await page.waitForFunction(() => document.querySelector(".msg-text table")?.closest("li")?.querySelector("[data-copy-message]")?.textContent === "Could not copy. Select and copy the message manually.");
+    const systemLayout = await page.evaluate(async (url: string) => {
+      const { app } = await import(url), row = app.renderMessage({ id: "copy-system-fixture", senderId: "system", text: "UX system copy fixture", createdAt: Date.now() }, false);
+      document.querySelector("#msgList")!.append(row);
+      const text = row.querySelector("span")!.getBoundingClientRect(), copy = row.querySelector("[data-copy-message]")!.getBoundingClientRect();
+      row.remove();
+      return { textBottom: text.bottom, copyTop: copy.top };
+    }, "/assets/chat/state.js");
+    expect(systemLayout.copyTop).toBeGreaterThanOrEqual(systemLayout.textBottom);
     await checkSelection(page, ".msg-text table");
     await checkSelection(page, ".msg-text pre code");
     await page.evaluate(() => { const thread = document.querySelector<HTMLElement>("#thread")!; thread.scrollTop = 12000; });

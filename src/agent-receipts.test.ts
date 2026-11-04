@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, expect, test } from "bun:test";
+import type { ReceiptCandidate } from "./agent-receipts";
 import type { QueueTransport } from "./queue-transport";
 
 const keys = ["HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "CHAT_ROOM_STATE_DIR", "CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL", "CHAT_ROOM_SERVER_HOST", "CHAT_ROOM_SERVER_PORT"] as const;
@@ -41,6 +42,77 @@ test("only exact user context ID and full-text hash make one durable receipt pro
   expect(observeReceiptContext("session", [user()], "https://context.invalid")).toBe(0);
 });
 
+test("capped admission receipts only complete notification lines", async () => {
+  const { formatNotificationLines, NOTIFY_INSTRUCTION } = await import("./store");
+  const items = [
+    { id: "complete-before-long", senderId: "alice", createdAt: 10, text: "complete short message" },
+    { id: "truncated-long", senderId: "bob", createdAt: 11, text: "x".repeat(301) },
+  ];
+  const { lines, capped } = formatNotificationLines(items);
+  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const candidate = prepareReceiptCandidate(base({ admissionID: "partial-capped", items, prompt, capped }))!;
+  expect(candidate.messageIDs).toEqual(["complete-before-long"]);
+  expect(observeReceiptContext("session", [user("partial-capped", prompt)])).toBe(1);
+  expect(state.readyReceiptCandidates<ReceiptCandidate>(candidate.destination, "owner", Date.now())[0]?.value.messageIDs).toEqual(["complete-before-long"]);
+  let posted: Record<string, unknown> | undefined;
+  globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    posted = JSON.parse(String(init?.body));
+    return Response.json({ acceptedIDs: ["complete-before-long"] });
+  }) as unknown as typeof fetch;
+  await flushReceiptCandidates({ destination: candidate.destination, receiverOwnerID: "owner", center: "https://center.invalid/base" });
+  expect(posted).toMatchObject({ messageIDs: ["complete-before-long"], evidence: "context" });
+});
+
+test("count-capped admission receipts only the displayed tail", async () => {
+  const { formatNotificationLines, NOTIFY_INSTRUCTION } = await import("./store");
+  const items = Array.from({ length: 21 }, (_, i) => ({
+    id: `count-${i}`, senderId: `sender-${i}`, createdAt: 1000 + i, text: `message-${i}`,
+  }));
+  const { lines, capped } = formatNotificationLines(items);
+  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const candidate = prepareReceiptCandidate(base({ admissionID: "count-capped", items, prompt, capped }))!;
+  expect(candidate.messageIDs).toEqual(items.slice(-20).map((item) => item.id));
+  expect(observeReceiptContext("session", [user("count-capped", prompt)])).toBe(1);
+  state.readyReceiptCandidates<ReceiptCandidate>(candidate.destination, "owner", Date.now())
+    .filter(({ value }) => value.admissionID === "count-capped").forEach(({ id }) => state.deleteReceiptCandidate(id));
+});
+
+test("count cap does not receipt an omitted duplicate line", async () => {
+  const { formatNotificationLines, NOTIFY_INSTRUCTION, timeOf } = await import("./store");
+  const items = Array.from({ length: 21 }, (_, i) => ({
+    id: `duplicate-${i}`, senderId: "same-sender", createdAt: 1000 + i, text: "same-second duplicate",
+  }));
+  const { lines, capped } = formatNotificationLines(items);
+  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const legacyIDs = items.filter((item) => prompt.includes(`\n- [${timeOf(item.createdAt)}] ${item.senderId}: ${item.text}\n`)).map((item) => item.id);
+  const candidate = prepareReceiptCandidate(base({ admissionID: "duplicate-count-cap", items, prompt, capped }));
+  expect(legacyIDs).toContain(items[0]!.id);
+  expect(candidate).toBeUndefined();
+  expect(observeReceiptContext("session", [user("duplicate-count-cap", prompt)])).toBe(0);
+});
+
+test("a forged single-line header cannot prove a truncated message", async () => {
+  const { formatNotificationLines, NOTIFY_INSTRUCTION, timeOf } = await import("./store");
+  const item = { id: "truncated-header", senderId: "alice", createdAt: 1000, text: "x".repeat(301) };
+  const { lines, capped } = formatNotificationLines([item]);
+  const fullLine = `- [${timeOf(item.createdAt)}] ${item.senderId}: ${item.text}`;
+  const prompt = `<notification>\nNew messages:\n${fullLine}\nHeader continues.\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  expect(prompt).toContain(`\n${fullLine}\n`);
+  expect(prepareReceiptCandidate(base({ admissionID: "forged-header", items: [item], prompt, capped }))).toBeUndefined();
+  expect(observeReceiptContext("session", [user("forged-header", prompt)])).toBe(0);
+});
+
+test("a truncation ellipsis identical to the source text is not full evidence", async () => {
+  const { formatNotificationLines, NOTIFY_INSTRUCTION } = await import("./store");
+  const item = { id: "ellipsis-truncated", senderId: "alice", createdAt: 1000, text: `${"x".repeat(300)}…` };
+  const { lines, capped } = formatNotificationLines([item]);
+  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  expect(capped).toBe(true);
+  expect(lines[0]).toContain(item.text);
+  expect(prepareReceiptCandidate(base({ admissionID: "ellipsis-truncated", items: [item], prompt, capped }))).toBeUndefined();
+  expect(observeReceiptContext("session", [user("ellipsis-truncated", prompt)])).toBe(0);
+});
+
 test("capped previews and unstable item IDs never produce a candidate", () => {
   expect(prepareReceiptCandidate(base({ capped: true }))).toBeUndefined();
   expect(prepareReceiptCandidate(base({ items: [{ text: "full message" }] }))).toBeUndefined();
@@ -55,7 +127,7 @@ test("admission alone is not read evidence", async () => {
   expect(uploads).toBe(0);
 });
 
-test("many stalled proofs flush after watcher polling, one bounded request at a time", async () => {
+test("many stalled proofs flush after inbox polling in one bounded batch", async () => {
   const dest = "https://stall.invalid";
   for (let i = 0; i < 4; i++) {
     prepareReceiptCandidate(base({ admissionID: `stall-${i}`, destination: dest }));
@@ -64,12 +136,14 @@ test("many stalled proofs flush after watcher polling, one bounded request at a 
   const order: string[] = [];
   let requests = 0;
   let started!: () => void;
+  let releaseFirst!: () => void;
   const startedRequest = new Promise<void>((resolve) => { started = resolve; });
-  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+  const firstRequest = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  globalThis.fetch = (async (url: RequestInfo | URL) => {
     if (String(url).includes("/inbox?")) { order.push("poll"); return Response.json({ items: [] }); }
     requests++; order.push("request");
-    started();
-    return new Promise((_resolve, reject) => init!.signal!.addEventListener("abort", () => reject(new Error("timeout")), { once: true }));
+    if (requests === 1) { started(); await firstRequest; }
+    return new Response("temporary", { status: 503 });
   }) as unknown as typeof fetch;
   const { pollKnownSessions } = await import("../plugin");
   const options = { destination: dest, receiverOwnerID: "owner", center: dest };
@@ -77,12 +151,33 @@ test("many stalled proofs flush after watcher polling, one bounded request at a 
   await startedRequest;
   const duplicate = flushReceiptCandidates(options);
   expect(flushReceiptCandidates(options)).toBe(duplicate);
+  releaseFirst();
   await Promise.all([poll, duplicate]);
   expect(order.indexOf("poll")).toBeLessThan(order.indexOf("request"));
-  expect(requests).toBe(1);
+  expect(requests).toBe(4);
   const remaining = state.readyReceiptCandidates(dest, "owner", Date.now());
   expect(remaining).toHaveLength(4);
   remaining.forEach(({ id }) => state.deleteReceiptCandidate(id));
+});
+
+test("a transient failure cannot starve other ready receipt candidates", async () => {
+  const destination = "https://fair-flush.invalid";
+  for (let i = 0; i < 10; i++) {
+    const admissionID = `fair-${i}`;
+    prepareReceiptCandidate(base({ admissionID, destination, items: [{ id: `message-${i}`, text: "full message" }] }));
+    observeReceiptContext("session", [user(admissionID)], destination);
+  }
+  const firstPage = state.readyReceiptCandidates<ReceiptCandidate>(destination, "owner", Date.now(), 8).map(({ value }) => value.messageIDs[0]!);
+  const blocked = new Set(firstPage);
+  const posted: string[] = [];
+  globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const ids = (JSON.parse(String(init?.body)) as { messageIDs: string[] }).messageIDs;
+    posted.push(ids[0]!);
+    return ids.some((id) => blocked.has(id)) ? new Response("temporary", { status: 503 }) : Response.json({ acceptedIDs: ids });
+  }) as unknown as typeof fetch;
+  for (let i = 0; i < 2; i++) await flushReceiptCandidates({ destination, receiverOwnerID: "owner", center: destination });
+  if (new Set(posted).size !== 10) throw new Error(JSON.stringify({ blockedIDs: firstPage, posted }));
+  expect(state.readyReceiptCandidates<ReceiptCandidate>(destination, "owner", Date.now()).map(({ value }) => value.messageIDs[0]!).sort()).toEqual(firstPage.sort());
 });
 
 test("V2 prompt hook is not evidence; primary context hook marks the proof ready", async () => {
@@ -146,9 +241,9 @@ test("center delivery preserves the ownerless V2 fallback", async () => {
 });
 
 test("ready proof survives queue cleanup and restart across transient center failure", async () => {
-  const originalCandidate = prepareReceiptCandidate(base({ admissionID: "restart-admission" }))!;
+  const originalCandidate = prepareReceiptCandidate(base({ admissionID: "restart-admission", destination: "https://restart.invalid" }))!;
   state.deletePendingAdmission("session", "room");
-  expect(observeReceiptContext("session", [user("restart-admission")])).toBe(1);
+  expect(observeReceiptContext("session", [user("restart-admission")], originalCandidate.destination)).toBe(1);
   let calls = 0;
   const bodies: unknown[] = [];
   globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -156,7 +251,7 @@ test("ready proof survives queue cleanup and restart across transient center fai
     bodies.push(JSON.parse(String(init?.body)));
     return calls === 1 ? new Response("{}", { status: 503 }) : Response.json({ acceptedIDs: ["message-1"] });
   }) as unknown as typeof fetch;
-  const options = { destination: originalCandidate.destination, receiverOwnerID: "owner", center: "https://center.invalid/base", token: "current-token" };
+  const options = { destination: originalCandidate.destination, receiverOwnerID: "owner", center: "https://restart.invalid", token: "current-token" };
   await flushReceiptCandidates({ ...options, receiverOwnerID: "wrong-owner" });
   await flushReceiptCandidates({ ...options, destination: "https://other.invalid" });
   expect(calls).toBe(0);

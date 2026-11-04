@@ -97,6 +97,29 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     if (await page.locator("#btnMembers").getAttribute("aria-expanded") !== "true") await page.locator("#btnMembers").click();
     expect(await page.locator("#memberPanel").isVisible()).toBe(true);
     expect(await page.locator(".message-readers[open]").count()).toBeGreaterThan(0);
+    const receiptLayout = await page.locator(`[data-msg-id="${targetMessageID}"]`).evaluate((row: Element) => {
+      const bubble = row.querySelector<HTMLElement>(".msg-text")!.getBoundingClientRect();
+      const summary = row.querySelector<HTMLElement>(".message-readers summary")!;
+      const badge = summary.getBoundingClientRect();
+      return { size: [badge.width, badge.height], gap: badge.left - bubble.right, overlap: Math.min(badge.bottom, bubble.bottom) - Math.max(badge.top, bubble.top), label: summary.getAttribute("aria-label") };
+    });
+    expect(receiptLayout.size[0]).toBe(22);
+    expect(receiptLayout.size[1]).toBe(22);
+    expect(receiptLayout.gap).toBeGreaterThanOrEqual(0);
+    expect(receiptLayout.gap).toBeLessThan(12);
+    expect(receiptLayout.overlap).toBeGreaterThan(0);
+    expect(receiptLayout.label).toContain("Read by");
+    await page.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
+    expect(await page.locator(`[data-msg-id="${targetMessageID}"] .message-copy`).textContent()).toBe("复制");
+    expect(await page.locator(`[data-msg-id="${targetMessageID}"] .message-readers summary`).getAttribute("aria-label")).toContain("已读");
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new Error("denied"); } } });
+      document.execCommand = (() => false) as typeof document.execCommand;
+    });
+    await page.locator(`[data-msg-id="${targetMessageID}"] .message-copy`).click();
+    await page.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-copy`)?.textContent === "复制失败，请手动选择并复制消息。", targetMessageID);
+    await page.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    await page.locator(`[data-msg-id="${targetMessageID}"] .message-readers summary`).click();
     await page.waitForTimeout(220);
     await page.screenshot({ path: path.join(artifactDir, "chat-receipts-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -105,6 +128,10 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
       const thread = document.querySelector<HTMLElement>("#thread")!, row = document.querySelector<HTMLElement>(`[data-msg-id="${id}"]`)!;
       thread.scrollTop += row.getBoundingClientRect().top - 440;
     }, targetMessageID);
+    const mobileReceipt = await page.locator(`[data-msg-id="${targetMessageID}"] .receipt-reader-list`).boundingBox();
+    expect(mobileReceipt).not.toBeNull();
+    expect(mobileReceipt!.x).toBeGreaterThanOrEqual(0);
+    expect(mobileReceipt!.x + mobileReceipt!.width).toBeLessThanOrEqual(390);
     await page.screenshot({ path: path.join(artifactDir, "chat-receipts-mobile.png"), fullPage: true });
     await page.emulateMedia({ colorScheme: "dark" });
     await page.screenshot({ path: path.join(artifactDir, "chat-receipts-mobile-dark.png"), fullPage: true });

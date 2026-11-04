@@ -77,17 +77,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.2 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.3 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.3.2 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.3.2 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.3.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.3.3 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.3.3 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.3.2
+  bunx @alexsun-top/opencode-chat-room@0.3.3
 
 # 本地 checkout：
 bun install
@@ -130,7 +130,9 @@ V2 使用 `POST /presence` 上报 owner 范围内递增的序号，每次最多 
 
 浏览器持久身份恢复和 `afterTs` 需要中心服务器 0.3.2；只更新客户端插件不会部署服务端。回执 API 自 0.3.1 起提供。V2 上下文回执修复需要将每台 V2 客户端插件升级并重新加载到 0.3.2。
 
-0.3.2 尚未实现图片消息；设计提案见[图片消息方案](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md)。
+0.3.3 在每条消息下方增加复制原文按钮，并将已读人数改为消息旁的圆形标记。网页变化需升级中心服务器，批量回执修复需将各 V2 客户端插件升级并重新加载至 0.3.3。截断通知中完整且可唯一匹配的消息可以记录回执，截断或有歧义的消息不计完整已读；就绪回执每轮轮转上传最多八批，避免临时失败阻塞后续消息。
+
+0.3.3 尚未实现图片消息；设计提案见[图片消息方案](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md)。
 
 每台客户端机器上：
 

@@ -68,7 +68,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   try {
     await waitForServer(origin);
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const alice = await context.newPage();

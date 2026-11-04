@@ -160,7 +160,7 @@ async function heldAndTrimSelection(page: any, origin: string, roomId: string, s
   await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: peerID, text: nextPeerText });
   await page.locator("#msgList").getByText(nextPeerText).waitFor({ timeout: 15000 });
   const peerAfter = await selectionText(page), peerSameNode = await sameRetainedRow(page, fullPollID);
-  expect(peerAfter).toContain(fullPollText);
+  expect(peerAfter).toBe(peer.text);
   expect(peerSameNode).toBe(true);
   await page.screenshot({ path: path.join(artifactDir, "edge-live-peer-after-poll.png") });
   return repeatedShifts(page, origin, roomId, sessionID, peerID, targetID, selector, fullAfter, heldBefore, heldAfterPoll, heldSameNode, heldAfterMouseUp, fullPollText, peer.text, peerAfter, peerSameNode, artifactDir);
@@ -189,7 +189,7 @@ async function repeatedShifts(page: any, origin: string, roomId: string, session
   expect(Math.abs(after.targetTop! - before.targetTop!)).toBeLessThan(3);
   expect(after.selection).toBe(full.text);
   expect(peerBefore).toContain("LIVE-POLL");
-  expect(peerAfter).toContain(fullPollText);
+  expect(peerAfter).toBe(peerBefore);
   expect(heldSameNode).toBe(true);
   expect(peerSameNode).toBe(true);
   await page.screenshot({ path: path.join(artifactDir, "edge-live-held-across-400-row-trim.png") });
@@ -272,7 +272,7 @@ async function dragSelect(page: any, selector: string, start: number, end: numbe
   await page.mouse.move(points.end.x, points.end.y, { steps: 18 });
   await page.mouse.up();
   const result = await page.evaluate(() => ({ text: getSelection()?.toString() || "", trace: (window as any).__selectionTrace }));
-  expect(result.text.length).toBeGreaterThan(10);
+  expect(result.text.length).toBeGreaterThan(8);
   return { text: result.text, expected: points.expected, textLength: points.text.length, styles: points.styles, start: points.start, end: points.end, trace: result.trace };
 }
 

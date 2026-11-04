@@ -58,8 +58,27 @@ function replaceMentionTokens(fragment, mentions, app) {
 
 export function copyCodeFromButton(button, app) {
   const code = button.parentElement.querySelector("code")?.textContent || "";
-  return navigator.clipboard?.writeText(code).then(
-    () => app.flash(button, "copiedCode"),
-    () => app.showSendError("copyCodeFailed"),
-  ) ?? app.showSendError("copyCodeFailed");
+  return copyTextToClipboard(code).then((copied) => copied ? app.flash(button, "copiedCode") : app.showSendError("copyCodeFailed"));
+}
+
+export async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* Use the legacy clipboard command when permission is unavailable. */ }
+  const field = document.createElement("textarea"), selection = getSelection(), active = document.activeElement;
+  const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange()) : [];
+  field.value = text;
+  field.setAttribute("readonly", "");
+  field.style.cssText = "position:fixed;left:-9999px;top:0";
+  document.body.append(field);
+  field.select();
+  let copied = false;
+  try { copied = document.execCommand("copy"); } catch { /* Clipboard access may be disabled. */ }
+  field.remove();
+  if (selection) { selection.removeAllRanges(); ranges.forEach((range) => selection.addRange(range)); }
+  if (active instanceof HTMLElement) active.focus({ preventScroll: true });
+  return copied;
 }

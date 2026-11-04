@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.3 — 2026-11-04
+
+- Added an always-visible copy button below every message, including system messages. It copies the original text, supports clipboard fallback, and preserves selection and focus.
+- Moved per-message reader counts into circular badges beside message bubbles. Reader details remain available on desktop and mobile, with localized accessible labels.
+- Fixed capped V2 notifications discarding receipts for complete short messages in the same batch. Only uniquely matched, fully rendered messages qualify; truncated, omitted, multiline capped, and ambiguous duplicate messages remain unreceipted.
+- Flush up to eight ready receipt candidates per round with ordered rotation, so transient upload failures do not repeatedly block later candidates. Failed candidates remain queued for retry.
+- Verified all 143 tests, including Edge browser coverage, and TypeScript checks. An isolated OpenCode 2.2.5 host using the modified engine recorded the complete message but not the truncated message in a mixed batch. The reported production incident has not been independently attributed to either fixed case.
+- Upgrade the central server for the web changes and reload each V2 client plugin for receipt fixes. This release does not deploy servers, change OpenCode permissions, or implement image messages.
+
 ## 0.3.2 — 2026-11-02
 
 - Fixed V2 context-receipt attribution when the verified host owner is discovered after plugin setup, and propagate that owner across project attachments. A full short message can now record `context` evidence without `room.poll`; capped previews remain unreceipted. A previously unready candidate becomes eligible only if its complete original message appears in agent context again—there is no read-all backfill or synthetic empty-context replay.

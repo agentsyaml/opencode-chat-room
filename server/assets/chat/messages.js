@@ -144,8 +144,19 @@ export function initMessages(app) {
       const body = document.createElement("div");
       body.className = "msg-text";
       renderMarkdown(body, message.text, app);
-      row.append(meta, body, receiptDetails(message, app));
+      const content = document.createElement("div");
+      content.className = "msg-content";
+      content.append(body, receiptDetails(message, app));
+      row.append(meta, content);
     }
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "message-copy";
+    copy.dataset.copyMessage = "";
+    copy.dataset.i18n = "copyMessage";
+    copy.textContent = app.t("copyMessage");
+    copy._copyText = String(message.text ?? "");
+    row.append(copy);
     if (live) row.classList.add("in");
     return row;
   };
@@ -466,7 +477,10 @@ function updateReceiptDetails(row, message, app) {
   const senderID = message.senderSessionID || (app.state.room?.kind === "direct" ? message.senderId : "");
   const readers = (app.state.receipts.get(detailsKey) || []).filter((reader) => reader.sessionID !== senderID);
   details.hidden = readers.length === 0;
-  details.querySelector(".receipt-count").textContent = app.t("receiptCount", { count: readers.length });
+  const summary = details.querySelector("summary"), label = app.t("receiptCount", { count: readers.length });
+  summary.setAttribute("aria-label", label);
+  summary.title = label;
+  details.querySelector(".receipt-count").textContent = String(readers.length);
   const list = details.querySelector(".receipt-reader-list");
   list.textContent = "";
   const members = app.state.memberSessions.get(app.state.room?.id) || [];
