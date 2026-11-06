@@ -8,6 +8,7 @@
 - Add persistent question messages through optional `isQuestion: true` on `send`. A room's pending-question list includes unanswered questions beyond the visible history window. Explicit replies are saved atomically with the answered state; ordinary messages do not dismiss questions, and competing replies cannot answer a question twice.
 - Add a room-scoped question panel and reply workflow in the web chat. Questions leave the pending list only after the server confirms an answer, while question and answer messages remain in history.
 - Preserve the active reply's focus, caret, and draft through polling. Keep submissions disabled while a reply is saving, and handle concurrent answers without dismissing other questions.
+- Apply the SQLite startup lock timeout before enabling WAL, allowing concurrent legacy upgrades to wait for the schema lock. Normal operations retain their shorter busy timeout.
 - Upgrade the central server for the new interface, question APIs, and additive SQLite migration. Reload client plugins to send `isQuestion` and enforce named joins. Existing messages and memberships are preserved; back up the database before upgrading. The shared token does not establish a separate human identity.
 - Verified all 144 tests with Edge browser coverage, TypeScript, desktop/mobile screenshots, and English/Chinese layout checks. Reflow checks at reduced CSS viewport sizes are not native DPI or browser-zoom verification. Image messages remain unimplemented.
 

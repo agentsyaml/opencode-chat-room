@@ -27,7 +27,7 @@ async function initialize(file: string): Promise<Database> {
   try {
     for (let attempt = 0; ; attempt++) {
       try {
-        db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=50; PRAGMA foreign_keys=ON;");
+        db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
         db.exec(`CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY,name TEXT NOT NULL,owner_id TEXT NOT NULL,created_at INTEGER NOT NULL,kind TEXT NOT NULL DEFAULT 'group',direct_sessions TEXT,direct_pair TEXT UNIQUE);
     CREATE TABLE IF NOT EXISTS participants(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,id TEXT NOT NULL,name TEXT NOT NULL,joined_at INTEGER NOT NULL,PRIMARY KEY(room_id,id));
@@ -37,6 +37,7 @@ async function initialize(file: string): Promise<Database> {
     CREATE TABLE IF NOT EXISTS registry(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,session_id TEXT NOT NULL,server_url TEXT NOT NULL,api_prefix TEXT NOT NULL,protocol TEXT,name TEXT NOT NULL,last_read_ts INTEGER,last_queued_ts INTEGER,directory TEXT,host TEXT,receiver_owner_id TEXT,membership_id TEXT,work_state TEXT,last_seen_at INTEGER,PRIMARY KEY(room_id,session_id));`);
         await ensureRoomColumns(db);
         await migrate(db, file);
+        db.exec("PRAGMA busy_timeout=50;");
         return db;
       } catch (error) {
         if (!isBusy(error) || attempt >= 7) throw error;

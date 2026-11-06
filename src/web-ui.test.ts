@@ -72,9 +72,9 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const alice = await context.newPage();
-    const pageErrors: string[] = [], unauthorized: string[] = [], roomJoins: string[] = [], roomLeaves: string[] = [];
+    const pageErrors: string[] = [], httpErrors: string[] = [], unauthorized: string[] = [], roomJoins: string[] = [], roomLeaves: string[] = [];
     const aliceRoomReads: string[] = [], bobRoomReads: string[] = [];
-    watchPage(alice, pageErrors, unauthorized);
+    watchPage(alice, pageErrors, unauthorized, httpErrors);
     watchMembershipRequests(alice, roomJoins, roomLeaves, aliceRoomReads);
     await alice.goto(`${origin}/chat`);
     expect(await alice.title()).toBe("OC Chat");
@@ -108,7 +108,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     const bobContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
     const bob = await bobContext.newPage();
     await bob.addInitScript(() => localStorage.setItem("chat.token", "ui-test-token"));
-    watchPage(bob, pageErrors, unauthorized);
+    watchPage(bob, pageErrors, unauthorized, httpErrors);
     watchMembershipRequests(bob, roomJoins, roomLeaves, bobRoomReads);
     await bob.goto(`${origin}/chat`);
     await bob.locator("#inName").fill("Bob");
@@ -296,7 +296,10 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await bob.waitForFunction((id: string) => (document.querySelector("#btnCopyId") as HTMLButtonElement | null)?.title.endsWith(id), sourceRoom);
     await bob.locator(`#roomListChat [data-room-id="${secondRoom}"]`).waitFor({ state: "detached" });
     expect(await bob.evaluate(() => JSON.parse(sessionStorage.getItem("chat.joinedRoomIds") || "[]"))).toContain(directRoomId);
-    expect(pageErrors).toEqual([]);
+    if (pageErrors.length) {
+      const [aliceState, bobState] = await Promise.all([captureAppState(alice), captureAppState(bob)]);
+      throw new Error(JSON.stringify({ pageErrors, httpErrors, appState: { alice: aliceState, bob: bobState } }));
+    }
     expect(unauthorized.length).toBe(2);
     expect(roomLeaves).toEqual([]);
     await context.close();
@@ -407,6 +410,17 @@ async function currentRoomId(page: any) {
   return title!.slice(title!.lastIndexOf(": ") + 2);
 }
 
+async function captureAppState(page: any) {
+  return page.evaluate(async (url: string) => {
+    const { app } = await import(url);
+    return {
+      roomId: app.state.room?.id || null,
+      questionPanelHidden: document.querySelector<HTMLElement>("#questionPanel")?.hidden,
+      questionStatus: document.querySelector<HTMLElement>("#questionStatus")?.textContent,
+    };
+  }, "/assets/chat/state.js");
+}
+
 function watchMembershipRequests(page: any, joins: string[], leaves: string[], reads: string[]) {
   page.on("request", (request: any) => {
     const url = new URL(request.url()), method = request.method();
@@ -420,13 +434,14 @@ function watchMembershipRequests(page: any, joins: string[], leaves: string[], r
   });
 }
 
-function watchPage(page: any, errors: string[], unauthorized: string[]) {
+function watchPage(page: any, errors: string[], unauthorized: string[], httpErrors: string[] = []) {
   page.on("pageerror", (error: Error) => errors.push(error.message));
   page.on("console", (message: any) => {
     if (message.type() === "error" && !message.text().includes("status of 401")) errors.push(message.text());
   });
   page.on("response", (response: any) => {
     if (response.status() === 401) unauthorized.push(response.url());
+    else if (response.status() >= 400) httpErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
   });
 }
 

@@ -295,10 +295,15 @@ describe.serial("shared-token room management", () => {
       CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,sender_id TEXT NOT NULL,sender_session_id TEXT,text TEXT NOT NULL,created_at INTEGER NOT NULL); INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at) VALUES('legacy-message','legacy','owner','legacy-session','keep history',10);
       CREATE TABLE registry(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,session_id TEXT NOT NULL,server_url TEXT NOT NULL,api_prefix TEXT NOT NULL,protocol TEXT,name TEXT NOT NULL,last_read_ts INTEGER,last_queued_ts INTEGER,directory TEXT,host TEXT,receiver_owner_id TEXT,PRIMARY KEY(room_id,session_id)); INSERT INTO registry VALUES('legacy','legacy-session','','/api','v1','legacy',8,9,NULL,'host',NULL);`);
     database.close();
+    const lock = new Database(path.join(migrationDir, "chat-room.sqlite"));
+    lock.exec("BEGIN EXCLUSIVE");
     const script = `import { loadRooms } from ${JSON.stringify(path.resolve("src/store.ts"))}; await loadRooms()`;
     const children = [1, 2].map(() => Bun.spawn([process.execPath, "-e", script], {
       env: { ...process.env, CHAT_ROOM_STATE_DIR: migrationDir }, stdout: "ignore", stderr: "pipe",
     }));
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    lock.exec("COMMIT");
+    lock.close();
     for (const child of children) {
       const code = await child.exited;
       if (code !== 0) throw new Error(await new Response(child.stderr).text());
