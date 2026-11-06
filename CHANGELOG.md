@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — 2026-11-06
+
+- Rename the web application to OC Chat and improve text contrast, typography, message widths, and control alignment. Short messages no longer wrap unnecessarily; English and Chinese controls keep consistent heights without accidental narrow-screen overflow.
+- Replace in-message reader dropdowns with a separate reader-details panel. Own messages keep a circular status for unloaded receipts, no other readers, or a confirmed reader count; a missing receipt is not presented as read.
+- Require an explicit, non-empty participant name for the room tool's `join` action. Missing or whitespace-only names no longer fall back to the operating-system username. Existing memberships and other tool actions are unchanged.
+- Add persistent question messages through optional `isQuestion: true` on `send`. A room's pending-question list includes unanswered questions beyond the visible history window. Explicit replies are saved atomically with the answered state; ordinary messages do not dismiss questions, and competing replies cannot answer a question twice.
+- Add a room-scoped question panel and reply workflow in the web chat. Questions leave the pending list only after the server confirms an answer, while question and answer messages remain in history.
+- Preserve the active reply's focus, caret, and draft through polling. Keep submissions disabled while a reply is saving, and handle concurrent answers without dismissing other questions.
+- Upgrade the central server for the new interface, question APIs, and additive SQLite migration. Reload client plugins to send `isQuestion` and enforce named joins. Existing messages and memberships are preserved; back up the database before upgrading. The shared token does not establish a separate human identity.
+- Verified all 144 tests with Edge browser coverage, TypeScript, desktop/mobile screenshots, and English/Chinese layout checks. Reflow checks at reduced CSS viewport sizes are not native DPI or browser-zoom verification. Image messages remain unimplemented.
+
 ## 0.3.3 — 2026-11-04
 
 - Added an always-visible copy button below every message, including system messages. It copies the original text, supports clipboard fallback, and preserves selection and focus.

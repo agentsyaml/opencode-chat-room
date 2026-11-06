@@ -8,7 +8,7 @@ import RoomService, {
   type Message,
   type Room,
 } from "../src/room-service";
-import { readState, writeState, type Registry, type RegistryEntry } from "../src/store";
+import { answerQuestion, readQuestions, readState, writeState, type Registry, type RegistryEntry } from "../src/store";
 import {
   admissionMatches,
   clearPendingAdmission,
@@ -273,15 +273,15 @@ async function handle(req: Request): Promise<Response> {
     if (m) {
       const roomId = decodeURIComponent(m[1]!);
       const body = (await req.json()) as Record<string, string>;
-      const sessionID = body.sessionID ?? "";
+      const sessionID = typeof body.sessionID === "string" ? body.sessionID : "";
       if (req.method === "POST" && m[2] === "join") {
         if (body.protocol !== undefined && body.protocol !== "v2" || body.receiverOwnerID !== undefined && !isReceiverOwnerID(body.receiverOwnerID)) {
           return json({ error: "invalid receiver ownership" }, 400);
         }
         // ponytail: F4/F5 — names must be non-empty, and re-joining under a
         // new name must retire the old participant (no ghost members)
-        const id = (body.participantId ?? "").trim();
-        const name = (body.participantName ?? "").trim();
+        const id = typeof body.participantId === "string" ? body.participantId.trim() : "";
+        const name = typeof body.participantName === "string" ? body.participantName.trim() : "";
         if (!id || !name || !sessionID) {
           return json(
             { error: "participantId/participantName/sessionID are required" },
@@ -371,6 +371,8 @@ async function handle(req: Request): Promise<Response> {
         return json({ ok: true });
       }
       if (req.method === "POST" && m[2] === "messages") {
+        const isQuestion = (body as Record<string, unknown>).isQuestion;
+        if (isQuestion !== undefined && typeof isQuestion !== "boolean") return json({ error: "isQuestion must be a boolean" }, 400);
         // ponytail: F3 — mirror the plugin's zod limit at the HTTP boundary
         const text = (body.text ?? "").trim();
         if (!text) {
@@ -383,7 +385,7 @@ async function handle(req: Request): Promise<Response> {
           const senderEntry = reg[roomId]?.[sessionID];
           if (!senderEntry) throw new RoomError("NOT_JOINED", "session is not a room member");
           const sender = svc.getRoom(roomId).kind === "direct" ? sessionID : senderEntry.name;
-          svc.sendMessage(roomId, sender, text, sessionID);
+          svc.sendMessage(roomId, sender, text, sessionID, isQuestion === true);
           return svc.getRoom(roomId);
         });
         touchActive(sessionID); // 发送者活跃
@@ -401,6 +403,32 @@ async function handle(req: Request): Promise<Response> {
         }
         return json(serializeRoom(room), 201);
       }
+    }
+    const questions = p.match(/^\/rooms\/([^/]+)\/questions$/);
+    if (req.method === "GET" && questions) {
+      const roomId = decodeURIComponent(questions[1]!);
+      const exists = await read((svc) => svc.listRooms().some((room) => room.id === roomId));
+      if (!exists) return json({ error: "room not found" }, 404);
+      return json({ questions: await readQuestions(roomId) });
+    }
+    const answer = p.match(/^\/rooms\/([^/]+)\/questions\/([^/]+)\/answers$/);
+    if (req.method === "POST" && answer) {
+      const roomId = decodeURIComponent(answer[1]!);
+      const questionID = decodeURIComponent(answer[2]!);
+      const body: unknown = await req.json();
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "sessionID and non-empty text (max 2000) are required" }, 400);
+      const input = body as Record<string, unknown>;
+      if (typeof input.sessionID !== "string" || !input.sessionID || typeof input.text !== "string" || !input.text.trim() || input.text.trim().length > 2000) return json({ error: "sessionID and non-empty text (max 2000) are required" }, 400);
+      const result = await answerQuestion(roomId, questionID, input.sessionID, input.text.trim());
+      if (result.status === "missing") return json({ error: "room not found" }, 404);
+      if (result.status === "question") return json({ error: "question not found" }, 404);
+      if (result.status === "member") return json({ error: "session is not a room member" }, 409);
+      if (result.status === "answered") return json({ error: "question already answered" }, 409);
+      if (result.status !== "ok") return json({ error: "question not found" }, 404);
+      touchActive(input.sessionID);
+      const room = await read((svc) => svc.getRoom(roomId));
+      void wakeMentionedSessions(serveWakeUrl, roomId, room.name, result.answer.text, input.sessionID, result.answer);
+      return json({ questionID, answer: result.answer }, 201);
     }
     const g = p.match(/^\/rooms\/([^/]+)$/);
     if (g && req.method === "GET") {

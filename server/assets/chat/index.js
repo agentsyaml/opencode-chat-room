@@ -4,9 +4,13 @@ import { initMessages } from "./messages.js";
 import { initMembers } from "./members.js";
 import { initRooms } from "./rooms.js";
 import { initEvents } from "./events.js";
+import { initQuestions } from "./questions.js";
+import { initReceipts } from "./receipts.js";
 
 initMentions(app);
 initMessages(app);
+initReceipts(app);
 initMembers(app);
 initRooms(app);
+initQuestions(app);
 initEvents(app);

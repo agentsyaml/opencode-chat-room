@@ -120,6 +120,11 @@ function roomSchema() {
     name: z.string().max(64).optional(),
     roomId: z.string().optional(),
     text: z.string().max(2000).optional(),
+    isQuestion: z.boolean().optional(),
+  }).superRefine((args, ctx) => {
+    if (args.action === "join" && !args.name?.trim()) {
+      ctx.addIssue({ code: "custom", path: ["name"], message: "name is required to join a room" });
+    }
   });
 }
 

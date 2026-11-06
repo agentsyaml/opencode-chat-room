@@ -4,7 +4,7 @@
 import path from "node:path";
 import os from "node:os";
 import RoomService, { type Message, type Room } from "./room-service";
-import { readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state";
+import { answerQuestion as sqliteAnswerQuestion, readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestions as sqliteReadQuestions, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state";
 
 export function statePath(): string {
   // JSON path remains the migration source; SQLite lives beside it.
@@ -34,6 +34,8 @@ export async function readInboxMessages(sessionID: string, roomID: string | null
 export async function readHistory(roomID: string, beforeSeq?: number, limit = 100, exclude?: { sessionID: string; name: string }): Promise<{ messages: HistoryMessage[]; nextBeforeSeq: number | null; hasMore: boolean }> {
   return readHistoryPage(databasePath(), roomID, beforeSeq, limit, exclude?.sessionID, exclude?.name);
 }
+export async function readQuestions(roomID: string): Promise<Message[]> { return sqliteReadQuestions(databasePath(), roomID); }
+export async function answerQuestion(roomID: string, questionID: string, sessionID: string, text: string) { return sqliteAnswerQuestion(databasePath(), roomID, questionID, sessionID, text); }
 
 export async function loadRooms(): Promise<Room[]> {
   return (await readSqliteState(databasePath())).rooms;

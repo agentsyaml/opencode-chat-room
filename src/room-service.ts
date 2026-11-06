@@ -13,6 +13,9 @@ export type Message = {
   senderSessionID?: string;
   text: string;
   createdAt: number;
+  isQuestion?: boolean;
+  answerToMessageID?: string;
+  answeredByMessageID?: string;
 };
 
 export type Room = {
@@ -129,6 +132,7 @@ export default class RoomService {
     senderId: string,
     text: string,
     senderSessionID?: string,
+    isQuestion = false,
   ): Message {
     const room = this.getRoom(roomId);
     if (!room.participants.has(senderId)) {
@@ -145,6 +149,7 @@ export default class RoomService {
       ...(senderSessionID ? { senderSessionID } : {}),
       text: trimmed,
       createdAt: Math.max(Date.now(), (room.messages.at(-1)?.createdAt ?? 0) + 1),
+      ...(isQuestion ? { isQuestion: true } : {}),
     };
     room.messages.push(message);
     this.trimMessages(room);

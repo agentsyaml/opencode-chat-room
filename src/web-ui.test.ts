@@ -77,6 +77,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     watchPage(alice, pageErrors, unauthorized);
     watchMembershipRequests(alice, roomJoins, roomLeaves, aliceRoomReads);
     await alice.goto(`${origin}/chat`);
+    expect(await alice.title()).toBe("OC Chat");
     expect(await alice.evaluate(() => [Boolean((window as any).marked), Boolean((window as any).DOMPurify)])).toEqual([true, true]);
     await alice.locator("#tokenBox[open]").waitFor();
     await alice.locator("#inName").fill("Alice");
@@ -86,15 +87,22 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.locator("#inToken").fill("ui-test-token");
     await alice.locator('[data-token-save="inToken"]').click();
     await alice.locator("#chatView").waitFor({ state: "visible" });
+    expect(await alice.title()).toBe("Design room · OC Chat");
+    expect(await alice.locator(".rail-brand").textContent()).toContain("OC Chat");
     expect(unauthorized.length).toBe(2);
     await alice.locator("#btnSettings").click();
     await alice.locator("#inTokenChat").fill("ui-test-token");
     await alice.locator("#inTokenChat").press("Enter");
     await alice.waitForFunction(() => document.querySelector('[data-token-save="inTokenChat"]')?.textContent === "Saved");
-    await alice.selectOption("#localeSelectChat", "zh-CN");
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
+    const zhDesktopGeometry = await localeGeometry(alice);
+    await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-zh.png"), fullPage: true });
+    expect(await alice.title()).toBe("Design room · OC Chat");
     expect(await alice.locator("#btnDeleteRoom").textContent()).toBe("删除房间");
     expect(await alice.locator('[data-i18n="privacyNote"]').textContent()).toContain("持有共享令牌的人都可以读取私聊内容");
-    await alice.selectOption("#localeSelectChat", "en");
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    const enDesktopGeometry = await localeGeometry(alice);
+    expectLocaleGeometry(enDesktopGeometry, zhDesktopGeometry);
     expect(await alice.locator('[data-i18n="privacyNote"]').textContent()).toContain("read direct messages");
     const sourceRoom = await currentRoomId(alice);
     const bobContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
@@ -173,16 +181,48 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(await alice.locator("#thread").evaluate((thread: HTMLElement) => thread.scrollTop)).toBe(0);
 
     await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-light.png"), fullPage: true });
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
+    await alice.waitForTimeout(250);
+    await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-zh.png"), fullPage: true });
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
     await alice.emulateMedia({ colorScheme: "dark" });
-    await alice.waitForFunction(() => getComputedStyle(document.body).backgroundColor === "rgb(23, 21, 15)");
-    await alice.waitForFunction(() => getComputedStyle(document.querySelector("#roomListChat .selected")!).backgroundColor === "rgb(59, 36, 24)");
+    await alice.waitForFunction(() => getComputedStyle(document.body).backgroundColor === "rgb(21, 26, 32)");
+    await alice.waitForFunction(() => getComputedStyle(document.querySelector("#roomListChat .selected")!).backgroundColor === "rgb(38, 63, 73)");
     await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-dark.png"), fullPage: true });
     await alice.emulateMedia({ colorScheme: "light" });
     await alice.waitForFunction(() => !matchMedia("(prefers-color-scheme: dark)").matches);
-    await alice.waitForFunction(() => getComputedStyle(document.querySelector("#btnMembers")!).backgroundColor === "rgb(253, 252, 248)");
+    await alice.waitForFunction(() => getComputedStyle(document.querySelector("#btnMembers")!).backgroundColor === "rgb(255, 255, 255)");
     await alice.setViewportSize({ width: 375, height: 812 });
     expect(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const enMobileGeometry = await localeGeometry(alice);
     await alice.screenshot({ path: path.join(screenshotDir, "chat-mobile.png"), fullPage: true });
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
+    const zhMobileGeometry = await localeGeometry(alice);
+    expectLocaleGeometry(enMobileGeometry, zhMobileGeometry);
+    await alice.screenshot({ path: path.join(screenshotDir, "chat-mobile-zh.png"), fullPage: true });
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    await alice.locator("#btnSettings").click();
+    const enMobileSettings = await alice.locator("#chatSettings").evaluate((node: HTMLElement) => ({ height: node.getBoundingClientRect().height, scroll: node.scrollHeight - node.clientHeight, width: node.scrollWidth - node.clientWidth }));
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
+    const zhMobileSettings = await alice.locator("#chatSettings").evaluate((node: HTMLElement) => ({ height: node.getBoundingClientRect().height, scroll: node.scrollHeight - node.clientHeight, width: node.scrollWidth - node.clientWidth }));
+    expect(Math.abs(enMobileSettings.height - zhMobileSettings.height)).toBeLessThanOrEqual(1);
+    expect(zhMobileSettings.width).toBeLessThanOrEqual(1);
+    expect(zhMobileSettings.scroll).toBeLessThanOrEqual(1);
+    expect(await alice.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
+    await alice.keyboard.press("Escape");
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    // Smaller CSS viewports approximate zoom reflow; they are not native zoom or DPI validation.
+    for (const [width, height] of [[300, 650], [250, 541], [188, 406]]) {
+      await alice.setViewportSize({ width, height });
+      const geometry = await localeGeometry(alice);
+      expect(geometry.pageX).toBeLessThanOrEqual(1);
+      expect(geometry.pageY).toBeLessThanOrEqual(1);
+      if (geometry.headX > 1) throw new Error(`header overflow at ${width}px: ${JSON.stringify(geometry.headParts)}`);
+      await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
+      expectLocaleGeometry(geometry, await localeGeometry(alice));
+      await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    }
+    await alice.setViewportSize({ width: 375, height: 812 });
     const mobileInput = alice.locator("#msgInput");
     await mobileInput.fill("x".repeat(2005));
     expect((await mobileInput.inputValue()).length).toBe(2000);
@@ -209,6 +249,12 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await bob.waitForFunction(() => document.querySelector("#roomName")?.textContent === "Design room");
     await alice.locator("#btnMembers").click();
     await alice.locator("#memberList").getByText("Bob").waitFor();
+    const enMembersHeight = await alice.locator("#memberPanel").evaluate((node: HTMLElement) => node.getBoundingClientRect().height);
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
+    const zhMembersHeight = await alice.locator("#memberPanel").evaluate((node: HTMLElement) => node.getBoundingClientRect().height);
+    expect(Math.abs(enMembersHeight - zhMembersHeight)).toBeLessThanOrEqual(1);
+    expect(await alice.locator("#memberPanel").evaluate((node: HTMLElement) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
     await alice.getByRole("button", { name: "Message privately" }).click();
     await alice.waitForFunction((id: string) => !(document.querySelector("#btnCopyId") as HTMLButtonElement | null)?.title.endsWith(id), sourceRoom);
     await alice.locator("#msgInput").fill("Direct hello from Alice");
@@ -335,6 +381,7 @@ async function unusedPort() {
 function isolatedServerEnv(stateDir: string, port: number): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env.CHAT_ROOM_SERVER_URL;
+  delete env.CHAT_ROOM_SERVER_TOKEN;
   delete env.CHAT_ROOM_WAKE_SERVE_URL;
   return {
     ...env,
@@ -381,4 +428,32 @@ function watchPage(page: any, errors: string[], unauthorized: string[]) {
   page.on("response", (response: any) => {
     if (response.status() === 401) unauthorized.push(response.url());
   });
+}
+
+async function localeGeometry(page: any) {
+  return page.evaluate(() => {
+    const height = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().height;
+    const thread = document.querySelector<HTMLElement>("#thread")!;
+    return {
+      head: height("#chatView > .chat-head"), composer: height(".composer"), composerRow: height(".composer-row"),
+      input: height("#msgInput"), send: height("#btnSend"), controls: Array.from(document.querySelectorAll<HTMLElement>(".chat-head-actions .chip, #localeSelectChat")).map((node) => node.getBoundingClientRect().height),
+      settings: height("#chatSettings"), privacy: height('#chatSettings [data-i18n="privacyNote"]'),
+      pageX: document.documentElement.scrollWidth - innerWidth, pageY: document.documentElement.scrollHeight - innerHeight,
+      threadX: thread.scrollWidth - thread.clientWidth,
+      headX: document.querySelector<HTMLElement>("#chatView > .chat-head")!.scrollWidth - document.querySelector<HTMLElement>("#chatView > .chat-head")!.clientWidth,
+      headParts: Array.from(document.querySelector<HTMLElement>("#chatView > .chat-head")!.children).map((node) => [node.getBoundingClientRect().left, node.getBoundingClientRect().right, node.scrollWidth, node.clientWidth]),
+    };
+  });
+}
+
+function expectLocaleGeometry(a: Awaited<ReturnType<typeof localeGeometry>>, b: Awaited<ReturnType<typeof localeGeometry>>) {
+  for (const key of ["head", "composer", "composerRow", "input", "send", "privacy", "settings"] as const) if (Math.abs(a[key] - b[key]) > 1) throw new Error(`${key}: ${a[key]} vs ${b[key]}`);
+  expect(a.controls).toHaveLength(b.controls.length);
+  a.controls.forEach((height: number, index: number) => expect(Math.abs(height - b.controls[index]!)).toBeLessThanOrEqual(1));
+  for (const metrics of [a, b]) {
+    expect(metrics.pageX).toBeLessThanOrEqual(1);
+    expect(metrics.pageY).toBeLessThanOrEqual(1);
+    expect(metrics.threadX).toBeLessThanOrEqual(1);
+    expect(metrics.headX).toBeLessThanOrEqual(1);
+  }
 }

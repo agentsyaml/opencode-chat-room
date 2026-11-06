@@ -8,8 +8,8 @@
     border-bottom: 1px solid var(--line);
     background: var(--surface);
   }
-  .chat-head-main h1 { margin: 0; font-family: var(--font-serif); font-size: 19px; letter-spacing: .02em; }
-  .room-meta { margin: 2px 0 0; font-size: 12px; color: var(--ink-3); }
+  .chat-head-main h1 { margin: 0; font-family: var(--font-sans); font-size: 20px; font-weight: 650; line-height: 1.25; letter-spacing: -.02em; }
+  .room-meta { margin: 2px 0 0; font-size: 13px; color: var(--ink-2); }
   .mono { font-family: var(--font-mono); }
   .copy-id {
     appearance: none;
@@ -29,10 +29,25 @@
   .copy-id.copied .copy-ok { display: inline; color: var(--accent); }
 
   .chat-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+  .question-panel { width: min(390px, calc(100vw - 32px)); max-height: min(70vh, 620px); overflow: auto; }
+  .questions-trigger { position: relative; }
+  .question-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .question-panel-head h3 { margin-bottom: 0; }
+  .question-refresh { border: 0; padding: 4px 7px; color: var(--accent); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+  .question-list { list-style: none; max-height: 260px; overflow: auto; margin: 10px 0 0; padding: 0; }
+  .question-item { width: 100%; padding: 9px 10px; border: 1px solid transparent; border-radius: 9px; color: var(--ink); background: transparent; font: inherit; font-size: 13px; line-height: 1.5; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+  .question-item:hover, .question-item[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: var(--accent-soft); }
+  .question-reply { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .question-reply-quote { max-height: 72px; overflow: auto; margin: 0 0 8px; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 4px; background: var(--surface-2); font-size: 12px; overflow-wrap: anywhere; }
+  .question-reply-form { display: grid; gap: 8px; }
+  .question-reply-form textarea { min-height: 62px; resize: vertical; }
+  .question-reply-form .btn { justify-self: end; }
+  .question-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 5px; padding: 0 4px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: 10px; }
   .chip {
     appearance: none;
     font: inherit;
     font-size: 13px;
+    line-height: 1.25;
     font-weight: 600;
     color: var(--ink-2);
     background: var(--surface);
@@ -77,6 +92,7 @@
   #memberList .member-activity + .member-actions { grid-column: 2; grid-row: 2; }
   #memberList .member-action { white-space: normal; }
   #memberList li:last-child { border-bottom: none; }
+  #chatSettings [data-i18n="privacyNote"] { min-height: 63px; line-height: 21px; }
   .m-time { font-size: 11.5px; color: var(--ink-3); }
   .member-activity { flex: none; padding: 2px 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 10px; }
   .member-activity.working { color: var(--accent); background: var(--accent-soft); }
@@ -164,24 +180,26 @@
   .msg.own { align-items: flex-end; }
   .msg.repeat { margin-bottom: 8px; }
   .msg-meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
-  .msg-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+  .msg-name { font-size: 14px; font-weight: 600; color: var(--ink); }
   .msg.own .msg-name { color: var(--accent); }
+  .question-mark { padding: 1px 6px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 10px; line-height: 1.5; }
   .msg.repeat .msg-name { display: none; }
-  .msg-time { font-size: 11.5px; color: var(--ink-3); }
+  .msg-time { font-size: 12px; color: var(--ink-2); }
   .msg-text {
     display: inline-block;
+    width: max-content;
     max-width: min(86%, 540px);
     padding: 8px 12px;
     border-radius: 14px;
     background: var(--surface-2);
     border-bottom-left-radius: 4px;
-    font-size: 15px;
-    line-height: 1.65;
+    font-size: 16px;
+    line-height: 1.6;
     white-space: normal;
     overflow-wrap: anywhere;
   }
   .msg.own .msg-text { background: var(--accent-soft); border-bottom-left-radius: 14px; border-bottom-right-radius: 4px; }
-  .msg-content { position: relative; display: flex; align-items: flex-end; gap: 6px; width: fit-content; max-width: 100%; }
+  .msg-content { position: relative; display: flex; align-items: flex-end; gap: 6px; width: 100%; max-width: 100%; }
   .msg.own .msg-content { flex-direction: row-reverse; }
   .message-copy {
     align-self: flex-start;
@@ -198,15 +216,21 @@
   .msg.own .message-copy { align-self: flex-end; margin-right: 4px; }
   .message-copy:hover, .message-copy:focus-visible { color: var(--ink); background: var(--surface-2); }
   .message-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .message-readers { position: static; flex: 0 0 22px; margin: 0 0 4px; color: var(--ink-3); font-size: 11px; }
-  .message-readers summary { display: grid; place-items: center; width: 22px; height: 22px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); cursor: pointer; list-style: none; }
-  .message-readers summary::-webkit-details-marker { display: none; }
-  .message-readers summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .receipt-reader-list { position: absolute; z-index: 5; left: 0; top: 100%; min-width: min(210px, calc(100vw - 32px)); max-width: calc(100vw - 24px); box-sizing: border-box; margin: 4px 0 0; padding: 5px 8px; list-style: none; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
-  .msg.own .receipt-reader-list { right: 0; left: auto; }
+  .message-readers { flex: 0 0 22px; align-self: flex-end; margin: 0 0 4px; padding: 0; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font: inherit; font-size: 10px; cursor: pointer; }
+  .message-readers[data-reader-state="empty"], .message-readers[data-reader-state="unknown"] { background: var(--surface-2); }
+  .message-readers:hover, .message-readers[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+  .message-readers:focus-visible, .reader-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .receipt-reader-list { margin: 0; padding: 0; list-style: none; }
   .receipt-reader-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
   .receipt-reader-list li + li { margin-top: 4px; }
   .receipt-reader-list li span:last-child { color: var(--ink-3); }
+  .reader-panel { min-width: 0; grid-column: 3; grid-row: 2 / 5; overflow: auto; padding: 20px 16px; border-left: 1px solid var(--line); background: var(--surface); }
+  .reader-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .reader-panel-head h2 { margin: 0; font-family: var(--font-sans); font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+  .reader-panel-head .hint { margin: 0 0 4px; }
+  .reader-close { flex: none; width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 21px; cursor: pointer; }
+  .reader-excerpt { max-height: 110px; overflow: auto; margin: 16px 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .reader-panel .receipt-reader-list li { display: grid; gap: 3px; padding: 10px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 
   /* Markdown content */
   .msg-text p, .msg-text pre, .msg-text blockquote, .msg-text ul, .msg-text ol { margin: 0; }
@@ -366,6 +390,8 @@
     background: var(--surface);
   }
   .composer-row { display: flex; gap: 10px; align-items: flex-end; }
+  .question-toggle { width: min(940px, 100%); margin: -2px auto 0; color: var(--ink-2); font-size: 12px; }
+  .question-toggle input { accent-color: var(--accent); vertical-align: -1px; }
   .composer .input { flex: 1; }
   .composer .input:disabled { opacity: .5; }
   #msgInput {

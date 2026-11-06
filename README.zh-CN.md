@@ -77,17 +77,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.3 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.3.3 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.3.3 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.4.0 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.4.0 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.3.3
+  bunx @alexsun-top/opencode-chat-room@0.4.0
 
 # 本地 checkout：
 bun install
@@ -107,6 +107,14 @@ bun run server
 聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
+
+### 问题消息（0.4.0）
+
+Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQuestion: true` 发送问题。网页发送前勾选“问题”，在当前房间的“问题”面板逐条回答。普通聊天回复不会自动消除问题；回答保存成功后，问题移出待回答列表，问题和回答仍保留在历史记录中。
+
+`GET /rooms/:roomId/questions` 返回 `{ questions }`，按时间从旧到新排列，包含可视历史窗口以外的未回答问题。`POST /rooms/:roomId/questions/:questionID/answers` 接受 `{ sessionID, text }`，返回 `{ questionID, answer }`。服务端要求当前房间成员身份，并原子保存回答和已回答状态；并发重复回答返回 HTTP 409。问题包含 `isQuestion`，回答后增加 `answeredByMessageID`；回答包含 `answerToMessageID`。接口沿用共享令牌，不提供独立的人类身份认证。
+
+0.4.0 中，`room` 的 `join` 操作必须显式传入非空 `name`；其他操作参数不变，已有成员不会被改名。问题接口和 OC Chat 界面需升级中心服务器，`isQuestion` 和具名加入需重新加载客户端插件。升级前请备份 SQLite 数据库；迁移将旧消息保留为普通消息。
 
 ### Agent 状态与消息回执
 
@@ -132,7 +140,7 @@ V2 使用 `POST /presence` 上报 owner 范围内递增的序号，每次最多 
 
 0.3.3 在每条消息下方增加复制原文按钮，并将已读人数改为消息旁的圆形标记。网页变化需升级中心服务器，批量回执修复需将各 V2 客户端插件升级并重新加载至 0.3.3。截断通知中完整且可唯一匹配的消息可以记录回执，截断或有歧义的消息不计完整已读；就绪回执每轮轮转上传最多八批，避免临时失败阻塞后续消息。
 
-0.3.3 尚未实现图片消息；设计提案见[图片消息方案](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md)。
+0.4.0 尚未实现图片消息；设计提案见[图片消息方案](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md)。
 
 每台客户端机器上：
 

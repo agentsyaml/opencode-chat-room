@@ -250,6 +250,11 @@ const roomArgs = z.object({
   name: z.string().max(64).optional(),
   roomId: z.string().optional(),
   text: z.string().max(2000).optional(),
+  isQuestion: z.boolean().optional(),
+}).superRefine((args, ctx) => {
+  if (args.action === "join" && !args.name?.trim()) {
+    ctx.addIssue({ code: "custom", path: ["name"], message: "name is required to join a room" });
+  }
 });
 type RoomArguments = z.infer<typeof roomArgs>;
 
@@ -257,6 +262,7 @@ const roomExecute = async (
   args: RoomArguments,
   context: Pick<V1ToolContext, "sessionID">,
 ) => {
+    if (args.action === "join" && !args.name?.trim()) return "error: name is required to join a room";
     try {
       const runtime = currentRuntime();
       const explicitV2Join = runtime.protocol === "v2" && (args.action === "create" || args.action === "join");
@@ -317,7 +323,7 @@ const roomExecute = async (
             if (!args.roomId) {
               return "error: roomId is required";
             }
-            const me = identity(args.name?.trim());
+            const me = identity(args.name!.trim());
             // ponytail: F5 — re-join under a new name retires the old
             // participant, otherwise every rename leaks a ghost member;
             // skipped when another session still holds the old name
@@ -391,6 +397,7 @@ const roomExecute = async (
               selfName,
               args.text,
               context.sessionID,
+              args.isQuestion,
             );
             const room = svc.getRoom(args.roomId);
             notifications.push({ roomId: args.roomId, roomName: room.name, messages: [...room.messages] });

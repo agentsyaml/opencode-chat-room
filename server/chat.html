@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title data-i18n="documentTitle">Casual Chat · Lightweight Chatroom</title>
+<title data-i18n="documentTitle">OC Chat</title>
 <link rel="stylesheet" href="/assets/base.css">
 <link rel="stylesheet" href="/assets/conversation.css">
 <link rel="stylesheet" href="/assets/responsive.css">
@@ -23,7 +23,7 @@
           <option value="zh-CN">中文</option>
         </select>
       </div>
-      <p class="wordmark" data-i18n="brand">Casual Chat</p>
+       <p class="wordmark" data-i18n="brand">OC Chat</p>
       <p class="tagline" data-i18n="tagline">A lightweight chat room. Enter a room ID to join, or create a new one.</p>
 
       <form id="joinForm" novalidate>
@@ -73,7 +73,7 @@
    <!-- Shared room workspace. -->
   <section id="chatView" class="view" hidden>
     <aside class="room-rail" aria-label="Rooms" data-i18n-aria-label="roomsLabel">
-      <div class="rail-brand"><span class="brand-mark">C</span><span data-i18n="brand">Casual Chat</span></div>
+      <div class="rail-brand"><span class="brand-mark">OC</span><span data-i18n="brand">OC Chat</span></div>
       <div class="rail-label"><span data-i18n="existingRooms">Rooms</span><span class="rail-tools"><button id="btnNewRoom" class="icon-btn" type="button" aria-label="Create a room" data-i18n-aria-label="newRoom">+</button><button id="btnRefreshRooms" class="icon-btn" type="button" aria-label="Refresh rooms" data-i18n-aria-label="refreshRooms">↻</button></span></div>
       <form id="railRoomForm" class="rail-composer" hidden>
         <label class="field"><span class="field-label" data-i18n="newRoomNameLabel">New room name</span><input id="inRoomNameChat" class="input" maxlength="40" data-i18n-placeholder="newRoomNamePlaceholder" placeholder="e.g. Weekend movie night"></label>
@@ -99,6 +99,18 @@
             <option value="en">English</option>
             <option value="zh-CN">中文</option>
           </select>
+        </div>
+        <div class="anchor questions-anchor">
+          <button class="chip questions-trigger" type="button" id="btnQuestions" aria-haspopup="true" aria-expanded="false" aria-controls="questionPanel">
+            <span data-i18n="questions">Questions</span><span id="questionBadge" class="question-badge" hidden></span>
+          </button>
+          <section class="panel question-panel" id="questionPanel" aria-labelledby="questionHeading" hidden>
+            <div class="question-panel-head"><h3 id="questionHeading" tabindex="-1" data-i18n="pendingQuestions">Pending questions</h3>
+              <button class="question-refresh" type="button" id="btnRefreshQuestions" data-i18n="refreshQuestions">Refresh</button></div>
+            <p id="questionStatus" class="hint" role="status" aria-live="polite" data-i18n="questionsLoading">Loading questions…</p>
+            <ul id="questionList" class="question-list" aria-label="Pending questions" data-i18n-aria-label="pendingQuestions"></ul>
+            <div id="questionReply" class="question-reply" hidden></div>
+          </section>
         </div>
         <div class="anchor">
           <button class="chip" type="button" id="btnMembers" aria-label="Members" data-i18n-aria-label="members" aria-haspopup="true" aria-expanded="false" data-i18n="members">Members</button>
@@ -142,6 +154,15 @@
       </button>
     </div>
 
+    <aside id="readerPanel" class="reader-panel" aria-labelledby="readerHeading" hidden>
+      <div class="reader-panel-head">
+        <div><p id="readerCount" class="hint"></p><h2 id="readerHeading" tabindex="-1" data-i18n="readerPanelTitle">Message readers</h2></div>
+        <button type="button" id="btnCloseReaders" class="reader-close" data-i18n-aria-label="close" aria-label="Close">×</button>
+      </div>
+      <blockquote id="readerExcerpt" class="reader-excerpt"></blockquote>
+      <ul id="readerList" class="receipt-reader-list" aria-label="Message readers" data-i18n-aria-label="readerPanelTitle"></ul>
+    </aside>
+
     <footer class="composer">
       <p id="sendError" class="send-error" role="alert" hidden></p>
       <div id="mentionPicker" class="mention-picker" role="listbox" aria-label="Choose a member to mention" data-i18n-aria-label="mentionMembers" hidden></div>
@@ -149,6 +170,7 @@
         <textarea id="msgInput" class="input" rows="1" maxlength="2000" placeholder="Type a message, Enter to send, Shift+Enter for a new line" data-i18n-placeholder="messagePlaceholder" autocomplete="off" aria-autocomplete="list" aria-controls="mentionPicker" aria-expanded="false" disabled></textarea>
         <button class="btn primary" type="button" id="btnSend" data-i18n="send" disabled>Send</button>
       </div>
+      <label class="question-toggle"><input id="questionToggle" type="checkbox"><span data-i18n="sendAsQuestion">Send as a question</span></label>
       <p id="draftCount" class="draft-count">0 / 2000</p>
     </footer>
   </section>

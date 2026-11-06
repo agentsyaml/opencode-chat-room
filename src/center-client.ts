@@ -97,6 +97,7 @@ export async function centerAction(
     name?: string;
     roomId?: string;
     text?: string;
+    isQuestion?: boolean;
     receiverOwnerID?: string;
     protocol?: "v1" | "v2";
   },
@@ -134,10 +135,13 @@ export async function centerAction(
       return formatRoom(svcOf(room), toRoom(room));
     }
     case "join": {
+      if (!args.name?.trim()) {
+        return "error: name is required to join a room";
+      }
       if (!args.roomId) {
         return "error: roomId is required";
       }
-      const me = identity(args.name?.trim());
+      const me = identity(args.name.trim());
       const room = await request(
         opts,
         `/rooms/${encodeURIComponent(args.roomId)}/join`,
@@ -192,7 +196,7 @@ export async function centerAction(
         opts,
         `/rooms/${encodeURIComponent(args.roomId)}/messages`,
         "POST",
-        { sessionID, text: args.text.trim() },
+        { sessionID, text: args.text.trim(), ...(args.isQuestion ? { isQuestion: true } : {}) },
       );
       const svc = svcOf(room);
       return `sent: ${args.text.trim()}\n${formatRoom(svc, toRoom(room))}`;

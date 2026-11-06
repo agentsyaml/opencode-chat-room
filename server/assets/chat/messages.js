@@ -48,7 +48,7 @@ export function initMessages(app) {
     app.renderFailedMessages();
     try {
       const updated = await app.api(`/rooms/${encodeURIComponent(roomId)}/messages`, {
-        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text: item.text }),
+        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text: item.text, isQuestion: Boolean(item.isQuestion) }),
       });
       const entry = app.state.rooms.get(roomId);
       if (entry) {
@@ -146,7 +146,7 @@ export function initMessages(app) {
       renderMarkdown(body, message.text, app);
       const content = document.createElement("div");
       content.className = "msg-content";
-      content.append(body, receiptDetails(message, app));
+      content.append(body, app.createReceiptButton(message, own));
       row.append(meta, content);
     }
     const copy = document.createElement("button");
@@ -159,23 +159,6 @@ export function initMessages(app) {
     row.append(copy);
     if (live) row.classList.add("in");
     return row;
-  };
-
-  app.renderReceiptData = (roomId, receipts) => {
-    const thread = $("#thread"), edge = thread.getBoundingClientRect();
-    const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
-    const anchor = Array.from($("#msgList").querySelectorAll("[data-msg-id]")).find((node) => node.getBoundingClientRect().bottom > edge.top);
-    const anchorId = anchor?.dataset.msgId, anchorTop = anchor ? anchor.getBoundingClientRect().top - edge.top : 0;
-    for (const receipt of receipts) app.state.receipts.set(`${roomId}\0${receipt.messageID}`, receipt.readers);
-    for (const row of document.querySelectorAll(`#msgList [data-msg-id]`)) {
-      const message = app.state.room?.messages.find((item) => item.id === row.dataset.msgId);
-      if (message?.roomId === roomId || app.state.room?.id === roomId && message) updateReceiptDetails(row, message, app);
-    }
-    if (atBottom) thread.scrollTop = thread.scrollHeight;
-    else if (anchorId) {
-      const next = $("#msgList").querySelector(`[data-msg-id="${CSS.escape(anchorId)}"]`);
-      if (next) thread.scrollTop += next.getBoundingClientRect().top - thread.getBoundingClientRect().top - anchorTop;
-    }
   };
 
   app.renderMessages = (live = false) => {
@@ -269,7 +252,7 @@ export function initMessages(app) {
   };
 
   app.send = async () => {
-    const input = $("#msgInput"), text = input.value.trim(), room = app.state.room;
+    const input = $("#msgInput"), text = input.value.trim(), room = app.state.room, isQuestion = Boolean(app.isQuestionSending?.());
     if (!text || !room) return;
     const revision = app.state.draftRevision.get(room.id) || 0;
     app.closeMention();
@@ -281,7 +264,7 @@ export function initMessages(app) {
     app.hideSendError();
     try {
       const updated = await app.api(`/rooms/${encodeURIComponent(room.id)}/messages`, {
-        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text }),
+        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, isQuestion }),
       });
       if (app.state.room?.id !== room.id) return;
       app.state.room = updated;
@@ -302,7 +285,7 @@ export function initMessages(app) {
     } catch (error) {
       const unchanged = (app.state.draftRevision.get(room.id) || 0) === revision;
       const failures = app.state.failedMessages.get(room.id) || [];
-      app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text }]);
+      app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, isQuestion }]);
       app.renderFailedMessages();
       if (app.state.room?.id !== room.id) return;
       if (unchanged) app.clearDraft(room.id);
@@ -456,45 +439,6 @@ function trimMessages(list, app) {
       app.setText(gap, "earlierMessages");
       list.insertBefore(gap, list.firstChild);
     }
-}
-
-function receiptDetails(message, app) {
-  const details = document.createElement("details");
-  details.className = "message-readers";
-  const summary = document.createElement("summary"), count = document.createElement("span"), list = document.createElement("ul");
-  count.className = "receipt-count";
-  list.className = "receipt-reader-list";
-  summary.append(count);
-  details.append(summary, list);
-  updateReceiptDetails(details.closest("li") || details, message, app);
-  return details;
-}
-
-function updateReceiptDetails(row, message, app) {
-  const details = row.matches?.("details.message-readers") ? row : row.querySelector("details.message-readers");
-  if (!details) return;
-  const detailsKey = `${app.state.room?.id || message.roomId || ""}\0${message.id}`;
-  const senderID = message.senderSessionID || (app.state.room?.kind === "direct" ? message.senderId : "");
-  const readers = (app.state.receipts.get(detailsKey) || []).filter((reader) => reader.sessionID !== senderID);
-  details.hidden = readers.length === 0;
-  const summary = details.querySelector("summary"), label = app.t("receiptCount", { count: readers.length });
-  summary.setAttribute("aria-label", label);
-  summary.title = label;
-  details.querySelector(".receipt-count").textContent = String(readers.length);
-  const list = details.querySelector(".receipt-reader-list");
-  list.textContent = "";
-  const members = app.state.memberSessions.get(app.state.room?.id) || [];
-  for (const reader of readers) {
-    const row = document.createElement("li"), name = document.createElement("span"), evidence = document.createElement("span");
-    const duplicates = members.filter((member) => member.name === reader.name).length > 1 || readers.filter((item) => item.name === reader.name).length > 1;
-    name.textContent = `${reader.name}${duplicates ? ` · ${reader.sessionID.slice(0, 8)}` : ""}${reader.currentMember === false ? ` · ${app.t("departedMember")}` : ""}`;
-    evidence.textContent = app.t(`receiptEvidence_${reader.evidence}`);
-    evidence.title = evidence.textContent;
-    evidence.setAttribute("aria-label", evidence.textContent);
-    row.dataset.readerSessionId = reader.sessionID;
-    row.append(name, evidence);
-    list.append(row);
-  }
 }
 
 }

@@ -79,17 +79,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.3 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.3.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.3.3 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.3.3 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.4.0 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.4.0 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.3.3
+  bunx @alexsun-top/opencode-chat-room@0.4.0
 
 # Local checkout:
 bun install
@@ -109,6 +109,14 @@ Switching the sidebar does not leave a room. Direct conversations are created wi
 The chat renders GitHub Flavored Markdown using locally bundled Marked and DOMPurify assets. Message text is sanitized before rendered HTML is inserted. No CDN is required.
 
 The central server uses a trusted shared-token model, not per-user authorization or private DMs: anyone holding the token can read messages, manage rooms, remove members, and delete rooms. The server and its SQLite database can read direct-message content. Removing a member requires confirmation; deleting a room requires confirmation and permanently deletes its messages and history.
+
+### Question messages (0.4.0)
+
+Use `room` with `action: "send"`, `roomId`, `text`, and `isQuestion: true` to send a question. In web chat, enable **Question** before sending. Open the room's **Questions** panel to answer pending questions one at a time. Ordinary chat replies do not dismiss questions. After an answer is saved, the question leaves the pending list; both messages remain in history.
+
+`GET /rooms/:roomId/questions` returns `{ questions }`, oldest first, including pending questions outside the visible history window. `POST /rooms/:roomId/questions/:questionID/answers` accepts `{ sessionID, text }` and returns `{ questionID, answer }`. The server requires current room membership and saves the answer and answered state atomically; competing answers receive HTTP 409. Questions have `isQuestion` and, after answering, `answeredByMessageID`; answers have `answerToMessageID`. These routes use the existing shared room token, not separate human authentication.
+
+Version 0.4.0 requires an explicit non-empty `name` for `room`'s `join` action. Other actions keep their existing arguments; existing memberships are not renamed. Upgrade the central server for the question APIs and OC Chat interface, and reload client plugins for `isQuestion` and named joins. Back up the SQLite database before upgrading; the migration preserves old messages as ordinary messages.
 
 ### Agent presence and message receipts
 
@@ -134,7 +142,7 @@ Central server 0.3.2 is required for persistent browser identity restoration and
 
 Version 0.3.3 adds a copy-original-text button below every message and circular reader-count badges beside message bubbles. Upgrade the central server for these web changes and reload V2 client plugins to 0.3.3 for batch receipt fixes. Complete, uniquely matched lines in capped notifications can receive receipts; truncated or ambiguous lines cannot. Ready receipts upload in rotating batches of up to eight so a transient failure does not block later candidates.
 
-Image messages are not implemented in 0.3.3; see the [image-message proposal](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md).
+Image messages are not implemented in 0.4.0; see the [image-message proposal](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md).
 
 On every client machine:
 

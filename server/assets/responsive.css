@@ -34,8 +34,8 @@
     background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 11%, var(--surface)) 0%, var(--surface) 52%);
     border-right: 1px solid var(--line);
   }
-  .rail-brand { display: flex; align-items: center; gap: 10px; margin: 0 0 35px 5px; font-family: var(--font-serif); font-size: 18px; font-weight: 700; letter-spacing: .04em; }
-  .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 11px 11px 11px 4px; background: var(--accent); color: var(--accent-ink); font: 700 17px var(--font-serif); }
+  .rail-brand { display: flex; align-items: center; gap: 10px; margin: 0 0 35px 5px; font-family: var(--font-sans); font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
+  .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 11px 11px 11px 4px; background: var(--accent); color: var(--accent-ink); font: 700 11px var(--font-sans); }
   .rail-label { display: flex; align-items: center; justify-content: space-between; margin: 0 8px 10px; color: var(--ink-3); font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
   .rail-tools { display: flex; align-items: center; gap: 7px; }
   .icon-btn { border: 0; background: transparent; color: var(--ink-2); font: inherit; font-size: 20px; cursor: pointer; }
@@ -63,6 +63,8 @@
   .msg-text { max-width: min(82%, 680px); padding: 10px 14px; }
   .composer { padding: 14px 24px calc(14px + env(safe-area-inset-bottom)); }
   .composer-row { max-width: 940px; width: 100%; margin: 0 auto; }
+  #chatView.reader-open { grid-template-columns: 252px minmax(0, 1fr) 320px; }
+  #chatView.reader-open > .chat-head { grid-column: 2 / 4; }
   .member-actions { display: flex; gap: 6px; }
   .member-action { border: 0; background: transparent; padding: 2px 4px; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; }
   .member-action:hover { text-decoration: underline; }
@@ -94,18 +96,25 @@
     #chatView > .conn-bar { grid-column: 1; grid-row: 3; }
     #chatView > .msg-scroll { grid-column: 1; grid-row: 4; }
     #chatView > .composer { grid-column: 1; grid-row: 5; }
+    #chatView.reader-open { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr) minmax(140px, 34dvh) auto; }
+    #chatView.reader-open > .chat-head { grid-column: 1; }
+    #chatView.reader-open > .composer { grid-row: 6; }
+    .reader-panel { grid-column: 1; grid-row: 5; padding: 10px 14px; border-top: 1px solid var(--line); border-left: 0; }
+    .reader-excerpt { max-height: 46px; margin: 8px 0; padding: 6px 9px; }
     .chat-head-actions { flex: none; flex-wrap: nowrap; gap: 4px; }
     .chat-head-actions > .locale-control { display: none; }
     .chat-head-main { flex: 1; min-width: 0; }
     .chat-head-main h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
     .chat-head .chip { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; font-size: 0; }
+    #btnQuestions::before { content: "?"; font-size: 17px; }
+    #btnQuestions .question-badge { position: absolute; top: -5px; right: -5px; margin: 0; font-size: 10px; }
     #btnMembers::before { content: "♧"; font-size: 18px; }
     #btnSettings::before { content: "⋯"; font-size: 21px; }
     #btnDeleteRoom::before { content: "×"; font-size: 20px; }
     #btnLeave::before { content: "↪"; font-size: 17px; }
     .mobile-locale { display: block; }
     .thread { padding: 14px 12px 6px; }
-    .msg-text { max-width: 92%; font-size: 14px; }
+    .msg-text { max-width: 92%; font-size: 15px; }
     .composer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
     #msgInput { min-height: 70px; padding: 9px 11px; line-height: 1.45; }
     #btnSend { padding: 12px 15px; }
@@ -116,4 +125,9 @@
     .chat-head-actions .chip { width: 34px; height: 34px; padding: 0; font-size: 0; }
     .chat-head-actions .panel { position: fixed; top: calc(env(safe-area-inset-top) + 196px); left: 12px; right: 12px; width: auto; max-height: min(55dvh, 420px); overflow: auto; }
     .room-meta { max-width: 100px; overflow: hidden; }
+  }
+  @media (max-width: 220px) {
+    #chatView > .chat-head { padding: 8px; gap: 4px; }
+    .chat-head-actions { gap: 2px; }
+    .chat-head-actions .chip { width: 28px; height: 28px; }
   }

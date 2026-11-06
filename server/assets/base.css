@@ -3,19 +3,18 @@
   [hidden] { display: none !important; }
 
   :root {
-    --font-sans: "PingFang SC","Hiragino Sans GB","Noto Sans SC","Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
-    --font-serif: "Songti SC","STSong","Noto Serif SC","Noto Serif CJK SC","Source Han Serif SC","SimSun",serif;
+    --font-sans: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Noto Sans SC","Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei",sans-serif;
     --font-mono: ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Consolas,monospace;
-    --bg: #f4f1ea;
-    --surface: #fdfcf8;
-    --surface-2: #ece9df;
-    --ink: #2a2721;
-    --ink-2: #777162;
-    --ink-3: #847c69;
-    --line: #e2ddd0;
-    --accent: #b85a35;
-    --accent-ink: #fdf6ef;
-    --accent-soft: #f6e3d6;
+    --bg: #f2f4f6;
+    --surface: #ffffff;
+    --surface-2: #f3f5f7;
+    --ink: #1c2631;
+    --ink-2: #465462;
+    --ink-3: #566574;
+    --line: #d5dce3;
+    --accent: #286783;
+    --accent-ink: #ffffff;
+    --accent-soft: #e2f0f5;
     --danger: #b23a2e;
     --danger-soft: #f9e7e2;
     --mention-blue: #2e6cc4;
@@ -24,16 +23,16 @@
 
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #17150f;
-      --surface: #211e18;
-      --surface-2: #2c2820;
-      --ink: #eae5d8;
-      --ink-2: #a19a88;
-      --ink-3: #8a8372;
-      --line: #322e25;
-      --accent: #dd8761;
-      --accent-ink: #241208;
-      --accent-soft: #3b2418;
+      --bg: #151a20;
+      --surface: #1e252d;
+      --surface-2: #28313a;
+      --ink: #edf2f7;
+      --ink-2: #cad3dc;
+      --ink-3: #b3bfca;
+      --line: #3a4652;
+      --accent: #75b6cc;
+      --accent-ink: #10242c;
+      --accent-soft: #263f49;
       --danger: #e27a6c;
       --danger-soft: #3a201b;
       --mention-blue: #86a9ee;
@@ -45,8 +44,8 @@
   body {
     margin: 0;
     font-family: var(--font-sans);
-    font-size: 15px;
-    line-height: 1.6;
+    font-size: 16px;
+    line-height: 1.65;
     color: var(--ink);
     background:
       radial-gradient(1100px 520px at 50% -8%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 65%),
@@ -96,13 +95,14 @@
   }
   .locale-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 20px; color: var(--ink-2); font-size: 12.5px; }
   .locale-control label { font-weight: 600; }
-  .locale-select { appearance: auto; font: inherit; font-size: 12.5px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; cursor: pointer; }
+  .locale-select { appearance: auto; min-height: 36px; font: inherit; font-size: 12.5px; line-height: 1.25; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; cursor: pointer; }
   .chat-head-actions .locale-control { margin: 0; }
   .wordmark {
     margin: 0;
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
     font-size: 30px;
-    letter-spacing: .14em;
+    font-weight: 700;
+    letter-spacing: -.03em;
     color: var(--ink);
   }
   .tagline { margin: 8px 0 26px; font-size: 13.5px; color: var(--ink-2); }
@@ -136,6 +136,7 @@
     border: none;
     cursor: pointer;
     font: inherit;
+    line-height: 1.25;
     font-weight: 600;
     border-radius: 10px;
     padding: 11px 18px;

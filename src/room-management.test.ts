@@ -40,6 +40,72 @@ async function call(route: string, method = "GET", body?: unknown, auth = true) 
 }
 
 describe.serial("shared-token room management", () => {
+  test("question queue survives the message window and answers atomically", async () => {
+    const created = await (await call("/rooms", "POST", { name: "questions", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
+    const id = created.id;
+    await call(`/rooms/${id}/join`, "POST", { sessionID: "human", participantId: "human", participantName: "human" });
+    const sent = await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "first?", isQuestion: true });
+    expect(sent.status).toBe(201);
+    const questionID = (await sent.json() as { messages: Array<{ id: string; isQuestion?: boolean }> }).messages.at(-1)!.id;
+    for (let i = 0; i < 510; i++) await store.writeState((svc) => svc.sendMessage(id, "owner", `ordinary-${i}`, "owner"));
+    expect((await (await call(`/rooms/${id}/questions`)).json() as { questions: Array<{ id: string; isQuestion?: boolean }> }).questions).toEqual([expect.objectContaining({ id: questionID, isQuestion: true })]);
+    const answered = await call(`/rooms/${id}/questions/${questionID}/answers`, "POST", { sessionID: "human", text: "reply" });
+    expect(answered.status).toBe(201);
+    expect((await answered.json() as { answer: { answerToMessageID: string } }).answer.answerToMessageID).toBe(questionID);
+    expect((await call(`/rooms/${id}/questions/${questionID}/answers`, "POST", { sessionID: "human", text: "second" })).status).toBe(409);
+    expect((await (await call(`/rooms/${id}/questions`)).json() as { questions: unknown[] }).questions).toHaveLength(0);
+  });
+  test("rejects invalid flags and answers to ordinary or foreign messages", async () => {
+    const { id } = await (await call("/rooms", "POST", { name: "validation", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
+    await call(`/rooms/${id}/join`, "POST", { sessionID: "human", participantId: "human", participantName: "human" });
+    expect((await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "invalid", isQuestion: "yes" })).status).toBe(400);
+    const ordinary = await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "ordinary" });
+    const ordinaryID = (await ordinary.json() as { messages: Array<{ id: string }> }).messages.at(-1)!.id;
+    expect((await call(`/rooms/${id}/questions/${ordinaryID}/answers`, "POST", { sessionID: "human", text: "reply" })).status).toBe(404);
+    const foreign = await (await call("/rooms", "POST", { name: "foreign", ownerId: "foreign", sessionID: "foreign-session" })).json() as { id: string };
+    const foreignQuestion = await call(`/rooms/${foreign.id}/messages`, "POST", { sessionID: "foreign-session", text: "foreign?", isQuestion: true });
+    const foreignID = (await foreignQuestion.json() as { messages: Array<{ id: string }> }).messages.at(-1)!.id;
+    expect((await call(`/rooms/${id}/questions/${foreignID}/answers`, "POST", { sessionID: "human", text: "reply" })).status).toBe(404);
+    expect((await call(`/rooms/${id}/questions/missing/answers`, "POST", { sessionID: "outsider", text: "reply" })).status).toBe(409);
+    expect((await call(`/rooms/${id}/questions/missing/answers`, "POST", { sessionID: "human", text: " " })).status).toBe(400);
+  });
+  test("concurrent answers commit one reply and malformed JSON values leave questions pending", async () => {
+    const { id } = await (await call("/rooms", "POST", { name: "atomic", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
+    await call(`/rooms/${id}/join`, "POST", { sessionID: "human", participantId: "human", participantName: "human" });
+    const sent = await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "choose one", isQuestion: true });
+    const questionID = (await sent.json() as { messages: Array<{ id: string }> }).messages.at(-1)!.id;
+    expect((await call(`/rooms/${id}/questions/${questionID}/answers`, "POST", null)).status).toBe(400);
+    expect((await (await call(`/rooms/${id}/questions`)).json() as { questions: unknown[] }).questions).toHaveLength(1);
+    const replies = await Promise.all(["first", "second"].map((text) => call(`/rooms/${id}/questions/${questionID}/answers`, "POST", { sessionID: "human", text })));
+    expect(replies.map((response) => response.status).sort()).toEqual([201, 409]);
+    const room = await (await call(`/rooms/${id}`)).json() as { messages: Array<{ id: string; answerToMessageID?: string; answeredByMessageID?: string }> };
+    const question = room.messages.find((message) => message.id === questionID)!;
+    const answers = room.messages.filter((message) => message.answerToMessageID === questionID);
+    expect(answers).toHaveLength(1);
+    expect(question.answeredByMessageID).toBe(answers[0]!.id);
+  });
+  test("join requires a trimmed participant name without mutating membership", async () => {
+    const created = await call("/rooms", "POST", { name: "named join", ownerId: "owner", sessionID: "owner-session" });
+    const room = await created.json() as { id: string };
+    for (const participantName of [undefined, "", "   ", 42]) {
+      const response = await call(`/rooms/${room.id}/join`, "POST", { sessionID: "new-session", participantId: "new", ...(participantName === undefined ? {} : { participantName }) });
+      expect(response.status).toBe(400);
+    }
+    expect(await store.readState((svc, registry) => ({
+      participants: svc.getParticipants(room.id).map((participant) => participant.name),
+      session: registry[room.id]?.["new-session"],
+    }))).toEqual({ participants: ["owner"], session: undefined });
+    const joined = await call(`/rooms/${room.id}/join`, "POST", { sessionID: "new-session", participantId: "new", participantName: "  New Name  " });
+    expect(joined.status).toBe(201);
+    expect(await store.readState((_svc, registry) => registry[room.id]?.["new-session"]?.name)).toBe("New Name");
+  });
+  test("local and central room tools reject unnamed joins before making requests", async () => {
+    const [{ server: localPlugin }, { centerAction }] = await Promise.all([import("../plugin"), import("./center-client")]);
+    const local = await localPlugin({ serverUrl: "", directory: dir } as never) as unknown as { tool: { room: { execute(args: unknown, context: unknown): Promise<string> } } };
+    expect(await local.tool.room.execute({ action: "join", roomId: "room" }, { sessionID: "unnamed" })).toBe("error: name is required to join a room");
+    expect(await centerAction({ center: "http://unused.invalid", token: "" }, { action: "join", roomId: "room" }, "unnamed")).toBe("error: name is required to join a room");
+  });
+
   test("creates one persistent direct conversation between session IDs", async () => {
     const source = await call("/rooms", "POST", { name: "team", ownerId: "same", sessionID: "agent-a" });
     const room = await source.json() as { id: string };
@@ -63,8 +129,12 @@ describe.serial("shared-token room management", () => {
     const sent = await call(`/rooms/${direct.id}/messages`, "POST", { sessionID: "agent-a", text: "private" });
     expect(sent.status).toBe(201);
     expect(await sent.json()).toMatchObject({ messages: [{ senderSessionID: "agent-a" }] });
+    const asked = await call(`/rooms/${direct.id}/messages`, "POST", { sessionID: "agent-a", text: "direct question", isQuestion: true });
+    const questionID = (await asked.json() as { messages: Array<{ id: string }> }).messages.at(-1)!.id;
+    const answered = await call(`/rooms/${direct.id}/questions/${questionID}/answers`, "POST", { sessionID: "agent-b", text: "direct answer" });
+    expect(await answered.json()).toMatchObject({ answer: { senderId: "agent-b", answerToMessageID: questionID } });
     const received = await (await call(`/inbox?sessionID=agent-b&roomId=${direct.id}`)).json() as { items: Array<{ text: string; roomKind?: string }> };
-    expect(received.items).toMatchObject([{ text: "private", roomKind: "direct" }]);
+    expect(received.items.some((item) => item.text === "private" && item.roomKind === "direct")).toBe(true);
     await call(`/rooms/${direct.id}/messages`, "POST", { sessionID: "agent-b", text: "reply" });
     const reply = await (await call(`/inbox?sessionID=agent-a&roomId=${direct.id}`)).json() as { items: Array<{ text: string }> };
     expect(reply.items.some((item) => item.text === "reply")).toBe(true);
@@ -233,9 +303,10 @@ describe.serial("shared-token room management", () => {
       const code = await child.exited;
       if (code !== 0) throw new Error(await new Response(child.stderr).text());
     }
-    const { readSqliteState } = await import("./sqlite-state");
+    const { readQuestions, readSqliteState } = await import("./sqlite-state");
     const state = await readSqliteState(path.join(migrationDir, "chat-room.sqlite"));
     expect(state.rooms).toMatchObject([{ id: "legacy", name: "legacy room", kind: "group", messages: [{ id: "legacy-message", text: "keep history" }] }]);
+    expect(await readQuestions(path.join(migrationDir, "chat-room.sqlite"), "legacy")).toEqual([]);
     expect(state.registry.legacy!["legacy-session"]).toMatchObject({ lastReadTs: 8, lastQueuedTs: 9 });
     expect(await store.readReceipts("legacy")).toEqual([]);
   });

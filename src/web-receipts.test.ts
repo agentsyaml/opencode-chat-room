@@ -51,10 +51,20 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
       oldMessage ||= result;
     }
     const target = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: "agent-twin", text: "Visible receipt target" });
-    const contextMessage = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: "twin-b", text: "Context receipt with wide content\n\n| Item | Status | Detail | Owner | Updated | Source |\n| --- | --- | --- | --- | --- | --- |\n| Queue | Waiting | Long text scrolls horizontally on small screens | Mira | Today | Room |\n\n```js\nconst longIdentifier = 'selection-and-receipt-layout-regression';\nconsole.log(longIdentifier);\n```" });
+    const contextMessage = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: "twin-b", text: `Context receipt with wide content\n\nhttps://example.com/${"unbroken-segment".repeat(12)}\n\n| Item | Status | Detail | Owner | Updated | Source |\n| --- | --- | --- | --- | --- | --- |\n| Queue | Waiting | Long text scrolls horizontally on small screens | Mira | Today | Room |\n\n\`\`\`js\nconst longIdentifier = 'selection-and-receipt-layout-regression';\nconsole.log(longIdentifier);\n\`\`\`` });
+    await page.locator("#msgInput").fill("My short note");
+    await page.locator("#btnSend").click();
+    await page.locator("#msgList").getByText("My short note").waitFor();
     const oldMessageID = oldMessage.messages.at(-1).id, targetMessageID = target.messages.at(-1).id;
     const contextMessageID = contextMessage.messages.at(-1).id;
+    const ownMessageID = await page.evaluate(async (url: string) => (await import(url)).app.state.room.messages.find((message: any) => message.text === "My short note").id, "/assets/chat/state.js");
     await api(origin, "/queued", "POST", { roomId, sessionID: ownerID, ts: oldMessage.messages.at(-1).createdAt });
+    const members = await api(origin, `/rooms/${roomId}/members`);
+    const owner = members.find((member: any) => member.sessionID === ownerID);
+    const agent = members.find((member: any) => member.sessionID === "agent-twin");
+    expect(owner.type).toBe("human");
+    expect(agent.type).toBe("agent");
+    await page.reload();
     await page.route(`**/rooms/${roomId}/receipts*`, async (route: any) => {
       if (route.request().method() === "POST") {
         const ids = route.request().postDataJSON().messageIDs as string[];
@@ -62,13 +72,34 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
       }
       await route.continue();
     });
-    const members = await api(origin, `/rooms/${roomId}/members`);
-    const owner = members.find((member: any) => member.sessionID === ownerID);
-    const agent = members.find((member: any) => member.sessionID === "agent-twin");
-    expect(owner.type).toBe("human");
-    expect(agent.type).toBe("agent");
-    await page.reload();
     await openRoom(page, roomId);
+    const shortTextHeight = await page.locator(`[data-msg-id="${targetMessageID}"] .msg-text p`).evaluate((node: HTMLElement) => node.getBoundingClientRect().height);
+    expect(shortTextHeight).toBeLessThan(26);
+    expect(await page.locator(`[data-msg-id="${ownMessageID}"] .msg-text p`).evaluate((node: HTMLElement) => node.getBoundingClientRect().height)).toBeLessThan(26);
+    await refreshReceiptView(page, origin, roomId, ownMessageID);
+    const ownReceiptButton = page.locator(`[data-msg-id="${ownMessageID}"] .message-readers`);
+    expect(await ownReceiptButton.isVisible()).toBe(true);
+    expect(await ownReceiptButton.textContent()).toBe("0");
+    expect(await ownReceiptButton.getAttribute("aria-label")).toBe("No readers yet");
+    await ownReceiptButton.click();
+    expect(await page.locator("#readerCount").textContent()).toBe("No readers yet");
+    expect(await page.locator("#readerList li").count()).toBe(0);
+    await page.waitForTimeout(220);
+    await page.screenshot({ path: path.join(artifactDir, "chat-own-readers-empty.png"), fullPage: true });
+    await page.keyboard.press("Escape");
+    await page.locator("#readerPanel").waitFor({ state: "hidden" });
+    const twinA = members.find((member: any) => member.sessionID === "twin-a");
+    const ownReceiptWrite = await api(origin, `/rooms/${roomId}/receipts`, "POST", { sessionID: "twin-a", membershipID: twinA.membershipID, messageIDs: [ownMessageID], evidence: "displayed" });
+    expect(ownReceiptWrite.acceptedIDs).toContain(ownMessageID);
+    const ownReceiptRead = await refreshReceiptView(page, origin, roomId, ownMessageID);
+    expect(ownReceiptRead.receipts[0].readers.some((reader: any) => reader.sessionID === "twin-a")).toBe(true);
+    await page.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-readers`)?.textContent === "1", ownMessageID);
+    await refreshReceiptView(page, origin, roomId, ownMessageID);
+    expect(await ownReceiptButton.textContent()).toBe("1");
+    await ownReceiptButton.click();
+    await page.locator('#readerList [data-reader-session-id="twin-a"]').waitFor();
+    await page.screenshot({ path: path.join(artifactDir, "chat-own-readers-confirmed.png"), fullPage: true });
+    await page.keyboard.press("Escape");
     await page.locator("#btnMembers").click();
     await page.locator('#memberList [data-member-session-id="agent-twin"] .member-activity').waitFor();
     expect(await page.locator('#memberList [data-member-session-id="agent-twin"] .member-activity').textContent()).toBe("Status unknown");
@@ -88,7 +119,7 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     expect(roomReceipts.readers.some((reader: any) => reader.sessionID === ownerID)).toBe(true);
     const visibleIDs = await visibleMessageIDs(page), allReceipts = await api(origin, `/rooms/${roomId}/receipts`);
     const ownerReceiptIDs = allReceipts.receipts.filter((item: any) => item.readers.some((reader: any) => reader.sessionID === ownerID)).map((item: any) => item.messageID).sort();
-    for (const ack of displayedAcks) expect(ack.ids.every((id) => ack.visibleIDs.includes(id))).toBe(true);
+    for (const ack of displayedAcks) if (!ack.ids.every((id) => ack.visibleIDs.includes(id))) throw new Error(JSON.stringify(ack));
     const hiddenReceipts = await api(origin, `/rooms/${roomId}/receipts?messageIDs=${oldMessageID}`);
     expect(hiddenReceipts.receipts[0].readers.some((reader: any) => reader.sessionID === ownerID)).toBe(false);
     const sameNameReaderIDs = await sameNameReaders(page, origin, roomId, targetMessageID, contextMessageID, members, receiverOwnerID);
@@ -96,12 +127,12 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     const staleStatus = await staleStatusIsNamedHonestly(page, origin, roomId);
     if (await page.locator("#btnMembers").getAttribute("aria-expanded") !== "true") await page.locator("#btnMembers").click();
     expect(await page.locator("#memberPanel").isVisible()).toBe(true);
-    expect(await page.locator(".message-readers[open]").count()).toBeGreaterThan(0);
+    expect(await page.locator(".message-readers:not([hidden])").count()).toBeGreaterThan(0);
     const receiptLayout = await page.locator(`[data-msg-id="${targetMessageID}"]`).evaluate((row: Element) => {
       const bubble = row.querySelector<HTMLElement>(".msg-text")!.getBoundingClientRect();
-      const summary = row.querySelector<HTMLElement>(".message-readers summary")!;
-      const badge = summary.getBoundingClientRect();
-      return { size: [badge.width, badge.height], gap: badge.left - bubble.right, overlap: Math.min(badge.bottom, bubble.bottom) - Math.max(badge.top, bubble.top), label: summary.getAttribute("aria-label") };
+      const button = row.querySelector<HTMLElement>(".message-readers")!;
+      const badge = button.getBoundingClientRect();
+      return { size: [badge.width, badge.height], gap: badge.left - bubble.right, overlap: Math.min(badge.bottom, bubble.bottom) - Math.max(badge.top, bubble.top), label: button.getAttribute("aria-label") };
     });
     expect(receiptLayout.size[0]).toBe(22);
     expect(receiptLayout.size[1]).toBe(22);
@@ -111,7 +142,7 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     expect(receiptLayout.label).toContain("Read by");
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
     expect(await page.locator(`[data-msg-id="${targetMessageID}"] .message-copy`).textContent()).toBe("复制");
-    expect(await page.locator(`[data-msg-id="${targetMessageID}"] .message-readers summary`).getAttribute("aria-label")).toContain("已读");
+    expect(await page.locator(`[data-msg-id="${targetMessageID}"] .message-readers`).getAttribute("aria-label")).toContain("已读");
     await page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new Error("denied"); } } });
       document.execCommand = (() => false) as typeof document.execCommand;
@@ -119,19 +150,49 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     await page.locator(`[data-msg-id="${targetMessageID}"] .message-copy`).click();
     await page.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-copy`)?.textContent === "复制失败，请手动选择并复制消息。", targetMessageID);
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
-    await page.locator(`[data-msg-id="${targetMessageID}"] .message-readers summary`).click();
+    const receiptButton = page.locator(`[data-msg-id="${targetMessageID}"] .message-readers`);
+    await receiptButton.scrollIntoViewIfNeeded();
+    const targetTop = (await page.locator(`[data-msg-id="${targetMessageID}"]`).boundingBox())!.y;
+    await receiptButton.click();
+    await page.locator("#readerPanel").waitFor({ state: "visible" });
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(Math.abs((await page.locator(`[data-msg-id="${targetMessageID}"]`).boundingBox())!.y - targetTop)).toBeLessThan(3);
+    expect(await page.locator("#readerList li").count()).toBeGreaterThan(0);
+    expect(await page.locator("#readerExcerpt").textContent()).toBe("Visible receipt target");
+    const enReaderHeight = await page.locator("#readerPanel").evaluate((node: HTMLElement) => node.getBoundingClientRect().height);
+    await page.keyboard.press("Escape");
+    await page.locator("#readerPanel").waitFor({ state: "hidden" });
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(await receiptButton.evaluate((node: HTMLElement) => document.activeElement === node)).toBe(true);
+    await page.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
+    await receiptButton.click();
+    await page.locator("#readerPanel").waitFor({ state: "visible" });
+    const zhReaderHeight = await page.locator("#readerPanel").evaluate((node: HTMLElement) => node.getBoundingClientRect().height);
+    expect(Math.abs(enReaderHeight - zhReaderHeight)).toBeLessThanOrEqual(1);
+    await page.keyboard.press("Escape");
+    await page.locator("#readerPanel").waitFor({ state: "hidden" });
+    await page.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    await receiptButton.click();
+    await page.locator("#readerPanel").waitFor({ state: "visible" });
     await page.waitForTimeout(220);
     await page.screenshot({ path: path.join(artifactDir, "chat-receipts-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.locator("#memberPanel").evaluate((node: HTMLElement) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    expect(await page.locator(`[data-msg-id="${targetMessageID}"] .msg-text p`).evaluate((node: HTMLElement) => node.getBoundingClientRect().height)).toBeLessThan(26);
+    expect(await page.locator(`[data-msg-id="${ownMessageID}"] .msg-text p`).evaluate((node: HTMLElement) => node.getBoundingClientRect().height)).toBeLessThan(26);
+    expect(await page.locator(`[data-msg-id="${contextMessageID}"] .msg-text`).evaluate((node: HTMLElement) => node.getBoundingClientRect().right <= innerWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.evaluate((id: string) => {
       const thread = document.querySelector<HTMLElement>("#thread")!, row = document.querySelector<HTMLElement>(`[data-msg-id="${id}"]`)!;
       thread.scrollTop += row.getBoundingClientRect().top - 440;
     }, targetMessageID);
-    const mobileReceipt = await page.locator(`[data-msg-id="${targetMessageID}"] .receipt-reader-list`).boundingBox();
-    expect(mobileReceipt).not.toBeNull();
-    expect(mobileReceipt!.x).toBeGreaterThanOrEqual(0);
-    expect(mobileReceipt!.x + mobileReceipt!.width).toBeLessThanOrEqual(390);
+    const mobilePanel = await page.locator("#readerPanel").boundingBox();
+    const mobileComposer = await page.locator(".composer").boundingBox();
+    expect(mobilePanel).not.toBeNull();
+    expect(mobilePanel!.y).toBeGreaterThan(0);
+    expect(mobilePanel!.y + mobilePanel!.height).toBeLessThanOrEqual(mobileComposer!.y + 1);
+    expect(await page.locator("#readerList li").count()).toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);
     await page.screenshot({ path: path.join(artifactDir, "chat-receipts-mobile.png"), fullPage: true });
     await page.emulateMedia({ colorScheme: "dark" });
     await page.screenshot({ path: path.join(artifactDir, "chat-receipts-mobile-dark.png"), fullPage: true });
@@ -155,6 +216,14 @@ async function openRoom(page: any, roomId: string) {
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), roomId);
 }
 
+async function refreshReceiptView(page: any, origin: string, roomId: string, messageID: string) {
+  const result = await api(origin, `/rooms/${roomId}/receipts?messageIDs=${messageID}`);
+  await page.evaluate(async ({ url, id, receipts }: { url: string; id: string; receipts: any[] }) => {
+    const { app } = await import(url); app.renderReceiptData(id, receipts);
+  }, { url: "/assets/chat/state.js", id: roomId, receipts: result.receipts });
+  return result;
+}
+
 async function sameNameReaders(page: any, origin: string, roomId: string, messageID: string, contextMessageID: string, members: any[], receiverOwnerID: string) {
   for (const [sessionID, evidence] of [["twin-a", "tool"], ["twin-b", "displayed"]]) {
     const member = members.find((item) => item.sessionID === sessionID);
@@ -166,29 +235,32 @@ async function sameNameReaders(page: any, origin: string, roomId: string, messag
   await page.evaluate(async ({ modulePath, id }: { modulePath: string; id: string }) => {
     const { app } = await import(modulePath); await app.loadVisibleReceipts(id, app.state.pollGeneration);
   }, { modulePath: "/assets/chat/state.js", id: roomId });
-  const row = page.locator(`#msgList [data-msg-id="${messageID}"]`), details = row.locator(".message-readers");
-  await details.locator('[data-reader-session-id="twin-b"]').waitFor({ state: "attached" });
-  expect(await details.locator(".receipt-reader-list li").count()).toBeGreaterThanOrEqual(2);
-  expect(await details.locator('[data-reader-session-id="agent-twin"]').count()).toBe(0);
-  await details.locator("summary").click();
+  const row = page.locator(`#msgList [data-msg-id="${messageID}"]`), trigger = row.locator(".message-readers");
+  await trigger.click();
+  const readers = page.locator("#readerList");
+  await readers.locator('[data-reader-session-id="twin-b"]').waitFor({ state: "attached" });
+  expect(await readers.locator("li").count()).toBeGreaterThanOrEqual(2);
+  expect(await readers.locator('[data-reader-session-id="agent-twin"]').count()).toBe(0);
   for (const sessionID of ["twin-a", "twin-b"]) {
-    expect(await details.locator(`[data-reader-session-id="${sessionID}"]`).textContent()).toContain(sessionID);
+    expect(await readers.locator(`[data-reader-session-id="${sessionID}"]`).textContent()).toContain(sessionID);
   }
-  expect(await details.locator('[data-reader-session-id="twin-a"]').textContent()).toContain("Fetched with room tool");
-  expect(await details.locator('[data-reader-session-id="twin-b"]').textContent()).toContain("Shown on screen");
+  expect(await readers.locator('[data-reader-session-id="twin-a"]').textContent()).toContain("Fetched with room tool");
+  expect(await readers.locator('[data-reader-session-id="twin-b"]').textContent()).toContain("Shown on screen");
   const contextDetails = page.locator(`#msgList [data-msg-id="${contextMessageID}"] .message-readers`);
   await page.locator(`#msgList [data-msg-id="${contextMessageID}"]`).scrollIntoViewIfNeeded();
   await page.evaluate(async ({ modulePath, id }: { modulePath: string; id: string }) => {
     const { app } = await import(modulePath); await app.loadVisibleReceipts(id, app.state.pollGeneration);
   }, { modulePath: "/assets/chat/state.js", id: roomId });
-  await contextDetails.locator(".receipt-reader-list li").first().waitFor({ state: "attached" });
-  await contextDetails.locator("summary").click();
-  expect(await contextDetails.locator('[data-reader-session-id="agent-twin"]').textContent()).toContain("not proof of understanding");
+  await contextDetails.click();
+  await readers.locator("li").first().waitFor({ state: "attached" });
+  expect(await readers.locator('[data-reader-session-id="agent-twin"]').textContent()).toContain("not proof of understanding");
   await api(origin, `/rooms/${roomId}/leave`, "POST", { sessionID: "twin-a" });
+  await page.locator(`#msgList [data-msg-id="${messageID}"]`).scrollIntoViewIfNeeded();
   await page.evaluate(async ({ modulePath, id }: { modulePath: string; id: string }) => {
     const { app } = await import(modulePath); await app.loadVisibleReceipts(id, app.state.pollGeneration);
   }, { modulePath: "/assets/chat/state.js", id: roomId });
-  expect(await details.locator('[data-reader-session-id="twin-a"]').textContent()).toContain("left");
+  await trigger.click();
+  expect(await readers.locator('[data-reader-session-id="twin-a"]').textContent()).toContain("left");
   return ["twin-a", "twin-b"];
 }
 
