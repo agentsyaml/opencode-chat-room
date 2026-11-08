@@ -32,10 +32,14 @@ test.skipIf(!browserModule)("receipt details float beside their trigger and rema
     await message.waitFor();
     const id = await message.getAttribute("data-msg-id");
     const roomId = await page.evaluate(async (url: string) => (await import(url)).app.state.room.id, "/assets/chat/state.js");
-    await page.evaluate(async ({ url, roomId, id }: any) => {
-      const { app } = await import(url);
-      app.renderReceiptData(roomId, [{ messageID: id, readers: [{ sessionID: "reader-one", name: "Reader One", evidence: "displayed", currentMember: true }] }]);
-    }, { url: "/assets/chat/state.js", roomId, id });
+    await api(origin, `/rooms/${roomId}/join`, "POST", { sessionID: "reader-one", participantId: "Reader One", participantName: "Reader One" });
+    const members = await api(origin, `/rooms/${roomId}/members`);
+    const reader = members.find((member: any) => member.sessionID === "reader-one");
+    expect(reader).toBeTruthy();
+    const receipt = await api(origin, `/rooms/${roomId}/receipts`, "POST", { sessionID: "reader-one", membershipID: reader.membershipID, messageIDs: [id], evidence: "displayed" });
+    expect(receipt.acceptedIDs).toContain(id);
+    await page.evaluate(async ({ url, roomId }: any) => (await import(url)).app.loadVisibleReceipts(roomId), { url: "/assets/chat/state.js", roomId });
+    await page.waitForFunction((messageId: string) => document.querySelector(`[data-msg-id="${messageId}"] .message-readers`)?.textContent === "1", id);
     const trigger = message.locator(".message-readers");
     await trigger.focus(); await page.keyboard.press("Enter");
     const panel = page.locator("#readerPanel"); await panel.waitFor({ state: "visible" });
@@ -72,6 +76,11 @@ async function geometry(page: any, trigger: any) {
   }, await trigger.elementHandle());
 }
 
+async function api(origin: string, route: string, method = "GET", body?: unknown) {
+  const response = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!response.ok) throw new Error(`${method} ${route} failed (${response.status})`);
+  return response.json();
+}
 async function unusedPort() {
   const server = createServer(); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); if (!address || typeof address === "string") throw new Error("No local port");
