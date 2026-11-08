@@ -14,7 +14,7 @@ const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 test.skipIf(!browserModule)("agent uploads render and download real browser media", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const dir = await mkdtemp(path.join(os.tmpdir(), "chat-resource-integration-"));
-  const artifacts = process.env.CHAT_UI_SCREENSHOT_DIR || "/private/var/folders/nq/jj7b4c4n1px3q3670cczmfqh0000gn/T/opencode/chat-room-next-visual";
+  const artifacts = process.env.CHAT_UI_SCREENSHOT_DIR || dir;
   await mkdir(artifacts, { recursive: true });
   const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(dir, port), stdio: "ignore" });

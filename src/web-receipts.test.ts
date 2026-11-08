@@ -9,7 +9,7 @@ import path from "node:path";
 
 const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
 const token = "chat-receipts-local-token";
-const duplicateName = "Mira-Celeste Fontaine-Worthington";
+const duplicateName = "Mira";
 
 test.skipIf(!browserModule)("room activity and per-message receipts stay identity-safe", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
@@ -159,7 +159,12 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     expect(Math.abs((await page.locator(`[data-msg-id="${targetMessageID}"]`).boundingBox())!.y - targetTop)).toBeLessThan(3);
     expect(await page.locator("#readerList li").count()).toBeGreaterThan(0);
     expect(await page.locator("#readerExcerpt").textContent()).toBe("Visible receipt target");
-    const enReaderHeight = await page.locator("#readerPanel").evaluate((node: HTMLElement) => node.getBoundingClientRect().height);
+    const readerGeometry = () => page.locator("#readerPanel").evaluate((node: HTMLElement) => ({
+      height: node.getBoundingClientRect().height,
+      children: Array.from(node.children).map((child) => ({ text: child.textContent, height: (child as HTMLElement).getBoundingClientRect().height })),
+      rows: Array.from(node.querySelectorAll("#readerList li")).map((row) => ({ text: row.textContent, height: row.getBoundingClientRect().height, spans: Array.from(row.children).map((child) => ({ text: child.textContent, height: (child as HTMLElement).getBoundingClientRect().height })) })),
+    }));
+    const enReaderGeometry = await readerGeometry();
     await page.keyboard.press("Escape");
     await page.locator("#readerPanel").waitFor({ state: "hidden" });
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -167,8 +172,8 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
     await receiptButton.click();
     await page.locator("#readerPanel").waitFor({ state: "visible" });
-    const zhReaderHeight = await page.locator("#readerPanel").evaluate((node: HTMLElement) => node.getBoundingClientRect().height);
-    expect(Math.abs(enReaderHeight - zhReaderHeight)).toBeLessThanOrEqual(1);
+    const zhReaderGeometry = await readerGeometry();
+    if (Math.abs(enReaderGeometry.height - zhReaderGeometry.height) > 1) throw new Error(`Reader panel locale geometry differs: ${JSON.stringify({ en: enReaderGeometry, zh: zhReaderGeometry })}`);
     await page.keyboard.press("Escape");
     await page.locator("#readerPanel").waitFor({ state: "hidden" });
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");

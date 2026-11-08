@@ -9,10 +9,14 @@ export function initMessages(app) {
 
   app.autoGrow = (textarea) => {
     textarea.style.overflowY = "hidden";
-    textarea.style.height = "auto";
     const style = getComputedStyle(textarea), line = parseFloat(style.lineHeight);
     const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    if (!textarea.value) {
+      textarea.style.height = `${Math.max(line + padding + border, parseFloat(style.minHeight) || 0)}px`;
+      return;
+    }
+    textarea.style.height = "auto";
     const limit = line * 5 + padding;
     const overflow = textarea.scrollHeight > limit + 1;
     textarea.style.height = `${Math.min(textarea.scrollHeight, limit) + border}px`;

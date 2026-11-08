@@ -120,6 +120,9 @@
     #msgInput { min-height: 0; padding: 9px 11px; line-height: 1.45; }
     #btnSend { padding: 12px 15px; }
   }
+  @media (max-width: 480px) {
+    #msgInput:placeholder-shown { min-height: calc(2.9em + 20px); }
+  }
   @media (max-width: 420px) {
     #chatView > .chat-head { align-items: center; }
     .chat-head-actions { justify-content: flex-start; gap: 2px; }

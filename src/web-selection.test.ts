@@ -238,8 +238,7 @@ async function dragSelect(page: any, selector: string, start: number, end: numbe
           range.setStart(node, index); range.setEnd(node, Math.min(index + 1, node.length));
           const rect = range.getBoundingClientRect();
           const x = trailing ? rect.right - 0.5 : rect.left + 0.5, y = rect.top + rect.height / 2;
-          const hit = document.elementFromPoint(x, y);
-          return { x, y, hit: hit ? { tag: hit.tagName, className: (hit as HTMLElement).className } : null };
+          return { x, y };
         }
         base += node.length;
       }
@@ -252,7 +251,18 @@ async function dragSelect(page: any, selector: string, start: number, end: numbe
       styles.push({ tag: node.tagName, className: node.className, userSelect: style.userSelect, webkitUserSelect: style.webkitUserSelect, pointerEvents: style.pointerEvents, touchAction: style.touchAction, transform: style.transform, animationName: style.animationName, animationFillMode: style.animationFillMode, before: pseudo("::before"), after: pseudo("::after") });
       if (node.tagName === "BODY") break;
     }
-    return { start: point(bounds.start, false), end: point(bounds.end, true), expected: text.slice(Math.min(bounds.start, bounds.end), Math.max(bounds.start, bounds.end)), text, styles };
+    const thread = element.closest<HTMLElement>("#thread")!, edge = thread.getBoundingClientRect();
+    const top = edge.top + thread.clientTop + 4, bottom = edge.bottom - thread.clientTop - 4;
+    let first = point(bounds.start, false), last = point(bounds.end, true);
+    if (Math.min(first.y, last.y) < top) thread.scrollTop += Math.min(first.y, last.y) - top;
+    first = point(bounds.start, false); last = point(bounds.end, true);
+    if (Math.max(first.y, last.y) > bottom) thread.scrollTop += Math.max(first.y, last.y) - bottom;
+    first = point(bounds.start, false); last = point(bounds.end, true);
+    for (const [offset, point] of [[bounds.start, first], [bounds.end, last]] as const) {
+      const hit = document.elementFromPoint(point.x, point.y);
+      if (!hit || !element.contains(hit)) throw new Error(`Selection offset ${offset} hit outside message text: ${hit?.tagName}.${(hit as HTMLElement | null)?.className}`);
+    }
+    return { start: first, end: last, expected: text.slice(Math.min(bounds.start, bounds.end), Math.max(bounds.start, bounds.end)), text, styles };
   }, { start, end });
   await page.evaluate(() => {
     (window as any).__selectionTrace = [];
@@ -273,7 +283,12 @@ async function dragSelect(page: any, selector: string, start: number, end: numbe
   await page.mouse.up();
   const result = await page.evaluate(() => ({ text: getSelection()?.toString() || "", trace: (window as any).__selectionTrace }));
   expect(result.text.length).toBeGreaterThan(8);
-  return { text: result.text, expected: points.expected, textLength: points.text.length, styles: points.styles, start: points.start, end: points.end, trace: result.trace };
+  const withinTarget = await target.evaluate((element: HTMLElement) => {
+    const selection = getSelection();
+    return Boolean(selection?.anchorNode && selection.focusNode && element.contains(selection.anchorNode) && element.contains(selection.focusNode));
+  });
+  expect(withinTarget).toBe(true);
+  return { text: result.text, expected: points.expected, textLength: points.text.length, styles: points.styles, start: points.start, end: points.end, trace: result.trace, withinTarget };
 }
 
 async function api(origin: string, route: string, method = "GET", body?: unknown) {
