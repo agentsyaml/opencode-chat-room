@@ -121,20 +121,53 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     expect(await readingAnchor(page)).toMatchObject({ id: reentryAnchor.id });
     expect(Math.abs((await readingAnchor(page)).offset - reentryAnchor.offset)).toBeLessThan(3);
     await selectRoom(page, otherRoomId);
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      clearTimeout(app.state.watcherTimer); app.state.watcherTimer = 0;
+      (window as any).__startRoomWatcher = app.startRoomWatcher; app.startRoomWatcher = () => {};
+    }, "/assets/chat/state.js");
     await page.evaluate(async ({ url, id, anchor }: { url: string; id: string; anchor: string }) => {
       const { app } = await import(url), entry = app.state.rooms.get(id);
       entry.room.messages = entry.room.messages.filter((message: any) => message.id !== anchor);
     }, { url: "/assets/chat/state.js", id: roomId, anchor: reentryAnchor.id });
-    await page.evaluate(async ({ url, id }: { url: string; id: string }) => {
+    const awayMessage = await page.evaluate(async ({ url, id }: { url: string; id: string }) => {
       const { app } = await import(url);
       await app.api(`/rooms/${encodeURIComponent(id)}/join`, { method: "POST", body: JSON.stringify({ sessionID: "resize-reader", participantId: "Resize reader", participantName: "Resize reader" }) });
-      await app.api(`/rooms/${encodeURIComponent(id)}/messages`, { method: "POST", body: JSON.stringify({ sessionID: "resize-reader", text: "Unread while away" }) });
+      const result = await app.api(`/rooms/${encodeURIComponent(id)}/messages`, { method: "POST", body: JSON.stringify({ sessionID: "resize-reader", text: "Unread while away" }) });
+      return result.messages.at(-1);
     }, { url: "/assets/chat/state.js", id: roomId });
+    const inboxPattern = "**/inbox**";
+    let releaseInbox!: () => void, startInbox!: () => void, finishInbox!: () => void;
+    const inboxGate = new Promise<void>((resolve) => { releaseInbox = resolve; });
+    const inboxStarted = new Promise<void>((resolve) => { startInbox = resolve; });
+    const inboxDone = new Promise<void>((resolve) => { finishInbox = resolve; });
+    await page.route(inboxPattern, async (route: any) => {
+      const query = new URL(route.request().url()).searchParams;
+      if (query.get("roomId") !== roomId || query.get("timeout") !== "25000") return route.continue();
+      startInbox(); await inboxGate;
+      const response = await route.fetch(); await route.fulfill({ response }); finishInbox();
+    });
     await selectRoom(page, roomId);
+    await inboxStarted;
+    const preInbox = await page.evaluate(async ({ url, id, messageId }: any) => {
+      const entry = (await import(url)).app.state.rooms.get(id);
+      return { knownFromHistory: entry.room.messages.some((message: any) => message.id === messageId), unreadBeforePoll: entry.unreadIds.has(messageId) };
+    }, { url: "/assets/chat/state.js", id: roomId, messageId: awayMessage.id });
+    expect(preInbox).toEqual({ knownFromHistory: true, unreadBeforePoll: false });
+    releaseInbox(); await inboxDone; await page.unroute(inboxPattern);
+    await page.waitForFunction(async ({ url, id, messageId }: any) => (await import(url)).app.state.rooms.get(id)?.unreadIds.has(messageId), { url: "/assets/chat/state.js", id: roomId, messageId: awayMessage.id }, { timeout: 10000 });
     await page.locator("#msgList").getByText("Unread while away").waitFor();
     expect(await readingAnchor(page)).toMatchObject({ id: reentryAnchor.id });
     expect(Math.abs((await readingAnchor(page)).offset - reentryAnchor.offset)).toBeLessThan(3);
-    expect(await page.evaluate(async (url: string) => (await import(url)).app.state.unread, "/assets/chat/state.js")).toBeGreaterThan(0);
+    const unreadState = await page.evaluate(async ({ url, id }: any) => {
+      const { app } = await import(url), registry = await app.api(`/rooms/${encodeURIComponent(id)}/registry`);
+      return { unread: app.state.unread, readTs: registry[app.LS.sessionID]?.lastReadTs || 0 };
+    }, { url: "/assets/chat/state.js", id: roomId });
+    expect(unreadState.unread).toBeGreaterThan(0);
+    expect(unreadState.readTs).toBeLessThan(awayMessage.createdAt);
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url); app.startRoomWatcher = (window as any).__startRoomWatcher; delete (window as any).__startRoomWatcher;
+    }, "/assets/chat/state.js");
     await page.reload(); await page.locator("#chatView").waitFor({ state: "visible" });
     await page.waitForFunction((name: string) => document.querySelector("#roomName")?.textContent === name, "__Test_ComposerSizing");
     await frame(page);
@@ -158,7 +191,6 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     await rm(dir, { recursive: true, force: true });
   }
 }, 60000);
-
 async function announcementBoardWorks(page: any, artifacts: string) {
   const name = "__Test_AnnouncementBoard", content = "Plain text only: <img src=x onerror=alert(1)>";
   await page.locator("#btnAnnouncements").click();

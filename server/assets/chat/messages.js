@@ -143,10 +143,7 @@ export function initMessages(app) {
       row.append(text);
     } else {
       const direct = app.state.room.kind === "direct";
-      const sameName = app.state.memberSessions.get(app.state.room.id)?.filter((member) => member.name === message.senderId);
-      const own = direct ? message.senderId === LS.sessionID
-        : message.senderSessionID ? message.senderSessionID === LS.sessionID
-          : message.senderId === app.state.myName && sameName?.length === 1 && sameName[0].sessionID === LS.sessionID;
+      const own = isOwnMessage(message, app);
       const sender = direct
         ? app.state.room.participants.find((person) => person.id === message.senderId)?.name || app.t("guest")
         : message.senderId;
@@ -355,18 +352,22 @@ export function initMessages(app) {
         return;
       }
       if (data.member !== true || !Array.isArray(data.items)) return;
-      const items = data.items, previousReceivedTs = entry?.receivedTs || 0, messages = app.state.room.messages;
-      const known = new Set(messages.map((message) => message.id));
-      let sawSystem = false, added = 0;
-      for (const item of items) {
-        if (item.senderId === "system") sawSystem = true;
-        if (known.has(item.id)) continue;
-        messages.push({ ...item, roomId });
-        known.add(item.id);
-        entry?.unreadIds.set(item.id, item);
-        if (entry && item.createdAt >= entry.previewAt) setRoomPreview(entry, item);
-        added++;
-      }
+       const items = data.items, previousReceivedTs = entry?.receivedTs || 0, messages = app.state.room.messages;
+       const known = new Set(messages.map((message) => message.id));
+       const previousUnreadOverflow = Boolean(entry?.unreadOverflow);
+       let sawSystem = false, added = 0, unreadChanged = false;
+       for (const item of items) {
+         if (item.senderId === "system") sawSystem = true;
+         const wasKnown = known.has(item.id);
+         if (!wasKnown) {
+           messages.push({ ...item, roomId }); known.add(item.id);
+           if (entry && item.createdAt >= entry.previewAt) setRoomPreview(entry, item);
+           added++;
+         }
+         if (entry && item.createdAt > entry.readTs && !(wasKnown && isOwnMessage(item, app)) && !entry.unreadIds.has(item.id)) {
+           entry.unreadIds.set(item.id, item); unreadChanged = true;
+         }
+       }
       if (entry) entry.receivedTs = items.reduce((latest, item) => Number.isSafeInteger(item.createdAt) ? Math.max(latest, item.createdAt) : latest, previousReceivedTs);
       if (entry) entry.unreadOverflow = Boolean(data.hasMore);
       if (messages.length > 500) messages.splice(0, messages.length - 500);
@@ -375,7 +376,7 @@ export function initMessages(app) {
         await app.refreshRoomMeta(roomId, generation);
         if (!isCurrentPoll(roomId, generation)) return;
       }
-      if (added) {
+       if (added || unreadChanged || entry && previousUnreadOverflow !== entry.unreadOverflow) {
         app.state.unread = entry ? entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0) : app.state.unread + added;
         app.updateBadge();
       }
@@ -466,6 +467,14 @@ function trimMessages(list, app) {
       app.setText(gap, "earlierMessages");
       list.insertBefore(gap, list.firstChild);
     }
+}
+
+function isOwnMessage(message, app) {
+  const room = app.state.room, direct = room.kind === "direct";
+  const sameName = app.state.memberSessions.get(room.id)?.filter((member) => member.name === message.senderId);
+  return direct ? message.senderId === LS.sessionID
+    : message.senderSessionID ? message.senderSessionID === LS.sessionID
+      : message.senderId === app.state.myName && sameName?.length === 1 && sameName[0].sessionID === LS.sessionID;
 }
 
 }
