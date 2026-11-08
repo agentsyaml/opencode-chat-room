@@ -1,7 +1,7 @@
 // Image attachments: bytes are validated, stored per room, and survive the
 // SQLite round trip as ids only.
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -92,5 +92,26 @@ describe("image store", () => {
     expect((await readAttachmentRoute("room-f", ref.id))?.mime).toBe("image/png");
     await deleteRoute("room-f", [ref.id]);
     expect(await readAttachmentRoute("room-f", ref.id)).toBeNull();
+  });
+});
+
+describe("delivery to a host", () => {
+  test("the bytes are written to a temp file and named in the notification", async () => {
+    const { materializeMessage, imageNote } = await import("./attachments");
+    const realFetch = globalThis.fetch;
+    // The HTTP contract is covered in attachment-http.test.ts; here the point is
+    // what the plugin does with the response.
+    globalThis.fetch = (async () => new Response(PNG, { headers: { "Content-Type": "image/png" } })) as unknown as typeof fetch;
+    try {
+      const paths = await materializeMessage(
+        { id: "message-1", roomId: "room-delivery", attachments: [{ id: "img-1", mime: "image/png", bytes: PNG.byteLength }] },
+        { base: "http://x", token: "", roomID: "room-delivery" });
+      expect(paths.length).toBe(1);
+      expect([...new Uint8Array(readFileSync(paths[0]!))]).toEqual([...PNG]);
+      expect(imageNote("message-1")).toContain(paths[0]!);
+      expect(imageNote("message-1")).toContain("read this file yourself");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });
