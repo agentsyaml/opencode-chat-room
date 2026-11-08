@@ -190,7 +190,7 @@ describe("SQLite local state", () => {
       },
     };
     await pollKnownSessions(new Set([sessionID]), transport, { center: "", token: "" });
-    expect(backgrounds).toBe(1);
+    expect(backgrounds).toBe(0);
     expect(prompts).toHaveLength(1);
     await store.writeState((_service, registry) => { registry[roomID]![sessionID]!.lastReadTs = firstTs; });
     await pollKnownSessions(new Set([sessionID]), transport, { center: "", token: "" });

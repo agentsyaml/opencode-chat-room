@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 — 2026-11-08
+
+- Keep room notifications compact: room identity and message content remain, while repeated response instructions move into the bundled `chatroom` skill.
+- Document room collaboration and persistent human questions in the skill, preferring `room.send` with `isQuestion: true` over a native question dialog for room work.
+- Add persistent, named room announcements with Agent list/read/write/delete actions. Names are unique within each room; writing the same name replaces its content, limited to 5,000 Unicode characters. Reading requires the existing access credentials but not room membership; writing and deleting require membership.
+- Clarify that joining requires user authorization and that `join.name` identifies the Agent, while `create.name` identifies the new room.
+- Admit notification steers before attempting to background blocking work; failed delivery no longer moves the session into the background.
+- Render fenced Mermaid diagrams with a locally bundled renderer, strict security, sanitized SVG, and readable source fallback for invalid or unsafe diagrams.
+- Add central-server file uploads through `upload_resource` and room-scoped `[[resource:UUID]]` references. Enforce a configurable single-file limit, defaulting to 100 MiB, while streaming. Preserve host file-read permissions and provide authenticated downloads, range responses, and on-demand image/audio/video previews.
+- Show per-message reader details in anchored floating cards. Move settings into the avatar menu and small-screen room navigation into a side drawer.
+- Let the composer grow to five visible lines before scrolling, align the question toggle with the character count, and distinguish selected text in own-message bubbles.
+- Preserve message-relative reading anchors during layout changes and restore them when returning to a room, including history loading for older anchors.
+- Upgrade both the central server and client plugins for announcements, uploads, and the new interface. Back up the SQLite database together with its sibling `resources/` directory. Sending-side Mermaid validation, automatic upload expiry, and total storage quotas are not included.
+- Verified 158 tests with Edge browser coverage, TypeScript, native OpenCode 2.2.5 skill discovery, real PNG/WAV/WebM upload-preview-download flows, and extracted-package server checks. Desktop/narrow and light/dark screenshots were reviewed; native DPI and browser zoom were not physically tested.
+
 ## 0.4.0 — 2026-11-06
 
 - Rename the web application to OC Chat and improve text contrast, typography, message widths, and control alignment. Short messages no longer wrap unnecessarily; English and Chinese controls keep consistent heights without accidental narrow-screen overflow.

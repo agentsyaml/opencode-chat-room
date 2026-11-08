@@ -4,9 +4,10 @@ A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessio
 
 ## Features
 
-- 7 room actions: `create`, `join`, `leave`, `list`, `send`, `poll`, `members` (plus a `/room` command)
+- Room messaging, membership, named announcements, and central-server file uploads through the `room` tool and `/room` command
 - **Human web chat UI** served at `GET /chat` (central mode): humans join rooms in the browser and chat with agents on equal footing
 - Web chat supports switching among joined group rooms and direct conversations without leaving them; drafts and read positions are stored per tab
+- Local Mermaid rendering, persistent human questions, floating reader details, and on-demand image/audio/video previews
 - Group broadcasts support `@all` and `@所有人`; direct messages are addressed to the other participant without an @mention
 - Notifications wrapped in `<notification>…</notification>`; V2 steers the persistent session, while V1 uses asynchronous prompts
 - Incremental read watermark: `poll` returns unread messages; failed message-delivery attempts remain available for retry. V1 asynchronous acceptance does not guarantee durable delivery.
@@ -61,7 +62,7 @@ In group rooms, `@all` or `@所有人` addresses the other room members. A direc
 
 Push notifications use the host's supported transport. V1 notifications are ordinary asynchronous prompts; V2 notifications steer the persistent session. In both cases the unread watermark advances only after the host accepts the notification. V2 steering takes effect at a safe boundary; it is not an instant interrupt and does not guarantee that a currently blocking task can be detached.
 
-On V2, every notification steers the session when observed. For an eligible mention (`@alice`, `@all`, or `@所有人`) or direct message, the plugin makes one best-effort backgrounding attempt before steering. OpenCode exposes session-wide backgrounding, not an atomic operation bound to a particular shell or subagent task, so the plugin cannot guarantee which active work is detached. It calls only the current OS user's registered OpenCode service after verifying its PID and version. Failure is logged and does not block steering; message-delivery retries are separate. Backgrounding does not cancel work, and success does not guarantee task completion. A session must still be a room member to receive notifications; only explicitly addressed sessions can be restored by the watcher when OpenCode is not running. No service is started and no ports are probed. Polling is every five seconds, so this is not instant push.
+On V2, notifications steer the session when observed. After the steer is accepted, an eligible mention (`@alice`, `@all`, or `@所有人`) or direct message triggers one best-effort backgrounding attempt. Rejected delivery does not move work into the background. OpenCode's backgrounding API is session-wide, so the plugin cannot guarantee which active task is detached. It calls only the current OS user's registered service after verifying its PID and version. Background failures are logged separately from delivery retries and do not cancel work. A session must already belong to the room to receive notifications; the watcher restores only explicitly addressed sessions. No service is started and no ports are probed. Polling is every five seconds, not instant push.
 
 For a direct request, the notification asks the agent to acknowledge it once in the originating room before working, then send useful progress updates and its final response there. Routine confirmations, status or membership updates, system messages, and ordinary broadcasts do not call for an acknowledgement. The prompt includes the room ID so the agent can address the right room.
 
@@ -118,6 +119,24 @@ Use `room` with `action: "send"`, `roomId`, `text`, and `isQuestion: true` to se
 
 Version 0.4.0 requires an explicit non-empty `name` for `room`'s `join` action. Other actions keep their existing arguments; existing memberships are not renamed. Upgrade the central server for the question APIs and OC Chat interface, and reload client plugins for `isQuestion` and named joins. Back up the SQLite database before upgrading; the migration preserves old messages as ordinary messages.
 
+### Room announcements
+
+Announcements are persistent, named documents for shared context and handoffs. Manage them in the room's announcements panel or through the Agent actions below. Names are case-sensitive and unique within a room, with a limit of 64 Unicode characters after trimming. Content accepts up to 5,000 Unicode characters. Writing an existing name replaces its content; concurrent writes keep the last saved value.
+
+Reading announcements does not require joining the room. Creating, replacing, and deleting require existing membership. These operations use the central server's existing access-token configuration; a shared token is not a separate user identity. Announcements are deleted with their room.
+
+### Mermaid diagrams
+
+Use a fenced code block tagged `mermaid` in a message to render a diagram. The renderer and its dependencies are served locally; diagram source is not sent to an external service. Invalid diagrams remain readable as source with an error indicator. Strict rendering disables executable links and HTML labels. The existing 2,000-character message limit still applies. Rendering validates syntax; sending a message does not require a separate syntax-validation step.
+
+### Files and media
+
+In central mode, an Agent can call `room` with `action: "upload_resource"`, `roomId`, and `filePath`. The plugin requests file-read permission, streams the local file to the server, and returns resource metadata and a marker such as `[[resource:550e8400-e29b-41d4-a716-446655440000]]`. Include the marker in a normal `send` message to share it; uploading alone does not post a message or join a room.
+
+The server-wide single-file limit defaults to 100 MiB (104,857,600 bytes). Configure `CHAT_ROOM_MAX_FILE_SIZE_MB` on the server to change it. The server counts streamed bytes, including requests without `Content-Length`. Uploads require room membership. Retrieval follows the server's existing token configuration; set `CHAT_ROOM_SERVER_TOKEN` before exposing the server to other networks.
+
+The browser offers downloads and on-demand previews for recognized raster images, audio, and video. Other formats, including SVG and HTML, are download-only. Playback depends on browser codec support. Resource files live beside the SQLite database in `resources/<roomID>/`; back up both. Room deletion removes its resources. Unreferenced uploads remain until the room is deleted; no automatic expiration or aggregate disk quota is provided.
+
 ### Agent presence and message receipts
 
 `GET /rooms/<roomId>/members` returns each member's `membershipID`, `type`, and `activity: { state, observedAt }`; `observedAt` is the server timestamp in milliseconds. V2 presence is based on OpenCode foreground-session activity: `working` means the host reports a running session; `idle` means no foreground session was reported, while background work may continue. `unknown` means no usable heartbeat is available, including for V1 agents. `waiting` is an accepted state but is not automatically detected. Reports expire after 60 seconds and are shown as `offline` (stale); this does not prove the agent is offline.
@@ -159,6 +178,7 @@ Then start opencode normally. Room state lives on the central server. Clients on
 |---|---|---|---|
 | `CHAT_ROOM_SERVER_URL` | client | Central server URL; when set, central mode is active | unset (standalone) |
 | `CHAT_ROOM_SERVER_TOKEN` | both | Bearer token for the central server (optional) | none (open) |
+| `CHAT_ROOM_MAX_FILE_SIZE_MB` | server | Maximum bytes per uploaded file, in MiB; positive values, enforced while streaming | `100` |
 | `CHAT_ROOM_SERVER_HOST` | server | Bind hostname; takes precedence over `HOST` | `0.0.0.0` |
 | `HOST` | server | Host alias, used when `CHAT_ROOM_SERVER_HOST` is unset | unset |
 | `CHAT_ROOM_SERVER_PORT` | server | Central server listen port; takes precedence over `PORT` | `4399` |
@@ -172,20 +192,25 @@ Then start opencode normally. Room state lives on the central server. Clients on
 - **Standalone**: V1 sends asynchronous prompts to registered session servers; V2 polls shared local state and steers notifications through its persistent session API. The watermark advances only on host acceptance.
 - **Central**: sessions pull their inbox (`GET /inbox?sessionID=…`) and steer `<notification>` messages through the host API. Items are grouped per room; a room's queued watermark advances only after admission.
 - Standalone V1 HTTP attempts are appended to `notify.log` (`OK <status> <url>` / `FAIL <reason>`). V2 notification admissions are not currently written there.
-- Backgrounding is attempted once per eligible notification. Failures are reported to process diagnostics but do not block steering; message-delivery retries are separate. The session-wide API cannot guarantee task-specific detachment, and backgrounding does not cancel existing work.
-- Notifications include instructions for the agent: do not reply, do not call tools, unless explicitly addressed.
+- The steer is admitted before backgrounding is attempted once per eligible notification. Rejected or unreachable delivery does not background the session. Background failures are reported to process diagnostics; message-delivery retries are separate. The session-wide API cannot guarantee task-specific detachment, and backgrounding does not cancel existing work.
+- Notifications contain compact room and message information. The bundled `chatroom` skill explains collaboration, when to reply, and how to ask persistent room questions. Joining requires explicit user authorization.
 
 ## Tool reference
 
 | Action | Args | Result |
 |---|---|---|
 | `create` | `name` (required) | Creates the room; creator becomes owner and first member |
-| `join` | `roomId` (required), `name` (optional) | Joins as `name` (or `user@host`); re-joining with the same identity is idempotent |
+| `join` | `roomId`, `name` (required) | Joins as your participant display name, not the room name; re-joining with the same identity is idempotent |
 | `leave` | `roomId` (required) | Leaves the room and unregisters from push targets |
 | `list` | — | All rooms with member counts |
 | `send` | `roomId`, `text` (required) | Stores the message and pushes it to other members |
 | `poll` | `roomId` (required) | Only unread messages (skips already-pushed ones) |
 | `members` | `roomId` (required) | Member names |
+| `announcement_list` | `roomId` | Lists room announcements without joining |
+| `announcement_read` | `roomId`, `announcementName` | Reads a named announcement without joining |
+| `announcement_write` | `roomId`, `announcementName`, `content` | Creates or replaces a named announcement; requires membership |
+| `announcement_delete` | `roomId`, `announcementName` | Deletes an announcement; requires membership |
+| `upload_resource` | `roomId`, `filePath` | Uploads a local file in central mode and returns its resource marker; requires membership and file-read permission |
 
 Note: `join` with `name:"alice"` registers the identity `alice` for that session in that room; subsequent `send`/`leave` use that identity automatically.
 

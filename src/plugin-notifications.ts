@@ -5,7 +5,6 @@ import {
   formatNotificationLines,
   loadRegistry,
   loadRooms,
-  NOTIFY_INSTRUCTION,
   statePath,
   timeOf,
 } from "./store";
@@ -49,7 +48,7 @@ export function createNotifier(deps: {
   function render(batch: NotifyBatch, name: string, roomKind: "group" | "direct", items: QueueItem[]) {
     const { lines, capped } = formatNotificationLines(items);
     const context = roomKind === "direct" ? `Direct conversation with ${name} in room ${batch.roomName} (${batch.roomId})` : `New messages in room ${batch.roomName} (${batch.roomId})`;
-    return { prompt: `<notification>\n${context}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`, capped };
+    return { prompt: `<notification>\n${context}:\n${lines.join("\n")}\n</notification>`, capped };
   }
 
   async function tryBackground(transport: QueueTransport, sessionID: string) {
@@ -126,12 +125,6 @@ export function createNotifier(deps: {
     }
     const addressedTs = admission.items.filter((message) => explicitlyAddresses(message, entry.name, sessionID, roomKind))
       .reduce((max, message) => Math.max(max, message.createdAt), 0);
-    if (entry.protocol === "v2" && addressedTs > 0 && targetTransport.backgroundSession && claimBackgroundAttempt(
-      sessionID, batch.roomId, service, addressedTs,
-    )) {
-      const attempt = await tryBackground(targetTransport, sessionID);
-      logBackgroundResult(batch.roomId, attempt.status, attempt.reason);
-    }
     const [currentRegistry, currentRooms] = await Promise.all([loadRegistry(), loadRooms()]);
     const currentEntry = currentRegistry[batch.roomId]?.[sessionID];
     const currentKind = currentRooms.find((room) => room.id === batch.roomId)?.kind ?? "group";
@@ -162,6 +155,12 @@ export function createNotifier(deps: {
     }
     markPendingAdmissionAdmitted(sessionID, batch.roomId, admission.id);
     if (admission.maxTs > 0) await deps.bumpQueued(batch.roomId, sessionID, admission.maxTs);
+    if (entry.protocol === "v2" && addressedTs > 0 && targetTransport.backgroundSession && claimBackgroundAttempt(
+      sessionID, batch.roomId, service, addressedTs,
+    )) {
+      const attempt = await tryBackground(targetTransport, sessionID);
+      logBackgroundResult(batch.roomId, attempt.status, attempt.reason);
+    }
     return { url, status: entry.protocol === "v2" ? 200 : 204 };
   }
 
@@ -207,7 +206,6 @@ export function createNotifier(deps: {
   async function notifyRoom(
     roomId: string,
     roomName: string,
-    _body: string,
     selfSessionID: string,
     messages: Message[],
   ) {

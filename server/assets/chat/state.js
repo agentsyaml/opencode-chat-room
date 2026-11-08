@@ -7,7 +7,8 @@ export const app = {
     receiptObservation: null,
     memberApiUnavailable: new Set(), receiptApiUnavailable: new Set(),
     receipts: new Map(), acknowledgedMessages: new Map(), pendingAcknowledgements: new Map(),
-    pendingAction: null, watcherTimer: 0, restored: false,
+    pendingAction: null, watcherTimer: 0, restored: false, resizeScrollAdjusting: false, layoutScrollAdjusting: false,
+    readAnchorGuard: null, userScrollIntentUntil: 0,
   },
   rendered: 0,
   firstMessageId: null,
@@ -145,6 +146,8 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
     set drafts(value) { writeSession("chat.drafts", JSON.stringify(value)); },
     get positions() { try { return JSON.parse(readSession("chat.positions") || "{}"); } catch { return {}; } },
     set positions(value) { writeSession("chat.positions", JSON.stringify(value)); },
+    get readTs() { try { return JSON.parse(readSession("chat.readTs") || "{}"); } catch { return {}; } },
+    set readTs(value) { writeSession("chat.readTs", JSON.stringify(value)); },
     get failedMessages() {
       try {
         const value = JSON.parse(readSession("chat.failedMessages") || "{}");
@@ -154,10 +157,10 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
     set failedMessages(value) { writeSession("chat.failedMessages", JSON.stringify(value)); },
   };
   const saveToken = (value) => { auth.token = String(value ?? "").trim(); return auth.token; };
-  const api = async (url, options = {}) => {
+  const apiResponse = async (url, options = {}) => {
     assertIdentity();
     const headers = { ...options.headers };
-    if (options.body) headers["Content-Type"] = "application/json";
+    if (typeof options.body === "string" && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
     if (auth.token) headers.Authorization = `Bearer ${auth.token}`;
     let response;
     try { response = await (fetcher ?? globalThis.fetch)(url, { ...options, headers }); }
@@ -166,16 +169,25 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
       error.network = true;
       throw error;
     }
-    const data = await response.json().catch(() => ({}));
     assertIdentity();
     if (!response.ok) {
+      const data = await response.clone().json().catch(() => ({}));
+      assertIdentity();
       const error = new Error(data.error || translate("requestFailed", { status: response.status }));
       error.status = response.status;
       throw error;
     }
-    return data;
+    return response;
   };
-  return { LS: auth, saveToken, api };
+  const api = async (url, options) => {
+    const response = await apiResponse(url, options), data = await response.json().catch(() => ({}));
+    assertIdentity(); return data;
+  };
+  const apiBlob = async (url, options) => {
+    const response = await apiResponse(url, options), blob = await response.blob();
+    assertIdentity(); return blob;
+  };
+  return { LS: auth, saveToken, api, apiBlob };
 }
 
 const messages = {
@@ -192,8 +204,14 @@ const messages = {
     existingRooms: "Rooms", noRooms: "No rooms yet. Create one.", copyRoomId: "Copy room ID",
     newRoom: "Create a room",
     copyRoomIdTitle: ({ id }) => `Click to copy the full room ID: ${id}`, copied: "Copied",
-    members: "Members", membersCount: ({ count }) => `Members (${count})`, noMembers: "No members yet.",
+    members: "Members", membersCount: ({ count }) => `Members (${count})`, noMembers: "No members yet.", profileMenu: "Your profile and settings",
     questions: "Questions", pendingQuestions: "Pending questions", refreshQuestions: "Refresh",
+    announcements: "Announcements", announcementName: "Name", announcementContent: "Content",
+    diagramLoading: "Rendering diagram…", diagramRenderFailed: "Diagram unavailable; showing its source.", resourceLoading: "Loading file…", resourceFailed: "This file could not be loaded.", resourceDownload: "Download", resourcePreview: "Preview", resourceHide: "Hide preview",
+    announcementDelete: "Delete announcement",
+    announcementNew: "New announcement", announcementEmpty: "No announcements yet.", announcementLoading: "Loading announcements…",
+    announcementLoadFailed: "Could not load announcements. Your draft is still here.", announcementSaved: "Announcement saved.", announcementDeleted: "Announcement deleted.",
+    announcementDuplicate: "That name already exists. Select it to edit, or choose another name.", announcementDeleteConfirm: ({ name }) => `Delete “${name}”?`, announcementCount: ({ count }) => `${count} / 5000`, announcementInvalid: "Use a name of 1–64 characters and content up to 5000 characters.",
     questionsLoading: "Loading questions…", questionsEmpty: "No unanswered questions.",
     questionsFailed: "Could not load questions. Try again.", questionLabel: "Question",
     answerQuestion: "Reply", answerPlaceholder: "Write a reply…", sendAnswer: "Send reply",
@@ -207,7 +225,7 @@ const messages = {
     joinArrow: "Join →", joinDirectTitle: "Click to join directly", mentionEmpty: "No matching members",
     joined: "Joined", joinAction: "Join room", unreadMessages: ({ count }) => `${count} unread`,
     mentionHint: "↑↓ Select · Enter to confirm · Esc to close", today: "Today", yesterday: "Yesterday",
-    earlierMessages: "Earlier messages omitted", you: "You", saved: "Saved",
+    earlierMessages: "Earlier messages omitted", messagesBetweenOmitted: "Messages between this reading point and latest are omitted.", you: "You", saved: "Saved",
     savedMemory: "Saved for this tab only", copyFailed: ({ id }) => `Copy failed. Copy manually: ${id}`,
     copyCode: "Copy code", copiedCode: "Copied", copyCodeFailed: "Could not copy code. Select and copy it manually.",
     copyMessage: "Copy", copiedMessage: "Copied", copyMessageFailed: "Could not copy. Select and copy the message manually.",
@@ -223,6 +241,7 @@ const messages = {
     failedMessages: "Messages not sent", retryFailed: "Retry", discardFailed: "Discard",
     roomListError: "Unable to load rooms. You can enter a room ID directly.", guest: "Guest",
     roomsLabel: "Rooms", refreshRooms: "Refresh rooms", identityLabel: ({ name }) => `Chatting as ${name}`,
+    roomsMenu: "Open room list", closeRoomList: "Close room list",
     direct: "Direct", messagePrivately: "Message privately", removeMember: "Remove",
     kickConfirm: ({ name, id }) => `Remove ${name} (session ${id}) from this room?`,
     deleteRoom: "Delete room", deleteConfirm: ({ name }) => `Delete “${name}” and all its messages? This cannot be undone.`,
@@ -245,8 +264,14 @@ const messages = {
     noRooms: "还没有房间，创建一个吧。", copyRoomId: "复制房间 ID",
     newRoom: "创建房间",
     copyRoomIdTitle: ({ id }) => `点击复制完整房间 ID：${id}`, copied: "已复制", members: "成员",
-    membersCount: ({ count }) => `成员 ${count}`, noMembers: "暂无成员", settings: "设置",
+    membersCount: ({ count }) => `成员 ${count}`, noMembers: "暂无成员", settings: "设置", profileMenu: "个人资料和设置",
     questions: "提问", pendingQuestions: "待回答的问题", refreshQuestions: "刷新",
+    announcements: "公告栏", announcementName: "名称", announcementContent: "内容",
+    diagramLoading: "正在渲染图表…", diagramRenderFailed: "图表无法显示，以下为源代码。", resourceLoading: "正在加载文件…", resourceFailed: "无法加载此文件。", resourceDownload: "下载", resourcePreview: "预览", resourceHide: "收起预览",
+    announcementDelete: "删除公告",
+    announcementNew: "新建公告", announcementEmpty: "暂无公告。", announcementLoading: "正在加载公告…",
+    announcementLoadFailed: "无法加载公告，草稿仍已保留。", announcementSaved: "公告已保存。", announcementDeleted: "公告已删除。",
+    announcementDuplicate: "此名称已存在。请选择该公告进行编辑，或使用其他名称。", announcementDeleteConfirm: ({ name }) => `删除“${name}”？`, announcementCount: ({ count }) => `${count} / 5000`, announcementInvalid: "名称需为 1–64 个字符，内容不能超过 5000 个字符。",
     questionsLoading: "正在加载问题…", questionsEmpty: "没有待回答的问题。",
     questionsFailed: "无法加载问题，请重试。", questionLabel: "问题",
     answerQuestion: "回复", answerPlaceholder: "写下回复…", sendAnswer: "发送回复",
@@ -258,7 +283,7 @@ const messages = {
     send: "发送", roomMeta: ({ members, count }) => `${members} 人 · ${count} 条消息`, joinArrow: "加入 →",
     joinDirectTitle: "点击直接加入", mentionEmpty: "没有匹配的成员", mentionHint: "↑↓ 选择 · Enter 确认 · Esc 关闭",
     joined: "已加入", joinAction: "加入房间", unreadMessages: ({ count }) => `${count} 条未读`,
-    today: "今天", yesterday: "昨天", earlierMessages: "更早的消息已省略", you: "我", saved: "已保存",
+    today: "今天", yesterday: "昨天", earlierMessages: "更早的消息已省略", messagesBetweenOmitted: "此阅读位置与最新消息之间的部分消息已省略。", you: "我", saved: "已保存",
     savedMemory: "仅保存于当前标签页", copyFailed: ({ id }) => `复制失败，请手动复制：${id}`,
     copyCode: "复制代码", copiedCode: "已复制", copyCodeFailed: "复制失败，请手动选择并复制代码。",
     copyMessage: "复制", copiedMessage: "已复制", copyMessageFailed: "复制失败，请手动选择并复制消息。",
@@ -271,7 +296,7 @@ const messages = {
     sendNetwork: "发送失败，消息已保存在下方", sendFailed: ({ message }) => `发送失败：${message}`,
     failedMessages: "未发送的消息", retryFailed: "重试", discardFailed: "删除",
     roomListError: "无法加载房间列表，可直接输入房间 ID 加入。", guest: "访客", roomsLabel: "房间列表",
-    refreshRooms: "刷新房间", identityLabel: ({ name }) => `当前昵称：${name}`, direct: "私聊",
+    refreshRooms: "刷新房间", identityLabel: ({ name }) => `当前昵称：${name}`, roomsMenu: "打开房间列表", closeRoomList: "关闭房间列表", direct: "私聊",
     messagePrivately: "私聊", removeMember: "移除", kickConfirm: ({ name, id }) => `确定将 ${name}（会话 ${id}）移出此房间？`,
     deleteRoom: "删除房间", deleteConfirm: ({ name }) => `删除“${name}”及全部聊天记录？此操作无法撤销。`,
     allMembers: "所有人", messageCount: ({ count }) => `${count} / 2000`,
@@ -289,14 +314,16 @@ app.t = (key, values = {}) => {
   const text = typeof entry === "function" ? entry(values) : entry;
   return String(text).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? "");
 };
-export const { LS, saveToken, api } = createAuth(undefined, undefined, (key, values) => app.t(key, values));
+export const { LS, saveToken, api, apiBlob } = createAuth(undefined, undefined, (key, values) => app.t(key, values));
 app.LS = LS;
 app.api = api;
+app.apiBlob = apiBlob;
 app.setToken = saveToken;
 app.locale = LS.locale === "zh-CN" ? "zh-CN" : "en";
 app.state.joinedIds = new Set(LS.joinedRoomIds);
 app.state.drafts = new Map(Object.entries(LS.drafts));
-app.state.positions = new Map(Object.entries(LS.positions).map(([id, value]) => [id, Number(value) || 0]));
+app.state.positions = new Map(Object.entries(LS.positions).map(([id, value]) => [id, value && typeof value === "object" ? value : Number(value) || 0]));
+app.state.lastReadTs = new Map(Object.entries(LS.readTs).map(([id, value]) => [id, Number(value) || 0]));
 app.state.roomNames = new Map(Object.entries(LS.roomNames));
 app.state.failedMessages = new Map(Object.entries(LS.failedMessages).map(([id, items]) => [id, Array.isArray(items) ? items.filter((item) => item && typeof item.id === "string" && typeof item.text === "string") : []]));
 app.saveDraft = (roomId, text) => {
@@ -316,9 +343,15 @@ app.savePosition = (roomId, position) => {
   app.state.positions.set(roomId, position);
   LS.positions = Object.fromEntries(app.state.positions);
 };
+app.saveReadTs = (roomId, timestamp) => {
+  app.state.lastReadTs.set(roomId, timestamp);
+  LS.readTs = Object.fromEntries(app.state.lastReadTs);
+};
 app.clearPosition = (roomId) => {
   app.state.positions.delete(roomId);
   LS.positions = Object.fromEntries(app.state.positions);
+  app.state.lastReadTs.delete(roomId);
+  LS.readTs = Object.fromEntries(app.state.lastReadTs);
 };
 app.saveJoinedIds = () => { LS.joinedRoomIds = [...app.state.joinedIds]; };
 app.saveRoomNames = () => { LS.roomNames = Object.fromEntries(app.state.roomNames); };
@@ -340,6 +373,7 @@ app.applyLocale = () => {
     });
   }
   document.querySelectorAll(".locale-select").forEach((select) => { select.value = app.locale; });
+  app.autoGrow?.(app.$("#msgInput"));
   app.updateDraftCount?.();
   app.updateMentionList?.();
   app.renderFailedMessages?.();

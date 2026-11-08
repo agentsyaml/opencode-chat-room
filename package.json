@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A chat-room plugin and central server for OpenCode.",
   "repository": {
     "type": "git",
@@ -24,11 +24,14 @@
     "index.ts",
     "src",
     "!src/**/*.test.ts",
+    "skills/chatroom/SKILL.md",
     "server/chat-server.ts",
     "server/inbox.ts",
     "server/history-route.ts",
     "server/newrooms.ts",
     "server/member-routes.ts",
+    "server/announcement-routes.ts",
+    "server/resource-routes.ts",
     "server/wake.ts",
     "server/chat.html",
     "server/assets",

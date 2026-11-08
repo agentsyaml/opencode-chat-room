@@ -3,6 +3,7 @@ import { acknowledgeReadWithReceipts, readReceipts, readState, recordMessageRece
 import { isReceiverOwnerID } from "../src/receiver-owner";
 import { clearPendingAdmission } from "../src/queue";
 import { touchActive } from "./wake";
+import { announcementRoutes } from "./announcement-routes";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const states = new Set<WorkState>(["working", "idle", "waiting", "unknown"]);
@@ -13,6 +14,8 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 export async function memberRoutes(req: Request, url: URL): Promise<Response | undefined> {
+  const announcements = await announcementRoutes(req, url);
+  if (announcements) return announcements;
   if (req.method === "POST" && url.pathname === "/read") {
     const body = (await req.json()) as Record<string, unknown>;
     const ts = body.ts;

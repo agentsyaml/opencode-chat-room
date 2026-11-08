@@ -28,7 +28,7 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
     await page.goto(`${origin}/chat`);
     await page.locator("#inName").fill("UX tester");
-    await page.locator("#inRoomName").fill("UX history");
+    await page.locator("#inRoomName").fill("__Test_UXHistory");
     await page.locator("#btnCreate").click();
     await page.locator("#chatView").waitFor({ state: "visible" });
     const roomId = await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.state.room.id, "/assets/chat/state.js");
@@ -52,6 +52,11 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID, text: "| Left | Right |\n| --- | --- |\n| One | Two |\n\n```js\nconst value = 42;\n```" });
     await page.locator(".msg-text table").waitFor();
     await page.locator(".msg-text pre code").waitFor();
+    const queueCell = page.locator(".msg-text td").filter({ hasText: "One" }).first();
+    expect(await queueCell.evaluate((cell: HTMLElement) => {
+      const range = document.createRange(); range.selectNodeContents(cell);
+      return new Set(Array.from(range.getClientRects()).map((rect) => Math.round(rect.top))).size;
+    })).toBe(1);
     expect(await page.locator("#msgList [data-msg-id]:not(.day-sep)").evaluateAll((rows: Element[]) => rows.every((row) => row.querySelector("[data-copy-message]")))).toBe(true);
     await page.evaluate(() => {
       let copied = "";
@@ -164,14 +169,19 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     expect(trimAfter.id).toBe(trimBefore.id);
     expect(Math.abs(trimAfter.top - trimBefore.top)).toBeLessThanOrEqual(2);
     await page.evaluate(() => { document.querySelector<HTMLElement>("#thread")!.scrollTop = 2500; });
-    const savedTop = await page.locator("#thread").evaluate((n: HTMLElement) => n.scrollTop);
+    await page.waitForTimeout(100);
+    const reentryAnchor = await visibleAnchor(page);
     await page.locator("#btnNewRoom").click();
-    await page.locator("#inRoomNameChat").fill("UX second");
+    await page.locator("#inRoomNameChat").fill("__Test_UXSecond");
     await page.locator("#btnCreateChatRoom").click();
-    await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "UX second");
+    await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "__Test_UXSecond");
+    await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: "ux-peer", text: "Arrived while away" });
     await page.locator(`#roomListChat [data-room-id="${roomId}"]`).click();
     await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), roomId);
-    expect(Math.abs(await page.locator("#thread").evaluate((n: HTMLElement) => n.scrollTop) - savedTop)).toBeLessThan(5);
+    await page.locator("#msgList").getByText("Arrived while away").waitFor();
+    const reentryRestored = await visibleAnchor(page);
+    expect(reentryRestored.id).toBe(reentryAnchor.id);
+    expect(Math.abs(reentryRestored.top - reentryAnchor.top)).toBeLessThanOrEqual(5);
     const alignment = await page.evaluate(() => {
       const messages = document.querySelector("#msgList")!.getBoundingClientRect();
       const composer = document.querySelector(".composer-row")!.getBoundingClientRect();

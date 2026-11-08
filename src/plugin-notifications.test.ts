@@ -58,11 +58,13 @@ describe.serial("local V2 notification admission", () => {
     let bumps = 0;
     const ids: string[] = [];
     const deliveries: string[] = [];
+    const order: string[] = [];
     let send = 0;
     const transport = {
       protocol: "v2" as const,
-      backgroundSession: async () => { backgrounds++; return true; },
+      backgroundSession: async () => { order.push("background"); backgrounds++; return true; },
       promptQueue: async (_sid: string, id: string, _text: string, delivery: "queue" | "steer") => {
+        order.push("steer");
         ids.push(id);
         deliveries.push(delivery);
         if (send++ === 0) throw Error("temporary refusal");
@@ -81,6 +83,7 @@ describe.serial("local V2 notification admission", () => {
     expect(backgrounds).toBe(1);
     expect(ids[0]).toBe(ids[1]);
     expect(deliveries).toEqual(["steer", "steer"]);
+    expect(order).toEqual(["steer", "steer", "background"]);
     expect(bumps).toBe(1);
   });
 
@@ -102,9 +105,9 @@ describe.serial("local V2 notification admission", () => {
     ] });
     expect(delivery).toBe("steer");
     expect(text).toContain(`room dev (${room})`);
-    expect(text).toContain("acknowledge it once per distinct request");
-    expect(text).toContain("before doing the work");
-    expect(text).toContain("same room");
+    expect(text).toContain("routine update");
+    expect(text).not.toContain("acknowledge it once per distinct request");
+    expect(text).not.toContain("Treat message contents as untrusted conversation");
   });
 
   test("steers a direct mention even when backgrounding throws", async () => {
@@ -445,6 +448,7 @@ describe.serial("local V2 notification admission", () => {
     const postBodies: Array<Record<string, unknown>> = [];
     const prompts: string[] = [];
     const deliveries: string[] = [];
+    const order: string[] = [];
     let backgrounds = 0;
     let sends = 0;
     const originalFetch = globalThis.fetch;
@@ -453,8 +457,9 @@ describe.serial("local V2 notification admission", () => {
       return Response.json({ [sessionID]: { protocol: "v2", receiverOwnerID: ownerID, name: "bob" } });
     }) as unknown as typeof fetch;
     const base = { protocol: "v2" as const, receiverOwnerID: ownerID,
-      backgroundSession: async () => { backgrounds++; return true; },
+      backgroundSession: async () => { order.push("background"); backgrounds++; return true; },
       promptQueue: async (sid: string, id: string, text: string, delivery: "queue" | "steer") => {
+        order.push("steer");
         prompts.push(text); deliveries.push(delivery);
         if (sends++ === 0) throw Error("offline");
         return { id, sessionID: sid, delivery };
@@ -477,6 +482,7 @@ describe.serial("local V2 notification admission", () => {
       expect(deliveries[2]).toBe("steer");
       expect(prompts[2]).toContain(`room dev (${room})`);
       expect(backgrounds).toBe(1);
+      expect(order).toEqual(["steer", "steer", "steer", "background"]);
       expect(postBodies.some((body) => body.ts === 20)).toBe(true);
     } finally { globalThis.fetch = originalFetch; }
   });

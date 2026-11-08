@@ -152,7 +152,8 @@ describe.serial("central receiver membership scope", () => {
     } finally { globalThis.fetch = previousFetch; }
     expect(body.delivery).toBe("steer");
     expect((body.prompt as { text: string }).text).toContain(`room wake (${roomID})`);
-    expect((body.prompt as { text: string }).text).toContain("acknowledge it once per distinct request");
+    expect((body.prompt as { text: string }).text).toContain("@bob please handle this");
+    expect((body.prompt as { text: string }).text).not.toContain("acknowledge it once per distinct request");
   });
 
   test("immediately wakes direct peers and group @all recipients", async () => {

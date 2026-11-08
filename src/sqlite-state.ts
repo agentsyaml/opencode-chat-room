@@ -35,6 +35,8 @@ async function initialize(file: string): Promise<Database> {
     CREATE INDEX IF NOT EXISTS messages_room_seq ON messages(room_id,seq DESC);
     CREATE INDEX IF NOT EXISTS messages_room_time ON messages(room_id,created_at,seq);
     CREATE TABLE IF NOT EXISTS registry(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,session_id TEXT NOT NULL,server_url TEXT NOT NULL,api_prefix TEXT NOT NULL,protocol TEXT,name TEXT NOT NULL,last_read_ts INTEGER,last_queued_ts INTEGER,directory TEXT,host TEXT,receiver_owner_id TEXT,membership_id TEXT,work_state TEXT,last_seen_at INTEGER,PRIMARY KEY(room_id,session_id));`);
+        db.exec("CREATE TABLE IF NOT EXISTS announcements(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,name TEXT NOT NULL,content TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(room_id,name))");
+        db.exec("CREATE TABLE IF NOT EXISTS resources(id TEXT PRIMARY KEY,room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,name TEXT NOT NULL,mime_type TEXT NOT NULL,size INTEGER NOT NULL,created_at INTEGER NOT NULL)");
         await ensureRoomColumns(db);
         await migrate(db, file);
         db.exec("PRAGMA busy_timeout=50;");
@@ -47,6 +49,45 @@ async function initialize(file: string): Promise<Database> {
   } catch (error) { db.close(); throw error; }
 }
 
+export type Announcement = { roomID: string; name: string; content: string; updatedAt: number };
+export async function listAnnouncements(file: string, roomID: string): Promise<Announcement[]> {
+  const db = await open(file);
+  if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return [];
+  return db.query("SELECT room_id AS roomID,name,content,updated_at AS updatedAt FROM announcements WHERE room_id=? ORDER BY name").all(roomID) as Announcement[];
+}
+export async function getAnnouncement(file: string, roomID: string, name: string): Promise<Announcement | undefined> {
+  const db = await open(file);
+  return db.query("SELECT room_id AS roomID,name,content,updated_at AS updatedAt FROM announcements WHERE room_id=? AND name=?").get(roomID, name) as Announcement | undefined;
+}
+export async function putAnnouncement(file: string, roomID: string, name: string, content: string, updatedAt: number): Promise<Announcement | undefined> {
+  const db = await open(file);
+  return immediate(db, () => {
+    if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return undefined;
+    db.query("INSERT INTO announcements(room_id,name,content,updated_at) VALUES(?,?,?,?) ON CONFLICT(room_id,name) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at").run(roomID, name, content, updatedAt);
+    return { roomID, name, content, updatedAt };
+  });
+}
+export async function deleteAnnouncement(file: string, roomID: string, name: string): Promise<boolean> {
+  const db = await open(file);
+  return immediate(db, () => db.query("DELETE FROM announcements WHERE room_id=? AND name=?").run(roomID, name).changes > 0);
+}
+
+export type StoredResource = { id: string; roomID: string; name: string; mimeType: string; size: number; createdAt: number };
+export async function putResource(file: string, resource: StoredResource): Promise<boolean> {
+  const db = await open(file);
+  return immediate(db, () => {
+    if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(resource.roomID)) return false;
+    db.query("INSERT INTO resources(id,room_id,name,mime_type,size,created_at) VALUES(?,?,?,?,?,?)")
+      .run(resource.id, resource.roomID, resource.name, resource.mimeType, resource.size, resource.createdAt);
+    return true;
+  });
+}
+export async function getResource(file: string, roomID: string, id: string): Promise<StoredResource | undefined> {
+  const db = await open(file);
+  const row = db.query("SELECT id,room_id AS roomID,name,mime_type AS mimeType,size,created_at AS createdAt FROM resources WHERE room_id=? AND id=?")
+    .get(roomID, id) as StoredResource | null;
+  return row ?? undefined;
+}
 async function ensureRoomColumns(db: Database): Promise<void> {
     await immediate(db, () => {
     const messageColumns = db.query("PRAGMA table_info(messages)").all() as Array<{ name: string }>;

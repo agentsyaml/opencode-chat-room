@@ -90,13 +90,16 @@ export function initMembers(app) {
     app.state.receiptRefreshTimer = setTimeout(() => void app.loadVisibleReceipts(roomId, generation), 180);
   };
   app.queueReceiptObservation = () => {
+    if ((app.state.resizeScrollAdjusting || app.state.layoutScrollAdjusting)
+        && performance.now() > app.state.userScrollIntentUntil) return;
     app.state.receiptObservation = { roomId: app.state.room?.id, generation: app.state.pollGeneration };
     if (app.state.receiptObservationFrame) return;
     app.state.receiptObservationFrame = requestAnimationFrame(() => {
       app.state.receiptObservationFrame = 0;
       const target = app.state.receiptObservation;
       app.state.receiptObservation = null;
-      if (!target || document.hidden || !document.hasFocus() || !current(app, target.roomId, target.generation)) return;
+      if (!target || (app.state.resizeScrollAdjusting || app.state.layoutScrollAdjusting)
+          && performance.now() > app.state.userScrollIntentUntil || document.hidden || !document.hasFocus() || !current(app, target.roomId, target.generation)) return;
       void app.loadVisibleReceipts(target.roomId, target.generation);
       void app.ackVisibleMessages(target.roomId, target.generation);
     });

@@ -176,6 +176,10 @@ async function persistentBrowserFlow(context: any, origin: string, token: string
   }
   await pageA.waitForFunction(() => Array.from(document.querySelectorAll("#msgList .msg-text")).filter((node) => node.textContent?.startsWith("PEER-BURST-")).length === 205, undefined, { timeout: 30000 });
   await pageA.bringToFront();
+  await pageA.locator("#btnJump").waitFor({ state: "visible" });
+  await pageA.locator("#btnJump").click();
+  await pageA.waitForFunction(() => { const thread = document.querySelector<HTMLElement>("#thread")!; return thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2; });
+  expect(await pageA.evaluate(async (url: string) => (await import(url)).app.state.readAnchorGuard, "/assets/chat/state.js")).toBeNull();
   await pageA.evaluate(async (url: string) => (await import(url)).app.markActiveRoomRead(), "/assets/chat/state.js");
   const latest = await api(origin, `/rooms/${encodeURIComponent(room.id)}` , token);
   const registry = await api(origin, `/rooms/${encodeURIComponent(room.id)}/registry`, token);

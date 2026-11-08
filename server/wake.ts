@@ -1,6 +1,6 @@
 import os from "node:os";
 import type { Message } from "../src/room-service";
-import { authHeader, formatNotificationLines, formatServeWakePrompt, NOTIFY_INSTRUCTION, readState, writeState, type RegistryEntry } from "../src/store";
+import { authHeader, formatNotificationLines, formatServeWakePrompt, readState, writeState, type RegistryEntry } from "../src/store";
 import { admissionMatches, clearPendingAdmission, getOrCreatePendingAdmission, markPendingAdmissionAdmitted, pendingAdmission, rejectPendingAdmission, type QueueBody, type QueueItem } from "../src/queue";
 import { readInbox, type InboxItem } from "./inbox";
 import { explicitlyAddresses } from "../src/mentions";
@@ -66,7 +66,7 @@ async function deliverWake(
   }
   const { lines, capped } = formatNotificationLines(delta);
   const prompt = roomKind === "direct"
-    ? `You received a direct message. Poll and reply in that direct conversation: ${NOTIFY_INSTRUCTION}\n\nNew messages in direct conversation ${roomName} (${roomId}):\n${lines.join("\n")}`
+    ? `<notification>\nNew messages in direct conversation ${roomName} (${roomId}):\n${lines.join("\n")}\n</notification>`
     : formatServeWakePrompt(roomName, roomId, lines);
   const admission = getOrCreatePendingAdmission(sid, roomId, delta as QueueItem[], prompt,
     delta.reduce((max, item) => Math.max(max, item.createdAt), 0), capped);

@@ -19,6 +19,8 @@ import { claimWake, touchActive, wakeMentionedSessions } from "./wake";
 import { historyRoute } from "./history-route";
 import { roomManagement } from "./newrooms";
 import { memberRoutes } from "./member-routes";
+import { resourceRoutes } from "./resource-routes";
+import { maxResourceBytes } from "../src/resources";
 
 function parsePort(value: string): number {
   const port = Number(value);
@@ -110,8 +112,9 @@ async function handle(req: Request): Promise<Response> {
   // ponytail: F1 — reject non-JSON POSTs; a text/plain simple request from a
   // malicious page would otherwise mutate rooms cross-origin (no preflight)
   if (
-    ["POST", "DELETE"].includes(req.method) &&
-    !req.headers.get("content-type")?.includes("application/json")
+    ["POST", "PUT", "DELETE"].includes(req.method) &&
+    !req.headers.get("content-type")?.includes("application/json") &&
+    !(/^\/rooms\/[^/]+\/resources$/.test(p) && req.method === "POST")
   ) {
     return json({ error: "content-type must be application/json" }, 415);
   }
@@ -119,6 +122,8 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "unauthorized" }, 401);
   }
   try {
+    const resource = await resourceRoutes(req, url);
+    if (resource) return resource;
     const history = await historyRoute(url);
     if (history) return history;
     if (req.method === "GET" && p === "/rooms/summary") {
@@ -481,18 +486,14 @@ export default {
   hostname,
   port,
   fetch: handle,
-  // ponytail: bun's default idleTimeout (10s) would close our long-poll
-  // connections (25s) mid-request -> ERR_EMPTY_RESPONSE on every poll;
-  // keep connections alive well past the longest long-poll window
   idleTimeout: 60,
+  maxRequestBodySize: Math.max(128 * 1024 * 1024, maxResourceBytes()),
 };
 
 console.log(
   `chat-room center listening on http://${displayHostname}:${port}${token ? " (token auth on)" : ""}`,
 );
 if (!token) {
-  // ponytail: default is open — anyone who can reach the port can read/write
-  // rooms; set CHAT_ROOM_SERVER_TOKEN before exposing beyond localhost
   console.warn(
     "chat-room center has NO token auth — set CHAT_ROOM_SERVER_TOKEN if this port is reachable from other hosts",
   );

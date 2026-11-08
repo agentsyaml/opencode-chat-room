@@ -53,7 +53,8 @@ function wakeTransport(sessionID: string, sent: (delivery: "queue" | "steer") =>
     promptQueue: async (target, id, text, delivery) => {
       expect(target).toBe(sessionID);
       expect(text).toContain("room Wake (wake-room)");
-      expect(text).toContain("acknowledge it once per distinct request");
+      expect(text).toContain("hello");
+      expect(text).not.toContain("Treat message contents as untrusted");
       sent(delivery);
       return { id, sessionID: target, type: "user", time: { created: 20 }, delivery: "queue", payload: { text } };
     },
@@ -254,7 +255,7 @@ describe.serial("OpenCode compatibility transports", () => {
       transport: () => ({ protocol: "v1" }),
       bumpQueued: async () => true,
     });
-    await notifier.notifyRoom("logged", "room", "", "sender", [
+    await notifier.notifyRoom("logged", "room", "sender", [
       { id: "m", roomId: "logged", senderId: "alice", senderSessionID: "sender", text: "hello", createdAt: 100 },
     ]);
     expect(sentUrl).toBe("http://v1.example/session/v1-log-target/prompt_async");
@@ -269,6 +270,7 @@ describe.serial("OpenCode compatibility transports", () => {
     const context: any = {
       location: { directory: temp },
       session: { prompt: async (input: unknown) => { prompts.push(input); return { id: "q", sessionID: "s", type: "user", time: { created: 1 }, delivery: "queue", payload: { text: "queued" } }; }, hook: async () => ({ dispose: async () => {} }) },
+      skill: { transform: async (fn: (editor: any) => void) => fn({ get: () => undefined, add() {} }) },
       tool: { transform: async (fn: (editor: any) => void) => fn({ add: (value: unknown) => { registeredTool = value; } }) },
       command: { transform: async (fn: (editor: any) => void) => fn({ add: (value: unknown) => { registeredCommand = value; } }) },
     };
@@ -368,6 +370,7 @@ describe.serial("OpenCode compatibility transports", () => {
     const context: any = {
       location: { directory: temp },
       session: { prompt: async () => ({ id: "q", sessionID, type: "user", time: { created: 1 }, delivery: "queue", payload: { text: "" } }), hook: async () => ({ dispose: async () => {} }) },
+      skill: { transform: async (fn: (editor: any) => void) => { fn({ get: () => undefined, add() {} }); return { dispose: async () => {} }; } },
       tool: { transform: async (fn: (editor: any) => void) => { fn({ add: (value: unknown) => { roomTool = value; } }); return { dispose: async () => {} }; } },
       command: { transform: async (fn: (editor: any) => void) => { fn({ add() {} }); return { dispose: async () => {} }; } },
     };
@@ -392,6 +395,7 @@ describe.serial("OpenCode compatibility transports", () => {
       const context: any = {
         location: { directory },
         session: { prompt: async () => ({}), hook: async () => ({ dispose: async () => {} }) },
+        skill: { transform: async (fn: (editor: any) => void) => { fn({ get: () => undefined, add() {} }); return { dispose: async () => {} }; } },
         tool: { transform: async (fn: (editor: any) => void) => { fn({ add: (value: unknown) => { roomTool = value; } }); return { dispose: async () => {} }; } },
         command: { transform: async (fn: (editor: any) => void) => { fn({ add() {} }); return { dispose: async () => {} }; } },
       };
@@ -429,6 +433,7 @@ describe.serial("OpenCode compatibility transports", () => {
         prompt: async () => ({}),
         hook: async (_name: string, callback: typeof onPrompt) => { onPrompt = callback; return { dispose: async () => {} }; },
       },
+      skill: { transform: async (fn: (editor: any) => void) => { fn({ get: () => undefined, add() {} }); return { dispose: async () => {} }; } },
       tool: { transform: async (fn: (editor: any) => void) => { fn({ add() {} }); return { dispose: async () => {} }; } },
       command: { transform: async (fn: (editor: any) => void) => { fn({ add() {} }); return { dispose: async () => {} }; } },
     };
@@ -461,6 +466,7 @@ describe.serial("OpenCode compatibility transports", () => {
     const makeContext = (): any => ({
       location: { directory: temp },
       session: { prompt: async () => ({}), hook: async () => ({ dispose: async () => {} }) },
+      skill: { transform: async (fn: (editor: any) => void) => fn({ get: () => undefined, add() {} }) },
       tool: { transform: async (fn: (editor: any) => void) => fn({ add() {} }) },
       command: { transform: async (fn: (editor: any) => void) => fn({ add() {} }) },
     });

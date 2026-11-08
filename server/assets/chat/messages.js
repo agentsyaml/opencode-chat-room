@@ -8,8 +8,15 @@ export function initMessages(app) {
   let pollDelay = 2000;
 
   app.autoGrow = (textarea) => {
+    textarea.style.overflowY = "hidden";
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 132)}px`;
+    const style = getComputedStyle(textarea), line = parseFloat(style.lineHeight);
+    const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    const limit = line * 5 + padding;
+    const overflow = textarea.scrollHeight > limit + 1;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, limit) + border}px`;
+    textarea.style.overflowY = overflow ? "auto" : "hidden";
   };
   app.updateSendState = () => { $("#btnSend").disabled = !$("#msgInput").value.trim(); };
   app.updateDraftCount = () => app.setText($("#draftCount"), "messageCount", { count: $("#msgInput").value.length });
@@ -73,6 +80,7 @@ export function initMessages(app) {
     }
   };
   app.jumpToBottom = () => {
+    app.state.readAnchorGuard = null;
     $("#thread").scrollTop = $("#thread").scrollHeight;
     const entry = app.state.room && app.state.rooms.get(app.state.room.id);
     app.state.unread = entry ? entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0) : 0;
@@ -97,6 +105,10 @@ export function initMessages(app) {
     const thread = $("#thread");
     if (!room || !entry || document.hidden || !document.hasFocus()
         || thread.scrollHeight - thread.scrollTop - thread.clientHeight >= 80) return;
+    if (app.state.readAnchorGuard?.roomId === room.id) {
+      if (performance.now() > app.state.userScrollIntentUntil) return;
+      app.state.readAnchorGuard = null;
+    }
     const timestamp = room.messages.reduce((latest, message) => Math.max(latest, message.createdAt), entry.readTs);
     if (!timestamp || timestamp <= entry.readTs) return;
     try {
@@ -105,6 +117,7 @@ export function initMessages(app) {
       });
       if (app.state.room?.id !== room.id || app.state.pollGeneration !== generation) return;
       entry.readTs = timestamp;
+      app.saveReadTs(room.id, timestamp);
       entry.unreadOverflow = false;
       for (const [id, message] of entry.unreadIds) if (message.createdAt <= timestamp) entry.unreadIds.delete(id);
       app.state.unread = entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
@@ -432,6 +445,16 @@ export function initMessages(app) {
 
 function trimMessages(list, app) {
     if (list.children.length <= 400 || hasMessageSelection(list)) return;
+    const saved = app.state.positions.get(app.state.room?.id), rows = [...list.querySelectorAll("[data-msg-id]")];
+    const anchor = saved?.messageId && rows.find((row) => row.dataset.msgId === saved.messageId);
+    if (anchor && rows.indexOf(anchor) < rows.length - 280) {
+      const recent = rows.at(-300);
+      while (list.firstElementChild && list.firstElementChild !== anchor) list.firstElementChild.remove();
+      let next = anchor.nextElementSibling;
+      while (next && next !== recent) { const after = next.nextElementSibling; next.remove(); next = after; }
+      const gap = document.createElement("li"); gap.className = "gap"; app.setText(gap, "messagesBetweenOmitted"); anchor.after(gap);
+      return;
+    }
     while (list.children.length > 300) list.removeChild(list.firstChild);
     if (list.firstElementChild && !list.firstElementChild.classList.contains("gap")) {
       const gap = document.createElement("li");

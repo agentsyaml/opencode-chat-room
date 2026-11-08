@@ -1,6 +1,7 @@
 import RoomService, { RoomError, type Room } from "../src/room-service";
 import { writeState } from "../src/store";
 import { clearPendingAdmission } from "../src/queue";
+import { removeRoomResources } from "../src/resources";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const serializeRoom = (room: Room) => ({ ...room, participants: [...room.participants.values()], messages: room.messages, kind: room.kind ?? "group" });
@@ -79,6 +80,7 @@ export async function roomManagement(req: Request, url: URL): Promise<Response |
       delete registry[roomId];
       return removed;
     });
+    await removeRoomResources(roomId).catch(() => console.error("failed to clean deleted room resources", roomId));
     for (const sid of sessions) clearPendingAdmission(sid, roomId, Number.MAX_SAFE_INTEGER);
     return json({ ok: true });
   }

@@ -27,7 +27,7 @@ export function initReceipts(app) {
       const next = $("#msgList").querySelector(`[data-msg-id="${CSS.escape(anchorId)}"]`);
       if (next) thread.scrollTop += next.getBoundingClientRect().top - thread.getBoundingClientRect().top - anchorTop;
     }
-    if (selectedID) renderPanel();
+    if (selectedID) { renderPanel(); positionPanel(); }
   };
   $("#msgList").addEventListener("click", (event) => {
     const button = event.target.closest(".message-readers");
@@ -42,33 +42,38 @@ export function initReceipts(app) {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && selectedID) { event.preventDefault(); close(true); }
   });
+  window.addEventListener("resize", positionPanel);
+  window.addEventListener("scroll", positionPanel, true);
 
   function open(id, button) {
     selectedID = id; trigger = button;
     button.setAttribute("aria-expanded", "true");
-    preservePosition(() => {
-      $("#chatView").classList.add("reader-open"); panel.hidden = false; renderPanel();
-    }, () => $("#btnCloseReaders").focus());
+    panel.hidden = false; renderPanel(); positionPanel();
+    requestAnimationFrame(() => $("#readerHeading").focus({ preventScroll: true }));
   }
   function close(restoreFocus) {
     if (!selectedID) return;
     const previous = trigger;
     selectedID = ""; trigger = null;
     previous?.setAttribute("aria-expanded", "false");
-    preservePosition(() => {
-      panel.hidden = true; $("#chatView").classList.remove("reader-open");
-    }, () => { if (restoreFocus && previous?.isConnected) previous.focus({ preventScroll: true }); });
+    panel.hidden = true;
+    if (restoreFocus && previous?.isConnected) previous.focus({ preventScroll: true });
   }
-  function preservePosition(change, after) {
-    const thread = $("#thread"), edge = thread.getBoundingClientRect();
-    const anchor = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((node) => node.getBoundingClientRect().bottom > edge.top);
-    const id = anchor?.dataset.msgId, top = anchor?.getBoundingClientRect().top;
-    change();
-    requestAnimationFrame(() => {
-      const next = id && $("#msgList").querySelector(`[data-msg-id="${CSS.escape(id)}"]`);
-      if (next) thread.scrollTop += next.getBoundingClientRect().top - top;
-      after();
-    });
+  function positionPanel() {
+    if (!selectedID || panel.hidden) return;
+    if (!trigger?.isConnected) return close(false);
+    const anchor = trigger.getBoundingClientRect(), margin = 12;
+    if (anchor.bottom <= 0 || anchor.top >= innerHeight) return close(false);
+    const width = Math.min(320, innerWidth - margin * 2);
+    panel.style.width = `${width}px`;
+    const belowSpace = innerHeight - margin - anchor.bottom - 8;
+    const aboveSpace = anchor.top - margin - 8;
+    const placeBelow = belowSpace >= aboveSpace;
+    panel.style.maxHeight = `${Math.max(0, placeBelow ? belowSpace : aboveSpace)}px`;
+    const height = panel.getBoundingClientRect().height;
+    const left = Math.max(margin, Math.min(anchor.right - width, innerWidth - width - margin));
+    const top = placeBelow ? anchor.bottom + 8 : anchor.top - height - 8;
+    panel.style.left = `${left}px`; panel.style.top = `${top}px`;
   }
   function renderPanel() {
     const message = app.state.room?.messages.find((item) => item.id === selectedID);

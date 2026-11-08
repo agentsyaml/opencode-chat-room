@@ -9,7 +9,6 @@ import {
   identity,
   loadRegistry,
   loadRooms,
-  NOTIFY_INSTRUCTION,
   writeState,
   readState,
   readUnreadMessages,
@@ -31,6 +30,8 @@ import { createNotifier } from "./src/plugin-notifications";
 import { explicitlyAddresses } from "./src/mentions";
 import { createV2Setup, type V2Runtime } from "./src/v2-plugin";
 import { createV1Server } from "./src/v1-plugin";
+import { runAnnouncementTool } from "./src/announcement-tool";
+import { uploadAgentResource } from "./src/resource-upload";
 
 // ponytail: CHAT_ROOM_SERVER_URL switches to central mode (all state on a
 // central server); unset = standalone local-file mode
@@ -243,14 +244,17 @@ export async function pollKnownSessions(
   await flushReceiptCandidates({ destination: receiptDestination(""), receiverOwnerID: transport.receiverOwnerID }).catch(() => {});
 }
 
-const READ_ONLY_ACTIONS = new Set(["list", "members", "poll"]);
+const READ_ONLY_ACTIONS = new Set(["list", "members", "poll", "announcement_list", "announcement_read"]);
 
 const roomArgs = z.object({
-  action: z.enum(["create", "join", "leave", "list", "send", "poll", "members"]),
-  name: z.string().max(64).optional(),
+  action: z.enum(["create", "join", "leave", "list", "send", "poll", "members", "upload_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete"]),
+  name: z.string().max(64).optional().describe("For join: your own participant display name, NOT the room name (required). For create: the new room name."),
   roomId: z.string().optional(),
+  filePath: z.string().optional().describe("Local regular file to upload; central mode only; requires host read permission."),
   text: z.string().max(2000).optional(),
   isQuestion: z.boolean().optional(),
+  announcementName: z.string().optional().describe("Name of a room announcement; distinct from participant or room name."),
+  content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters."),
 }).superRefine((args, ctx) => {
   if (args.action === "join" && !args.name?.trim()) {
     ctx.addIssue({ code: "custom", path: ["name"], message: "name is required to join a room" });
@@ -260,11 +264,12 @@ type RoomArguments = z.infer<typeof roomArgs>;
 
 const roomExecute = async (
   args: RoomArguments,
-  context: Pick<V1ToolContext, "sessionID">,
+  context: V1ToolContext,
 ) => {
     if (args.action === "join" && !args.name?.trim()) return "error: name is required to join a room";
+    const runtime = currentRuntime();
+    if (args.action === "upload_resource") return uploadAgentResource(runtime.center, args.roomId ?? "", args.filePath ?? "", context.sessionID, context);
     try {
-      const runtime = currentRuntime();
       const explicitV2Join = runtime.protocol === "v2" && (args.action === "create" || args.action === "join");
       const receiverOwnerID = explicitV2Join && runtime.transport.verifySession
         ? await runtime.transport.verifySession(context.sessionID) : undefined;
@@ -280,6 +285,8 @@ const roomExecute = async (
           ...(runtime.protocol === "v2" ? { protocol: "v2" as const, receiverOwnerID } : {}),
         }, context.sessionID);
       }
+      const announcementResult = await runAnnouncementTool(args, context.sessionID);
+      if (announcementResult !== undefined) return announcementResult;
       // ponytail: act as the identity this session registered with on join
       let selfName = identity();
       let joinPrevName: string | undefined;
@@ -433,10 +440,12 @@ const roomExecute = async (
               )
               .join("\n") + (pollPage?.hasMore ? "\nMore unread messages remain; poll again." : "");
           }
+          default:
+            return "error: unsupported room action";
         }
       }, READ_ONLY_ACTIONS.has(args.action));
       for (const notification of notifications) {
-        void notifyRoom(notification.roomId, notification.roomName, NOTIFY_INSTRUCTION,
+        void notifyRoom(notification.roomId, notification.roomName,
           context.sessionID, notification.messages).catch(() => {});
       }
       if (args.action === "poll" && pollMaxTs !== undefined && pollMaxTs > 0) {
@@ -449,7 +458,7 @@ const roomExecute = async (
 };
 
 const room = tool({
-  description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members",
+  description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; upload files and media",
   args: roomArgs.shape,
   execute: roomExecute,
 });
@@ -479,7 +488,7 @@ export const setup = createV2Setup({
     center: { center: centerUrl, token: centerToken, directory },
   }),
   run: (runtime, callback) => runtimeContext.run(runtime, callback),
-  execute: (args, sessionID) => roomExecute(args, { sessionID }),
+  execute: (args, sessionID, permissionContext) => roomExecute(args, { ...permissionContext, sessionID } as V1ToolContext),
   observe: refreshSelf,
   poll: pollKnownSessions,
 });

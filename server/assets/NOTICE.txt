@@ -2,5 +2,6 @@ Browser vendors bundled locally; no external requests are made at runtime.
 
 marked 18.0.4 — MIT License, see MARKED-LICENSE.
 DOMPurify 3.4.7 — MPL 2.0 or Apache License 2.0, see DOMPURIFY-LICENSE.
+Mermaid 11.12.2 — MIT License, see MERMAID-LICENSE.
 
-Sources: https://www.npmjs.com/package/marked and https://www.npmjs.com/package/dompurify
+Sources: https://www.npmjs.com/package/marked, https://www.npmjs.com/package/dompurify and https://www.npmjs.com/package/mermaid

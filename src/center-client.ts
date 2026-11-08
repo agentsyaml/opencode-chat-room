@@ -97,6 +97,8 @@ export async function centerAction(
     name?: string;
     roomId?: string;
     text?: string;
+    announcementName?: string;
+    content?: string;
     isQuestion?: boolean;
     receiverOwnerID?: string;
     protocol?: "v1" | "v2";
@@ -184,6 +186,30 @@ export async function centerAction(
       return members.length > 0
         ? members.map((m) => m.name).join("\n")
         : "no members";
+    }
+    case "announcement_list":
+    case "announcement_read":
+    case "announcement_write":
+    case "announcement_delete": {
+      if (!args.roomId) return "error: roomId is required";
+      if (args.action !== "announcement_list" && !args.announcementName) return "error: announcementName is required";
+      const root = `/rooms/${encodeURIComponent(args.roomId)}/announcements`;
+      if (args.action === "announcement_list") {
+        const result = await request(opts, root, "GET") as { announcements: Array<{ name: string; content: string }> };
+        return result.announcements.map((item) => `${item.name}: ${item.content}`).join("\n") || "no announcements";
+      }
+      const path = `${root}/${encodeURIComponent(args.announcementName!)}`;
+      if (args.action === "announcement_read") {
+        const result = await request(opts, path, "GET") as { announcement: { name: string; content: string } };
+        return `${result.announcement.name}:\n${result.announcement.content}`;
+      }
+      if (args.action === "announcement_write") {
+        if (typeof args.content !== "string") return "error: content is required";
+        const result = await request(opts, path, "PUT", { sessionID, content: args.content }) as { announcement: { name: string; content: string } };
+        return `announcement saved: ${result.announcement.name}`;
+      }
+      await request(opts, path, "DELETE", { sessionID });
+      return `announcement deleted: ${args.announcementName}`;
     }
     case "send": {
       if (!args.roomId) {

@@ -1,6 +1,9 @@
 import type { Config, Plugin, PluginInput, ToolDefinition } from "@opencode-ai/plugin";
 import type { V2Runtime } from "./v2-plugin";
 import type { QueueTransport } from "./queue-transport";
+import { fileURLToPath } from "node:url";
+
+const bundledSkillsPath = fileURLToPath(new URL("../skills", import.meta.url));
 
 export function createV1Server(deps: {
   runtime(input: PluginInput, transport: QueueTransport): V2Runtime;
@@ -35,7 +38,9 @@ export function createV1Server(deps: {
     };
     return {
       tool: { room },
-      config: async (cfg: Config) => {
+      config: async (cfg: Config & { skills?: { paths?: string[]; urls?: string[] } }) => {
+        cfg.skills ??= {};
+        cfg.skills.paths = [...new Set([...(cfg.skills.paths ?? []), bundledSkillsPath])];
         cfg.command = cfg.command ?? {};
         cfg.command.room = {
           description: "Chat room: create/join/leave/list rooms, send and poll messages",

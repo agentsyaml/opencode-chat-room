@@ -22,6 +22,7 @@ export function initRooms(app) {
     $("#btnCopyId").title = app.t("copyRoomIdTitle", { id: app.state.room.id });
     $("#btnCopyId").setAttribute("aria-label", app.t("copyRoomId"));
     app.setText($("#railIdentity"), "identityLabel", { name: app.state.myName });
+    $("#profileAvatar").textContent = Array.from(app.state.myName.trim())[0]?.toLocaleUpperCase() || "?";
     app.updateTitle();
   };
 
@@ -40,6 +41,7 @@ export function initRooms(app) {
     const entry = existing || { unreadIds: new Map(), unreadOverflow: false, preview: "", previewAt: 0, position: 0, readTs: 0, receivedTs: room.messages.at(-1)?.createdAt ?? 0 };
     entry.unreadIds ||= new Map();
     entry.unreadOverflow ||= false;
+    entry.readTs ||= app.state.lastReadTs.get(room.id) || 0;
     entry.room = room;
     entry.name = name;
     const latest = room.messages.at(-1);
@@ -60,13 +62,12 @@ export function initRooms(app) {
     if (app.state.room?.id === roomId) return;
     if (app.state.room) {
       app.saveDraft(app.state.room.id, $("#msgInput").value);
-      app.savePosition(app.state.room.id, $("#thread").scrollTop);
+      app.captureReadingPosition?.();
     }
     app.stopPolling();
     app.state.room = entry.room;
     app.state.myName = entry.name;
-    const hasSavedPosition = app.state.positions.has(roomId);
-    entry.position = app.state.positions.get(roomId) ?? entry.position;
+    const savedPosition = app.state.positions.get(roomId);
     app.state.unread = entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
     app.rendered = 0;
     app.firstMessageId = null;
@@ -76,9 +77,11 @@ export function initRooms(app) {
     app.renderHead();
     $("#msgList").textContent = "";
     app.renderMessages(false);
+    const restoredPosition = app.restoreReadingPosition?.(roomId);
+    app.state.readAnchorGuard = restoredPosition ? { roomId, ...restoredPosition } : null;
     app.startPolling();
     app.renderMembers();
-    $("#thread").scrollTop = hasSavedPosition ? entry.position : entry.position || $("#thread").scrollHeight;
+    if (!restoredPosition) $("#thread").scrollTop = typeof savedPosition === "number" ? savedPosition : entry.position || $("#thread").scrollHeight;
     $("#msgInput").disabled = false;
     $("#msgInput").value = app.state.drafts.get(roomId) || "";
     app.renderFailedMessages();
@@ -88,10 +91,11 @@ export function initRooms(app) {
     app.hideSendError();
     app.updateBadge();
     app.updateJump();
-    app.markActiveRoomRead();
+    if (!restoredPosition) app.markActiveRoomRead();
     app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
     app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
     void app.refreshRoomList();
+    document.dispatchEvent(new CustomEvent("chat-room-activated", { detail: roomId }));
   };
 
   app.joinRoom = async (roomId, name) => {
@@ -165,7 +169,7 @@ export function initRooms(app) {
     if (active) {
       app.state.navigationGeneration++;
       app.saveDraft(roomId, $("#msgInput").value);
-      app.savePosition(roomId, $("#thread").scrollTop);
+      app.captureReadingPosition?.();
       app.stopPolling();
       app.closeMention();
       app.state.room = null;
@@ -375,6 +379,7 @@ export function initRooms(app) {
   app.openTokenBox = () => { $("#tokenBox").open = true; };
   app.openChatSettings = () => {
     app.closePanels();
+    app.lastFocus = $("#btnSettings");
     $("#chatSettings").hidden = false;
     $("#btnSettings").setAttribute("aria-expanded", "true");
     $("#tokenHint").hidden = false;

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import { databasePath, formatNotificationLines, NOTIFY_INSTRUCTION, recordMessageReceipts, timeOf } from "./store";
+import { databasePath, formatNotificationLines, recordMessageReceipts, timeOf } from "./store";
 import { acquireDeliveryLease, deleteReceiptCandidate, markReceiptCandidateReady, ownsDeliveryLease, receiptCandidates, readyReceiptCandidates, releaseDeliveryLease, saveReceiptCandidate } from "./receiver-state";
 
 // shortcut: expire unobserved proofs after seven days; increase if hosts may stay disconnected longer.
@@ -36,15 +36,15 @@ export function prepareReceiptCandidate(input: {
   if (input.capped) {
     const cappedItems = input.items.filter(hasCappedMetadata);
     if (cappedItems.length !== input.items.length) return undefined;
-    const instruction = input.prompt.lastIndexOf(`\n${NOTIFY_INSTRUCTION}\n</notification>`);
-    if (instruction < 0) return undefined;
+    const closing = input.prompt.lastIndexOf("\n</notification>");
+    if (closing < 0) return undefined;
     const renderedCounts = new Map<string, number>();
     for (const item of cappedItems) {
       const prefix = `\n- [${timeOf(item.createdAt)}] ${item.senderId}: `;
       const key = `${prefix}${item.text}`;
       renderedCounts.set(key, (renderedCounts.get(key) ?? 0) + 1);
     }
-    let tail = input.prompt.slice(0, instruction);
+    let tail = input.prompt.slice(0, closing);
     evidenceItems = [];
     for (let index = cappedItems.length - 1; index >= 0; index--) {
       const item = cappedItems[index]!;

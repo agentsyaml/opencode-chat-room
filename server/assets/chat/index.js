@@ -6,6 +6,7 @@ import { initRooms } from "./rooms.js";
 import { initEvents } from "./events.js";
 import { initQuestions } from "./questions.js";
 import { initReceipts } from "./receipts.js";
+import { initAnnouncements } from "./announcements.js";
 
 initMentions(app);
 initMessages(app);
@@ -14,3 +15,4 @@ initMembers(app);
 initRooms(app);
 initQuestions(app);
 initEvents(app);
+initAnnouncements(app);

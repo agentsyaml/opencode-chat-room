@@ -1,4 +1,4 @@
-import { formatNotificationLines, NOTIFY_INSTRUCTION } from "./store";
+import { formatNotificationLines } from "./store";
 import {
   clearPendingAdmission,
   getOrCreatePendingAdmission,
@@ -32,7 +32,7 @@ const restoreKey = (sessionID: string, roomID: string) => JSON.stringify([sessio
 function render(roomName: string, roomId: string, roomKind: "group" | "direct", name: string, items: QueueItem[]) {
   const { lines, capped } = formatNotificationLines(items);
   const context = roomKind === "direct" ? `Direct conversation with ${name} in room ${roomName} (${roomId})` : `New messages in room ${roomName} (${roomId})`;
-  return { prompt: `<notification>\n${context}:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`, capped };
+  return { prompt: `<notification>\n${context}:\n${lines.join("\n")}\n</notification>`, capped };
 }
 
 export async function checkCenterInbox(
@@ -186,13 +186,6 @@ export async function pushItemsToSession(
       ? admission.items.filter((item) => explicitlyAddresses(item, recipient.name!, sessionID, roomKind))
         .reduce((max, item) => Math.max(max, item.createdAt), 0)
       : 0;
-    if (transport.protocol === "v2" && transport.backgroundSession && addressedTs > 0 &&
-      claimBackgroundAttempt(sessionID, roomId, backgroundServiceKey(target, opts.center), addressedTs)) {
-      let attempt: BackgroundResult;
-      try { attempt = backgroundResult(await target.backgroundSession!(sessionID)); }
-      catch { attempt = { status: "failed", reason: "request-threw" }; }
-      if (attempt.status !== "done") console.warn(`[chat-room] background ${attempt.status} room=${roomId} reason=${attempt.reason ?? "unknown"}`);
-    }
     let current: Recipient | undefined;
     try {
       const registry = await request(opts, `/rooms/${encodeURIComponent(roomId)}/registry`, "GET") as Record<string, Recipient>;
@@ -229,6 +222,13 @@ export async function pushItemsToSession(
     void request(opts, "/active", "POST", { sessionID }).catch(() => {});
     if (admission.maxTs > 0 && await markQueued(opts, roomId, sessionID, admission.maxTs)) {
       clearPendingAdmission(sessionID, roomId, admission.maxTs);
+    }
+    if (transport.protocol === "v2" && transport.backgroundSession && addressedTs > 0 &&
+      claimBackgroundAttempt(sessionID, roomId, backgroundServiceKey(target, opts.center), addressedTs)) {
+      let attempt: BackgroundResult;
+      try { attempt = backgroundResult(await target.backgroundSession!(sessionID)); }
+      catch { attempt = { status: "failed", reason: "request-threw" }; }
+      if (attempt.status !== "done") console.warn(`[chat-room] background ${attempt.status} room=${roomId} reason=${attempt.reason ?? "unknown"}`);
     }
   }
   return worst;

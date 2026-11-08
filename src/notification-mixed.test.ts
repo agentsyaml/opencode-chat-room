@@ -41,7 +41,7 @@ describe.serial("mixed protocol notification dispatch", () => {
       promptQueue: async () => { throw Error("V1 delivery must use prompt_async"); },
     };
     const notifier = createNotifier({ transport: () => transport, bumpQueued: async () => true });
-    try { await notifier.notifyRoom(message.roomId, "mixed", "ignored", "sender-session", [message]); }
+    try { await notifier.notifyRoom(message.roomId, "mixed", "sender-session", [message]); }
     finally { globalThis.fetch = oldFetch; }
     expect(requests).toHaveLength(1);
     expect(requests[0]!.url).toBe("http://v1.invalid:7788/session/legacy-session/prompt_async");
@@ -65,7 +65,7 @@ describe.serial("mixed protocol notification dispatch", () => {
     const oldFetch = globalThis.fetch;
     globalThis.fetch = (async () => { requests++; return new Response(null, { status: 204 }); }) as unknown as typeof fetch;
     const notifier = createNotifier({ transport: () => ({ protocol: "v1", serverUrl: "http://v1.invalid" }), bumpQueued: async () => true });
-    try { await notifier.notifyRoom(message.roomId, "mixed", "ignored", "sender-session", [message]); }
+    try { await notifier.notifyRoom(message.roomId, "mixed", "sender-session", [message]); }
     finally { globalThis.fetch = oldFetch; }
     expect(requests).toBe(0);
   });

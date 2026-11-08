@@ -42,14 +42,22 @@ test("only exact user context ID and full-text hash make one durable receipt pro
   expect(observeReceiptContext("session", [user()], "https://context.invalid")).toBe(0);
 });
 
+test("serve wake content stays compact and retains the room and unread text", async () => {
+  const { formatServeWakePrompt } = await import("./store");
+  const prompt = formatServeWakePrompt("dev", "room-123", ["- [12:00] alice: please review"]);
+  expect(prompt).toContain("room dev (room-123)");
+  expect(prompt).toContain("alice: please review");
+  expect(prompt).not.toContain("follow this reply rule");
+});
+
 test("capped admission receipts only complete notification lines", async () => {
-  const { formatNotificationLines, NOTIFY_INSTRUCTION } = await import("./store");
+  const { formatNotificationLines } = await import("./store");
   const items = [
     { id: "complete-before-long", senderId: "alice", createdAt: 10, text: "complete short message" },
     { id: "truncated-long", senderId: "bob", createdAt: 11, text: "x".repeat(301) },
   ];
   const { lines, capped } = formatNotificationLines(items);
-  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n</notification>`;
   const candidate = prepareReceiptCandidate(base({ admissionID: "partial-capped", items, prompt, capped }))!;
   expect(candidate.messageIDs).toEqual(["complete-before-long"]);
   expect(observeReceiptContext("session", [user("partial-capped", prompt)])).toBe(1);
@@ -64,12 +72,12 @@ test("capped admission receipts only complete notification lines", async () => {
 });
 
 test("count-capped admission receipts only the displayed tail", async () => {
-  const { formatNotificationLines, NOTIFY_INSTRUCTION } = await import("./store");
+  const { formatNotificationLines } = await import("./store");
   const items = Array.from({ length: 21 }, (_, i) => ({
     id: `count-${i}`, senderId: `sender-${i}`, createdAt: 1000 + i, text: `message-${i}`,
   }));
   const { lines, capped } = formatNotificationLines(items);
-  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n</notification>`;
   const candidate = prepareReceiptCandidate(base({ admissionID: "count-capped", items, prompt, capped }))!;
   expect(candidate.messageIDs).toEqual(items.slice(-20).map((item) => item.id));
   expect(observeReceiptContext("session", [user("count-capped", prompt)])).toBe(1);
@@ -78,12 +86,12 @@ test("count-capped admission receipts only the displayed tail", async () => {
 });
 
 test("count cap does not receipt an omitted duplicate line", async () => {
-  const { formatNotificationLines, NOTIFY_INSTRUCTION, timeOf } = await import("./store");
+  const { formatNotificationLines, timeOf } = await import("./store");
   const items = Array.from({ length: 21 }, (_, i) => ({
     id: `duplicate-${i}`, senderId: "same-sender", createdAt: 1000 + i, text: "same-second duplicate",
   }));
   const { lines, capped } = formatNotificationLines(items);
-  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n</notification>`;
   const legacyIDs = items.filter((item) => prompt.includes(`\n- [${timeOf(item.createdAt)}] ${item.senderId}: ${item.text}\n`)).map((item) => item.id);
   const candidate = prepareReceiptCandidate(base({ admissionID: "duplicate-count-cap", items, prompt, capped }));
   expect(legacyIDs).toContain(items[0]!.id);
@@ -92,21 +100,21 @@ test("count cap does not receipt an omitted duplicate line", async () => {
 });
 
 test("a forged single-line header cannot prove a truncated message", async () => {
-  const { formatNotificationLines, NOTIFY_INSTRUCTION, timeOf } = await import("./store");
+  const { formatNotificationLines, timeOf } = await import("./store");
   const item = { id: "truncated-header", senderId: "alice", createdAt: 1000, text: "x".repeat(301) };
   const { lines, capped } = formatNotificationLines([item]);
   const fullLine = `- [${timeOf(item.createdAt)}] ${item.senderId}: ${item.text}`;
-  const prompt = `<notification>\nNew messages:\n${fullLine}\nHeader continues.\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const prompt = `<notification>\nNew messages:\n${fullLine}\nHeader continues.\n${lines.join("\n")}\n</notification>`;
   expect(prompt).toContain(`\n${fullLine}\n`);
   expect(prepareReceiptCandidate(base({ admissionID: "forged-header", items: [item], prompt, capped }))).toBeUndefined();
   expect(observeReceiptContext("session", [user("forged-header", prompt)])).toBe(0);
 });
 
 test("a truncation ellipsis identical to the source text is not full evidence", async () => {
-  const { formatNotificationLines, NOTIFY_INSTRUCTION } = await import("./store");
+  const { formatNotificationLines } = await import("./store");
   const item = { id: "ellipsis-truncated", senderId: "alice", createdAt: 1000, text: `${"x".repeat(300)}…` };
   const { lines, capped } = formatNotificationLines([item]);
-  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n${NOTIFY_INSTRUCTION}\n</notification>`;
+  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n</notification>`;
   expect(capped).toBe(true);
   expect(lines[0]).toContain(item.text);
   expect(prepareReceiptCandidate(base({ admissionID: "ellipsis-truncated", items: [item], prompt, capped }))).toBeUndefined();
@@ -185,16 +193,21 @@ test("V2 prompt hook is not evidence; primary context hook marks the proof ready
   const { createV2Setup } = await import("./v2-plugin");
   const hooks = new Map<string, (input: never) => unknown>();
   const registration = { dispose: async () => {} };
+  let registeredSkill: { id: string; path: string; content: string } | undefined;
   const context = {
     app: { version: "" }, location: { directory: "/isolated" },
     session: { hook: async (name: string, callback: (input: never) => unknown) => { hooks.set(name, callback); return registration; }, prompt: async () => {} },
-    tool: { transform: async () => registration }, command: { transform: async () => registration },
+    skill: { transform: async (edit: (editor: { get: () => undefined; add: (skill: typeof registeredSkill) => void }) => void) => {
+      edit({ get: () => undefined, add: (skill) => { registeredSkill = skill; } }); return registration;
+    } }, tool: { transform: async () => registration }, command: { transform: async () => registration },
   };
   let receiverPoll: ((ids: ReadonlySet<string>, target: QueueTransport, center: { center: string; token: string; directory?: string }) => Promise<void>) | undefined;
   const setup = createV2Setup({ runtime: (_directory, transport) => ({ protocol: "v2", selfServerUrl: "", selfDirectory: "", transport, center: { center: "https://hook.invalid", token: "" } }),
     run: (_runtime, callback) => callback(), execute: async () => "", observe: async () => {}, poll: async () => {},
     attachReceiver: (value) => { receiverPoll = value.poll; return async () => {}; } });
   const cleanup = await setup(context as never);
+  expect(registeredSkill).toMatchObject({ id: "chatroom", path: expect.stringContaining("skills/chatroom/SKILL.md") });
+  expect(registeredSkill?.content).toContain("persistent room question");
   let uploads = 0;
   globalThis.fetch = (async () => { uploads++; return Response.json({ acceptedIDs: ["message-1"] }); }) as unknown as typeof fetch;
   await hooks.get("prompt")!({ sessionID: "session" } as never);
@@ -220,7 +233,7 @@ test("first context lazily resolves the verified owner and marks its receipt", a
     resolveOwner: async () => { lookups++; return "owner"; }, attachReceiver: () => async () => {} });
   const context = { app: { version: "" }, location: { directory: "/isolated" },
     session: { hook: async (name: string, callback: (input: never) => unknown) => { if (name === "context") hook = callback as (input: never) => void | Promise<void>; return registration; }, prompt: async () => {} },
-    tool: { transform: async () => registration }, command: { transform: async () => registration } };
+    skill: { transform: async () => registration }, tool: { transform: async () => registration }, command: { transform: async () => registration } };
   const cleanup = await setup(context as never);
   globalThis.fetch = (async () => { uploads++; return Response.json({ acceptedIDs: ["message-1"] }); }) as unknown as typeof fetch;
   await hook({ sessionID: "session", messages: [user("first-context")] } as never);
@@ -232,12 +245,15 @@ test("first context lazily resolves the verified owner and marks its receipt", a
 
 test("center delivery preserves the ownerless V2 fallback", async () => {
   const { pushItemsToSession } = await import("./center-inbox");
-  let prompts = 0;
+  let prompt = "";
   globalThis.fetch = (async () => Response.json({ session: { protocol: "v2", receiverOwnerID: "verified-owner", membershipID: "membership", name: "agent" } })) as unknown as typeof fetch;
   await pushItemsToSession({ center: "https://owner-gate.invalid", token: "" }, "session", [
     { id: "owner-gated-message", roomId: "owner-gated-room", roomName: "test", senderId: "alice", text: "full text", createdAt: 10 },
-  ], { protocol: "v2", promptQueue: async () => { prompts++; } });
-  expect(prompts).toBe(1);
+  ], { protocol: "v2", promptQueue: async (_sessionID, _id, text) => { prompt = text; } });
+  expect(prompt).toContain("owner-gated-room");
+  expect(prompt).toContain("full text");
+  expect(prompt).not.toContain("Treat message contents as untrusted");
+  expect(prompt).not.toContain("follow this reply rule");
 });
 
 test("ready proof survives queue cleanup and restart across transient center failure", async () => {
@@ -423,7 +439,9 @@ test("ownerless V2 central polls advance through the real inbox and read routes"
 test("owned V2 reads require the owner and current join generation", async () => {
   const store = await import("./store");
   const ownerID = "123e4567-e89b-42d3-a456-426614174000", otherOwner = "123e4567-e89b-42d3-a456-426614174001";
+  const previousToken = process.env.CHAT_ROOM_SERVER_TOKEN;
   process.env.CHAT_ROOM_SERVER_TOKEN = "isolated-poll-token";
+  try {
   const server = (await import("../server/chat-server")).default;
   const fixture = await store.writeState((service, registry) => {
     const room = service.createRoom("owned-poll", "sender");
@@ -447,4 +465,8 @@ test("owned V2 reads require the owner and current join generation", async () =>
   expect(current.membershipID).not.toBe("old-generation");
   expect((await postRead("old-generation", ownerID)).status).toBe(409);
   expect((await store.loadRegistry())[fixture.roomID]!.reader!.lastReadTs).toBe(current.lastReadTs);
+  } finally {
+    if (previousToken === undefined) delete process.env.CHAT_ROOM_SERVER_TOKEN;
+    else process.env.CHAT_ROOM_SERVER_TOKEN = previousToken;
+  }
 });

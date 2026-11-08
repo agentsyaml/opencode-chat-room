@@ -3,6 +3,137 @@ import { copyCodeFromButton, copyTextToClipboard } from "./markdown.js";
 
 export function initEvents(app) {
   const $ = app.$;
+  const roomRail = $("#roomRail"), drawerTrigger = $("#btnRoomsDrawer"), backdrop = $("#roomDrawerBackdrop");
+  const smallScreen = () => matchMedia("(max-width: 760px)").matches;
+  let readingPosition = null, resizeFrame = 0, resizeGeneration = 0, scrollGeneration = 0, resizeResetTimer = 0;
+  function captureReadingPosition() {
+    const thread = $("#thread"), edge = thread.getBoundingClientRect(), top = edge.top + thread.clientTop;
+    const anchor = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((row) => row.getBoundingClientRect().bottom > top);
+    readingPosition = { roomId: app.state.room?.id, messageId: anchor?.dataset.msgId, offset: anchor ? anchor.getBoundingClientRect().top - top : 0,
+      atBottom: thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 4 };
+    const missing = app.state.readAnchorGuard?.roomId === readingPosition.roomId && app.state.readAnchorGuard.missing;
+    if (readingPosition.roomId && anchor && (!missing || performance.now() <= app.state.userScrollIntentUntil)) {
+      app.savePosition(readingPosition.roomId, { messageId: readingPosition.messageId, offset: readingPosition.offset });
+    }
+  }
+  app.captureReadingPosition = captureReadingPosition;
+  let layoutQueue = Promise.resolve();
+  app.preserveReadingLayout = (change) => {
+    const task = layoutQueue.then(async () => {
+      captureReadingPosition();
+      const saved = readingPosition, roomId = app.state.room?.id, generation = scrollGeneration;
+      app.state.layoutScrollAdjusting = true;
+      try {
+        await change();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        if (roomId && app.state.room?.id === roomId && generation === scrollGeneration) {
+          const thread = $("#thread");
+          if (saved.atBottom) thread.scrollTop = thread.scrollHeight;
+          else if (saved.messageId) {
+            const row = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((item) => item.dataset.msgId === saved.messageId);
+            if (row) thread.scrollTop += row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop + saved.offset);
+          }
+        }
+        captureReadingPosition();
+      } finally { requestAnimationFrame(() => { app.state.layoutScrollAdjusting = false; }); }
+    });
+    layoutQueue = task.catch(() => {});
+    return task;
+  };
+  app.restoreReadingPosition = (roomId) => {
+    const thread = $("#thread"), saved = app.state.positions.get(roomId), entry = app.state.rooms.get(roomId);
+    const align = (messageId, offset) => {
+      const row = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((item) => item.dataset.msgId === messageId);
+      if (!row) return false;
+      thread.scrollTop += row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop + offset);
+      captureReadingPosition(); return true;
+    };
+    if (typeof saved === "number") { thread.scrollTop = saved; captureReadingPosition(); return { messageId: readingPosition?.messageId }; }
+    if (saved?.messageId && align(saved.messageId, Number(saved.offset) || 0)) return { messageId: saved.messageId };
+    const readTs = entry?.readTs || app.state.lastReadTs.get(roomId) || 0;
+    const boundary = readTs && entry?.room.messages.find((message) => message.createdAt > readTs);
+    if (boundary && align(boundary.id, 0)) return { messageId: boundary.id };
+    return saved?.messageId || readTs ? { messageId: saved?.messageId || null, missing: true } : false;
+  };
+  function closeRoomDrawer(restore = true) {
+    roomRail.classList.remove("drawer-open"); roomRail.inert = true; roomRail.setAttribute("aria-hidden", "true");
+    backdrop.hidden = true; drawerTrigger.setAttribute("aria-expanded", "false");
+    if (restore && smallScreen()) drawerTrigger.focus({ preventScroll: true });
+  }
+  function syncRoomDrawer() {
+    if (!smallScreen()) { roomRail.classList.remove("drawer-open"); roomRail.inert = false; roomRail.removeAttribute("aria-hidden"); backdrop.hidden = true; drawerTrigger.setAttribute("aria-expanded", "false"); }
+    else if (!roomRail.classList.contains("drawer-open")) {
+      if (roomRail.contains(document.activeElement)) drawerTrigger.focus({ preventScroll: true });
+      roomRail.inert = true; roomRail.setAttribute("aria-hidden", "true");
+    }
+  }
+  function preserveReadingPosition() {
+    syncRoomDrawer();
+    if (!app.state.resizeScrollAdjusting) app.state.userScrollIntentUntil = 0;
+    app.state.resizeScrollAdjusting = true;
+    const generation = ++resizeGeneration;
+    if (app.state.receiptObservationFrame) cancelAnimationFrame(app.state.receiptObservationFrame);
+    app.state.receiptObservationFrame = 0; app.state.receiptObservation = null;
+    clearTimeout(resizeResetTimer);
+    resizeResetTimer = setTimeout(() => { if (generation === resizeGeneration) app.state.resizeScrollAdjusting = false; }, 500);
+    if (resizeFrame) cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = 0;
+      const position = readingPosition, thread = $("#thread");
+      if (!position?.roomId || position.roomId !== app.state.room?.id) return captureReadingPosition();
+      if (position.atBottom) thread.scrollTop = thread.scrollHeight;
+      else if (position.messageId) {
+        const row = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((item) => item.dataset.msgId === position.messageId);
+        if (row) thread.scrollTop += row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop + position.offset);
+      }
+      captureReadingPosition();
+    });
+  }
+  syncRoomDrawer();
+  window.addEventListener("resize", preserveReadingPosition);
+  window.addEventListener("pagehide", captureReadingPosition);
+  drawerTrigger.addEventListener("click", () => {
+    if (roomRail.classList.contains("drawer-open")) return closeRoomDrawer();
+    app.closePanels(); roomRail.inert = false; roomRail.removeAttribute("aria-hidden"); roomRail.classList.add("drawer-open");
+    backdrop.hidden = false; drawerTrigger.setAttribute("aria-expanded", "true");
+    (roomRail.querySelector('.room-row[aria-current="page"]') || $("#btnRefreshRooms")).focus();
+  });
+  backdrop.addEventListener("click", () => closeRoomDrawer());
+  $("#roomListChat").addEventListener("click", (event) => { if (roomRail.classList.contains("drawer-open") && event.target.closest("[data-room-id]")) closeRoomDrawer(); });
+  const activateRoom = app.activateRoom;
+  const pendingAnchorLoads = new Map();
+  function cancelAnchorLoads() {
+    for (const { controller } of pendingAnchorLoads.values()) controller.abort();
+    pendingAnchorLoads.clear();
+  }
+  const showJoin = app.showJoin;
+  app.showJoin = (...args) => { cancelAnchorLoads(); return showJoin(...args); };
+  const removeJoinedRoom = app.removeJoinedRoom;
+  app.removeJoinedRoom = (roomId, options) => {
+    if (app.state.room?.id === roomId) cancelAnchorLoads();
+    return removeJoinedRoom(roomId, options);
+  };
+  function activateNow(id) {
+    activateRoom(id); captureReadingPosition();
+    if (roomRail.classList.contains("drawer-open")) closeRoomDrawer();
+  }
+  app.activateRoom = (id) => {
+    cancelAnchorLoads();
+    const entry = app.state.rooms.get(id), saved = app.state.positions.get(id);
+    const intent = ++app.state.navigationGeneration;
+    if (!entry) return activateNow(id);
+    const readTs = entry.readTs || app.state.lastReadTs.get(id) || 0;
+    const needAnchor = saved?.messageId && !entry.room.messages.some((message) => message.id === saved.messageId);
+    const latest = entry.room.messages.at(-1);
+    const needBoundary = !saved?.messageId && readTs && (!latest || latest.createdAt > readTs && !entry.room.messages.some((message) => message.createdAt <= readTs));
+    if (!needAnchor && !needBoundary) return activateNow(id);
+    const controller = new AbortController();
+    const task = loadAnchorHistory(id, entry, saved?.messageId, app, needBoundary ? readTs : 0, controller.signal).catch(() => {}).finally(() => {
+      if (pendingAnchorLoads.get(id)?.controller === controller) pendingAnchorLoads.delete(id);
+      if (intent === app.state.navigationGeneration) activateNow(id);
+    });
+    pendingAnchorLoads.set(id, { controller, task });
+  };
   document.querySelectorAll(".locale-select").forEach((select) => {
     select.addEventListener("change", () => {
       app.setLocale(select.value);
@@ -36,6 +167,7 @@ export function initEvents(app) {
   $("#inRoomNameChat").addEventListener("input", app.hideSendError);
 
   const input = $("#msgInput");
+  window.addEventListener("resize", () => app.autoGrow(input));
   $(".composer").addEventListener("click", (event) => {
     const button = event.target.closest?.("[data-failed-action]");
     if (!button) return;
@@ -66,17 +198,32 @@ export function initEvents(app) {
     event.preventDefault();
     app.insertMention(option.dataset.name);
   });
-  $("#thread").addEventListener("scroll", () => {
-    const thread = $("#thread");
-    if (thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80) void app.markActiveRoomRead();
+  const thread = $("#thread");
+  const markScrollIntent = () => { scrollGeneration++; app.state.userScrollIntentUntil = performance.now() + 700; };
+  thread.addEventListener("wheel", markScrollIntent, { passive: true });
+  thread.addEventListener("touchmove", markScrollIntent, { passive: true });
+  thread.addEventListener("pointerdown", (event) => {
+    if (event.clientX >= thread.getBoundingClientRect().right - 18) markScrollIntent();
+  });
+  thread.addEventListener("scroll", () => {
+    const adjusting = (app.state.resizeScrollAdjusting || app.state.layoutScrollAdjusting)
+      && performance.now() > app.state.userScrollIntentUntil;
+    if (!adjusting || performance.now() <= app.state.userScrollIntentUntil) captureReadingPosition();
+    if (!adjusting && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80) void app.markActiveRoomRead();
     app.queueReceiptRefresh();
-    app.queueReceiptObservation();
+    if (!adjusting) app.queueReceiptObservation();
     app.updateJump();
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) { void app.markActiveRoomRead(); void app.loadManageableMembers(); }
+    if (!document.hidden) {
+      if (!app.state.resizeScrollAdjusting && !app.state.layoutScrollAdjusting) void app.markActiveRoomRead();
+      void app.loadManageableMembers();
+    }
   });
-  window.addEventListener("focus", () => { void app.markActiveRoomRead(); app.queueReceiptRefresh(); app.queueReceiptObservation(); });
+  window.addEventListener("focus", () => {
+    if (!app.state.resizeScrollAdjusting && !app.state.layoutScrollAdjusting) { void app.markActiveRoomRead(); app.queueReceiptObservation(); }
+    app.queueReceiptRefresh();
+  });
   $("#msgList").addEventListener("click", (event) => {
     const button = event.target.closest("[data-copy-code]");
     if (button) void copyCodeFromButton(button, app);
@@ -106,6 +253,14 @@ export function initEvents(app) {
     if (!event.target.closest("#railRoomForm, #btnNewRoom")) $("#railRoomForm").hidden = true;
   });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Tab" && roomRail.classList.contains("drawer-open")) {
+      const stops = [...roomRail.querySelectorAll("button:not(:disabled), input:not(:disabled)")].filter((node) => node.getClientRects().length);
+      const first = stops[0], last = stops.at(-1);
+      if (!roomRail.contains(document.activeElement)) { event.preventDefault(); first?.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+    if (event.key === "Escape" && roomRail.classList.contains("drawer-open")) { event.preventDefault(); closeRoomDrawer(); return; }
     if (event.key === "Escape" && app.mentionActive) app.closeMention();
     if (event.key === "Escape" && !$("#railRoomForm").hidden) $("#railRoomForm").hidden = true;
     if (event.key === "Escape" && (!$("#memberPanel").hidden || !$("#chatSettings").hidden)) {
@@ -119,6 +274,25 @@ export function initEvents(app) {
   $("#inTokenChat").value = LS.token;
   void app.refreshRoomList();
   $("#inRoomId").focus();
+}
+
+async function loadAnchorHistory(roomId, entry, messageId, app, readTs = 0, signal) {
+  let beforeSeq;
+  const messages = [];
+  while (!signal?.aborted) {
+    const query = new URLSearchParams({ limit: "100" });
+    if (beforeSeq) query.set("beforeSeq", String(beforeSeq));
+    const result = await app.api(`/rooms/${encodeURIComponent(roomId)}/history?${query}`, { signal });
+    if (signal?.aborted) return;
+    messages.push(...(result.messages || []));
+    const found = messageId ? messages.some((message) => message.id === messageId)
+      : messages.some((message) => message.createdAt > readTs) && messages.some((message) => message.createdAt <= readTs);
+    if (found || !result.hasMore || !result.nextBeforeSeq || result.nextBeforeSeq === beforeSeq) break;
+    beforeSeq = result.nextBeforeSeq;
+  }
+  if (messageId ? !messages.some((message) => message.id === messageId) : !messages.some((message) => message.createdAt > readTs)) return;
+  const merged = new Map([...entry.room.messages, ...messages].map((message) => [message.id, { ...message, roomId }]));
+  entry.room.messages = [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
 }
 
 function saveAccessToken(button, app) {

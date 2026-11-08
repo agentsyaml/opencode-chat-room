@@ -29,7 +29,7 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
     await page.goto(`${origin}/chat`);
     await page.locator("#inName").fill("Room host");
-    await page.locator("#inRoomName").fill("Receipts room");
+    await page.locator("#inRoomName").fill("__Test_ReceiptsRoom");
     await page.locator("#btnCreate").click();
     await page.locator("#chatView").waitFor({ state: "visible" });
     const roomId = await page.evaluate(async (url: string) => (await import(url)).app.state.room.id, "/assets/chat/state.js");
@@ -182,15 +182,19 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     expect(await page.locator(`[data-msg-id="${ownMessageID}"] .msg-text p`).evaluate((node: HTMLElement) => node.getBoundingClientRect().height)).toBeLessThan(26);
     expect(await page.locator(`[data-msg-id="${contextMessageID}"] .msg-text`).evaluate((node: HTMLElement) => node.getBoundingClientRect().right <= innerWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.evaluate((id: string) => {
-      const thread = document.querySelector<HTMLElement>("#thread")!, row = document.querySelector<HTMLElement>(`[data-msg-id="${id}"]`)!;
-      thread.scrollTop += row.getBoundingClientRect().top - 440;
-    }, targetMessageID);
+    const mobileReaderButton = page.locator(`[data-msg-id="${targetMessageID}"] .message-readers`);
+    await mobileReaderButton.scrollIntoViewIfNeeded();
+    if (!await page.locator("#readerPanel").isVisible()) await mobileReaderButton.click();
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const mobilePanel = await page.locator("#readerPanel").boundingBox();
-    const mobileComposer = await page.locator(".composer").boundingBox();
+    const mobileTrigger = await page.locator(`[data-msg-id="${targetMessageID}"] .message-readers`).boundingBox();
     expect(mobilePanel).not.toBeNull();
-    expect(mobilePanel!.y).toBeGreaterThan(0);
-    expect(mobilePanel!.y + mobilePanel!.height).toBeLessThanOrEqual(mobileComposer!.y + 1);
+    expect(mobileTrigger).not.toBeNull();
+    const verticalGap = Math.min(Math.abs(mobilePanel!.y - (mobileTrigger!.y + mobileTrigger!.height)), Math.abs(mobileTrigger!.y - (mobilePanel!.y + mobilePanel!.height)));
+    if (verticalGap > 10) throw new Error(JSON.stringify({ mobilePanel, mobileTrigger, verticalGap }));
+    expect(mobilePanel!.x).toBeGreaterThanOrEqual(0);
+    expect(mobilePanel!.x + mobilePanel!.width).toBeLessThanOrEqual(390);
+    expect(mobilePanel!.y + mobilePanel!.height).toBeLessThanOrEqual(844);
     expect(await page.locator("#readerList li").count()).toBeGreaterThan(0);
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);
     await page.screenshot({ path: path.join(artifactDir, "chat-receipts-mobile.png"), fullPage: true });
@@ -308,9 +312,9 @@ async function staleReceiptFetchCannotWrite(page: any, roomId: string, messageID
   }, { modulePath: "/assets/chat/state.js", id: roomId });
   await Promise.race([Promise.all([memberRequest, receiptRequest]), new Promise((_, reject) => setTimeout(() => reject(new Error("Room member/receipt requests did not start")), 5000))]);
   await page.locator("#btnNewRoom").click();
-  await page.locator("#inRoomNameChat").fill("Race room");
+  await page.locator("#inRoomNameChat").fill("__Test_ReceiptRace");
   await page.locator("#btnCreateChatRoom").click();
-  await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "Race room");
+  await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "__Test_ReceiptRace");
   await page.waitForFunction(() => document.querySelectorAll("#memberList li[data-member-session-id]").length === 1);
   release(); await page.waitForTimeout(100);
   expect(await page.locator(`#msgList [data-msg-id="${messageID}"]`).count()).toBe(0);

@@ -87,6 +87,7 @@ describe("shared V2 receiver lifecycle", () => {
     const context = {
       location: { directory: "/isolated/project" }, app: { version: "2.0.32" },
       session: { hook: async () => ({ dispose: async () => {} }) },
+      skill: { transform: async () => ({ dispose: async () => {} }) },
       tool: { transform: async () => { throw Error("setup failure"); } },
       command: { transform: async () => ({ dispose: async () => {} }) },
     };

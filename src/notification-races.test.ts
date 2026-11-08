@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { backgroundServiceKey } from "./queue-transport";
 
 const keys = ["HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "CHAT_ROOM_STATE_DIR"] as const;
@@ -15,11 +15,20 @@ const [store, { createNotifier }, receiverState, queue, inbox, { wakeSessions }]
   import("./store"), import("./plugin-notifications"), import("./receiver-state"), import("./queue"), import("./center-inbox"), import("./center-wake"),
 ]);
 const { closeReceiverState } = receiverState;
+const initialFetch = globalThis.fetch;
+async function waitForGate(gate: Promise<void>) {
+  let timer: ReturnType<typeof setTimeout>;
+  try {
+    await Promise.race([gate, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("notification race gate timed out")), 5_000);
+    })]);
+  } finally { clearTimeout(timer!); }
+}
 const ownerID = "123e4567-e89b-42d3-a456-426614174078";
 const sessionID = "race-session";
 
 describe.serial("notification membership races", () => {
-  test("local removal during backgrounding cancels prompt, cursor and retry", async () => {
+  test("local removal during backgrounding cannot retract an admitted prompt", async () => {
     const { roomID, triggerTs } = await store.writeState((service, registry) => {
       const room = service.createRoom("race", "owner");
       service.joinRoom(room.id, { id: "alice", name: "alice" });
@@ -37,15 +46,20 @@ describe.serial("notification membership races", () => {
     ] }, {
       protocol: "v2", receiverOwnerID: ownerID,
       backgroundSession: async () => { entered(); return background; },
-      promptQueue: async () => { prompts++; return {}; },
+      promptQueue: async (sid: string, id: string, _text: string, delivery: "queue" | "steer") => {
+        prompts++; return { id, sessionID: sid, delivery };
+      },
     });
-    await waiting;
-    await store.writeState((_service, registry) => { delete registry[roomID]; });
-    release(false);
-    await delivery;
-    expect(prompts).toBe(0);
-    expect(bumps).toBe(0);
-    expect(queue.pendingAdmission(sessionID, roomID)).toBeUndefined();
+    try {
+      await waitForGate(waiting);
+      await store.writeState((_service, registry) => { delete registry[roomID]; });
+    } finally {
+      release(false);
+      await delivery;
+    }
+    expect(prompts).toBe(1);
+    expect(bumps).toBe(1);
+    expect(queue.pendingAdmission(sessionID, roomID)?.state).toBe("admitted");
     expect(receiverState.claimBackgroundAttempt(sessionID, roomID, backgroundServiceKey({ protocol: "v2", receiverOwnerID: ownerID }), triggerTs)).toBe(false);
   });
 
@@ -160,12 +174,9 @@ describe.serial("notification membership races", () => {
     expect(prompts[2]).not.toContain("@all first");
   });
 
-  test("central removal during backgrounding cancels prompt and retry", async () => {
+  test("central removal during verification prevents steer and background", async () => {
     const roomID = `center-${crypto.randomUUID()}`, triggerTs = Date.now();
-    let entered!: () => void, release!: (value: boolean) => void, registryReads = 0;
-    const waiting = new Promise<void>((resolve) => { entered = resolve; });
-    const background = new Promise<boolean>((resolve) => { release = resolve; });
-    let prompts = 0, queued = 0;
+    let registryReads = 0, prompts = 0, backgrounds = 0, queued = 0;
     const oldFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       if (String(input).includes("/registry")) {
@@ -179,18 +190,17 @@ describe.serial("notification membership races", () => {
       const delivery = inbox.pushItemsToSession({ center: "http://center.invalid", token: "test" }, sessionID, [
         { id: "message", roomId: roomID, roomName: "race", senderId: "alice", text: "@agent handle this", createdAt: triggerTs },
       ], { protocol: "v2", receiverOwnerID: ownerID,
-        backgroundSession: async () => { entered(); return background; },
+        backgroundSession: async () => { backgrounds++; return false; },
         promptQueue: async () => { prompts++; return {}; },
       });
-      await waiting;
-      release(false);
       await delivery;
     } finally { globalThis.fetch = oldFetch; }
     expect(registryReads).toBe(2);
     expect(prompts).toBe(0);
+    expect(backgrounds).toBe(0);
     expect(queued).toBe(0);
     expect(queue.pendingAdmission(sessionID, roomID)).toBeUndefined();
-    expect(receiverState.claimBackgroundAttempt(sessionID, roomID, backgroundServiceKey({ protocol: "v2", receiverOwnerID: ownerID }, "http://center.invalid"), triggerTs)).toBe(false);
+    expect(receiverState.claimBackgroundAttempt(sessionID, roomID, backgroundServiceKey({ protocol: "v2", receiverOwnerID: ownerID }, "http://center.invalid"), triggerTs)).toBe(true);
   });
 
   test("center pushes reject a kicked legacy member but still deliver to a current protocol-less member", async () => {
@@ -276,7 +286,7 @@ describe.serial("notification membership races", () => {
     expect(served).toBe(0);
   });
 
-  test("central read advances prune stale pending items before the next request", async () => {
+  test("central read advances during backgrounding and filters the next request", async () => {
     const roomID = `read-${crypto.randomUUID()}`, oldTs = Date.now() - 20_000, newTs = oldTs + 1;
     const opts = { center: "http://center.invalid", token: "test" };
     let readTs = 0, backgrounds = 0, prompts: string[] = [], entered!: () => void, release!: (value: boolean) => void;
@@ -291,26 +301,31 @@ describe.serial("notification membership races", () => {
       { id: "old", roomId: roomID, roomName: "read", senderId: "alice", text: "@agent old", createdAt: oldTs },
       { id: "new", roomId: roomID, roomName: "read", senderId: "alice", text: "@agent new", createdAt: newTs },
     ];
-    let firstID = "";
     const transport = { protocol: "v2" as const, receiverOwnerID: ownerID,
       backgroundSession: async () => { if (++backgrounds === 1) { entered(); return background; } return false; },
       promptQueue: async (sid: string, id: string, text: string, delivery: "queue" | "steer") => { prompts.push(text); return { id, sessionID: sid, delivery }; },
     };
+    let first: Promise<unknown> | undefined;
     try {
-      const first = inbox.pushItemsToSession(opts, sessionID, batch, transport);
-      await waiting;
-      firstID = queue.pendingAdmission(sessionID, roomID)!.id;
+      first = inbox.pushItemsToSession(opts, sessionID, batch, transport);
+      await waitForGate(waiting);
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).toContain("@agent old");
+      expect(prompts[0]).toContain("@agent new");
       readTs = oldTs;
       release(false);
       await first;
-      expect(prompts).toHaveLength(0);
-      expect(queue.pendingAdmission(sessionID, roomID)!.id).not.toBe(firstID);
+      expect(queue.pendingAdmission(sessionID, roomID)).toBeUndefined();
       await inbox.pushItemsToSession(opts, sessionID, batch, transport);
-    } finally { globalThis.fetch = oldFetch; }
+    } finally {
+      release(false);
+      if (first) await first;
+      globalThis.fetch = oldFetch;
+    }
     expect(backgrounds).toBe(1);
-    expect(prompts).toHaveLength(1);
-    expect(prompts[0]).not.toContain("@agent old");
-    expect(prompts[0]).toContain("@agent new");
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).not.toContain("@agent old");
+    expect(prompts[1]).toContain("@agent new");
   });
 
   test("central watermark ignores ordinary items but advances for a newer mention", async () => {
@@ -351,3 +366,5 @@ afterAll(() => {
   }
   rmSync(root, { recursive: true, force: true });
 });
+
+afterEach(() => { globalThis.fetch = initialFetch; });
