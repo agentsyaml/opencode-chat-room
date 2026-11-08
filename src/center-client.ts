@@ -16,6 +16,7 @@ import {
 } from "./queue";
 import type { InboxItem } from "./center-inbox";
 import { assertDeliveryLease } from "./session-delivery";
+import { imageNote, materializeAny } from "./attachments";
 export { queueAdmissionId } from "./queue";
 export { createQueueTransport, sendAsyncNotification, sendQueue } from "./queue-transport";
 export type { QueueTransport, PushResult } from "./queue-transport";
@@ -225,9 +226,15 @@ export async function centerAction(
       if (items.length === 0) {
         return "no new messages";
       }
-      const lines = items.map(
-        (it) => `[${timeOf(it.createdAt)}] ${it.senderId}: ${it.text}`,
-      );
+      // Images are written to this host before the text is built; the line
+      // names the file so the agent opens it instead of guessing.
+      await Promise.all(items.filter((item): item is InboxItem & { id: string } => Boolean(item.id))
+        .map((item) => materializeAny(item, { base: opts.center, token: opts.token, roomID: item.roomId })
+          .catch(() => [])));
+      const lines = items.map((it) => {
+        const note = it.id ? imageNote(it.id) : "";
+        return `[${timeOf(it.createdAt)}] ${it.senderId}: ${it.text}${note ? `\n${note}` : ""}`;
+      });
       // ponytail: F7 — serialize the acknowledgment before returning so a
       // following action cannot race the read watermark update. A failure only
       // repeats the messages, never loses them.
