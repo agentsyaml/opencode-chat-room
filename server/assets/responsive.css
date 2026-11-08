@@ -52,6 +52,42 @@
   .r-preview { overflow: hidden; color: var(--ink-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .r-badge { position: absolute; top: 8px; right: 9px; display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 700; }
   .rail-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 13px 8px 0; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+  .rail-foot .anchor { width: 100%; }
+  .user-menu-trigger { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 6px; border: 1px solid transparent; border-radius: 11px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+  .user-menu-trigger:hover, .user-menu-trigger[aria-expanded="true"] { border-color: var(--line); background: var(--surface); }
+  .user-menu-trigger:focus-visible, .menu-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .user-menu-trigger #railIdentity { flex: 1; min-width: 0; overflow: hidden; color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
+  .user-menu-trigger .rail-avatar { flex: none; width: 32px; height: 32px; font-size: 14px; font-weight: 700; }
+  .user-menu-caret { font-size: 14px; }
+  .user-menu-panel { top: auto; right: auto; bottom: calc(100% + 8px); left: 0; max-height: min(65dvh, 560px); overflow: auto; }
+  .room-options-panel { display: grid; gap: 4px; width: 190px; }
+  .menu-action { width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+  .menu-action:hover { background: var(--surface-2); }
+  .restore-view { display: none; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; color: var(--ink-2); text-align: center; }
+  .session-restore #joinView { display: none; }
+  .session-restore .restore-view { display: flex; }
+  .restore-message { display: flex; align-items: center; justify-content: center; gap: 12px; }
+  #restoreError { max-width: min(440px, 100%); margin: 0; }
+  .restore-spinner { width: 20px; height: 20px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .admin-access { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .admin-access summary { margin: 0 0 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .admin-dialog { width: min(980px, calc(100vw - 24px)); max-width: none; max-height: 90dvh; overflow: auto; padding: 20px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+  .admin-dialog::backdrop { background: rgb(9 16 22 / .55); }
+  .admin-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .admin-dialog-head h2 { margin: 0; font-size: 20px; }
+  .admin-dialog h3 { margin: 18px 0 8px; font-size: 15px; }
+  .admin-columns { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(0, 1.2fr); gap: 22px; }
+  .admin-columns > section { min-width: 0; }
+  .admin-columns .field { margin-bottom: 10px; }
+  .admin-dialog .admin-select { width: 100%; min-height: 36px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); font: inherit; }
+  .admin-overview, .admin-list { margin: 0; padding: 0; list-style: none; }
+  .admin-overview p, .admin-list li { margin: 6px 0; padding: 9px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; }
+  .admin-list li { display: grid; gap: 7px; }
+  .admin-plan-form { display: grid; gap: 8px; }
+  .admin-enrollment { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border-radius: 10px; background: var(--accent-soft); overflow-wrap: anywhere; }
+  .admin-enrollment code { user-select: all; }
+  @media (max-width: 620px) { .admin-dialog { padding: 15px; } .admin-columns { grid-template-columns: minmax(0, 1fr); gap: 0; } }
   .rail-avatar { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; color: var(--accent); background: var(--accent-soft); }
   .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #609773; box-shadow: 0 0 0 3px color-mix(in srgb, #609773 16%, transparent); }
   #chatView > .chat-head { grid-column: 2; grid-row: 1; min-width: 0; padding: 17px 24px; background: color-mix(in srgb, var(--surface) 93%, var(--accent)); }
@@ -80,6 +116,20 @@
   .mermaid-diagram { max-width: 100%; overflow-x: auto; }
   .mermaid-diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
   .diagram-status { margin: 0 0 6px; color: var(--ink-3); font-size: 12px; }
+
+  @media (min-width: 761px) and (max-width: 900px) {
+    #chatView > .chat-head { flex-wrap: nowrap; gap: 8px; }
+    .chat-head-main { flex: 1; min-width: 0; }
+    .chat-head-main h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
+    .chat-head-actions { flex: none; flex-wrap: nowrap; gap: 4px; }
+    .chat-head-actions > .locale-control { display: none; }
+    #chatView > .chat-head .chip:not(.rooms-drawer-trigger) { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; font-size: 0; }
+    #btnQuestions::before { content: "?"; font-size: 17px; }
+    #btnQuestions .question-badge { position: absolute; top: -5px; right: -5px; margin: 0; font-size: 10px; }
+    #btnAnnouncements::before { content: "▤"; font-size: 16px; }
+    #btnMembers::before { content: "♧"; font-size: 18px; }
+    #btnRoomOptions::before { content: "···"; font-size: 19px; letter-spacing: 1px; }
+  }
 
   @media (max-width: 760px) {
     #chatView { width: 100%; height: 100%; margin: 0; border: 0; border-radius: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
@@ -111,9 +161,8 @@
     #btnAnnouncements::before { content: "▤"; font-size: 16px; }
     #btnQuestions .question-badge { position: absolute; top: -5px; right: -5px; margin: 0; font-size: 10px; }
     #btnMembers::before { content: "♧"; font-size: 18px; }
-    #btnDeleteRoom::before { content: "×"; font-size: 20px; }
-    #btnLeave::before { content: "↪"; font-size: 17px; }
-    .mobile-locale { display: block; }
+    #btnRoomOptions::before { content: "···"; font-size: 19px; letter-spacing: 1px; }
+    .room-options-panel { right: 0; left: auto; }
     .thread { padding: 14px 12px 6px; }
     .msg-text { max-width: 92%; font-size: 15px; }
     .composer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }

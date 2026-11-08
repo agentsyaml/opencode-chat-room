@@ -3,6 +3,14 @@ import { copyCodeFromButton, copyTextToClipboard } from "./markdown.js";
 
 export function initEvents(app) {
   const $ = app.$;
+  app.showRestoreFailure = (message) => {
+    document.documentElement.classList.add("session-restore");
+    $("#joinView").hidden = $("#chatView").hidden = true;
+    $("#restoreView").hidden = false;
+    $("#restoreError").textContent = message;
+    $("#restoreError").hidden = false;
+    $("#btnRestoreRetry").hidden = false;
+  };
   const roomRail = $("#roomRail"), drawerTrigger = $("#btnRoomsDrawer"), backdrop = $("#roomDrawerBackdrop");
   const smallScreen = () => matchMedia("(max-width: 760px)").matches;
   let readingPosition = null, resizeFrame = 0, resizeGeneration = 0, scrollGeneration = 0, resizeResetTimer = 0;
@@ -157,6 +165,16 @@ export function initEvents(app) {
   $("#btnDeleteRoom").addEventListener("click", () => void app.deleteRoom());
   $("#btnMembers").addEventListener("click", () => app.togglePanel("#memberPanel"));
   $("#btnSettings").addEventListener("click", () => app.togglePanel("#chatSettings"));
+  $("#btnRoomOptions").addEventListener("click", () => {
+    const panel = $("#roomOptions"), open = panel.hidden;
+    app.closePanels(); panel.hidden = !open;
+    $("#btnRoomOptions").setAttribute("aria-expanded", String(open));
+  });
+  $("#btnRestoreRetry").addEventListener("click", () => {
+    $("#btnRestoreRetry").hidden = true;
+    $("#restoreError").hidden = true;
+    void app.refreshRoomList();
+  });
   $("#btnRefreshRooms").addEventListener("click", () => void app.refreshRoomList());
   $("#btnNewRoom").addEventListener("click", () => {
     const form = $("#railRoomForm");
@@ -273,7 +291,7 @@ export function initEvents(app) {
   $("#inToken").value = LS.token;
   $("#inTokenChat").value = LS.token;
   void app.refreshRoomList();
-  $("#inRoomId").focus();
+  if (!$("#joinView").hidden) $("#inRoomId").focus();
 }
 
 async function loadAnchorHistory(roomId, entry, messageId, app, readTs = 0, signal) {

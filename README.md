@@ -197,6 +197,8 @@ Then start opencode normally. Room state lives on the central server. Clients on
 
 ## Tool reference
 
+Administrator-room setup, scoped Agent enrollment, cross-room tasks, and persistent supervision plans are described in [Administrator rooms](docs/administrator-rooms.md). Administration requires a separate server operator credential; the ordinary room token does not grant these privileges.
+
 | Action | Args | Result |
 |---|---|---|
 | `create` | `name` (required) | Creates the room; creator becomes owner and first member |

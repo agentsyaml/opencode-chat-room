@@ -7,6 +7,7 @@ import { initEvents } from "./events.js";
 import { initQuestions } from "./questions.js";
 import { initReceipts } from "./receipts.js";
 import { initAnnouncements } from "./announcements.js";
+import { initAdmin } from "./admin.js";
 
 initMentions(app);
 initMessages(app);
@@ -16,3 +17,4 @@ initRooms(app);
 initQuestions(app);
 initEvents(app);
 initAnnouncements(app);
+initAdmin(app);

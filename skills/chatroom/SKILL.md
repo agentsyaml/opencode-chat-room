@@ -85,6 +85,18 @@ The plugin requests host file-read permissions and returns resource metadata and
 
 Respect permission denials and do not upload secrets or unrelated files. A local path is read on the machine running the plugin, not on the central server; remote URLs are not upload paths. The server sets the single-file size limit, defaulting to 100 MiB. Images, audio, and video may preview in the browser; other formats are offered as downloads. Resource markers refer to the room where the file was uploaded, not arbitrary filesystem paths or public links.
 
+## Administrator supervision
+
+The separate `admin` tool supports operator-enrolled administrator rooms in central mode. A normal room token, a mention, or room membership does not grant administrator privileges. Do not attempt to appoint yourself or another Agent.
+
+When the user privately supplies an enrollment instruction, call `admin` with `action: "admin_claim"`, `roomId`, and `enrollmentKey` in that designated session. Never post the enrollment key in a room. The plugin stores the resulting capability privately; do not request, copy, or expose it. If enrollment fails, ask the operator to reset it.
+
+For a designated supervisor, `admin_overview` lists rooms, members, tasks, and plans. Use `admin_dispatch` with the administrator `roomId`, `targetRoomId`, `targetSessionID`, and `text` to assign work to an existing Agent without joining its room. Use `admin_history` for bounded target-room history and `admin_tasks` to inspect assignments. Room names or display names are not substitutes for target session IDs.
+
+Workers receiving an assignment can call `admin` with `action: "task_progress"`, `taskId`, `status`, and `progress`. Supported states are `pending`, `working`, `blocked`, `completed`, and `cancelled`. Report actual progress and blockers; a received steer is not evidence that work is complete. Do not join the administrator room to report progress.
+
+Use `admin_plan_create`, `admin_plans`, `admin_plan_update`, and `admin_plan_delete` for recurring supervision authorized by the user. Timers persist on the server and coalesce offline reminders; they do not guarantee execution while the host is unavailable. Check task reports and concrete evidence before declaring completion. Pause or delete a plan when its purpose ends.
+
 ## Testing and subagents
 
 Debug only in newly created temporary rooms whose names start with `__Test_`, preferably on an isolated local center. Never join an existing room for testing. Delete temporary rooms and clean up test identities and processes afterward.

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="session-restore">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -13,9 +13,14 @@
 <body>
 
 <main id="app">
+  <section id="restoreView" class="restore-view" role="status" aria-live="polite">
+    <div class="restore-message"><span class="restore-spinner" aria-hidden="true"></span><span data-i18n="restoringSession">Restoring your session…</span></div>
+    <p id="restoreError" class="hint danger-text" role="alert" hidden></p>
+    <button id="btnRestoreRetry" class="btn ghost small" type="button" data-i18n="retry" hidden>Retry</button>
+  </section>
 
    <!-- Join or create a room. -->
-  <section id="joinView" class="view">
+  <section id="joinView" class="view" hidden>
     <div class="join-card">
       <div class="locale-control">
         <label for="localeSelectJoin" data-i18n="languageLabel">Language</label>
@@ -82,8 +87,45 @@
       </form>
       <ul id="roomListChat" class="rail-rooms"></ul>
       <p id="roomListChatEmpty" class="hint" data-i18n="noRooms" hidden></p>
-      <div class="rail-foot"><span id="railIdentity"></span></div>
+      <div class="rail-foot">
+        <div class="anchor user-menu-anchor">
+          <button id="btnSettings" class="user-menu-trigger" type="button" aria-label="Your profile and settings" data-i18n-aria-label="profileMenu" aria-haspopup="dialog" aria-expanded="false" aria-controls="chatSettings">
+            <span id="profileAvatar" class="rail-avatar" aria-hidden="true">?</span><span id="railIdentity"></span><span class="user-menu-caret" aria-hidden="true">⌃</span>
+          </button>
+          <div class="panel user-menu-panel" id="chatSettings" role="dialog" aria-modal="false" aria-labelledby="settingsHeading" hidden>
+            <h3 id="settingsHeading" data-i18n="settings">Settings</h3>
+            <label class="field"><span class="field-label" data-i18n="languageLabel">Language</span><select id="localeSelectSettings" class="locale-select"><option value="en">English</option><option value="zh-CN">中文</option></select></label>
+            <label class="field"><span class="field-label" data-i18n="tokenOptional">Access token (optional)</span><input id="inTokenChat" class="input" type="password" placeholder="Enter if the server requires it" data-i18n-placeholder="tokenPlaceholder" autocomplete="off" spellcheck="false"></label>
+            <button class="btn ghost small" type="button" data-token-save="inTokenChat" data-i18n="save">Save</button>
+            <p id="tokenHint" class="hint" data-i18n="tokenRequired" hidden>The server requires an access token (401).</p>
+            <p class="hint" data-i18n="privacyNote">Anyone with the shared token can read direct messages and manage rooms; the server can read them too.</p>
+            <details class="admin-access" aria-labelledby="adminAccessHeading">
+              <summary id="adminAccessHeading" data-i18n="adminAccess">Administration</summary>
+              <label class="field"><span class="field-label" data-i18n="adminToken">Administration token</span><input id="inAdminToken" class="input" type="password" autocomplete="off" spellcheck="false"></label>
+              <button id="btnSaveAdminToken" class="btn ghost small" type="button" data-i18n="save">Save</button>
+              <p id="adminAccessError" class="hint danger-text" role="alert" hidden></p>
+              <button id="btnOpenAdmin" class="btn ghost small" type="button" data-i18n="openAdministration" hidden>Open administration</button>
+            </details>
+          </div>
+        </div>
+      </div>
     </aside>
+    <dialog id="adminDialog" class="admin-dialog" aria-labelledby="adminHeading">
+      <header class="admin-dialog-head"><h2 id="adminHeading" data-i18n="administration">Administration</h2><button id="btnRefreshAdmin" class="btn ghost small" type="button" data-i18n="refreshAdmin">Refresh</button><button id="btnCloseAdmin" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close">×</button></header>
+      <p id="adminStatus" class="hint" role="status" aria-live="polite"></p>
+      <div class="admin-columns">
+        <section><h3 data-i18n="designations">Designations</h3><label class="field"><span class="field-label" data-i18n="adminRoom">Admin room</span><select id="adminRoomSelect" class="admin-select"></select></label>
+          <label class="field"><span class="field-label" data-i18n="targetRoom">Agent room</span><select id="adminTargetRoom" class="admin-select"></select></label>
+          <label class="field"><span class="field-label" data-i18n="targetAgent">Registered agent</span><select id="adminTargetAgent" class="admin-select"></select></label>
+          <button id="btnDesignateAgent" class="btn primary small" type="button" data-i18n="designate">Designate and issue enrollment</button><div id="adminEnrollment" class="admin-enrollment" hidden></div>
+          <button id="btnRevokeAdmin" class="btn ghost small danger-text" type="button" data-i18n="revokeDesignation">Revoke designation</button>
+        </section>
+        <section><h3 data-i18n="globalStatus">Global status</h3><div id="adminOverview" class="admin-overview"></div><h3 data-i18n="adminTasks">Tasks</h3>
+          <form id="adminTaskForm"><label class="field"><span class="field-label" data-i18n="taskTargetRoom">Target room</span><select id="adminTaskRoom" class="admin-select"></select></label><label class="field"><span class="field-label" data-i18n="taskTargetAgent">Target agent</span><select id="adminTaskAgent" class="admin-select"></select></label><label class="field"><span class="field-label" data-i18n="taskText">Task</span><textarea id="adminTaskText" class="input" rows="2" maxlength="2000" required></textarea></label><button class="btn primary small" type="submit" data-i18n="dispatchTask">Dispatch task</button></form><ul id="adminTaskList" class="admin-list"></ul>
+          <h3 data-i18n="timers">Timers</h3><form id="adminPlanForm" class="admin-plan-form"><input id="adminPlanName" class="input" maxlength="64" required data-i18n-placeholder="planName" placeholder="Timer name"><input id="adminPlanInterval" class="input" type="number" min="60" max="2592000" value="3600" required><textarea id="adminPlanText" class="input" rows="2" maxlength="2000" required></textarea><button class="btn primary small" type="submit" data-i18n="createTimer">Create timer</button></form><ul id="adminPlanList" class="admin-list"></ul>
+        </section>
+      </div>
+    </dialog>
     <button id="roomDrawerBackdrop" class="room-drawer-backdrop" type="button" aria-label="Close room list" data-i18n-aria-label="closeRoomList" hidden></button>
     <header class="chat-head">
       <div class="chat-head-main">
@@ -95,13 +137,6 @@
         </p>
       </div>
       <div class="chat-head-actions">
-        <div class="locale-control">
-          <label for="localeSelectChat" data-i18n="languageLabel">Language</label>
-          <select id="localeSelectChat" class="locale-select" aria-label="Language" data-i18n-aria-label="languageLabel">
-            <option value="en">English</option>
-            <option value="zh-CN">中文</option>
-          </select>
-        </div>
         <div class="anchor questions-anchor">
           <button class="chip questions-trigger" type="button" id="btnQuestions" aria-haspopup="true" aria-expanded="false" aria-controls="questionPanel">
             <span data-i18n="questions">Questions</span><span id="questionBadge" class="question-badge" hidden></span>
@@ -136,22 +171,13 @@
             <p id="memberEmpty" class="hint" data-i18n="noMembers" hidden>No members yet.</p>
           </div>
         </div>
-        <div class="anchor">
-          <button class="chip profile-trigger" type="button" id="btnSettings" aria-label="Your profile and settings" data-i18n-aria-label="profileMenu" aria-haspopup="dialog" aria-expanded="false" aria-controls="chatSettings"><span id="profileAvatar" class="rail-avatar" aria-hidden="true">?</span></button>
-          <div class="panel" id="chatSettings" role="dialog" aria-modal="false" aria-labelledby="settingsHeading" hidden>
-            <h3 id="settingsHeading" data-i18n="settings">Settings</h3>
-            <label class="field mobile-locale"><span class="field-label" data-i18n="languageLabel">Language</span><select id="localeSelectSettings" class="locale-select"><option value="en">English</option><option value="zh-CN">中文</option></select></label>
-            <label class="field">
-              <span class="field-label" data-i18n="tokenOptional">Access token (optional)</span>
-              <input id="inTokenChat" class="input" type="password" placeholder="Enter if the server requires it" data-i18n-placeholder="tokenPlaceholder" autocomplete="off" spellcheck="false">
-            </label>
-            <button class="btn ghost small" type="button" data-token-save="inTokenChat" data-i18n="save">Save</button>
-            <p id="tokenHint" class="hint" data-i18n="tokenRequired" hidden>The server requires an access token (401).</p>
-            <p class="hint" data-i18n="privacyNote">Anyone with the shared token can read direct messages and manage rooms; the server can read them too.</p>
+        <div class="anchor room-options-anchor">
+          <button class="chip" type="button" id="btnRoomOptions" aria-haspopup="true" aria-expanded="false" aria-controls="roomOptions" data-i18n="roomOptions">Options</button>
+          <div class="panel room-options-panel" id="roomOptions" hidden>
+            <button class="menu-action" type="button" id="btnLeave" data-i18n="leave">Leave room</button>
+            <button class="menu-action danger-text" type="button" id="btnDeleteRoom" data-i18n="deleteRoom">Delete room</button>
           </div>
         </div>
-        <button class="chip danger" type="button" id="btnDeleteRoom" aria-label="Delete room" data-i18n-aria-label="deleteRoom" data-i18n="deleteRoom">Delete room</button>
-        <button class="chip" type="button" id="btnLeave" aria-label="Leave room" data-i18n-aria-label="leave" data-i18n="leave">Leave</button>
       </div>
     </header>
 

@@ -2,12 +2,12 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import type { Route as BrowserRoute } from "playwright";
 import { createServer } from "node:net";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { createAuth } from "../server/assets/chat/state.js";
-
 // The browser suite uses a temporary Playwright install passed through CHAT_UI_BROWSER_MODULE.
 export const GFM_FIXTURE = [
   "| Topic | Status |", "| :-- | --: |", "| Markdown | ~~rough~~ polished |", "",
@@ -127,8 +127,22 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.waitForFunction((id: string) => (document.querySelector("#btnCopyId") as HTMLButtonElement | null)?.title.endsWith(id), sourceRoom);
     expect(roomJoins.length).toBe(joinsBeforeSwitchBack);
     expect(await alice.locator("#msgInput").inputValue()).toBe("Draft for the first room");
-    await alice.reload();
-    await alice.waitForFunction((id: string) => (document.querySelector("#btnCopyId") as HTMLButtonElement | null)?.title.endsWith(id), sourceRoom);
+    let releaseRestore!: () => void, restoreRequested!: () => void, retryRequested!: () => void, attempts = 0;
+    const restoreGate = new Promise<void>((resolve) => { releaseRestore = resolve; }), restoreSeen = new Promise<void>((resolve) => { restoreRequested = resolve; }), retrySeen = new Promise<void>((resolve) => { retryRequested = resolve; });
+    await alice.route("**/rooms?sessionID=*", async (route: BrowserRoute) => {
+      if (!attempts++) { restoreRequested(); await route.fulfill({ status: 503, body: "Temporarily unavailable" }); }
+      else { retryRequested(); await restoreGate; await route.continue(); }
+    });
+    const reload = alice.reload(); await restoreSeen;
+    expect(await alice.locator("#joinView").isVisible()).toBe(false);
+    expect(await alice.locator("#btnJoin").isVisible()).toBe(false);
+    await alice.locator("#btnRestoreRetry").waitFor({ state: "visible" });
+    expect(await alice.evaluate(() => sessionStorage.getItem("chat.roomId"))).toBe(sourceRoom);
+    await alice.locator("#btnRestoreRetry").click(); await retrySeen;
+    releaseRestore(); await reload;
+    await alice.waitForFunction((id: string) => (document.querySelector("#btnCopyId") as HTMLButtonElement | null)?.title.endsWith(id), sourceRoom); await alice.unroute("**/rooms?sessionID=*");
+    httpErrors.splice(0, httpErrors.length, ...httpErrors.filter((error) => !error.startsWith("503 GET") || !error.includes("/rooms?sessionID=")));
+    pageErrors.splice(0, pageErrors.length, ...pageErrors.filter((error) => !error.includes("status of 503")));
     expect(await alice.locator("#msgInput").inputValue()).toBe("Draft for the first room");
     expect(await alice.locator("#roomListChat .room-row.joined").count()).toBe(2);
 
@@ -192,16 +206,21 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.emulateMedia({ colorScheme: "light" });
     await alice.waitForFunction(() => !matchMedia("(prefers-color-scheme: dark)").matches);
     await alice.waitForFunction(() => getComputedStyle(document.querySelector("#btnMembers")!).backgroundColor === "rgb(255, 255, 255)");
-    await alice.setViewportSize({ width: 375, height: 812 });
-    expect(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    const enMobileGeometry = await localeGeometry(alice);
+    await alice.setViewportSize({ width: 768, height: 900 }); const tabletHeader = await alice.evaluate(() => { const actions = document.querySelector<HTMLElement>(".chat-head-actions")!, options = document.querySelector<HTMLElement>("#btnRoomOptions")!; return { rail: getComputedStyle(document.querySelector(".room-rail")!).display, drawerTrigger: getComputedStyle(document.querySelector("#btnRoomsDrawer")!).display, header: actions.getBoundingClientRect().top, options: options.getBoundingClientRect().top, overflow: document.documentElement.scrollWidth > innerWidth }; });
+    expect(tabletHeader.rail).toBe("flex"); expect(tabletHeader.drawerTrigger).toBe("none"); expect(tabletHeader.options).toBe(tabletHeader.header); expect(tabletHeader.overflow).toBe(false); await alice.screenshot({ path: path.join(screenshotDir, "chat-tablet-768.png"), fullPage: true });
+    await alice.setViewportSize({ width: 375, height: 812 }); expect(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true); const enMobileGeometry = await localeGeometry(alice);
     await alice.screenshot({ path: path.join(screenshotDir, "chat-mobile.png"), fullPage: true });
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
     const zhMobileGeometry = await localeGeometry(alice);
     expectLocaleGeometry(enMobileGeometry, zhMobileGeometry);
     await alice.screenshot({ path: path.join(screenshotDir, "chat-mobile-zh.png"), fullPage: true });
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    await alice.locator("#btnRoomsDrawer").click();
     await alice.locator("#btnSettings").click();
+    expect(await alice.locator("#localeSelectSettings").isVisible()).toBe(true);
+    expect(await alice.locator(".chat-head .locale-select").count()).toBe(0);
+    await alice.waitForTimeout(200);
+    await alice.screenshot({ path: path.join(screenshotDir, "chat-user-settings-mobile.png"), fullPage: true });
     const enMobileSettings = await alice.locator("#chatSettings").evaluate((node: HTMLElement) => ({ height: node.getBoundingClientRect().height, scroll: node.scrollHeight - node.clientHeight, width: node.scrollWidth - node.clientWidth }));
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
     const zhMobileSettings = await alice.locator("#chatSettings").evaluate((node: HTMLElement) => ({ height: node.getBoundingClientRect().height, scroll: node.scrollHeight - node.clientHeight, width: node.scrollWidth - node.clientWidth }));
@@ -288,6 +307,11 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(await alice.locator("#chatView").isVisible()).toBe(true);
 
     await bob.locator(`#roomListChat [data-room-id="${secondRoom}"]`).click();
+    await bob.waitForFunction((name: string) => document.querySelector("#roomName")?.textContent === name, "Second room");
+    await bob.locator("#btnRoomOptions").click();
+    await bob.locator("#roomOptions").waitFor({ state: "visible" });
+    await bob.waitForTimeout(200);
+    await bob.screenshot({ path: path.join(screenshotDir, "chat-room-options-desktop.png"), fullPage: true });
     bob.once("dialog", (dialog: { dismiss(): Promise<void> }) => void dialog.dismiss());
     await bob.locator("#btnDeleteRoom").click();
     expect(await currentRoomId(bob)).toBe(secondRoom);
@@ -451,7 +475,7 @@ async function localeGeometry(page: any) {
     const thread = document.querySelector<HTMLElement>("#thread")!;
     return {
       head: height("#chatView > .chat-head"), composer: height(".composer"), composerRow: height(".composer-row"),
-      input: height("#msgInput"), send: height("#btnSend"), controls: Array.from(document.querySelectorAll<HTMLElement>(".chat-head-actions .chip, #localeSelectChat")).map((node) => node.getBoundingClientRect().height),
+      input: height("#msgInput"), send: height("#btnSend"), controls: Array.from(document.querySelectorAll<HTMLElement>(".chat-head-actions .chip")).map((node) => node.getBoundingClientRect().height),
       viewportWidth: innerWidth, meta: height(".composer-meta"), questionToggle: height(".question-toggle"), draftCount: height("#draftCount"),
       inputStyle: (() => { const node = document.querySelector<HTMLTextAreaElement>("#msgInput")!, style = getComputedStyle(node); return { height: style.height, minHeight: style.minHeight, lineHeight: style.lineHeight, scrollHeight: node.scrollHeight, placeholder: node.placeholder, value: node.value }; })(),
       settings: height("#chatSettings"), privacy: height('#chatSettings [data-i18n="privacyNote"]'),

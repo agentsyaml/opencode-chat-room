@@ -9,6 +9,7 @@ export function createV1Server(deps: {
   runtime(input: PluginInput, transport: QueueTransport): V2Runtime;
   run<T>(runtime: V2Runtime, callback: () => T): T;
   room: ToolDefinition;
+  admin?: ToolDefinition;
   observe(runtime: V2Runtime, sessionID: string): Promise<void>;
   checkInbox(runtime: V2Runtime, sessionID: string): Promise<void>;
   wake(runtime: V2Runtime, sessions: ReadonlySet<string>): Promise<void>;
@@ -22,6 +23,7 @@ export function createV1Server(deps: {
       protocol: "v1" as const,
     };
     const runtime = deps.runtime(input, transport);
+    const adminTool = deps.admin;
     let timer: ReturnType<typeof setInterval> | undefined;
     if (deps.central) {
       void deps.run(runtime, () => deps.wake(runtime, sessions));
@@ -37,7 +39,10 @@ export function createV1Server(deps: {
         }),
     };
     return {
-      tool: { room },
+      tool: { room, ...(adminTool ? { admin: {
+        ...adminTool,
+        execute: (args, context) => deps.run(runtime, () => adminTool.execute(args, context)),
+      } } : {}) },
       config: async (cfg: Config & { skills?: { paths?: string[]; urls?: string[] } }) => {
         cfg.skills ??= {};
         cfg.skills.paths = [...new Set([...(cfg.skills.paths ?? []), bundledSkillsPath])];

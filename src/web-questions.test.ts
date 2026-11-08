@@ -146,18 +146,23 @@ test.skipIf(!browserModule)("questions can be answered inline without replacing 
     await page.locator("#btnSend").click();
     await page.waitForFunction(() => Array.from(document.querySelectorAll("#msgList .msg-text")).at(-1)?.textContent?.trim() === "Which color should stay?");
     expect(await page.locator("#msgList [data-msg-id]").evaluateAll((rows: Element[]) => rows.every((row) => row.querySelector("[data-copy-message]")))).toBe(true);
-    await page.selectOption("#localeSelectChat", "zh-CN");
+    await setLocale(page, "zh-CN");
     expect(await page.locator("#questionHeading").textContent()).toBe("待回答的问题");
     await page.locator("#btnQuestions").click();
     await page.locator("#questionPanel").waitFor({ state: "visible" });
     await page.locator(".question-item").getByText("Can you review the mobile layout?").waitFor();
     await page.locator(".question-item").getByText("Can you review the mobile layout?").click();
     await page.locator("#questionReply textarea").waitFor({ state: "visible" });
+    await page.locator("#questionReply textarea").fill("Keep this translated reply draft.");
     const zhPanelHeight = await page.locator("#questionPanel").evaluate((node: HTMLElement) => node.getBoundingClientRect().height);
-    await page.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    await page.locator("#btnSettings").click(); await page.locator("#chatSettings").waitFor({ state: "visible" });
+    await page.locator("#localeSelectSettings").selectOption("en"); await page.keyboard.press("Escape");
+    await page.locator("#btnQuestions").click(); await page.locator("#questionReply textarea").waitFor({ state: "visible" });
+    expect(await page.locator("#questionReply textarea").inputValue()).toBe("Keep this translated reply draft.");
     const enPanelHeight = await page.locator("#questionPanel").evaluate((node: HTMLElement) => node.getBoundingClientRect().height);
     expect(Math.abs(zhPanelHeight - enPanelHeight)).toBeLessThanOrEqual(1);
-    await page.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
+    await page.locator("#btnSettings").click(); await page.locator("#chatSettings").waitFor({ state: "visible" });
+    await page.locator("#localeSelectSettings").selectOption("zh-CN"); await page.keyboard.press("Escape"); await page.locator("#btnQuestions").click();
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(screenshotDir, "questions-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 375, height: 812 });
@@ -204,6 +209,12 @@ test.skipIf(!browserModule)("questions can be answered inline without replacing 
     await rm(stateDir, { recursive: true, force: true });
   }
 }, 90000);
+
+async function setLocale(page: any, locale: string) {
+  await page.locator("#btnSettings").click(); await page.locator("#chatSettings").waitFor({ state: "visible" });
+  await page.locator("#localeSelectSettings").selectOption(locale); await page.keyboard.press("Escape");
+  await page.locator("#chatSettings").waitFor({ state: "hidden" });
+}
 
 async function api(origin: string, route: string, method = "GET", body?: unknown) {
   const response = await fetch(`${origin}${route}`, {

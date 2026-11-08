@@ -6,6 +6,7 @@ import { receiverOwnerID } from "./receiver-owner";
 import { attachV2Receiver } from "./v2-receiver";
 import { observeReceiptContext, receiptDestination } from "./agent-receipts";
 import { chatroomSkill } from "./chatroom-skill";
+import { adminToolDescription, adminToolSchema } from "./admin-client";
 
 type CenterOptions = { center: string; token: string; directory?: string };
 export type V2Runtime = {
@@ -20,6 +21,7 @@ export function createV2Setup(deps: {
   runtime(directory: string, transport: QueueTransport): V2Runtime;
   run<T>(runtime: V2Runtime, callback: () => T): T;
   execute(args: z.infer<ReturnType<typeof roomSchema>>, sessionID: string, permissionContext: { directory: string; worktree?: string; ask(input: { permission: string; patterns: string[]; always: string[]; metadata: Record<string, unknown> }): Promise<void> }): Promise<string>;
+  admin?: (args: z.infer<typeof adminToolSchema>, sessionID: string, transport: QueueTransport, center: CenterOptions) => Promise<string>;
   observe(runtime: V2Runtime, sessionID: string): Promise<void>;
   poll(sessions: ReadonlySet<string>, transport: QueueTransport, center: CenterOptions): Promise<void>;
   resolveOwner?: () => Promise<string | undefined>;
@@ -43,6 +45,7 @@ export function createV2Setup(deps: {
     };
     const runtime = deps.runtime(directory, transport);
     let toolRegistration: { dispose(): Promise<void> } | undefined;
+    let adminRegistration: { dispose(): Promise<void> } | undefined;
     let commandRegistration: { dispose(): Promise<void> } | undefined;
     let promptRegistration: { dispose(): Promise<void> } | undefined;
     let contextRegistration: { dispose(): Promise<void> } | undefined;
@@ -101,6 +104,14 @@ export function createV2Setup(deps: {
           });
         },
       }));
+      if (deps.admin) adminRegistration = await context.tool.transform((editor) => editor.add({
+        name: "admin",
+        description: adminToolDescription,
+        options: { codemode: false },
+        input: adminToolSchema,
+        execute: async (args, toolContext) => ({ content: [{ type: "text", text: await deps.run(runtime,
+          () => deps.admin!(args, toolContext.sessionID, transport, runtime.center)) }] }),
+      }));
       commandRegistration = await context.command.transform((editor) => editor.add({
         name: "room",
         description: "Chat room operations",
@@ -127,12 +138,12 @@ export function createV2Setup(deps: {
       });
     } catch (error) {
       releaseReceiver?.();
-      await dispose(toolRegistration, commandRegistration, promptRegistration, contextRegistration, skillRegistration);
+      await dispose(toolRegistration, adminRegistration, commandRegistration, promptRegistration, contextRegistration, skillRegistration);
       throw error;
     }
     return async () => {
       releaseReceiver?.();
-      await dispose(toolRegistration, commandRegistration, promptRegistration, contextRegistration, skillRegistration);
+      await dispose(toolRegistration, adminRegistration, commandRegistration, promptRegistration, contextRegistration, skillRegistration);
     };
   };
 }

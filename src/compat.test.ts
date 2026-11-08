@@ -265,25 +265,28 @@ describe.serial("OpenCode compatibility transports", () => {
     expect(plugin).toMatchObject({ id: "chat-room", server, setup });
     expect(id).toBe("chat-room");
     let registeredTool: any;
+    const registeredTools: any[] = [];
     let registeredCommand: any;
     const prompts: unknown[] = [];
     const context: any = {
       location: { directory: temp },
       session: { prompt: async (input: unknown) => { prompts.push(input); return { id: "q", sessionID: "s", type: "user", time: { created: 1 }, delivery: "queue", payload: { text: "queued" } }; }, hook: async () => ({ dispose: async () => {} }) },
       skill: { transform: async (fn: (editor: any) => void) => fn({ get: () => undefined, add() {} }) },
-      tool: { transform: async (fn: (editor: any) => void) => fn({ add: (value: unknown) => { registeredTool = value; } }) },
+      tool: { transform: async (fn: (editor: any) => void) => fn({ add: (value: any) => { registeredTools.push(value); if (value.name === "room") registeredTool = value; } }) },
       command: { transform: async (fn: (editor: any) => void) => fn({ add: (value: unknown) => { registeredCommand = value; } }) },
     };
     const cleanup = await setup(context);
-    expect(registeredTool.description).toContain("Chat room");
-    expect(registeredTool.name).toBe("room");
-    expect(registeredTool.options).toMatchObject({ codemode: false });
-    expect(registeredCommand.name).toBe("room");
-    await registeredTool.execute({ action: "list" }, { sessionID: "s" });
-    await registeredCommand.execute({ sessionID: "s", prompt: { text: "list", files: [{ uri: "file:///note.txt" }], agents: [], skills: [] }, delivery: "queue" });
-    expect(prompts[0]).toMatchObject({ sessionID: "s", text: "list\n\nThe user invoked /room. Use the room tool to perform this command." });
-    expect(prompts[0]).toMatchObject({ files: [{ uri: "file:///note.txt" }], delivery: "queue" });
-    await cleanup();
+    try {
+      expect(registeredTools.map((entry) => entry.name)).toEqual(["room", "admin"]);
+      expect(registeredTool.description).toContain("Chat room");
+      expect(registeredTool.name).toBe("room");
+      expect(registeredTool.options).toMatchObject({ codemode: false });
+      expect(registeredCommand.name).toBe("room");
+      await registeredTool.execute({ action: "list" }, { sessionID: "s" });
+      await registeredCommand.execute({ sessionID: "s", prompt: { text: "list", files: [{ uri: "file:///note.txt" }], agents: [], skills: [] }, delivery: "queue" });
+      expect(prompts[0]).toMatchObject({ sessionID: "s", text: "list\n\nThe user invoked /room. Use the room tool to perform this command." });
+      expect(prompts[0]).toMatchObject({ files: [{ uri: "file:///note.txt" }], delivery: "queue" });
+    } finally { await cleanup(); }
   });
   test.serial("V2 queue acceptance requires the returned admission identity", async () => {
     const seen: unknown[] = [];
@@ -314,7 +317,6 @@ describe.serial("OpenCode compatibility transports", () => {
     expect(await sendQueue({ serverUrl: "http://v2.example", protocol: "v2" }, "http-session", "notice", "http-admission")).toBe("delivered");
     expect(received).toEqual({ id: "http-admission", text: "notice", delivery: "steer", resume: true });
   });
-
   test.serial("concurrent V2 wake scans remain isolated by runtime", async () => {
     let started!: () => void;
     let release!: () => void;
@@ -334,7 +336,6 @@ describe.serial("OpenCode compatibility transports", () => {
     expect(sentB).toBe(1);
     expect(fake.summaries()).toBe(2);
   });
-
   test.serial("wake scans still suppress overlap for the same runtime", async () => {
     let started!: () => void;
     let release!: () => void;
@@ -371,7 +372,7 @@ describe.serial("OpenCode compatibility transports", () => {
       location: { directory: temp },
       session: { prompt: async () => ({ id: "q", sessionID, type: "user", time: { created: 1 }, delivery: "queue", payload: { text: "" } }), hook: async () => ({ dispose: async () => {} }) },
       skill: { transform: async (fn: (editor: any) => void) => { fn({ get: () => undefined, add() {} }); return { dispose: async () => {} }; } },
-      tool: { transform: async (fn: (editor: any) => void) => { fn({ add: (value: unknown) => { roomTool = value; } }); return { dispose: async () => {} }; } },
+      tool: { transform: async (fn: (editor: any) => void) => { fn({ add: (value: any) => { if (value.name === "room") roomTool = value; } }); return { dispose: async () => {} }; } },
       command: { transform: async (fn: (editor: any) => void) => { fn({ add() {} }); return { dispose: async () => {} }; } },
     };
     const cleanup = await setup(context);
@@ -388,7 +389,6 @@ describe.serial("OpenCode compatibility transports", () => {
       await cleanup();
     }
   });
-
   test.serial("V2 setup runtimes retain separate directories", async () => {
     const makeInstance = async (directory: string, sessionID: string) => {
       let roomTool: any;
@@ -396,7 +396,7 @@ describe.serial("OpenCode compatibility transports", () => {
         location: { directory },
         session: { prompt: async () => ({}), hook: async () => ({ dispose: async () => {} }) },
         skill: { transform: async (fn: (editor: any) => void) => { fn({ get: () => undefined, add() {} }); return { dispose: async () => {} }; } },
-        tool: { transform: async (fn: (editor: any) => void) => { fn({ add: (value: unknown) => { roomTool = value; } }); return { dispose: async () => {} }; } },
+        tool: { transform: async (fn: (editor: any) => void) => { fn({ add: (value: any) => { if (value.name === "room") roomTool = value; } }); return { dispose: async () => {} }; } },
         command: { transform: async (fn: (editor: any) => void) => { fn({ add() {} }); return { dispose: async () => {} }; } },
       };
       return { roomTool, sessionID, cleanup: await setup(context), getTool: () => roomTool };
@@ -473,9 +473,9 @@ describe.serial("OpenCode compatibility transports", () => {
     try {
       const first = await setup(makeContext());
       const second = await setup(makeContext());
-      first();
+      await first();
       expect(cleared).toEqual([]);
-      second();
+      await second();
       expect(cleared).toEqual([1]);
     } finally {
       globalThis.setInterval = setIntervalOriginal;

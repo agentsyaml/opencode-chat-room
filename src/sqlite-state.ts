@@ -10,13 +10,36 @@ type State = { rooms: Room[]; registry: Registry };
 type Page<T> = { items: T[]; hasMore: boolean };
 const databases = new Map<string, Promise<Database>>();
 
-function open(file: string): Promise<Database> {
+export function openStateDatabase(file: string): Promise<Database> {
   const known = databases.get(file);
   if (known) return known;
   const pending = initialize(file);
   databases.set(file, pending);
   void pending.catch(() => databases.delete(file));
   return pending;
+}
+
+export async function withStateTransaction<T>(file: string, callback: (db: Database) => T): Promise<T> {
+  const db = await openStateDatabase(file);
+  return immediate(db, () => callback(db));
+}
+
+export async function initializeAdminSchema(file: string): Promise<void> {
+  await withStateTransaction(file, db => {
+    db.exec(`CREATE TABLE IF NOT EXISTS admin_rooms(room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,target_room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,session_id TEXT NOT NULL,receiver_owner_id TEXT NOT NULL,membership_id TEXT NOT NULL,generation INTEGER NOT NULL,enrollment_hash TEXT NOT NULL,enrollment_expires INTEGER NOT NULL,capability_hash TEXT,created_at INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS admin_tasks(id TEXT PRIMARY KEY,admin_room_id TEXT NOT NULL REFERENCES admin_rooms(room_id) ON DELETE CASCADE,admin_generation INTEGER NOT NULL DEFAULT 1,target_room_id TEXT NOT NULL,target_session_id TEXT NOT NULL,target_owner_id TEXT NOT NULL DEFAULT '',target_membership_id TEXT NOT NULL DEFAULT '',text TEXT NOT NULL,status TEXT NOT NULL,progress TEXT NOT NULL,delivery_token_hash TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS admin_plans(id TEXT PRIMARY KEY,admin_room_id TEXT NOT NULL REFERENCES admin_rooms(room_id) ON DELETE CASCADE,name TEXT NOT NULL,interval_seconds INTEGER NOT NULL,text TEXT NOT NULL,paused INTEGER NOT NULL,next_run_at INTEGER NOT NULL,created_at INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS admin_deliveries(id TEXT PRIMARY KEY,admin_room_id TEXT NOT NULL REFERENCES admin_rooms(room_id) ON DELETE CASCADE,generation INTEGER NOT NULL,recipient_room_id TEXT NOT NULL DEFAULT '',session_id TEXT NOT NULL,owner_id TEXT NOT NULL,membership_id TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,task_id TEXT,task_token TEXT,admission_id TEXT NOT NULL,created_at INTEGER NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0,UNIQUE(admin_room_id,kind,task_id));
+  CREATE INDEX IF NOT EXISTS admin_delivery_target ON admin_deliveries(session_id,owner_id,acknowledged);`);
+  const taskColumns = db.query("PRAGMA table_info(admin_tasks)").all() as Array<{ name: string }>;
+  if (!taskColumns.some(column => column.name === "delivery_token_hash")) db.exec("ALTER TABLE admin_tasks ADD COLUMN delivery_token_hash TEXT NOT NULL DEFAULT ''");
+  if (!taskColumns.some(column => column.name === "admin_generation")) db.exec("ALTER TABLE admin_tasks ADD COLUMN admin_generation INTEGER NOT NULL DEFAULT 1");
+  if (!taskColumns.some(column => column.name === "target_owner_id")) db.exec("ALTER TABLE admin_tasks ADD COLUMN target_owner_id TEXT NOT NULL DEFAULT ''");
+  if (!taskColumns.some(column => column.name === "target_membership_id")) db.exec("ALTER TABLE admin_tasks ADD COLUMN target_membership_id TEXT NOT NULL DEFAULT ''");
+  const deliveryColumns = db.query("PRAGMA table_info(admin_deliveries)").all() as Array<{ name: string }>;
+  if (!deliveryColumns.some(column => column.name === "task_token")) db.exec("ALTER TABLE admin_deliveries ADD COLUMN task_token TEXT");
+  if (!deliveryColumns.some(column => column.name === "recipient_room_id")) db.exec("ALTER TABLE admin_deliveries ADD COLUMN recipient_room_id TEXT NOT NULL DEFAULT ''");
+  });
 }
 
 async function initialize(file: string): Promise<Database> {
@@ -51,16 +74,16 @@ async function initialize(file: string): Promise<Database> {
 
 export type Announcement = { roomID: string; name: string; content: string; updatedAt: number };
 export async function listAnnouncements(file: string, roomID: string): Promise<Announcement[]> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return [];
   return db.query("SELECT room_id AS roomID,name,content,updated_at AS updatedAt FROM announcements WHERE room_id=? ORDER BY name").all(roomID) as Announcement[];
 }
 export async function getAnnouncement(file: string, roomID: string, name: string): Promise<Announcement | undefined> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return db.query("SELECT room_id AS roomID,name,content,updated_at AS updatedAt FROM announcements WHERE room_id=? AND name=?").get(roomID, name) as Announcement | undefined;
 }
 export async function putAnnouncement(file: string, roomID: string, name: string, content: string, updatedAt: number): Promise<Announcement | undefined> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return immediate(db, () => {
     if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return undefined;
     db.query("INSERT INTO announcements(room_id,name,content,updated_at) VALUES(?,?,?,?) ON CONFLICT(room_id,name) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at").run(roomID, name, content, updatedAt);
@@ -68,13 +91,13 @@ export async function putAnnouncement(file: string, roomID: string, name: string
   });
 }
 export async function deleteAnnouncement(file: string, roomID: string, name: string): Promise<boolean> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return immediate(db, () => db.query("DELETE FROM announcements WHERE room_id=? AND name=?").run(roomID, name).changes > 0);
 }
 
 export type StoredResource = { id: string; roomID: string; name: string; mimeType: string; size: number; createdAt: number };
 export async function putResource(file: string, resource: StoredResource): Promise<boolean> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return immediate(db, () => {
     if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(resource.roomID)) return false;
     db.query("INSERT INTO resources(id,room_id,name,mime_type,size,created_at) VALUES(?,?,?,?,?,?)")
@@ -83,7 +106,7 @@ export async function putResource(file: string, resource: StoredResource): Promi
   });
 }
 export async function getResource(file: string, roomID: string, id: string): Promise<StoredResource | undefined> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   const row = db.query("SELECT id,room_id AS roomID,name,mime_type AS mimeType,size,created_at AS createdAt FROM resources WHERE room_id=? AND id=?")
     .get(roomID, id) as StoredResource | null;
   return row ?? undefined;
@@ -279,12 +302,16 @@ function readState(db: Database): State {
 
 export type HistoryMessage = Message & { seq: number };
 export async function writeSqliteState<T>(file: string, callback: (service: RoomService, registry: Registry) => T): Promise<T> {
-  const db = await open(file);
+  return writeSqliteStateWithDatabase(file, (service, registry) => callback(service, registry));
+}
+
+export async function writeSqliteStateWithDatabase<T>(file: string, callback: (service: RoomService, registry: Registry, db: Database) => T): Promise<T> {
+  const db = await openStateDatabase(file);
   return immediate(db, () => {
     const state = readState(db);
     const service = new RoomService();
     service.hydrate(state.rooms);
-    const result = callback(service, state.registry);
+    const result = callback(service, state.registry, db);
     if (result && typeof (result as { then?: unknown }).then === "function") throw new Error("writeState callback must be synchronous");
     persistState(db, service.listRooms(), state.registry);
     return result;
@@ -292,17 +319,17 @@ export async function writeSqliteState<T>(file: string, callback: (service: Room
 }
 
 export async function readSqliteState(file: string): Promise<State> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return db.transaction(() => readState(db)).deferred();
 }
 
 export async function readQuestions(file: string, roomID: string): Promise<Message[]> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return (db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? AND is_question=1 AND answered_by IS NULL ORDER BY seq").all(roomID) as Array<Record<string, string | number | null>>).map(rowMessage);
 }
 
 export async function answerQuestion(file: string, roomID: string, questionID: string, sessionID: string, text: string): Promise<{ status: "ok"; answer: Message } | { status: "missing" | "member" | "question" | "answered" }> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return immediate(db, () => {
     if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return { status: "missing" };
     const member = db.query("SELECT g.name,r.kind FROM registry g JOIN rooms r ON r.id=g.room_id JOIN participants p ON p.room_id=g.room_id AND p.id=CASE WHEN r.kind='direct' THEN g.session_id ELSE g.name END WHERE g.room_id=? AND g.session_id=?").get(roomID, sessionID) as { name: string; kind: string } | null;
@@ -320,7 +347,7 @@ export async function answerQuestion(file: string, roomID: string, questionID: s
 }
 
 export async function readUnreadPage(file: string, roomID: string, afterTs: number, limit = 100, sessionID?: string, senderName?: string, newest = false): Promise<Page<Message>> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   const take = Math.min(200, Math.max(1, limit));
   const rows = db.query(`SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? AND created_at>? AND
     (? IS NULL OR (sender_session_id IS NOT NULL AND sender_session_id!=?) OR (sender_session_id IS NULL AND sender_id!=?))
@@ -332,7 +359,7 @@ export async function readUnreadPage(file: string, roomID: string, afterTs: numb
 }
 
 export async function readInboxPage(file: string, sessionID: string, roomFilter: string | null, excludeSelf: boolean, limit = 100, afterTs?: number) {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return db.transaction(() => {
   const take = Math.min(200, Math.max(1, limit));
   const members = db.query("SELECT room_id,last_queued_ts FROM registry WHERE session_id=? AND (? IS NULL OR room_id=?)").all(sessionID, roomFilter, roomFilter) as Array<{ room_id: string; last_queued_ts: number | null }>;
@@ -354,7 +381,7 @@ export async function readInboxPage(file: string, sessionID: string, roomFilter:
 }
 
 export async function readHistoryPage(file: string, roomID: string, beforeSeq?: number, limit = 100, excludeSessionID?: string, excludeName = ""): Promise<{ messages: HistoryMessage[]; nextBeforeSeq: number | null; hasMore: boolean }> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   const take = Math.min(200, Math.max(1, limit));
   const rows = db.query(`SELECT seq,id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? ${beforeSeq === undefined ? "" : "AND seq<? "}AND
     (? IS NULL OR (sender_session_id IS NOT NULL AND sender_session_id!=?) OR (sender_session_id IS NULL AND sender_id!=?))
@@ -366,7 +393,7 @@ export async function readHistoryPage(file: string, roomID: string, beforeSeq?: 
 }
 
 export async function readMessageReceipts(file: string, roomID: string, messageIDs?: string[]): Promise<MessageReceipt[] | undefined> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return db.transaction(() => {
     if (messageIDs && (!messageIDs.length || messageIDs.length > 500 || messageIDs.some((id) => !id))) return undefined;
     const requested = messageIDs ? [...new Set(messageIDs)] : undefined;
@@ -385,7 +412,7 @@ export async function readMessageReceipts(file: string, roomID: string, messageI
 export async function writeMessageReceipts(file: string, roomID: string, sessionID: string, messageIDs: string[], evidence: ReceiptEvidence, identity: ReceiptIdentity, readAt: number, readThroughTs?: number): Promise<ReceiptWriteResult> {
   if (!messageIDs.length || messageIDs.length > 500 || messageIDs.some((id) => typeof id !== "string" || !id || id.length > 128) || !["displayed", "tool", "context"].includes(evidence)) return { status: "messageIDs", acceptedIDs: [] };
   const ids = [...new Set(messageIDs)];
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return immediate(db, () => {
     const member = db.query("SELECT membership_id,server_url,api_prefix,protocol,name,receiver_owner_id,host FROM registry WHERE room_id=? AND session_id=?").get(roomID, sessionID) as Record<string, string | null> | null;
     if (!member || member.membership_id !== identity.membershipID || !receiptOwnerMatches({
@@ -411,7 +438,7 @@ export async function writeMessageReceipts(file: string, roomID: string, session
 }
 
 export async function writePresenceState(file: string, reports: PresenceReport[], ownerID: string | undefined, sequence: number | undefined, now: number): Promise<{ stale: boolean; updatedSessionIDs: string[] }> {
-  const db = await open(file);
+  const db = await openStateDatabase(file);
   return immediate(db, () => {
     if (ownerID && sequence !== undefined) {
       const current = db.query("SELECT last_sequence FROM presence_sequences WHERE owner_id=?").get(ownerID) as { last_sequence: number } | null;

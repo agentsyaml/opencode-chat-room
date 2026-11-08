@@ -23,16 +23,14 @@ import { createQueueTransport, type QueueTransport } from "./src/queue-transport
 import { checkCenterInbox } from "./src/center-inbox";
 import { assertDeliveryLease } from "./src/session-delivery";
 import { wakeSessions } from "./src/center-wake";
-import {
-  clearPendingAdmission,
-} from "./src/queue";
+import { clearPendingAdmission } from "./src/queue";
 import { createNotifier } from "./src/plugin-notifications";
 import { explicitlyAddresses } from "./src/mentions";
 import { createV2Setup, type V2Runtime } from "./src/v2-plugin";
 import { createV1Server } from "./src/v1-plugin";
 import { runAnnouncementTool } from "./src/announcement-tool";
 import { uploadAgentResource } from "./src/resource-upload";
-
+import { adminTool, adminToolDescription, adminToolSchema } from "./src/admin-client";
 // ponytail: CHAT_ROOM_SERVER_URL switches to central mode (all state on a
 // central server); unset = standalone local-file mode
 const centerUrl = process.env.CHAT_ROOM_SERVER_URL ?? "";
@@ -184,7 +182,6 @@ const notifier = createNotifier({
 const { notifyRoom, notifyTarget } = notifier;
 const restoreScans = new Map<string, { afterTs: number; untilTs?: number }>();
 const restoreKey = (sid: string, roomID: string, ownerID = "") => JSON.stringify([ownerID, sid, roomID]);
-
 export async function pollKnownSessions(
   sessions: ReadonlySet<string>,
   transport: QueueTransport,
@@ -456,13 +453,17 @@ const roomExecute = async (
       return `error: ${err instanceof Error ? err.message : String(err)}`;
     }
 };
-
 const room = tool({
   description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; upload files and media",
   args: roomArgs.shape,
   execute: roomExecute,
 });
 
+const admin = tool({
+  description: adminToolDescription,
+  args: adminToolSchema.shape,
+  execute: (args, context) => adminTool(args, context, currentRuntime().center, currentRuntime().transport),
+});
 export const server = createV1Server({
   runtime: (input, transport) => ({
     protocol: "v1",
@@ -473,12 +474,12 @@ export const server = createV1Server({
   }),
   run: (runtime, callback) => runtimeContext.run(runtime, callback),
   room,
+  admin,
   observe: refreshSelf,
   checkInbox: (runtime, sessionID) => checkCenterInbox(runtime.center, sessionID, runtime.transport),
   wake: (runtime, sessions) => wakeSessions(runtime.center, runtime.transport, serveWakeUrl, sessions),
   central: Boolean(centerUrl),
 });
-
 export const setup = createV2Setup({
   runtime: (directory, transport) => ({
     protocol: "v2",
@@ -489,6 +490,7 @@ export const setup = createV2Setup({
   }),
   run: (runtime, callback) => runtimeContext.run(runtime, callback),
   execute: (args, sessionID, permissionContext) => roomExecute(args, { ...permissionContext, sessionID } as V1ToolContext),
+  admin: (args, sessionID, transport, center) => adminTool(args, { sessionID }, center, transport),
   observe: refreshSelf,
   poll: pollKnownSessions,
 });

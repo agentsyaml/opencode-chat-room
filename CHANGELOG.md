@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Restore the avatar and name in a bottom-left user menu, move language controls into settings, and place leave/delete actions in a room options menu.
+- Block the interactive join view while restoring an existing browser identity; preserve retry behavior for transient failures.
+- Add opt-in administrator rooms with one operator-designated Agent, separate enrollment and scoped capabilities, cross-room tasks, worker progress reports, and persistent recurring supervision plans.
+- Keep supervisor reminders capability-protected, coalesce offline checks, and retain stable delivery admissions across retries. Timer acceptance does not imply task completion.
+- Document the operator setup and the existing shared-token trust limit for worker status reports. Version 0.5.0 remains unchanged; these changes are not a release.
+
 ## 0.5.0 — 2026-11-08
 
 - Keep room notifications compact: room identity and message content remain, while repeated response instructions move into the bundled `chatroom` skill.

@@ -5,15 +5,19 @@ export function initRooms(app) {
   const $ = app.$;
 
   app.showJoin = (refresh = true) => {
+    document.documentElement.classList.remove("session-restore");
     if (!$("#inName").value) $("#inName").value = LS.name;
     $("#chatView").hidden = true;
+    $("#restoreView").hidden = true;
     $("#joinView").hidden = false;
     app.updateTitle();
     if (refresh) void app.refreshRoomList();
     $("#inRoomId").focus();
   };
   app.showChat = () => {
+    document.documentElement.classList.remove("session-restore");
     $("#joinView").hidden = true;
+    $("#restoreView").hidden = true;
     $("#chatView").hidden = false;
   };
   app.renderHead = () => {
@@ -21,7 +25,7 @@ export function initRooms(app) {
     $("#roomIdShort").textContent = app.state.room.id.slice(0, 8);
     $("#btnCopyId").title = app.t("copyRoomIdTitle", { id: app.state.room.id });
     $("#btnCopyId").setAttribute("aria-label", app.t("copyRoomId"));
-    app.setText($("#railIdentity"), "identityLabel", { name: app.state.myName });
+    $("#railIdentity").textContent = app.state.myName;
     $("#profileAvatar").textContent = Array.from(app.state.myName.trim())[0]?.toLocaleUpperCase() || "?";
     app.updateTitle();
   };
@@ -235,7 +239,11 @@ export function initRooms(app) {
       empty.hidden = rooms.length > 0;
       chatEmpty.hidden = rooms.length > 0;
     } catch (error) {
-      if (error.status === 401) app.state.room ? app.openChatSettings() : app.openTokenBox();
+      if (error.status === 401) {
+        if (!app.state.room && !app.state.restored) { app.showJoin(false); app.openTokenBox(); app.showJoinError("authRetry"); }
+        else app.state.room ? app.openChatSettings() : app.openTokenBox();
+      }
+      else if (!app.state.restored && !app.state.room) app.showRestoreFailure(app.t("networkRetry"));
       else {
         app.setText(empty, "roomListError");
         app.setText(chatEmpty, "roomListError");
@@ -262,6 +270,7 @@ export function initRooms(app) {
     const candidates = [...new Set([activeId, ...rooms.filter((room) => room.joined).map((room) => room.id), ...app.state.joinedIds, ...directIds].filter(Boolean))];
     const valid = new Set();
     const unresolved = new Set();
+    let authFailed = false;
     await bounded(candidates, 3, async (roomId) => {
       try {
         const room = rooms.find((item) => item.id === roomId) || await app.api(`/rooms/${encodeURIComponent(roomId)}`);
@@ -273,6 +282,7 @@ export function initRooms(app) {
       } catch (error) {
         if (error.status !== 404) {
           unresolved.add(roomId);
+          if (error.status === 401) authFailed = true;
           if (error.status === 401) app.state.room ? app.openChatSettings() : app.openTokenBox();
         }
       }
@@ -281,12 +291,16 @@ export function initRooms(app) {
     app.state.restorePending = unresolved;
     app.saveJoinedIds();
     app.state.restored = unresolved.size === 0;
+    if (authFailed) { app.showJoin(false); app.openTokenBox(); app.showJoinError("authRetry"); return; }
     if (activeId && valid.has(activeId)) app.activateRoom(activeId);
-    else if (activeId && unresolved.has(activeId)) app.showJoin(false);
+    else if (activeId && unresolved.has(activeId)) {
+      app.showRestoreFailure(app.t("networkRetry"));
+    }
     else {
       LS.roomId = "";
       const fallback = valid.values().next().value;
       if (fallback) app.activateRoom(fallback);
+      else if (unresolved.size) app.showRestoreFailure(app.t("networkRetry"));
       else app.showJoin(false);
     }
     app.startRoomWatcher();
@@ -361,6 +375,7 @@ export function initRooms(app) {
     document.querySelectorAll(".panel").forEach((panel) => { panel.hidden = true; });
     $("#btnMembers").setAttribute("aria-expanded", "false");
     $("#btnSettings").setAttribute("aria-expanded", "false");
+    $("#btnRoomOptions").setAttribute("aria-expanded", "false");
   };
   app.togglePanel = (selector) => {
     const panel = $(selector), wasHidden = panel.hidden;
@@ -392,12 +407,13 @@ export function initRooms(app) {
     try {
       await app.api(`/rooms/${encodeURIComponent(room.id)}`, {
         method: "DELETE", body: JSON.stringify({ sessionID: LS.sessionID }),
+        headers: LS.adminToken ? { "X-Chat-Admin-Token": LS.adminToken } : {},
       });
       await app.removeJoinedRoom(room.id);
       app.clearDraft(room.id);
       app.clearPosition(room.id);
       app.saveFailedMessages(room.id, []);
-    } catch (error) { app.showSendError("sendFailed", { message: error.message }); }
+    } catch (error) { app.showSendError(error.status === 403 && error.message.includes("operator token required") ? "adminRoomDeleteDenied" : "sendFailed", { message: error.message }); }
   };
 
   app.copyRoomId = async () => {

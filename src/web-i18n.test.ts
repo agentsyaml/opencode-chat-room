@@ -32,7 +32,7 @@ test.skipIf(!browserModule)("system events translate in messages and room previe
     const preview = page.locator(`#roomListChat [data-room-id="${roomId}"] .r-preview`);
     await api(origin, `/rooms/${roomId}/join`, "POST", { sessionID: "i18n-peer", participantId: "Peer", participantName: "Peer" });
     await page.locator("#msgList").getByText("Peer joined the room").waitFor();
-    await page.selectOption("#localeSelectChat", "zh-CN");
+    await setLocale(page, "zh-CN");
     const joinPreviewZh = await expectText(page, "Peer 加入了房间", roomId);
     await api(origin, `/rooms/${roomId}/leave`, "POST", { sessionID: "i18n-peer" });
     const leavePreviewZh = await expectText(page, "Peer 离开了房间", roomId);
@@ -42,13 +42,13 @@ test.skipIf(!browserModule)("system events translate in messages and room previe
     await api(origin, `/rooms/${roomId}/kick`, "POST", { sessionID: ownerID, targetSessionID: "i18n-alex" });
     const removedPreviewZh = await expectText(page, "Alex 被移出了房间", roomId);
     await page.screenshot({ path: path.join(artifactDir, "chat-system-removed-zh.png"), fullPage: true });
-    await page.selectOption("#localeSelectChat", "en");
+    await setLocale(page, "en");
     const removedPreviewEn = await expectText(page, "Alex was removed from the room", roomId);
     await page.screenshot({ path: path.join(artifactDir, "chat-system-removed-en.png"), fullPage: true });
     await page.locator("#msgList").getByText("Peer joined the room").waitFor();
     await page.locator("#msgList").getByText("Peer left the room").waitFor();
 
-    await page.selectOption("#localeSelectChat", "zh-CN");
+    await setLocale(page, "zh-CN");
     await page.locator("#msgInput").fill("Alex was removed from the room");
     await page.locator("#btnSend").click();
     const literal = page.locator("#msgList .msg.own .msg-text").filter({ hasText: "Alex was removed from the room" }).last();
@@ -70,6 +70,12 @@ async function expectText(page: any, text: string, roomId: string) {
   await page.waitForFunction(({ id, expected }: { id: string; expected: string }) =>
     document.querySelector(`#roomListChat [data-room-id="${id}"] .r-preview`)?.textContent === expected, { id: roomId, expected: text });
   return await page.locator(`#roomListChat [data-room-id="${roomId}"] .r-preview`).textContent();
+}
+
+async function setLocale(page: any, locale: string) {
+  await page.locator("#btnSettings").click(); await page.locator("#chatSettings").waitFor({ state: "visible" });
+  await page.locator("#localeSelectSettings").selectOption(locale); await page.keyboard.press("Escape");
+  await page.locator("#chatSettings").waitFor({ state: "hidden" });
 }
 
 async function api(origin: string, route: string, method = "GET", body?: unknown) {

@@ -1,9 +1,12 @@
 import RoomService, { RoomError, type Room } from "../src/room-service";
-import { writeState } from "../src/store";
+import { databasePath, writeState } from "../src/store";
+import { writeSqliteStateWithDatabase } from "../src/sqlite-state";
+import { isOperator } from "./admin-auth";
 import { clearPendingAdmission } from "../src/queue";
 import { removeRoomResources } from "../src/resources";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
+class ProtectedRoomDeletion extends Error {}
 const serializeRoom = (room: Room) => ({ ...room, participants: [...room.participants.values()], messages: room.messages, kind: room.kind ?? "group" });
 const mutate = <T>(fn: (service: RoomService, registry: import("../src/store").Registry) => T) => writeState(fn);
 async function objectBody(req: Request): Promise<Record<string, unknown> | undefined> {
@@ -71,15 +74,29 @@ export async function roomManagement(req: Request, url: URL): Promise<Response |
     const body = await objectBody(req);
     if (!body) return json({ error: "JSON object body is required" }, 400);
     const sessionID = typeof body.sessionID === "string" ? body.sessionID : "";
-    if (!sessionID || sessionID.length > 128) return json({ error: "sessionID is required" }, 400);
-    const sessions = await mutate((svc, registry) => {
-      svc.getRoom(roomId);
-      if (!registry[roomId]?.[sessionID]) throw new RoomError("NOT_JOINED", "actor is not a room member");
-      const removed = Object.keys(registry[roomId]);
-      svc.deleteRoom(roomId);
-      delete registry[roomId];
-      return removed;
-    });
+    if (body.sessionID !== undefined && (typeof body.sessionID !== "string" || sessionID.length > 128)) return json({ error: "invalid sessionID" }, 400);
+    if (!sessionID && !isOperator(req)) return json({ error: "sessionID is required" }, 400);
+    let sessions: string[];
+    try {
+      sessions = await writeSqliteStateWithDatabase(databasePath(), (svc, registry, db) => {
+        svc.getRoom(roomId);
+        const hasAdminSchema = db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='admin_rooms'").get();
+        const protectedRoom = Boolean(hasAdminSchema && db.query("SELECT 1 FROM admin_rooms WHERE room_id=? OR target_room_id=? LIMIT 1").get(roomId, roomId));
+        const operator = isOperator(req);
+        if (protectedRoom && !operator) throw new ProtectedRoomDeletion();
+        // Only an operator may bypass membership when deleting an admin room or its target.
+        if (!protectedRoom || !operator) {
+          if (!registry[roomId]?.[sessionID]) throw new RoomError("NOT_JOINED", "actor is not a room member");
+        }
+        const removed = Object.keys(registry[roomId] ?? {});
+        svc.deleteRoom(roomId);
+        delete registry[roomId];
+        return removed;
+      });
+    } catch (error) {
+      if (error instanceof ProtectedRoomDeletion) return json({ error: "operator token required to delete a designated admin or target room" }, 403);
+      throw error;
+    }
     await removeRoomResources(roomId).catch(() => console.error("failed to clean deleted room resources", roomId));
     for (const sid of sessions) clearPendingAdmission(sid, roomId, Number.MAX_SAFE_INTEGER);
     return json({ ok: true });

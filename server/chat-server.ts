@@ -21,6 +21,7 @@ import { roomManagement } from "./newrooms";
 import { memberRoutes } from "./member-routes";
 import { resourceRoutes } from "./resource-routes";
 import { maxResourceBytes } from "../src/resources";
+import { adminRoutes } from "./admin-routes";
 
 function parsePort(value: string): number {
   const port = Number(value);
@@ -80,8 +81,6 @@ async function handle(req: Request): Promise<Response> {
     return Response.redirect(new URL("/chat", url).toString(), 302);
   }
   if (req.method === "GET" && p === "/chat") {
-    // ponytail: the human-facing chat page; APIs stay token-gated, the page
-    // itself is a static shell
     const html = await fs
       .readFile(path.join(import.meta.dir, "chat.html"), "utf8")
       .catch(() => null);
@@ -91,8 +90,6 @@ async function handle(req: Request): Promise<Response> {
     return new Response(html, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
-        // ponytail: never cache the page — the UI is iterated often and the
-        // server reads it fresh from disk on every request
         "Cache-Control": "no-store",
       },
     });
@@ -122,6 +119,7 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "unauthorized" }, 401);
   }
   try {
+    const admin = await adminRoutes(req, url); if (admin) return admin;
     const resource = await resourceRoutes(req, url);
     if (resource) return resource;
     const history = await historyRoute(url);

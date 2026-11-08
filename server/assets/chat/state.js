@@ -132,6 +132,7 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
     get name() { return ensureIdentity().name; },
     set name(value) { ensureIdentity(); browserIdentity.name = String(value ?? "").slice(0, 64); writeSession("chat.name", browserIdentity.name || null); saveIdentity(); },
     get token() { return read("chat.token") || ""; }, set token(value) { write("chat.token", value || null); },
+    get adminToken() { return readSession("chat.adminToken") || ""; }, set adminToken(value) { writeSession("chat.adminToken", value || null); },
     get locale() { return read("chat.locale") || "en"; }, set locale(value) { write("chat.locale", value || null); },
     get joinedRoomIds() {
       try {
@@ -187,7 +188,13 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
     const response = await apiResponse(url, options), blob = await response.blob();
     assertIdentity(); return blob;
   };
-  return { LS: auth, saveToken, api, apiBlob };
+  const adminApi = async (url, options = {}) => {
+    if (!url.startsWith("/admin/") || !auth.adminToken) throw new Error("Administration token is required");
+    const response = await apiResponse(url, { ...options, headers: { ...options.headers, "X-Chat-Admin-Token": auth.adminToken } });
+    const data = await response.json().catch(() => ({}));
+    assertIdentity(); return data;
+  };
+  return { LS: auth, saveToken, api, apiBlob, adminApi };
 }
 
 const messages = {
@@ -195,6 +202,7 @@ const messages = {
     brand: "OC Chat", documentTitle: "OC Chat",
     roomTitle: ({ name }) => `${name} · OC Chat`,
     tagline: "A lightweight chat room. Enter a room ID to join, or create a new one.",
+    restoringSession: "Restoring your session…", retry: "Retry", roomOptions: "Options",
     languageLabel: "Language", roomIdLabel: "Room ID", roomIdPlaceholder: "Paste or enter a room ID",
     nameLabel: "Your name", namePlaceholder: "What should we call you?", joinRoom: "Join room",
     or: "or", newRoomNameLabel: "New room name", newRoomNamePlaceholder: "e.g. Weekend movie night",
@@ -217,10 +225,11 @@ const messages = {
     answerQuestion: "Reply", answerPlaceholder: "Write a reply…", sendAnswer: "Send reply",
     answerFailed: "Reply failed. Your draft is still here.", questionAlreadyAnswered: "This question was answered elsewhere.",
     sendAsQuestion: "Send as a question",
-    settings: "Settings", tokenRequired: "The server requires an access token (401).",
+    settings: "Settings", adminAccess: "Administration", adminToken: "Administration token", openAdministration: "Open administration", administration: "Administration", designations: "Designations", adminRoom: "Admin room", targetRoom: "Agent room", targetAgent: "Registered agent", designate: "Designate and issue enrollment", revokeDesignation: "Revoke designation", globalStatus: "Global status", adminTasks: "Tasks", taskText: "Task", dispatchTask: "Dispatch task", timers: "Timers", planName: "Timer name", createTimer: "Create timer", tokenRequired: "The server requires an access token (401).",
+    adminLoading: "Loading administration…", refreshAdmin: "Refresh", adminRoomBadge: "admin", chooseAdminRoom: "Choose a normal room", chooseTargetRoom: "Choose an agent room", chooseAgent: "Choose a registered agent", taskTargetRoom: "Target room", taskTargetAgent: "Target agent", createAdminRoomFirst: "Create a normal room first, then select it as the admin room.", noAgents: "No registered agents", selectAdminAgent: "Choose an admin room and registered agent.", privateEnrollment: ({ expires }) => `Copy this instruction and paste it privately into the selected agent session. Expires ${expires}. Never post it in a room.`, copyEnrollment: "Copy private instruction", enrollmentCopied: "Private instruction copied.", revokeConfirm: "Revoke this admin designation? The normal room will remain.", updateTask: "Update task", task_pending: "Pending", task_working: "Working", task_blocked: "Blocked", task_completed: "Completed", task_cancelled: "Cancelled", nextRun: ({ time, minutes }) => `Every ${minutes} min · next ${time}`, paused: "Paused", pauseTimer: "Pause", resumeTimer: "Resume", deleteTimer: "Delete", deleteTimerConfirm: ({ name }) => `Delete timer “${name}”?`,
     leave: "Leave", reconnecting: "Connection lost. Retrying…", messageList: "Message list",
     noMessages: "No messages yet. Say something.", latestMessages: "Back to latest messages",
-    mentionMembers: "Choose a member to mention", messagePlaceholder: "Message · Enter sends · Shift+Enter adds a line",
+    mentionMembers: "Choose a member to mention", messagePlaceholder: "Message · Enter to send",
     send: "Send", roomMeta: ({ members, count }) => `${members} ${members === 1 ? "member" : "members"} · ${count} ${count === 1 ? "message" : "messages"}`,
     joinArrow: "Join →", joinDirectTitle: "Click to join directly", mentionEmpty: "No matching members",
     joined: "Joined", joinAction: "Join room", unreadMessages: ({ count }) => `${count} unread`,
@@ -238,6 +247,7 @@ const messages = {
     roomNotFound: "This room is gone, or you no longer have access.",
     sendAuth: "Send failed: an access token is required", sendNetwork: "Send failed. Your message is saved below.",
     sendFailed: ({ message }) => `Send failed: ${message}`,
+    adminRoomDeleteDenied: "This room is designated for administration. Enter the Administration token in Settings to delete it.",
     failedMessages: "Messages not sent", retryFailed: "Retry", discardFailed: "Discard",
     roomListError: "Unable to load rooms. You can enter a room ID directly.", guest: "Guest",
     roomsLabel: "Rooms", refreshRooms: "Refresh rooms", identityLabel: ({ name }) => `Chatting as ${name}`,
@@ -256,6 +266,7 @@ const messages = {
   "zh-CN": {
     brand: "OC Chat", documentTitle: "OC Chat", roomTitle: ({ name }) => `${name} · OC Chat`,
     tagline: "一个轻量的聊天房间。输入房间 ID 加入，或直接新建一个。", languageLabel: "语言",
+    restoringSession: "正在恢复会话…", retry: "重试", roomOptions: "选项",
     roomIdLabel: "房间 ID", roomIdPlaceholder: "粘贴或输入房间 ID", nameLabel: "你的昵称",
     namePlaceholder: "怎么称呼你", joinRoom: "加入房间", or: "或", newRoomNameLabel: "新房间名称",
     newRoomNamePlaceholder: "例如：周末电影夜", createRoom: "创建新房间", tokenOptional: "访问令牌（可选）",
@@ -277,9 +288,11 @@ const messages = {
     answerQuestion: "回复", answerPlaceholder: "写下回复…", sendAnswer: "发送回复",
     answerFailed: "回复失败，草稿仍已保留。", questionAlreadyAnswered: "此问题已由其他人回答。",
     sendAsQuestion: "作为问题发送",
+    adminAccess: "管理", adminToken: "管理令牌", openAdministration: "打开管理面板", administration: "管理面板", designations: "管理绑定", adminRoom: "管理房间", targetRoom: "Agent 房间", targetAgent: "已注册 Agent", designate: "绑定并生成加入指令", revokeDesignation: "撤销绑定", globalStatus: "全局状态", adminTasks: "任务", taskText: "任务内容", dispatchTask: "派发任务", timers: "定时任务", planName: "定时任务名称", createTimer: "创建定时任务",
+    adminLoading: "正在加载管理面板…", refreshAdmin: "刷新", adminRoomBadge: "管理", chooseAdminRoom: "选择普通房间", chooseTargetRoom: "选择 Agent 房间", chooseAgent: "选择已注册 Agent", taskTargetRoom: "任务目标房间", taskTargetAgent: "任务目标 Agent", createAdminRoomFirst: "请先按普通流程创建房间，再选作管理房间。", noAgents: "没有已注册的 Agent", selectAdminAgent: "请选择管理房间和已注册的 Agent。", privateEnrollment: ({ expires }) => `复制此指令并私下粘贴到指定的 Agent 会话中。有效期至 ${expires}。请勿发送到房间。`, copyEnrollment: "复制私密指令", enrollmentCopied: "私密指令已复制。", revokeConfirm: "撤销此管理绑定？普通房间会保留。", updateTask: "更新任务", task_pending: "待处理", task_working: "进行中", task_blocked: "受阻", task_completed: "已完成", task_cancelled: "已取消", nextRun: ({ time, minutes }) => `每 ${minutes} 分钟 · 下次 ${time}`, paused: "已暂停", pauseTimer: "暂停", resumeTimer: "恢复", deleteTimer: "删除", deleteTimerConfirm: ({ name }) => `删除定时任务“${name}”？`,
     tokenRequired: "服务器要求访问令牌（401）。", leave: "离开", reconnecting: "连接中断，正在重试…",
     messageList: "消息列表", noMessages: "还没有消息，说点什么吧。", latestMessages: "回到最新消息",
-    mentionMembers: "选择要提及的成员", messagePlaceholder: "输入消息，Enter 发送，Shift+Enter 换行",
+    mentionMembers: "选择要提及的成员", messagePlaceholder: "输入消息，Enter 发送",
     send: "发送", roomMeta: ({ members, count }) => `${members} 人 · ${count} 条消息`, joinArrow: "加入 →",
     joinDirectTitle: "点击直接加入", mentionEmpty: "没有匹配的成员", mentionHint: "↑↓ 选择 · Enter 确认 · Esc 关闭",
     joined: "已加入", joinAction: "加入房间", unreadMessages: ({ count }) => `${count} 条未读`,
@@ -294,6 +307,7 @@ const messages = {
     roomNameRequired: "请输入房间名称", createFailed: ({ message }) => `创建失败：${message}`,
     roomNotFound: "房间不存在，或你已被移出房间", sendAuth: "发送失败：需要访问令牌",
     sendNetwork: "发送失败，消息已保存在下方", sendFailed: ({ message }) => `发送失败：${message}`,
+    adminRoomDeleteDenied: "此房间用于管理。请先在设置中输入管理令牌，再删除房间。",
     failedMessages: "未发送的消息", retryFailed: "重试", discardFailed: "删除",
     roomListError: "无法加载房间列表，可直接输入房间 ID 加入。", guest: "访客", roomsLabel: "房间列表",
     refreshRooms: "刷新房间", identityLabel: ({ name }) => `当前昵称：${name}`, roomsMenu: "打开房间列表", closeRoomList: "关闭房间列表", direct: "私聊",
@@ -314,10 +328,11 @@ app.t = (key, values = {}) => {
   const text = typeof entry === "function" ? entry(values) : entry;
   return String(text).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? "");
 };
-export const { LS, saveToken, api, apiBlob } = createAuth(undefined, undefined, (key, values) => app.t(key, values));
+export const { LS, saveToken, api, apiBlob, adminApi } = createAuth(undefined, undefined, (key, values) => app.t(key, values));
 app.LS = LS;
 app.api = api;
 app.apiBlob = apiBlob;
+app.adminApi = adminApi;
 app.setToken = saveToken;
 app.locale = LS.locale === "zh-CN" ? "zh-CN" : "en";
 app.state.joinedIds = new Set(LS.joinedRoomIds);

@@ -196,6 +196,8 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 
 ## 工具参考
 
+管理员房间、专属 Agent 授权、跨房间派活和持久定时监督见 [管理员房间说明](docs/administrator-rooms.md)。管理功能需要独立的服务器操作员凭证，普通房间 token 不授予管理员权限。
+
 | 操作 | 参数 | 结果 |
 |---|---|---|
 | `create` | `name`（必填） | 创建房间；创建者成为 owner 及第一名成员 |

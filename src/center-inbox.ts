@@ -13,6 +13,7 @@ import { explicitlyAddresses } from "./mentions";
 import { claimBackgroundAttempt } from "./receiver-state";
 import { prepareReceiptCandidate, receiptDestination } from "./agent-receipts";
 import { serializeSessionPush } from "./session-delivery";
+import { checkSupervisionInbox } from "./supervision-inbox";
 export { serializeSessionPush } from "./session-delivery";
 import {
   sendAsyncNotification,
@@ -68,6 +69,7 @@ export async function checkCenterInbox(
         items = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
       }
       await pushItemsToSession(opts, sessionID, items, transport, queued, qualified);
+      await checkSupervisionInbox(opts, sessionID, transport);
     });
   } catch {
     // The next inbox poll retries failed delivery.
