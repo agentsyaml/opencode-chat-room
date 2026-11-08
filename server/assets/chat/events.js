@@ -3,6 +3,7 @@ import { copyCodeFromButton, copyTextToClipboard } from "./markdown.js";
 
 export function initEvents(app) {
   const $ = app.$;
+  initImages(app);
   document.querySelectorAll(".locale-select").forEach((select) => {
     select.addEventListener("change", () => {
       app.setLocale(select.value);
@@ -119,6 +120,98 @@ export function initEvents(app) {
   $("#inTokenChat").value = LS.token;
   void app.refreshRoomList();
   $("#inRoomId").focus();
+}
+
+function initImages(app) {
+  const $ = app.$, drafts = [], cache = new Map(), files = new Map();
+  let draftRoom = null;
+  app.imageDrafts = drafts;
+  app.failedImageFiles = files;
+  app.clearImages = () => {
+    for (const item of drafts) URL.revokeObjectURL(item.url);
+    drafts.length = 0;
+    $("#imageInput").value = "";
+    renderDrafts();
+  };
+  app.syncImageRoom = () => {
+    const room = app.state.room?.id || null;
+    if (room !== draftRoom) { app.clearImages(); draftRoom = room; }
+  };
+  function renderDrafts() {
+    const container = $("#imageDrafts");
+    container.replaceChildren();
+    container.hidden = !drafts.length;
+    for (const item of drafts) {
+      const row = document.createElement("div"), img = document.createElement("img"), name = document.createElement("span"), remove = document.createElement("button");
+      row.className = "image-draft"; img.src = item.url; img.alt = ""; name.textContent = item.file.name;
+      remove.type = "button"; remove.className = "btn ghost"; remove.textContent = "×";
+      remove.setAttribute("aria-label", app.t("removeImage") + ": " + item.file.name);
+      remove.onclick = () => { URL.revokeObjectURL(item.url); drafts.splice(drafts.indexOf(item), 1); renderDrafts(); app.updateSendState(); };
+      row.append(img, name, remove); container.append(row);
+    }
+  }
+  function addFiles(selected) {
+    app.syncImageRoom();
+    app.hideSendError();
+    for (const file of selected) {
+      if (drafts.length >= 2) { app.showSendError("tooManyImages"); break; }
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { app.showSendError("invalidImage"); continue; }
+      if (file.size > 8 * 1024 * 1024) { app.showSendError("imageTooLarge"); continue; }
+      drafts.push({ file, url: URL.createObjectURL(file) });
+    }
+    renderDrafts(); app.updateSendState();
+  }
+  $("#btnAttach").onclick = () => $("#imageInput").click();
+  $("#imageInput").onchange = (event) => { addFiles(event.target.files); event.target.value = ""; };
+  $("#msgInput").addEventListener("paste", (event) => {
+    const images = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
+    if (images.length) { event.preventDefault(); addFiles(images); }
+  });
+  $(".composer").addEventListener("dragover", (event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); });
+  $(".composer").addEventListener("drop", (event) => { if (event.dataTransfer.files.length) { event.preventDefault(); addFiles(event.dataTransfer.files); } });
+  app.uploadImages = async (roomId, images, save = () => {}) => {
+    for (const image of images) {
+      if (image.id) continue;
+      if (!image.file) throw new Error(app.t("imageUnavailable"));
+      const result = await app.api(`/attachments/${encodeURIComponent(roomId)}?sessionID=${encodeURIComponent(LS.sessionID)}`, {
+        method: "POST", headers: { "Content-Type": image.file.type }, body: image.file,
+      });
+      image.id = result.id;
+      save();
+    }
+    return images.map((image) => image.id);
+  };
+  app.renderImages = (message, row) => {
+    if (!message.attachments?.length) return;
+    const container = document.createElement("div");
+    container.className = "message-images";
+    row.append(container);
+    for (const image of message.attachments) {
+      const link = document.createElement("a"), img = document.createElement("img");
+      link.target = "_blank"; link.rel = "noopener"; link.dataset.attachmentId = image.id;
+      img.alt = image.name || "Image"; link.setAttribute("aria-label", img.alt); link.append(img); container.append(link);
+      const key = `${app.state.room.id}/${image.id}`;
+      let entry = cache.get(key);
+      if (!entry) {
+        entry = { links: new Set(), url: null };
+        cache.set(key, entry);
+        app.api(`/attachments/${encodeURIComponent(app.state.room.id)}/${encodeURIComponent(image.id)}`, { responseType: "blob" })
+          .then((blob) => {
+            if (cache.get(key) !== entry) return;
+            entry.url = URL.createObjectURL(blob);
+            for (const anchor of entry.links) { anchor.href = entry.url; anchor.firstChild.src = entry.url; }
+          }).catch(() => { if (cache.get(key) === entry) cache.delete(key); });
+      }
+      entry.links.add(link);
+      if (entry.url) { link.href = entry.url; img.src = entry.url; }
+    }
+  };
+  new MutationObserver(() => {
+    for (const [key, entry] of cache) {
+      for (const link of entry.links) if (!link.isConnected) entry.links.delete(link);
+      if (!entry.links.size) { if (entry.url) URL.revokeObjectURL(entry.url); cache.delete(key); }
+    }
+  }).observe($("#msgList"), { childList: true, subtree: true });
 }
 
 function saveAccessToken(button, app) {

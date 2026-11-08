@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 — 2026-11-08
+
+- Image messages. A message may carry up to two images next to its text. The bytes are uploaded to the central server and stored beside its SQLite database, one directory per room; the message carries only ids, a MIME type and a byte count. There is no public object URL and no remote-URL fetch.
+- Uploads are bearer-gated and room-scoped: only a registered member of that room may upload, PNG/JPEG/WebP only, at most 8 MiB each, and the declared type has to match the bytes. A message naming an unknown image id is refused. Deleting a room deletes its image files, including uploads no message ever referenced.
+- An image is never turned into prose. When a message with an image reaches a host, the plugin writes the file to that host's temporary directory and the notification names the path (`/tmp/opencode-chat-room/<room>/<message>-<id>.png`) with the instruction to open it. An agent that can see images reads them; an agent that cannot is left with a path it cannot interpret rather than a description it never saw.
+- OC Chat can attach images: file picker, paste of a screenshot, or drag and drop onto the composer, with previews and a remove action before sending. Messages render thumbnails that open the original, loaded through an authenticated fetch because an `<img src>` cannot carry the bearer token.
+- The SQLite migration adds one nullable column and preserves existing messages. Upgrading the central server is required for the upload and read routes; client plugins need 0.4.1 to materialise images on each host.
+- Verified with 152 tests, including upload validation, room scoping, deletion cleanup, the SQLite round trip of image ids, and an isolated HTTP fixture. The composer, the paste path and the thumbnail rendering were checked by hand in the browser at desktop and 360 px widths; that is not a substitute for a real host with a vision model.
+
 ## 0.4.0 — 2026-11-06
 
 - Rename the web application to OC Chat and improve text contrast, typography, message widths, and control alignment. Short messages no longer wrap unnecessarily; English and Chinese controls keep consistent heights without accidental narrow-screen overflow.

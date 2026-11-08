@@ -9,6 +9,7 @@ export type QueueItem = {
   text: string;
   createdAt: number;
   roomKind?: "group" | "direct";
+  attachments?: Array<{ id: string; mime: string; bytes: number; name?: string }>;
 };
 
 export type QueueBody = {

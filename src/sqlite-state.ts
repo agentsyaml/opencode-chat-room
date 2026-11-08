@@ -31,7 +31,7 @@ async function initialize(file: string): Promise<Database> {
         db.exec(`CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY,name TEXT NOT NULL,owner_id TEXT NOT NULL,created_at INTEGER NOT NULL,kind TEXT NOT NULL DEFAULT 'group',direct_sessions TEXT,direct_pair TEXT UNIQUE);
     CREATE TABLE IF NOT EXISTS participants(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,id TEXT NOT NULL,name TEXT NOT NULL,joined_at INTEGER NOT NULL,PRIMARY KEY(room_id,id));
-    CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,sender_id TEXT NOT NULL,sender_session_id TEXT,text TEXT NOT NULL,created_at INTEGER NOT NULL,is_question INTEGER NOT NULL DEFAULT 0,answer_to TEXT,answered_by TEXT);
+    CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,sender_id TEXT NOT NULL,sender_session_id TEXT,text TEXT NOT NULL,created_at INTEGER NOT NULL,is_question INTEGER NOT NULL DEFAULT 0,answer_to TEXT,answered_by TEXT,attachments TEXT);
     CREATE INDEX IF NOT EXISTS messages_room_seq ON messages(room_id,seq DESC);
     CREATE INDEX IF NOT EXISTS messages_room_time ON messages(room_id,created_at,seq);
     CREATE TABLE IF NOT EXISTS registry(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,session_id TEXT NOT NULL,server_url TEXT NOT NULL,api_prefix TEXT NOT NULL,protocol TEXT,name TEXT NOT NULL,last_read_ts INTEGER,last_queued_ts INTEGER,directory TEXT,host TEXT,receiver_owner_id TEXT,membership_id TEXT,work_state TEXT,last_seen_at INTEGER,PRIMARY KEY(room_id,session_id));`);
@@ -53,6 +53,7 @@ async function ensureRoomColumns(db: Database): Promise<void> {
     if (!messageColumns.some((column) => column.name === "is_question")) db.exec("ALTER TABLE messages ADD COLUMN is_question INTEGER NOT NULL DEFAULT 0");
     if (!messageColumns.some((column) => column.name === "answer_to")) db.exec("ALTER TABLE messages ADD COLUMN answer_to TEXT");
     if (!messageColumns.some((column) => column.name === "answered_by")) db.exec("ALTER TABLE messages ADD COLUMN answered_by TEXT");
+    if (!messageColumns.some((column) => column.name === "attachments")) db.exec("ALTER TABLE messages ADD COLUMN attachments TEXT");
     db.exec("CREATE INDEX IF NOT EXISTS messages_pending_questions ON messages(room_id,is_question,answered_by,seq)");
     const columns = db.query("PRAGMA table_info(rooms)").all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === "kind")) db.exec("ALTER TABLE rooms ADD COLUMN kind TEXT NOT NULL DEFAULT 'group'");
@@ -175,8 +176,8 @@ function insertRoom(db: Database, room: Room): void {
   db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair) VALUES(?,?,?,?,?,?,?)").run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null);
   const participant = db.query("INSERT INTO participants VALUES(?,?,?,?)");
   for (const p of room.participants.values()) participant.run(room.id, p.id, p.name, p.joinedAt);
-  const message = db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by) VALUES(?,?,?,?,?,?,?,?,?)");
-  for (const m of room.messages) message.run(m.id, room.id, m.senderId, m.senderSessionID ?? null, m.text, m.createdAt, m.isQuestion ? 1 : 0, m.answerToMessageID ?? null, m.answeredByMessageID ?? null);
+  const message = db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,attachments) VALUES(?,?,?,?,?,?,?,?,?,?)");
+  for (const m of room.messages) message.run(m.id, room.id, m.senderId, m.senderSessionID ?? null, m.text, m.createdAt, m.isQuestion ? 1 : 0, m.answerToMessageID ?? null, m.answeredByMessageID ?? null, m.attachments?.length ? JSON.stringify(m.attachments) : null);
 }
 
 function replaceRegistry(db: Database, registry: Registry): void {
@@ -193,7 +194,7 @@ function replaceRegistry(db: Database, registry: Registry): void {
 function persistState(db: Database, rooms: Room[], registry: Registry): void {
   const roomRow = db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,owner_id=excluded.owner_id,created_at=excluded.created_at,kind=excluded.kind,direct_sessions=excluded.direct_sessions,direct_pair=excluded.direct_pair");
   const participant = db.query("INSERT INTO participants VALUES(?,?,?,?)");
-  const message = db.query("INSERT OR IGNORE INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by) VALUES(?,?,?,?,?,?,?,?,?)");
+  const message = db.query("INSERT OR IGNORE INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,attachments) VALUES(?,?,?,?,?,?,?,?,?,?)");
   const removeParticipants = db.query("DELETE FROM participants WHERE room_id=?");
   const keep = new Set(rooms.map((room) => room.id));
   const existing = db.query("SELECT id FROM rooms").all() as Array<{ id: string }>;
@@ -203,7 +204,7 @@ function persistState(db: Database, rooms: Room[], registry: Registry): void {
     roomRow.run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null);
     removeParticipants.run(room.id);
     for (const p of room.participants.values()) participant.run(room.id, p.id, p.name, p.joinedAt);
-    for (const m of room.messages) message.run(m.id, room.id, m.senderId, m.senderSessionID ?? null, m.text, m.createdAt, m.isQuestion ? 1 : 0, m.answerToMessageID ?? null, m.answeredByMessageID ?? null);
+    for (const m of room.messages) message.run(m.id, room.id, m.senderId, m.senderSessionID ?? null, m.text, m.createdAt, m.isQuestion ? 1 : 0, m.answerToMessageID ?? null, m.answeredByMessageID ?? null, m.attachments?.length ? JSON.stringify(m.attachments) : null);
   }
   replaceRegistry(db, registry);
 }
@@ -215,10 +216,10 @@ function readState(db: Database): State {
     for (const p of db.query("SELECT id,name,joined_at FROM participants WHERE room_id=?").all(String(r.id)) as Array<Record<string, string | number>>) {
       participants.set(String(p.id), { id: String(p.id), name: String(p.name), joinedAt: Number(p.joined_at) });
     }
-    const messages = db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 500").all(String(r.id)) as Array<Record<string, string | number | null>>;
+    const messages = db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,attachments FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 500").all(String(r.id)) as Array<Record<string, string | number | null>>;
     return { id: String(r.id), name: String(r.name), ownerId: String(r.owner_id), createdAt: Number(r.created_at), kind: r.kind === "direct" ? "direct" : "group", ...(r.direct_sessions ? { directSessionIDs: JSON.parse(String(r.direct_sessions)) as string[] } : {}), ...(r.direct_pair ? { directPair: String(r.direct_pair) } : {}), participants,
       messages: messages.reverse().map((m) => ({ id: String(m.id), roomId: String(m.room_id), senderId: String(m.sender_id),
-         text: String(m.text), createdAt: Number(m.created_at), ...(m.sender_session_id ? { senderSessionID: String(m.sender_session_id) } : {}), ...(m.is_question ? { isQuestion: true } : {}), ...(m.answer_to ? { answerToMessageID: String(m.answer_to) } : {}), ...(m.answered_by ? { answeredByMessageID: String(m.answered_by) } : {}) })) };
+         text: String(m.text), createdAt: Number(m.created_at), ...(m.sender_session_id ? { senderSessionID: String(m.sender_session_id) } : {}), ...(m.is_question ? { isQuestion: true } : {}), ...(m.answer_to ? { answerToMessageID: String(m.answer_to) } : {}), ...(m.answered_by ? { answeredByMessageID: String(m.answered_by) } : {}), ...(m.attachments ? { attachments: JSON.parse(String(m.attachments)) } : {}) })) };
   });
   const registry: Registry = Object.create(null);
   const rows = db.query("SELECT * FROM registry").all() as Array<Record<string, string | number | null>>;
@@ -257,7 +258,7 @@ export async function readSqliteState(file: string): Promise<State> {
 
 export async function readQuestions(file: string, roomID: string): Promise<Message[]> {
   const db = await open(file);
-  return (db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? AND is_question=1 AND answered_by IS NULL ORDER BY seq").all(roomID) as Array<Record<string, string | number | null>>).map(rowMessage);
+  return (db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,attachments FROM messages WHERE room_id=? AND is_question=1 AND answered_by IS NULL ORDER BY seq").all(roomID) as Array<Record<string, string | number | null>>).map(rowMessage);
 }
 
 export async function answerQuestion(file: string, roomID: string, questionID: string, sessionID: string, text: string): Promise<{ status: "ok"; answer: Message } | { status: "missing" | "member" | "question" | "answered" }> {
@@ -281,7 +282,7 @@ export async function answerQuestion(file: string, roomID: string, questionID: s
 export async function readUnreadPage(file: string, roomID: string, afterTs: number, limit = 100, sessionID?: string, senderName?: string, newest = false): Promise<Page<Message>> {
   const db = await open(file);
   const take = Math.min(200, Math.max(1, limit));
-  const rows = db.query(`SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? AND created_at>? AND
+  const rows = db.query(`SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,attachments FROM messages WHERE room_id=? AND created_at>? AND
     (? IS NULL OR (sender_session_id IS NOT NULL AND sender_session_id!=?) OR (sender_session_id IS NULL AND sender_id!=?))
     ORDER BY created_at ${newest ? "DESC" : "ASC"},seq ${newest ? "DESC" : "ASC"} LIMIT ?`)
     .all(roomID, afterTs, sessionID ?? null, sessionID ?? null, senderName ?? "", take + 1) as Array<Record<string, string | number | null>>;
@@ -315,7 +316,7 @@ export async function readInboxPage(file: string, sessionID: string, roomFilter:
 export async function readHistoryPage(file: string, roomID: string, beforeSeq?: number, limit = 100, excludeSessionID?: string, excludeName = ""): Promise<{ messages: HistoryMessage[]; nextBeforeSeq: number | null; hasMore: boolean }> {
   const db = await open(file);
   const take = Math.min(200, Math.max(1, limit));
-  const rows = db.query(`SELECT seq,id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? ${beforeSeq === undefined ? "" : "AND seq<? "}AND
+  const rows = db.query(`SELECT seq,id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,attachments FROM messages WHERE room_id=? ${beforeSeq === undefined ? "" : "AND seq<? "}AND
     (? IS NULL OR (sender_session_id IS NOT NULL AND sender_session_id!=?) OR (sender_session_id IS NULL AND sender_id!=?))
     ORDER BY seq DESC LIMIT ?`).all(...(beforeSeq === undefined ? [roomID] : [roomID, beforeSeq]),
     excludeSessionID ?? null, excludeSessionID ?? null, excludeName, take + 1) as Array<Record<string, string | number | null>>;
@@ -397,5 +398,5 @@ export async function writePresenceState(file: string, reports: PresenceReport[]
 
 function rowMessage(row: Record<string, string | number | null>): Message {
   return { id: String(row.id), roomId: String(row.room_id), senderId: String(row.sender_id), text: String(row.text),
-    createdAt: Number(row.created_at), ...(row.sender_session_id !== null ? { senderSessionID: String(row.sender_session_id) } : {}), ...(row.is_question ? { isQuestion: true } : {}), ...(row.answer_to ? { answerToMessageID: String(row.answer_to) } : {}), ...(row.answered_by ? { answeredByMessageID: String(row.answered_by) } : {}) };
+    createdAt: Number(row.created_at), ...(row.sender_session_id !== null ? { senderSessionID: String(row.sender_session_id) } : {}), ...(row.is_question ? { isQuestion: true } : {}), ...(row.answer_to ? { answerToMessageID: String(row.answer_to) } : {}), ...(row.answered_by ? { answeredByMessageID: String(row.answered_by) } : {}), ...(row.attachments ? { attachments: JSON.parse(String(row.attachments)) } : {}) };
 }

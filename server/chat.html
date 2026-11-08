@@ -166,7 +166,10 @@
     <footer class="composer">
       <p id="sendError" class="send-error" role="alert" hidden></p>
       <div id="mentionPicker" class="mention-picker" role="listbox" aria-label="Choose a member to mention" data-i18n-aria-label="mentionMembers" hidden></div>
+      <div id="imageDrafts" class="image-drafts" hidden></div>
       <div class="composer-row">
+        <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+        <button id="btnAttach" class="btn ghost attach-btn" type="button" aria-label="Attach images" data-i18n-aria-label="attach" title="Attach images" data-i18n-title="attach">＋</button>
         <textarea id="msgInput" class="input" rows="1" maxlength="2000" placeholder="Type a message, Enter to send, Shift+Enter for a new line" data-i18n-placeholder="messagePlaceholder" autocomplete="off" aria-autocomplete="list" aria-controls="mentionPicker" aria-expanded="false" disabled></textarea>
         <button class="btn primary" type="button" id="btnSend" data-i18n="send" disabled>Send</button>
       </div>

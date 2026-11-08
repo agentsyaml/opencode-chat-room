@@ -18,6 +18,8 @@ import { isReceiverOwnerID } from "../src/receiver-owner";
 import { claimWake, touchActive, wakeMentionedSessions } from "./wake";
 import { historyRoute } from "./history-route";
 import { roomManagement } from "./newrooms";
+import { attachmentRoutes, readAttachment } from "./attachment-routes";
+import { MAX_IMAGES_PER_MESSAGE } from "../src/attachments";
 import { memberRoutes } from "./member-routes";
 
 function parsePort(value: string): number {
@@ -109,9 +111,14 @@ async function handle(req: Request): Promise<Response> {
   }
   // ponytail: F1 — reject non-JSON POSTs; a text/plain simple request from a
   // malicious page would otherwise mutate rooms cross-origin (no preflight)
+  const contentType = (req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  // Image uploads are the one non-JSON body. They are still bearer-gated below
+  // and the browser sends a preflight for them, so this does not reopen F1.
+  const isImageUpload = req.method === "POST" && /^\/attachments\/[^/]+$/.test(p) && contentType.startsWith("image/");
   if (
     ["POST", "DELETE"].includes(req.method) &&
-    !req.headers.get("content-type")?.includes("application/json")
+    !contentType.includes("application/json") &&
+    !isImageUpload
   ) {
     return json({ error: "content-type must be application/json" }, 415);
   }
@@ -119,6 +126,8 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "unauthorized" }, 401);
   }
   try {
+    const attachments = await attachmentRoutes(req, url);
+    if (attachments) return attachments;
     const history = await historyRoute(url);
     if (history) return history;
     if (req.method === "GET" && p === "/rooms/summary") {
@@ -375,17 +384,31 @@ async function handle(req: Request): Promise<Response> {
         if (isQuestion !== undefined && typeof isQuestion !== "boolean") return json({ error: "isQuestion must be a boolean" }, 400);
         // ponytail: F3 — mirror the plugin's zod limit at the HTTP boundary
         const text = (body.text ?? "").trim();
-        if (!text) {
+        const wanted = Array.isArray((body as Record<string, unknown>).attachments)
+          ? ((body as Record<string, unknown>).attachments as unknown[]) : [];
+        if (wanted.length > MAX_IMAGES_PER_MESSAGE) {
+          return json({ error: `at most ${MAX_IMAGES_PER_MESSAGE} images per message` }, 400);
+        }
+        if (wanted.some((id) => typeof id !== "string")) {
+          return json({ error: "attachments must be image ids" }, 400);
+        }
+        if (!text && wanted.length === 0) {
           return json({ error: "text is required" }, 400);
         }
         if (text.length > 2000) {
           return json({ error: "text too long (max 2000)" }, 400);
         }
+        const attachments: Message["attachments"] = [];
+        for (const id of wanted as string[]) {
+          const found = await readAttachment(roomId, id);
+          if (!found) return json({ error: `unknown image: ${id}` }, 400);
+          attachments.push({ id, mime: found.mime, bytes: found.data.byteLength });
+        }
         const room = await mutate((svc, reg) => {
           const senderEntry = reg[roomId]?.[sessionID];
           if (!senderEntry) throw new RoomError("NOT_JOINED", "session is not a room member");
           const sender = svc.getRoom(roomId).kind === "direct" ? sessionID : senderEntry.name;
-          svc.sendMessage(roomId, sender, text, sessionID, isQuestion === true);
+          svc.sendMessage(roomId, sender, text, sessionID, isQuestion === true, attachments.length ? attachments : undefined);
           return svc.getRoom(roomId);
         });
         touchActive(sessionID); // 发送者活跃

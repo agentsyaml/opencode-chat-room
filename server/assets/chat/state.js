@@ -157,7 +157,7 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
   const api = async (url, options = {}) => {
     assertIdentity();
     const headers = { ...options.headers };
-    if (options.body) headers["Content-Type"] = "application/json";
+    if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
     if (auth.token) headers.Authorization = `Bearer ${auth.token}`;
     let response;
     try { response = await (fetcher ?? globalThis.fetch)(url, { ...options, headers }); }
@@ -166,7 +166,7 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
       error.network = true;
       throw error;
     }
-    const data = await response.json().catch(() => ({}));
+    const data = response.ok && options.responseType === "blob" ? await response.blob() : await response.json().catch(() => ({}));
     assertIdentity();
     if (!response.ok) {
       const error = new Error(data.error || translate("requestFailed", { status: response.status }));
@@ -204,6 +204,7 @@ const messages = {
     noMessages: "No messages yet. Say something.", latestMessages: "Back to latest messages",
     mentionMembers: "Choose a member to mention", messagePlaceholder: "Message · Enter sends · Shift+Enter adds a line",
     send: "Send", roomMeta: ({ members, count }) => `${members} ${members === 1 ? "member" : "members"} · ${count} ${count === 1 ? "message" : "messages"}`,
+    attach: "Attach images", removeImage: "Remove image", imageTooLarge: "Images must be 8 MiB or smaller.", tooManyImages: "You can attach at most two images.", uploading: "Uploading…", invalidImage: "Choose a PNG, JPEG, or WebP image.", imageUnavailable: "Image unavailable. Please attach it again.",
     joinArrow: "Join →", joinDirectTitle: "Click to join directly", mentionEmpty: "No matching members",
     joined: "Joined", joinAction: "Join room", unreadMessages: ({ count }) => `${count} unread`,
     mentionHint: "↑↓ Select · Enter to confirm · Esc to close", today: "Today", yesterday: "Yesterday",
@@ -256,6 +257,7 @@ const messages = {
     messageList: "消息列表", noMessages: "还没有消息，说点什么吧。", latestMessages: "回到最新消息",
     mentionMembers: "选择要提及的成员", messagePlaceholder: "输入消息，Enter 发送，Shift+Enter 换行",
     send: "发送", roomMeta: ({ members, count }) => `${members} 人 · ${count} 条消息`, joinArrow: "加入 →",
+    attach: "添加图片", removeImage: "移除图片", imageTooLarge: "图片不能超过 8 MiB。", tooManyImages: "最多添加两张图片。", uploading: "正在上传…", invalidImage: "请选择 PNG、JPEG 或 WebP 图片。", imageUnavailable: "图片不可用，请重新添加。",
     joinDirectTitle: "点击直接加入", mentionEmpty: "没有匹配的成员", mentionHint: "↑↓ 选择 · Enter 确认 · Esc 关闭",
     joined: "已加入", joinAction: "加入房间", unreadMessages: ({ count }) => `${count} 条未读`,
     today: "今天", yesterday: "昨天", earlierMessages: "更早的消息已省略", you: "我", saved: "已保存",

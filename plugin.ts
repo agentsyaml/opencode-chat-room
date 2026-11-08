@@ -29,6 +29,7 @@ import {
 } from "./src/queue";
 import { createNotifier } from "./src/plugin-notifications";
 import { explicitlyAddresses } from "./src/mentions";
+import { imageLines, materializeAny } from "./src/attachments";
 import { createV2Setup, type V2Runtime } from "./src/v2-plugin";
 import { createV1Server } from "./src/v1-plugin";
 
@@ -298,6 +299,12 @@ const roomExecute = async (
         selfName = entry?.name ?? selfName;
         pollLastRead = entry?.lastReadTs ?? 0;
         if (entry) pollPage = await readUnreadMessages(args.roomId, pollLastRead, 100);
+        // The poll result names image paths on this host, so the files have to
+        // exist before the synchronous formatter runs. A local room already
+        // has the bytes; a central room fetches them once.
+        await Promise.all((pollPage?.items ?? []).map((m) => materializeAny(m, {
+          base: runtime.center.center, token: runtime.center.token, roomID: args.roomId!,
+        }).catch(() => [])));
       }
       const result = await withRooms<string>(
         (svc, registry) => {
@@ -428,8 +435,11 @@ const roomExecute = async (
             );
             return messages
               .map(
-                (m) =>
-                  `[${timeOf(m.createdAt)}] ${senderName(svc, m)}: ${m.text}`,
+                (m) => {
+                  const note = imageLines(m.id);
+                  return `[${timeOf(m.createdAt)}] ${senderName(svc, m)}: ${m.text}`
+                    + note.map((file) => `\n  [image] ${file} (read this file yourself; it is not described here)`).join("");
+                },
               )
               .join("\n") + (pollPage?.hasMore ? "\nMore unread messages remain; poll again." : "");
           }

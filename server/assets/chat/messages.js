@@ -11,7 +11,7 @@ export function initMessages(app) {
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 132)}px`;
   };
-  app.updateSendState = () => { $("#btnSend").disabled = !$("#msgInput").value.trim(); };
+  app.updateSendState = () => { app.syncImageRoom?.(); $("#btnSend").disabled = Boolean(app.sending) || !($("#msgInput").value.trim() || app.imageDrafts?.length); };
   app.updateDraftCount = () => app.setText($("#draftCount"), "messageCount", { count: $("#msgInput").value.length });
   app.renderFailedMessages = () => {
     const composer = $("#msgInput").closest(".composer");
@@ -32,12 +32,13 @@ export function initMessages(app) {
     for (const item of items) {
       const row = document.createElement("article"), text = document.createElement("p");
       row.className = "failed-message";
-      text.textContent = item.text;
+      text.textContent = [item.text, ...(item.images || []).map((image) => image.name)].filter(Boolean).join(" · ");
       row.append(text, failedAction("retryFailed", roomId, item.id, app), failedAction("discardFailed", roomId, item.id, app));
       panel.append(row);
     }
   };
   app.discardFailedMessage = (roomId, failedId) => {
+    app.failedImageFiles?.delete(failedId);
     app.saveFailedMessages(roomId, (app.state.failedMessages.get(roomId) || []).filter((item) => item.id !== failedId));
     app.renderFailedMessages();
   };
@@ -47,8 +48,13 @@ export function initMessages(app) {
     app.state.retryingFailedIds.add(failedId);
     app.renderFailedMessages();
     try {
+      const images = (item.images || []).map((image, index) => ({ ...image, file: app.failedImageFiles.get(failedId)?.[index] }));
+      const attachments = await app.uploadImages(roomId, images, () => {
+        item.images = images.map(({ id, name }) => ({ id, name }));
+        app.saveFailedMessages(roomId, app.state.failedMessages.get(roomId));
+      });
       const updated = await app.api(`/rooms/${encodeURIComponent(roomId)}/messages`, {
-        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text: item.text, isQuestion: Boolean(item.isQuestion) }),
+        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text: item.text, isQuestion: Boolean(item.isQuestion), attachments }),
       });
       const entry = app.state.rooms.get(roomId);
       if (entry) {
@@ -148,6 +154,8 @@ export function initMessages(app) {
       content.className = "msg-content";
       content.append(body, app.createReceiptButton(message, own));
       row.append(meta, content);
+      if (!message.text) body.hidden = true;
+      app.renderImages?.(message, row);
     }
     const copy = document.createElement("button");
     copy.type = "button";
@@ -253,18 +261,23 @@ export function initMessages(app) {
 
   app.send = async () => {
     const input = $("#msgInput"), text = input.value.trim(), room = app.state.room, isQuestion = Boolean(app.isQuestionSending?.());
-    if (!text || !room) return;
+    const images = (app.imageDrafts || []).map(({ file }) => ({ file, name: file.name }));
+    if ((!text && !images.length) || !room || app.sending) return;
+    app.sending = true;
     const revision = app.state.draftRevision.get(room.id) || 0;
     app.closeMention();
     input.value = "";
+    app.clearImages();
     app.clearDraft(room.id);
     app.autoGrow(input);
     app.updateSendState();
     app.updateDraftCount();
     app.hideSendError();
     try {
+      if (images.length) $("#btnSend").textContent = app.t("uploading");
+      const attachments = await app.uploadImages(room.id, images);
       const updated = await app.api(`/rooms/${encodeURIComponent(room.id)}/messages`, {
-        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, isQuestion }),
+        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, isQuestion, attachments }),
       });
       if (app.state.room?.id !== room.id) return;
       app.state.room = updated;
@@ -285,7 +298,9 @@ export function initMessages(app) {
     } catch (error) {
       const unchanged = (app.state.draftRevision.get(room.id) || 0) === revision;
       const failures = app.state.failedMessages.get(room.id) || [];
-      app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, isQuestion }]);
+      const id = createRandomId();
+      if (images.length) app.failedImageFiles.set(id, images.map((image) => image.file));
+      app.saveFailedMessages(room.id, [...failures, { id, text, isQuestion, images: images.map(({ id, name }) => ({ id, name })) }]);
       app.renderFailedMessages();
       if (app.state.room?.id !== room.id) return;
       if (unchanged) app.clearDraft(room.id);
@@ -294,6 +309,10 @@ export function initMessages(app) {
       app.updateDraftCount();
       if (error.status === 401) { app.openChatSettings(); app.showSendError("sendAuth"); }
       else app.showSendError(error.network ? "sendNetwork" : "sendFailed", { message: error.message });
+    } finally {
+      app.sending = false;
+      $("#btnSend").textContent = app.t("send");
+      app.updateSendState();
     }
   };
 

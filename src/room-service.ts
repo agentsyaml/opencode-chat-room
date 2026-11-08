@@ -16,6 +16,8 @@ export type Message = {
   isQuestion?: boolean;
   answerToMessageID?: string;
   answeredByMessageID?: string;
+  // Image references only: the bytes stay in the server's attachment store.
+  attachments?: Array<{ id: string; mime: string; bytes: number; name?: string }>;
 };
 
 export type Room = {
@@ -133,13 +135,14 @@ export default class RoomService {
     text: string,
     senderSessionID?: string,
     isQuestion = false,
+    attachments?: Message["attachments"],
   ): Message {
     const room = this.getRoom(roomId);
     if (!room.participants.has(senderId)) {
       throw new RoomError("NOT_JOINED", `not joined: ${senderId}`);
     }
     const trimmed = text.trim();
-    if (trimmed.length === 0) {
+    if (trimmed.length === 0 && !attachments?.length) {
       throw new RoomError("EMPTY_MESSAGE", "message text is empty");
     }
     const message: Message = {
@@ -150,6 +153,7 @@ export default class RoomService {
       text: trimmed,
       createdAt: Math.max(Date.now(), (room.messages.at(-1)?.createdAt ?? 0) + 1),
       ...(isQuestion ? { isQuestion: true } : {}),
+      ...(attachments?.length ? { attachments } : {}),
     };
     room.messages.push(message);
     this.trimMessages(room);

@@ -12,6 +12,7 @@ import {
 import { backgroundResult, backgroundServiceKey, sendAsyncNotification, sendQueue, type BackgroundResult, type QueueTransport } from "./queue-transport";
 import { explicitlyAddresses } from "./mentions";
 import { claimBackgroundAttempt } from "./receiver-state";
+import { imageNote, materializeLocal } from "./attachments";
 import { serializeSessionPush } from "./center-inbox";
 import { prepareReceiptCandidate, receiptDestination } from "./agent-receipts";
 import {
@@ -93,6 +94,9 @@ export function createNotifier(deps: {
     const service = backgroundServiceKey(targetTransport);
     const cutoff = Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0);
     prunePendingAdmission(sessionID, batch.roomId, cutoff, (items) => render(batch, entry.name, roomKind, items));
+    // Standalone rooms keep the bytes on this machine; central rooms were
+    // already materialised from the server before the batch was built.
+    await Promise.all(batch.messages.map((m) => materializeLocal(m).catch(() => [])));
     const unread = batch.messages.filter((m) =>
       m.createdAt > cutoff &&
       (m.senderSessionID !== undefined ? m.senderSessionID !== sessionID : m.senderId !== (roomKind === "direct" ? sessionID : entry.name)),

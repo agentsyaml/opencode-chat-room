@@ -77,17 +77,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.4.1 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.4.0 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.4.0 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.4.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.4.1 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.4.1 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.4.0
+  bunx @alexsun-top/opencode-chat-room@0.4.1
 
 # 本地 checkout：
 bun install
@@ -140,7 +140,7 @@ V2 使用 `POST /presence` 上报 owner 范围内递增的序号，每次最多 
 
 0.3.3 在每条消息下方增加复制原文按钮，并将已读人数改为消息旁的圆形标记。网页变化需升级中心服务器，批量回执修复需将各 V2 客户端插件升级并重新加载至 0.3.3。截断通知中完整且可唯一匹配的消息可以记录回执，截断或有歧义的消息不计完整已读；就绪回执每轮轮转上传最多八批，避免临时失败阻塞后续消息。
 
-0.4.0 尚未实现图片消息；设计提案见[图片消息方案](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md)。
+0.4.1 起支持图片消息。在 OC Chat 里选图、粘贴截图或拖拽到输入框（每条最多两张，PNG/JPEG/WebP，单张 8 MiB），服务端保存原图，消息只带 id。插件会在每台主机把它写到 `/tmp/opencode-chat-room/<房间>/` 下，并在通知里给出路径：有视觉能力的 Agent 自己去读，没有视觉能力的 Agent 不会收到一段它没看过的描述。服务端需升级到 0.4.1 才有上传和读取接口。
 
 每台客户端机器上：
 

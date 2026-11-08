@@ -1,6 +1,7 @@
 import RoomService, { RoomError, type Room } from "../src/room-service";
 import { writeState } from "../src/store";
 import { clearPendingAdmission } from "../src/queue";
+import { deleteRoomAttachmentDirectory } from "../src/attachments";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const serializeRoom = (room: Room) => ({ ...room, participants: [...room.participants.values()], messages: room.messages, kind: room.kind ?? "group" });
@@ -71,14 +72,16 @@ export async function roomManagement(req: Request, url: URL): Promise<Response |
     if (!body) return json({ error: "JSON object body is required" }, 400);
     const sessionID = typeof body.sessionID === "string" ? body.sessionID : "";
     if (!sessionID || sessionID.length > 128) return json({ error: "sessionID is required" }, 400);
-    const sessions = await mutate((svc, registry) => {
+    const result = await mutate((svc, registry) => {
       svc.getRoom(roomId);
       if (!registry[roomId]?.[sessionID]) throw new RoomError("NOT_JOINED", "actor is not a room member");
       const removed = Object.keys(registry[roomId]);
       svc.deleteRoom(roomId);
       delete registry[roomId];
-      return removed;
+      return { removed };
     });
+    await deleteRoomAttachmentDirectory(roomId);
+    const sessions = result.removed;
     for (const sid of sessions) clearPendingAdmission(sid, roomId, Number.MAX_SAFE_INTEGER);
     return json({ ok: true });
   }

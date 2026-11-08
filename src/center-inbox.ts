@@ -9,6 +9,7 @@ import {
   type QueueItem,
 } from "./queue";
 import { request, markQueued, type CenterOpts } from "./center-client";
+import { materializeAny } from "./attachments";
 import { explicitlyAddresses } from "./mentions";
 import { claimBackgroundAttempt } from "./receiver-state";
 import { prepareReceiptCandidate, receiptDestination } from "./agent-receipts";
@@ -67,6 +68,11 @@ export async function checkCenterInbox(
         }
         items = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
       }
+      // Images become files on this host before the notification is built, so
+      // the notification can name a path the agent can open.
+      await Promise.all(items.filter((item): item is InboxItem & { id: string } => Boolean(item.id))
+        .map((item) => materializeAny(item, { base: opts.center, token: opts.token, roomID: item.roomId })
+          .catch(() => [])));
       await pushItemsToSession(opts, sessionID, items, transport, queued, qualified);
     });
   } catch {
