@@ -137,12 +137,14 @@ test("dispatches durably to another agent and progress is scoped to its membersh
   expect((await call("GET", "/supervision/inbox?sessionID=__Test_supervisor-session&receiverOwnerID=owner-s&adminRoomId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).status).toBe(401);
   const firstReminder = await call("GET", "/supervision/inbox?sessionID=__Test_supervisor-session&receiverOwnerID=owner-s&adminRoomId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", undefined, agentHeaders);
   const first = (await firstReminder.json() as { deliveries: Array<{ id: string; admissionID: string }> }).deliveries[0]!;
+  expect(first.admissionID).toMatch(/^msg_/);
   await dbState.withStateTransaction(file, db => db.query("UPDATE admin_plans SET next_run_at=? WHERE id=?").run(now + 1, plan.id));
   await scheduler.tickAdminScheduler(now + 1);
   const coalesced = await call("GET", "/supervision/inbox?sessionID=__Test_supervisor-session&receiverOwnerID=owner-s&adminRoomId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", undefined, agentHeaders);
   const coalescedDelivery = (await coalesced.json() as { deliveries: Array<{ id: string; admissionID: string }> }).deliveries[0]!;
   expect(coalescedDelivery.id).toBe(first.id);
   expect(coalescedDelivery.admissionID).toBe(first.admissionID);
+  expect(coalescedDelivery.admissionID).toMatch(/^msg_/);
   expect(await (await call("POST", "/supervision/ack", { id: first.id, sessionID: "__Test_supervisor-session", receiverOwnerID: "owner-s" })).json()).toEqual({ ok: false });
   expect((await call("POST", "/supervision/ack", { id: first.id, sessionID: "__Test_supervisor-session", receiverOwnerID: "owner-s" }, agentHeaders)).status).toBe(200);
   await dbState.withStateTransaction(file, db => db.query("UPDATE admin_plans SET next_run_at=? WHERE id=?").run(now + 2, plan.id));
@@ -163,11 +165,25 @@ test("dispatches durably to another agent and progress is scoped to its membersh
   expect((await deletedInbox.json() as { deliveries: unknown[] }).deliveries).toHaveLength(0);
 });
 
+test("legacy admin admission IDs are migrated to native message IDs", async () => {
+  await dbState.withStateTransaction(file, db => db.query("INSERT INTO admin_deliveries(id,admin_room_id,generation,recipient_room_id,session_id,owner_id,membership_id,kind,text,task_id,task_token,admission_id,created_at) VALUES('__Test_legacy_delivery','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',1,'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee','worker-session','owner-w','member-w','task','legacy',NULL,NULL,'admin:legacy',1)").run());
+  expect((await call("GET", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/tasks", undefined, operator)).status).toBe(200);
+  await dbState.withStateTransaction(file, db => {
+    expect(db.query("SELECT admission_id FROM admin_deliveries WHERE id='__Test_legacy_delivery'").get()).toEqual({ admission_id: "msg_legacy" });
+  });
+});
+
 test("rotation invalidates old capabilities and expired enrollment keys", async () => {
+  const oldHeaders = { "x-chat-admin-capability": originalCapability, "x-chat-agent-session": "__Test_supervisor-session", "x-chat-agent-owner": "owner-s" };
+  const pendingTask = await call("POST", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/tasks", { targetRoomId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", targetSessionID: "worker-session", text: "Pending rotation" }, oldHeaders);
+  const pendingTaskID = (await pendingTask.json() as { task: { id: string } }).task.id;
   const rotated = await call("PUT", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { targetRoomId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", sessionID: "__Test_supervisor-session", receiverOwnerID: "owner-s", membershipID: "member-s" }, operator);
   expect(rotated.status).toBe(200);
   const next = await rotated.json() as { enrollmentKey: string };
-  const oldHeaders = { "x-chat-admin-capability": originalCapability, "x-chat-agent-session": "__Test_supervisor-session", "x-chat-agent-owner": "owner-s" };
+  await dbState.withStateTransaction(file, db => {
+    expect(db.query("SELECT status FROM admin_tasks WHERE id=?").get(pendingTaskID)).toEqual({ status: "cancelled" });
+    expect(db.query("SELECT count(*) AS n FROM admin_deliveries WHERE task_id=? AND kind='task'").get(pendingTaskID)).toEqual({ n: 0 });
+  });
   expect((await call("GET", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/tasks", undefined, oldHeaders)).status).toBe(401);
   await dbState.withStateTransaction(file, db => db.query("UPDATE admin_rooms SET enrollment_expires=0 WHERE room_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'").run());
   expect((await claim("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", next.enrollmentKey)).status).toBe(409);

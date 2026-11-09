@@ -39,6 +39,7 @@ export async function initializeAdminSchema(file: string): Promise<void> {
   const deliveryColumns = db.query("PRAGMA table_info(admin_deliveries)").all() as Array<{ name: string }>;
   if (!deliveryColumns.some(column => column.name === "task_token")) db.exec("ALTER TABLE admin_deliveries ADD COLUMN task_token TEXT");
   if (!deliveryColumns.some(column => column.name === "recipient_room_id")) db.exec("ALTER TABLE admin_deliveries ADD COLUMN recipient_room_id TEXT NOT NULL DEFAULT ''");
+  db.exec("UPDATE admin_deliveries SET admission_id='msg_' || substr(admission_id,7) WHERE admission_id LIKE 'admin:%'");
   });
 }
 

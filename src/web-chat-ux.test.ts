@@ -64,8 +64,11 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
       (window as any).__copiedMessage = () => copied;
     });
     await page.locator(".msg-text table").locator("xpath=ancestor::li[@data-msg-id]").locator("[data-copy-message]").click();
+    const copyButton = page.locator(".msg-text table").locator("xpath=ancestor::li[@data-msg-id]").locator("[data-copy-message]");
     expect(await page.evaluate(() => (window as any).__copiedMessage())).toBe("| Left | Right |\n| --- | --- |\n| One | Two |\n\n```js\nconst value = 42;\n```");
-    expect(await page.locator(".msg-text table").locator("xpath=ancestor::li[@data-msg-id]").locator("[data-copy-message]").textContent()).toBe("Copied");
+    expect(await copyButton.locator(".message-copy-icon").count()).toBe(1);
+    expect(await copyButton.getAttribute("aria-label")).toBe("Copied");
+    expect(await copyButton.locator("[data-flash-output]").textContent()).toBe("Copied");
     const fallback = await page.evaluate(async (url: string) => {
       const { copyTextToClipboard } = await import(url), button = document.querySelector<HTMLElement>(".msg-text table")!.closest("li")!.querySelector<HTMLElement>("[data-copy-message]")!;
       const selection = getSelection()!, range = document.createRange();
@@ -102,6 +105,14 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     const incoming = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: "ux-peer", text: "Peer incoming" });
     const incomingID = incoming.messages.at(-1).id;
     await page.locator("#msgList").getByText("Peer incoming").waitFor({ timeout: 10000 });
+    const peerMessage = `#msgList [data-msg-id="${incomingID}"] .msg-text`;
+    for (const theme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+      const selection = await selectedPalette(page, peerMessage);
+      expect(selection.background).toBe(selection.expectedBackground);
+      expect(selection.color).toBe(selection.expectedColor);
+    }
+    await page.emulateMedia({ colorScheme: "light" });
     const after = await visibleAnchor(page);
     expect(after.id).toBe(before.id);
     expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(12);
@@ -211,6 +222,18 @@ async function checkSelection(page: any, selector: string) {
   });
   expect(result.text.length).toBeGreaterThan(10);
   expect(result.userSelect).not.toBe("none");
+}
+
+async function selectedPalette(page: any, selector: string) {
+  return page.locator(selector).evaluate((bubble: HTMLElement) => {
+    const text = document.createTreeWalker(bubble, NodeFilter.SHOW_TEXT).nextNode() as Text;
+    const range = document.createRange(); range.selectNodeContents(text);
+    getSelection()!.removeAllRanges(); getSelection()!.addRange(range);
+    const style = getComputedStyle(text.parentElement!, "::selection"), sample = document.createElement("span");
+    sample.style.color = "var(--accent-ink)"; sample.style.backgroundColor = "var(--accent)"; document.body.append(sample);
+    const expectedBackground = getComputedStyle(sample).backgroundColor, expectedColor = getComputedStyle(sample).color;
+    sample.remove(); return { background: style.backgroundColor, color: style.color, expectedBackground, expectedColor };
+  });
 }
 
 async function dragSelect(page: any, selector: string) {

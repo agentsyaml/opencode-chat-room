@@ -39,8 +39,8 @@ export function enroll(db: Database, roomID: string, targetRoomID: string, sessi
   run(db, `INSERT INTO admin_rooms(room_id,target_room_id,session_id,receiver_owner_id,membership_id,generation,enrollment_hash,enrollment_expires,capability_hash,created_at)
     VALUES(?,?,?,?,?,?,?,?,NULL,?) ON CONFLICT(room_id) DO UPDATE SET target_room_id=excluded.target_room_id,session_id=excluded.session_id,receiver_owner_id=excluded.receiver_owner_id,membership_id=excluded.membership_id,generation=excluded.generation,enrollment_hash=excluded.enrollment_hash,enrollment_expires=excluded.enrollment_expires,capability_hash=NULL`,
     roomID, targetRoomID, sessionID, ownerID, membershipID, generation, hash(nextKey), expiresAt, createdAt);
+  run(db, "UPDATE admin_tasks SET status='cancelled',delivery_token_hash='',updated_at=? WHERE admin_room_id=? AND status IN ('pending','working','blocked')", Date.now(), roomID);
   run(db, "DELETE FROM admin_deliveries WHERE admin_room_id=?", roomID);
-  run(db, "UPDATE admin_tasks SET delivery_token_hash='',admin_generation=-1 WHERE admin_room_id=?", roomID);
   run(db, "UPDATE admin_plans SET paused=1 WHERE admin_room_id=?", roomID);
   return { enrollmentKey: nextKey, expiresAt };
 }
@@ -54,7 +54,7 @@ export function queue(db: Database, b: Binding, kind: string, text: string, task
   const id = randomUUID();
   run(db, `INSERT INTO admin_deliveries(id,admin_room_id,generation,recipient_room_id,session_id,owner_id,membership_id,kind,text,task_id,task_token,admission_id,created_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(admin_room_id,kind,task_id) DO UPDATE SET text=excluded.text,task_token=excluded.task_token,generation=excluded.generation,recipient_room_id=excluded.recipient_room_id,session_id=excluded.session_id,owner_id=excluded.owner_id,membership_id=excluded.membership_id,created_at=excluded.created_at,acknowledged=0`,
-    id,b.room_id,b.generation,recipient.roomID,recipient.sessionID,recipient.ownerID,recipient.membershipID,kind,text,taskID,taskToken,`admin:${id}`,Date.now());
+    id,b.room_id,b.generation,recipient.roomID,recipient.sessionID,recipient.ownerID,recipient.membershipID,kind,text,taskID,taskToken,`msg_${id}`,Date.now());
 }
 export function one<T>(db: Database, sql: string, ...args: SQLQueryBindings[]) { return row<T>(db, sql, ...args); }
 export function many<T>(db: Database, sql: string, ...args: SQLQueryBindings[]) { return all<T>(db, sql, ...args); }

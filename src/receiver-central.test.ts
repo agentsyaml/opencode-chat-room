@@ -140,20 +140,22 @@ describe.serial("central receiver membership scope", () => {
     let finish!: () => void;
     const posted = new Promise<void>((resolve) => { finish = resolve; });
     const previousFetch = globalThis.fetch;
-    let body: Record<string, unknown> = {};
-    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    let body: Record<string, unknown> = {}, url = "";
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      url = String(input);
       body = JSON.parse(String(init?.body));
       finish();
-      return Response.json({ id: body.id, sessionID, delivery: "steer" });
+      return new Response(null, { status: 204 });
     }) as unknown as typeof fetch;
     try {
       await wakeMentionedSessions("http://serve.invalid", roomID, "wake", "@bob please handle this", "origin", message);
       await posted;
     } finally { globalThis.fetch = previousFetch; }
-    expect(body.delivery).toBe("steer");
-    expect((body.prompt as { text: string }).text).toContain(`room wake (${roomID})`);
-    expect((body.prompt as { text: string }).text).toContain("@bob please handle this");
-    expect((body.prompt as { text: string }).text).not.toContain("acknowledge it once per distinct request");
+    expect(url).toBe(`http://serve.invalid/session/${sessionID}/prompt_async`);
+    const text = (body.parts as Array<{ text: string }>)[0]!.text;
+    expect(text).toContain(`room wake (${roomID})`);
+    expect(text).toContain("@bob please handle this");
+    expect(text).not.toContain("acknowledge it once per distinct request");
   });
 
   test("immediately wakes direct peers and group @all recipients", async () => {
@@ -175,14 +177,14 @@ describe.serial("central receiver membership scope", () => {
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       posts.push({ url: String(input), body: JSON.parse(String(init?.body)) });
       if (posts.length === 1) finish();
-      return Response.json({ id: (posts.at(-1)!.body as { id: string }).id, sessionID: "target-dm", delivery: "steer" });
+      return new Response(null, { status: 204 });
     }) as unknown as typeof fetch;
     try {
       await wakeMentionedSessions("http://serve.invalid", created.roomID, "direct wake", "Please handle this", "sender-dm", created.message);
       await posted;
     } finally { globalThis.fetch = oldFetch; }
-    expect(posts[0]!.url).toContain("target-dm");
-    expect(((posts[0]!.body.prompt as { text: string }).text)).toContain("direct conversation");
+    expect(posts[0]!.url).toContain(`/session/target-dm/prompt_async`);
+    expect(((posts[0]!.body.parts as Array<{ text: string }>)[0]!.text)).toContain("direct conversation");
     const broadcast = await store.writeState((service, registry) => {
       const room = service.createRoom("broadcast", "sender-all");
       service.joinRoom(room.id, { id: "all-one", name: "one" });
@@ -196,11 +198,10 @@ describe.serial("central receiver membership scope", () => {
     let finishAll!: () => void;
     const allPosted = new Promise<void>((resolve) => { finishAll = resolve; });
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as { id: string };
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       posts.push({ url: String(input), body });
       if (posts.length === 2) finishAll();
-      const sessionID = String(input).includes("all-one") ? "all-one" : "all-two";
-      return Response.json({ id: body.id, sessionID, delivery: "steer" });
+      return new Response(null, { status: 204 });
     }) as unknown as typeof fetch;
     try {
       await wakeMentionedSessions("http://serve.invalid", broadcast.roomID, "broadcast", "@all please respond", "sender-all", broadcast.message);

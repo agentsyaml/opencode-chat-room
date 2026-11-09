@@ -247,7 +247,7 @@ export async function centerAction(
       if (!result.member) {
         return "error: not joined";
       }
-      const items = Array.isArray(result.items) ? result.items : [];
+      const items = (Array.isArray(result.items) ? result.items : []).filter((item) => item.senderSessionID !== sessionID);
       if (items.length === 0) {
         return "no new messages";
       }

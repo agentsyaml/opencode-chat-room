@@ -301,7 +301,7 @@ const roomExecute = async (
         if (entry?.membershipID) pollIdentity = { membershipID: entry.membershipID, ...(entry.receiverOwnerID ? { receiverOwnerID: entry.receiverOwnerID } : {}) };
         selfName = entry?.name ?? selfName;
         pollLastRead = entry?.lastReadTs ?? 0;
-        if (entry) pollPage = await readUnreadMessages(args.roomId, pollLastRead, 100);
+        if (entry) pollPage = await readUnreadMessages(args.roomId, pollLastRead, 100, context.sessionID, selfName);
       }
       const result = await withRooms<string>(
         (svc, registry) => {

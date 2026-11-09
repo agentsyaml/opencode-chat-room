@@ -23,10 +23,10 @@ export async function tickAdminScheduler(now = Date.now()): Promise<void> {
         exec(db, "UPDATE admin_deliveries SET text=?,created_at=?,generation=?,recipient_room_id=?,session_id=?,owner_id=?,membership_id=? WHERE id=?", text, now, b.generation, b.target_room_id, b.session_id, b.receiver_owner_id, b.membership_id, existing.id);
       } else if (existing) {
         const id = randomUUID();
-        exec(db, "UPDATE admin_deliveries SET id=?,admission_id=?,text=?,created_at=?,generation=?,recipient_room_id=?,session_id=?,owner_id=?,membership_id=?,acknowledged=0 WHERE id=?", id, `admin:${id}`, text, now, b.generation, b.target_room_id, b.session_id, b.receiver_owner_id, b.membership_id, existing.id);
+        exec(db, "UPDATE admin_deliveries SET id=?,admission_id=?,text=?,created_at=?,generation=?,recipient_room_id=?,session_id=?,owner_id=?,membership_id=?,acknowledged=0 WHERE id=?", id, `msg_${id}`, text, now, b.generation, b.target_room_id, b.session_id, b.receiver_owner_id, b.membership_id, existing.id);
       } else {
         const id = randomUUID();
-        exec(db, "INSERT INTO admin_deliveries(id,admin_room_id,generation,recipient_room_id,session_id,owner_id,membership_id,kind,text,task_id,admission_id,created_at) VALUES(?,?,?,?,?,?,?,'supervision',?,?,?,?)", id,b.room_id,b.generation,b.target_room_id,b.session_id,b.receiver_owner_id,b.membership_id,text,taskID,`admin:${id}`,now);
+        exec(db, "INSERT INTO admin_deliveries(id,admin_room_id,generation,recipient_room_id,session_id,owner_id,membership_id,kind,text,task_id,admission_id,created_at) VALUES(?,?,?,?,?,?,?,'supervision',?,?,?,?)", id,b.room_id,b.generation,b.target_room_id,b.session_id,b.receiver_owner_id,b.membership_id,text,taskID,`msg_${id}`,now);
       }
       exec(db, "UPDATE admin_plans SET next_run_at=? WHERE id=?", now + plan.interval_seconds * 1000, plan.id);
     }

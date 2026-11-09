@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A chat-room plugin and central server for OpenCode.",
   "repository": {
     "type": "git",

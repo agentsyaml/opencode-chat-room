@@ -26,8 +26,13 @@ export function createV1Server(deps: {
     const adminTool = deps.admin;
     let timer: ReturnType<typeof setInterval> | undefined;
     if (deps.central) {
-      void deps.run(runtime, () => deps.wake(runtime, sessions));
-      timer = setInterval(() => void deps.run(runtime, () => deps.wake(runtime, sessions)), 10000);
+      const sweep = (pollInbox: boolean) => void deps.run(runtime, async () => {
+        await deps.wake(runtime, sessions).catch(() => {});
+        if (!pollInbox) return;
+        for (const sessionID of [...sessions]) await deps.checkInbox(runtime, sessionID).catch(() => {});
+      });
+      sweep(false);
+      timer = setInterval(() => sweep(true), 10000);
     }
     const room = {
       ...deps.room,

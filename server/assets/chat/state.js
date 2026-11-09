@@ -265,7 +265,7 @@ const messages = {
     activity_working: "Working", activity_idle: "Foreground idle", activity_waiting: "Waiting", activity_unknown: "Status unknown", activity_offline: "Status stale",
     activityHint_working: "The agent reports active work.", activityHint_idle: "Foreground is idle; background work may continue.", activityHint_waiting: "The agent reports that it is waiting.", activityHint_unknown: "No activity report is available.", activityHint_offline: "The last status is stale; this does not prove the agent is offline.",
     receiptCount: ({ count }) => `Read by ${count}`, receiptNone: "No readers yet", receiptNotLoaded: "Read status not loaded", readerPanelTitle: "Message readers", close: "Close", departedMember: "left",
-    receiptEvidence_displayed: "Shown on screen", receiptEvidence_tool: "Fetched with room tool", receiptEvidence_context: "Full message reached agent context preparation (not proof of understanding)",
+    receiptEvidence_displayed: "Shown on screen", receiptEvidence_tool: "Fetched with room tool", receiptEvidence_context: "In agent context",
   },
   "zh-CN": {
     brand: "OC Chat", documentTitle: "OC Chat", roomTitle: ({ name }) => `${name} · OC Chat`,
@@ -327,7 +327,7 @@ const messages = {
     activity_working: "工作中", activity_idle: "前台空闲", activity_waiting: "等待中", activity_unknown: "状态未知", activity_offline: "状态已过期",
     activityHint_working: "Agent 正在报告工作状态。", activityHint_idle: "前台空闲；后台任务仍可能继续。", activityHint_waiting: "Agent 正在报告等待状态。", activityHint_unknown: "暂无活动状态报告。", activityHint_offline: "最近的状态已过期；这不能证明 Agent 已离线。",
     receiptCount: ({ count }) => `已读 ${count} 人`, receiptNone: "尚无人已读", receiptNotLoaded: "尚未加载已读状态", readerPanelTitle: "消息已读情况", close: "关闭", departedMember: "已离开",
-    receiptEvidence_displayed: "已显示在屏幕上", receiptEvidence_tool: "通过房间工具读取", receiptEvidence_context: "完整消息已进入 Agent 上下文准备阶段（不代表已理解）",
+    receiptEvidence_displayed: "已显示在屏幕上", receiptEvidence_tool: "通过房间工具读取", receiptEvidence_context: "进入上下文",
   },
 };
 
@@ -430,12 +430,21 @@ app.dayText = (timestamp) => {
   return new Intl.DateTimeFormat(app.intlLocale(), { month: "short", day: "numeric" }).format(date);
 };
 app.flash = (button, key) => {
+  const output = button.querySelector("[data-flash-output]");
   button._flashKey = key;
-  button.textContent = app.t(key);
+  if (output) {
+    output._flashKey = key; output.hidden = false; output.textContent = app.t(key);
+    button.classList.add("is-flashing");
+    if (button.dataset.i18nAriaLabel) button.setAttribute("aria-label", app.t(key));
+  } else button.textContent = app.t(key);
   setTimeout(() => {
     if (button._flashKey !== key) return;
     delete button._flashKey;
-    button.textContent = app.t(button.dataset.i18n, button._i18nValues || {});
+    if (output) {
+      delete output._flashKey; output.hidden = true; output.textContent = app.t(output.dataset.i18n, output._i18nValues || {});
+      button.classList.remove("is-flashing");
+      if (button.dataset.i18nAriaLabel) button.setAttribute("aria-label", app.t(button.dataset.i18nAriaLabel));
+    } else button.textContent = app.t(button.dataset.i18n, button._i18nValues || {});
   }, 1200);
 };
 app.updateTitle = () => {

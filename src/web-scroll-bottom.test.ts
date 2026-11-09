@@ -35,6 +35,12 @@ test.skipIf(!browserModule)("physical scroll reaches a stable zero-gap thread bo
       await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.wheel(0, -10000); await page.waitForTimeout(30);
       const scrolledUp = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollTop < node.scrollHeight - node.clientHeight; });
       expect(scrolledUp).toBe(true);
+      const wheelAwayFromEdge = await page.evaluate(() => {
+        const event = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+        document.querySelector<HTMLElement>("#thread")!.dispatchEvent(event);
+        return event.defaultPrevented;
+      });
+      expect(wheelAwayFromEdge).toBe(false);
       await page.locator("#btnJump").waitFor({ state: "visible" });
       const jump = await page.evaluate(() => { const button = document.querySelector<HTMLElement>("#btnJump")!, icon = button.firstElementChild!.getBoundingClientRect(), box = button.getBoundingClientRect(); return { width: box.width, height: box.height, radius: getComputedStyle(button).borderRadius, centered: Math.abs(icon.left + icon.width / 2 - (box.left + box.width / 2)) < 1 && Math.abs(icon.top + icon.height / 2 - (box.top + box.height / 2)) < 1, badgePosition: getComputedStyle(document.querySelector("#jumpBadge")!).position }; });
       expect(jump).toEqual({ width: 44, height: 44, radius: "50%", centered: true, badgePosition: "absolute" });
@@ -54,6 +60,15 @@ test.skipIf(!browserModule)("physical scroll reaches a stable zero-gap thread bo
       });
       if (!metrics.threadGaps.every((gap: number) => Math.abs(gap) < 1)) throw new Error(JSON.stringify({ width, height, scale, metrics }));
       expect(metrics.pageX).toBe(0); expect(metrics.pageY).toBe(0); expect(metrics.jumpHidden).toBe(true);
+      const edgeWheel = await page.evaluate(() => {
+        const thread = document.querySelector<HTMLElement>("#thread")!;
+        const fire = (deltaY: number) => { const event = new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true }); thread.dispatchEvent(event); return event.defaultPrevented; };
+        const gap = thread.scrollHeight - thread.clientHeight - thread.scrollTop;
+        return { gap, down: fire(120), up: fire(-120), top: thread.scrollTop };
+      });
+      expect(edgeWheel.gap).toBeLessThan(1);
+      expect(edgeWheel.down).toBe(true);
+      expect(edgeWheel.up).toBe(false);
       await api(origin, `/rooms/${roomInfo.roomId}/messages`, "POST", { sessionID: "__Test_ScrollPeer", text: `__Test_new_tail_${width}` });
       await page.locator("#msgList").getByText(`__Test_new_tail_${width}`).waitFor(); await page.waitForTimeout(180);
       const afterTail = await page.evaluate(() => { const thread = document.querySelector<HTMLElement>("#thread")!, root = document.scrollingElement!; return { gap: thread.scrollHeight - thread.clientHeight - thread.scrollTop, pageY: root.scrollHeight - root.clientHeight }; });

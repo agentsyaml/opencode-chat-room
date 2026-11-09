@@ -141,7 +141,9 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     expect(receiptLayout.overlap).toBeGreaterThan(0);
     expect(receiptLayout.label).toContain("Read by");
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
-    expect(await page.locator(`[data-msg-id="${targetMessageID}"] .message-copy`).textContent()).toBe("复制");
+    const copyButton = page.locator(`[data-msg-id="${targetMessageID}"] .message-copy`);
+    expect(await copyButton.locator(".message-copy-icon").count()).toBe(1);
+    expect(await copyButton.getAttribute("aria-label")).toBe("复制");
     expect(await page.locator(`[data-msg-id="${targetMessageID}"] .message-readers`).getAttribute("aria-label")).toContain("已读");
     await page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new Error("denied"); } } });
@@ -149,6 +151,8 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     });
     await page.locator(`[data-msg-id="${targetMessageID}"] .message-copy`).click();
     await page.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-copy`)?.textContent === "复制失败，请手动选择并复制消息。", targetMessageID);
+    expect(await copyButton.locator(".message-copy-icon").count()).toBe(1);
+    expect(await copyButton.getAttribute("aria-label")).toBe("复制失败，请手动选择并复制消息。");
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
     const receiptButton = page.locator(`[data-msg-id="${targetMessageID}"] .message-readers`);
     await receiptButton.scrollIntoViewIfNeeded();
@@ -262,7 +266,7 @@ async function sameNameReaders(page: any, origin: string, roomId: string, messag
   }, { modulePath: "/assets/chat/state.js", id: roomId });
   await contextDetails.click();
   await readers.locator("li").first().waitFor({ state: "attached" });
-  expect(await readers.locator('[data-reader-session-id="agent-twin"]').textContent()).toContain("not proof of understanding");
+  expect(await readers.locator('[data-reader-session-id="agent-twin"]').textContent()).toContain("In agent context");
   await api(origin, `/rooms/${roomId}/leave`, "POST", { sessionID: "twin-a" });
   await page.locator(`#msgList [data-msg-id="${messageID}"]`).scrollIntoViewIfNeeded();
   await page.evaluate(async ({ modulePath, id }: { modulePath: string; id: string }) => {

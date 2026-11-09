@@ -1,7 +1,8 @@
 import os from "node:os";
 import type { Message } from "../src/room-service";
-import { authHeader, formatNotificationLines, formatServeWakePrompt, readState, writeState, type RegistryEntry } from "../src/store";
-import { admissionMatches, clearPendingAdmission, getOrCreatePendingAdmission, markPendingAdmissionAdmitted, pendingAdmission, rejectPendingAdmission, type QueueBody, type QueueItem } from "../src/queue";
+import { formatNotificationLines, formatServeWakePrompt, readState, writeState, type RegistryEntry } from "../src/store";
+import { clearPendingAdmission, getOrCreatePendingAdmission, markPendingAdmissionAdmitted, pendingAdmission, rejectPendingAdmission, type QueueItem } from "../src/queue";
+import { sendAsyncNotification } from "../src/queue-transport";
 import { readInbox, type InboxItem } from "./inbox";
 import { explicitlyAddresses } from "../src/mentions";
 
@@ -70,21 +71,13 @@ async function deliverWake(
     : formatServeWakePrompt(roomName, roomId, lines);
   const admission = getOrCreatePendingAdmission(sid, roomId, delta as QueueItem[], prompt,
     delta.reduce((max, item) => Math.max(max, item.createdAt), 0), capped);
-  const body: QueueBody = { id: admission.id, prompt: { text: admission.prompt }, delivery: "steer", resume: true };
   const directory = entry.directory ?? process.env.OPENCODE_DIRECTORY;
-  const auth = authHeader();
   try {
-    const response = await fetch(`${serveWakeUrl.replace(/\/+$/, "")}/api/session/${encodeURIComponent(sid)}/prompt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(auth ? { Authorization: auth } : {}),
-        ...(directory ? { "x-opencode-directory": encodeURIComponent(directory) } : {}) },
-      body: JSON.stringify(body), signal: AbortSignal.timeout(10_000),
-    });
-    const data = await response.json().catch(() => undefined);
-    if (response.ok && admissionMatches(data, body, sid)) {
+    const result = await sendAsyncNotification({ serverUrl: serveWakeUrl, directory, protocol: "v1" }, sid, admission.prompt);
+    if (result === "delivered") {
       markPendingAdmissionAdmitted(sid, roomId, admission.id);
       touchActive(sid);
       await confirmQueued(admission.maxTs);
-    } else if (response.status !== 404) rejectPendingAdmission(sid, roomId, admission.id);
+    } else if (result === "rejected") rejectPendingAdmission(sid, roomId, admission.id);
   } catch { /* The periodic inbox poll retries delivery. */ }
 }

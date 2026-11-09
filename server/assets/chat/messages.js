@@ -171,8 +171,21 @@ export function initMessages(app) {
     copy.type = "button";
     copy.className = "message-copy";
     copy.dataset.copyMessage = "";
-    copy.dataset.i18n = "copyMessage";
-    copy.textContent = app.t("copyMessage");
+    copy.setAttribute("aria-label", app.t("copyMessage"));
+    copy.dataset.i18nAriaLabel = "copyMessage";
+    copy.dataset.i18nTitle = "copyMessage";
+    copy.title = app.t("copyMessage");
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.classList.add("message-copy-icon"); icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
+    const back = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    back.setAttribute("x", "4"); back.setAttribute("y", "3"); back.setAttribute("width", "13"); back.setAttribute("height", "15"); back.setAttribute("rx", "2");
+    const front = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    front.setAttribute("x", "8"); front.setAttribute("y", "7"); front.setAttribute("width", "12"); front.setAttribute("height", "14"); front.setAttribute("rx", "2");
+    icon.append(back, front);
+    const feedback = document.createElement("span");
+    feedback.className = "message-copy-feedback"; feedback.dataset.flashOutput = ""; feedback.dataset.i18n = "copyMessage";
+    feedback.hidden = true; feedback.setAttribute("role", "status"); feedback.setAttribute("aria-live", "polite"); feedback.textContent = app.t("copyMessage");
+    copy.append(icon, feedback);
     copy._copyText = String(message.text ?? "");
     row.append(copy);
     if (live) row.classList.add("in");
@@ -377,7 +390,7 @@ export function initMessages(app) {
            if (entry && item.createdAt >= entry.previewAt) setRoomPreview(entry, item);
            added++;
          }
-         if (entry && item.createdAt > entry.readTs && !(wasKnown && isOwnMessage(item, app)) && !entry.unreadIds.has(item.id)) {
+         if (entry && item.createdAt > entry.readTs && !isOwnMessage(item, app) && !entry.unreadIds.has(item.id)) {
            entry.unreadIds.set(item.id, item); unreadChanged = true;
          }
        }

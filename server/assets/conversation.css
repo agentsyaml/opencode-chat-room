@@ -213,27 +213,35 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
+  .msg-text::selection, .msg-text *::selection { color: var(--accent-ink); background: var(--accent); }
   .msg.own .msg-text { background: linear-gradient(145deg, color-mix(in srgb, var(--accent-soft) 86%, var(--surface)), var(--accent-soft)); border-color: color-mix(in srgb, var(--accent) 12%, transparent); border-bottom-left-radius: 16px; border-bottom-right-radius: 5px; }
-  .msg.own .msg-text ::selection { color: var(--accent-ink); background: var(--accent); }
   .msg-content { position: relative; display: flex; align-items: flex-end; gap: 6px; width: 100%; max-width: 100%; }
   .msg.own .msg-content { flex-direction: row-reverse; }
   .message-copy {
+    position: relative;
     align-self: flex-start;
-    margin: 2px 0 0 4px;
-    padding: 2px 6px;
-    border: 0;
-    border-radius: 5px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    margin: 3px 0 0 4px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 9px;
     color: var(--ink-3);
     background: transparent;
     font: inherit;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: .04em;
     cursor: pointer;
+    transition: color .14s, background .14s, border-color .14s;
   }
   .msg.own .message-copy { align-self: flex-end; margin-right: 4px; }
-  .message-copy:hover, .message-copy:focus-visible { color: var(--ink); background: var(--surface-2); }
+  .message-copy-icon { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+  .message-copy:hover, .message-copy:focus-visible, .message-copy.is-flashing { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
   .message-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .message-copy-feedback { position: absolute; z-index: 25; left: 0; bottom: calc(100% + 5px); width: max-content; max-width: min(260px, calc(100vw - 32px)); padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow); font-size: 11px; font-weight: 500; line-height: 1.4; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  .msg.own .message-copy-feedback { left: auto; right: 0; }
+  .sys .message-copy-feedback { left: 50%; right: auto; transform: translateX(-50%); }
   .message-readers { flex: 0 0 24px; align-self: flex-end; margin: 0 0 4px; padding: 0; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font: inherit; font-size: 10px; cursor: pointer; box-shadow: 0 1px 3px rgb(20 40 32 / .06); }
   .message-readers[data-reader-state="empty"], .message-readers[data-reader-state="unknown"] { background: var(--surface-2); }
   .message-readers:hover, .message-readers[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }

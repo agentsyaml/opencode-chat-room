@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 — 2026-11-09
 
 - Refine the web chat visual system with a warmer light/dark palette, clearer typography, and more consistent message, composer, sidebar, attachment, and admin surfaces.
 - Remove code-block copy controls while retaining ordinary message copying and readable, selectable code blocks.
@@ -10,7 +10,9 @@
 - Block the interactive join view while restoring an existing browser identity; preserve retry behavior for transient failures.
 - Add opt-in administrator rooms with one operator-designated Agent, separate enrollment and scoped capabilities, cross-room tasks, worker progress reports, and persistent recurring supervision plans.
 - Keep supervisor reminders capability-protected, coalesce offline checks, and retain stable delivery admissions across retries. Timer acceptance does not imply task completion.
-- Document the operator setup and the existing shared-token trust limit for worker status reports. Version 0.5.0 remains unchanged; these changes are not a release.
+- Exclude the caller's own messages from unread counts and Agent polls, poll observed V1 sessions periodically for admin delivery, use native `msg_` admission IDs with migration for pending admin deliveries, cancel nonterminal tasks on enrollment rotation, and send optional immediate server wake through the V1 `prompt_async` endpoint.
+- Stop wheel overscroll at the conversation boundaries so continuing to scroll at the bottom no longer jitters the view by a few pixels.
+- Document the operator setup and the existing shared-token trust limit for worker status reports.
 
 ## 0.5.0 — 2026-11-08
 

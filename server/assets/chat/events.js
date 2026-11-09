@@ -218,7 +218,13 @@ export function initEvents(app) {
   });
   const thread = $("#thread");
   const markScrollIntent = () => { scrollGeneration++; app.state.userScrollIntentUntil = performance.now() + 700; };
-  thread.addEventListener("wheel", markScrollIntent, { passive: true });
+  // Stop wheel overscroll at the ends. Without this, some layouts let the
+  // document absorb the leftover delta and the view jumps a few pixels.
+  thread.addEventListener("wheel", (event) => {
+    markScrollIntent();
+    const gap = thread.scrollHeight - thread.clientHeight - thread.scrollTop;
+    if (event.deltaY < 0 && thread.scrollTop <= 0 || event.deltaY > 0 && gap <= 2) event.preventDefault();
+  }, { passive: false });
   thread.addEventListener("touchmove", markScrollIntent, { passive: true });
   thread.addEventListener("pointerdown", (event) => {
     if (event.clientX >= thread.getBoundingClientRect().right - 18) markScrollIntent();
