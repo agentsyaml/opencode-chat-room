@@ -134,8 +134,8 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
       const badge = button.getBoundingClientRect();
       return { size: [badge.width, badge.height], gap: badge.left - bubble.right, overlap: Math.min(badge.bottom, bubble.bottom) - Math.max(badge.top, bubble.top), label: button.getAttribute("aria-label") };
     });
-    expect(receiptLayout.size[0]).toBe(22);
-    expect(receiptLayout.size[1]).toBe(22);
+    expect(receiptLayout.size[0]).toBe(24);
+    expect(receiptLayout.size[1]).toBe(24);
     expect(receiptLayout.gap).toBeGreaterThanOrEqual(0);
     expect(receiptLayout.gap).toBeLessThan(12);
     expect(receiptLayout.overlap).toBeGreaterThan(0);

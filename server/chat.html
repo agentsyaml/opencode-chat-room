@@ -80,7 +80,7 @@
   <section id="chatView" class="view" hidden>
     <aside id="roomRail" class="room-rail" aria-label="Rooms" data-i18n-aria-label="roomsLabel">
       <div class="rail-brand"><span class="brand-mark">OC</span><span data-i18n="brand">OC Chat</span></div>
-      <div class="rail-label"><span data-i18n="existingRooms">Rooms</span><span class="rail-tools"><button id="btnNewRoom" class="icon-btn" type="button" aria-label="Create a room" data-i18n-aria-label="newRoom">+</button><button id="btnRefreshRooms" class="icon-btn" type="button" aria-label="Refresh rooms" data-i18n-aria-label="refreshRooms">↻</button></span></div>
+      <div class="rail-label"><span data-i18n="existingRooms">Rooms</span><span class="rail-tools"><button id="btnNewRoom" class="icon-btn" type="button" aria-label="Create a room" data-i18n-aria-label="newRoom"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button><button id="btnRefreshRooms" class="icon-btn" type="button" aria-label="Refresh rooms" data-i18n-aria-label="refreshRooms"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.8-2L20 12M4 12l2.6 5a7 7 0 0 0 11.8-2"/></svg></button></span></div>
       <form id="railRoomForm" class="rail-composer" hidden>
         <label class="field"><span class="field-label" data-i18n="newRoomNameLabel">New room name</span><input id="inRoomNameChat" class="input" maxlength="40" data-i18n-placeholder="newRoomNamePlaceholder" placeholder="e.g. Weekend movie night"></label>
         <button id="btnCreateChatRoom" class="btn primary small" type="submit" data-i18n="createRoom">Create room</button>
@@ -129,7 +129,7 @@
     <button id="roomDrawerBackdrop" class="room-drawer-backdrop" type="button" aria-label="Close room list" data-i18n-aria-label="closeRoomList" hidden></button>
     <header class="chat-head">
       <div class="chat-head-main">
-        <div class="room-title-row"><h1 id="roomName"></h1><button id="btnRoomsDrawer" class="chip rooms-drawer-trigger" type="button" aria-label="Open room list" data-i18n-aria-label="roomsMenu" aria-controls="roomRail" aria-expanded="false">Rooms</button></div>
+        <div class="room-title-row"><h1 id="roomName"></h1><button id="btnRoomsDrawer" class="chip rooms-drawer-trigger" type="button" aria-label="Open room list" data-i18n-aria-label="roomsMenu" aria-controls="roomRail" aria-expanded="false"><svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="action-label">Rooms</span></button></div>
         <p class="room-meta">
           <button type="button" id="btnCopyId" class="copy-id" aria-label="Copy room ID" data-i18n-aria-label="copyRoomId" title="Click to copy the full room ID" data-i18n-title="copyRoomIdTitle">
             <span class="mono" id="roomIdShort"></span><span class="copy-ok" data-i18n="copied">Copied</span>
@@ -139,7 +139,7 @@
       <div class="chat-head-actions">
         <div class="anchor questions-anchor">
           <button class="chip questions-trigger" type="button" id="btnQuestions" aria-haspopup="true" aria-expanded="false" aria-controls="questionPanel">
-            <span data-i18n="questions">Questions</span><span id="questionBadge" class="question-badge" hidden></span>
+            <svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9.5 9a2.5 2.5 0 1 1 4.6 1.4c-.7.9-2.1 1.3-2.1 2.8M12 17.5h.01"/><circle cx="12" cy="12" r="9"/></svg><span class="action-label" data-i18n="questions">Questions</span><span id="questionBadge" class="question-badge" hidden></span>
           </button>
           <section class="panel question-panel" id="questionPanel" aria-labelledby="questionHeading" hidden>
             <div class="question-panel-head"><h3 id="questionHeading" tabindex="-1" data-i18n="pendingQuestions">Pending questions</h3>
@@ -150,7 +150,7 @@
           </section>
         </div>
         <div class="anchor">
-          <button class="chip" type="button" id="btnAnnouncements" aria-haspopup="true" aria-expanded="false" aria-controls="announcementPanel" data-i18n="announcements">Announcements</button>
+          <button class="chip" type="button" id="btnAnnouncements" aria-haspopup="true" aria-expanded="false" aria-controls="announcementPanel"><svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg><span class="action-label" data-i18n="announcements">Announcements</span></button>
           <section class="panel announcement-panel" id="announcementPanel" aria-labelledby="announcementHeading" hidden>
             <div class="announcement-head"><h3 id="announcementHeading" tabindex="-1" data-i18n="announcements">Announcements</h3><button type="button" id="btnRefreshAnnouncements" class="question-refresh" data-i18n="refreshQuestions">Refresh</button></div>
             <p id="announcementStatus" class="hint" role="status" aria-live="polite"></p>
@@ -164,7 +164,7 @@
           </section>
         </div>
         <div class="anchor">
-          <button class="chip" type="button" id="btnMembers" aria-label="Members" data-i18n-aria-label="members" aria-haspopup="true" aria-expanded="false" data-i18n="members">Members</button>
+          <button class="chip" type="button" id="btnMembers" aria-label="Members" data-i18n-aria-label="members" aria-haspopup="true" aria-expanded="false"><svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19v-1.5a5.5 5.5 0 0 1 11 0V19zM16 5.5a3 3 0 0 1 0 5.8M17 14a4.5 4.5 0 0 1 3.5 4.4V19h-3"/></svg><span class="action-label" data-i18n="members">Members</span></button>
           <div class="panel" id="memberPanel" hidden>
             <h3 data-i18n="members">Members</h3>
             <ul id="memberList"></ul>
@@ -172,7 +172,7 @@
           </div>
         </div>
         <div class="anchor room-options-anchor">
-          <button class="chip" type="button" id="btnRoomOptions" aria-haspopup="true" aria-expanded="false" aria-controls="roomOptions" data-i18n="roomOptions">Options</button>
+          <button class="chip" type="button" id="btnRoomOptions" aria-haspopup="true" aria-expanded="false" aria-controls="roomOptions"><svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span class="action-label" data-i18n="roomOptions">Options</span></button>
           <div class="panel room-options-panel" id="roomOptions" hidden>
             <button class="menu-action" type="button" id="btnLeave" data-i18n="leave">Leave room</button>
             <button class="menu-action danger-text" type="button" id="btnDeleteRoom" data-i18n="deleteRoom">Delete room</button>
@@ -208,7 +208,14 @@
     <footer class="composer">
       <p id="sendError" class="send-error" role="alert" hidden></p>
       <div id="mentionPicker" class="mention-picker" role="listbox" aria-label="Choose a member to mention" data-i18n-aria-label="mentionMembers" hidden></div>
+      <section id="attachmentTray" class="attachment-tray" aria-label="Attachments" data-i18n-aria-label="attachments" hidden>
+        <p id="attachmentVolatile" class="attachment-volatile" data-i18n="attachmentVolatile" hidden></p>
+        <ul id="attachmentList" class="attachment-list"></ul>
+        <p id="attachmentStatus" class="attachment-status" role="status" aria-live="polite"></p>
+      </section>
       <div class="composer-row">
+        <button class="attachment-button" type="button" id="btnAddAttachments" aria-label="Add files" data-i18n-aria-label="addFiles" aria-controls="attachmentPicker" disabled><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg></button>
+        <input id="attachmentPicker" type="file" multiple hidden>
         <textarea id="msgInput" class="input" rows="1" maxlength="2000" placeholder="Type a message, Enter to send, Shift+Enter for a new line" data-i18n-placeholder="messagePlaceholder" autocomplete="off" aria-autocomplete="list" aria-controls="mentionPicker" aria-expanded="false" disabled></textarea>
         <button class="btn primary" type="button" id="btnSend" data-i18n="send" disabled>Send</button>
       </div>
@@ -217,6 +224,7 @@
         <p id="draftCount" class="draft-count">0 / 2000</p>
       </div>
     </footer>
+    <div id="attachmentDropOverlay" class="attachment-drop-overlay" role="status" aria-live="polite" data-i18n="dropFilesHere" hidden></div>
   </section>
 
 </main>

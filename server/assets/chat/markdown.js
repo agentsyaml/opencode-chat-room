@@ -37,7 +37,6 @@ export function renderMarkdown(root, text, app) {
     link.rel = "noopener noreferrer";
   });
   fragment.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.disabled = true; });
-  fragment.querySelectorAll("pre").forEach((pre) => addCodeCopy(pre, app));
   root.appendChild(fragment);
   for (let i = 0; i < diagramNodes.length; i++) {
     const source = diagrams.get(`CHATDIAGRAM${nonce}${i}END`);
@@ -92,13 +91,8 @@ function showDiagramFallback(node, source, app, loading) {
   node.append(status);
   if (!loading) {
     const pre = document.createElement("pre"), code = document.createElement("code");
-    code.textContent = source; pre.append(code); addCodeCopy(pre, app); node.append(pre);
+    code.textContent = source; pre.append(code); node.append(pre);
   }
-}
-function addCodeCopy(pre, app) {
-  const button = document.createElement("button");
-  button.type = "button"; button.className = "code-copy"; button.dataset.copyCode = "";
-  button.dataset.i18n = "copyCode"; button.textContent = app.t("copyCode"); pre.append(button);
 }
 
 function replaceResourceMarkers(fragment, app) {
@@ -257,11 +251,6 @@ function replaceMentionTokens(fragment, mentions, app) {
     }
     node.replaceWith(replacement);
   }
-}
-
-export function copyCodeFromButton(button, app) {
-  const code = button.parentElement.querySelector("code")?.textContent || "";
-  return copyTextToClipboard(code).then((copied) => copied ? app.flash(button, "copiedCode") : app.showSendError("copyCodeFailed"));
 }
 
 export async function copyTextToClipboard(text) {

@@ -170,6 +170,7 @@ export function initRooms(app) {
   app.removeJoinedRoom = async (roomId, { leaveServer = false, reason = false } = {}) => {
     const active = app.state.room?.id === roomId;
     const entry = app.state.rooms.get(roomId);
+    app.disposeRoomAttachments?.(roomId);
     if (active) {
       app.state.navigationGeneration++;
       app.saveDraft(roomId, $("#msgInput").value);

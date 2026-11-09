@@ -31,33 +31,34 @@
     min-height: 0;
     padding: 22px 14px 14px;
     color: var(--ink);
-    background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 11%, var(--surface)) 0%, var(--surface) 52%);
+    background: radial-gradient(320px 260px at 0% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 72%), linear-gradient(160deg, var(--surface), color-mix(in srgb, var(--accent-soft) 25%, var(--surface)));
     border-right: 1px solid var(--line);
   }
-  .rail-brand { display: flex; align-items: center; gap: 10px; margin: 0 0 35px 5px; font-family: var(--font-sans); font-size: 18px; font-weight: 700; letter-spacing: -.02em; }
-  .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 11px 11px 11px 4px; background: var(--accent); color: var(--accent-ink); font: 700 11px var(--font-sans); }
-  .rail-label { display: flex; align-items: center; justify-content: space-between; margin: 0 8px 10px; color: var(--ink-3); font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+  .rail-brand { display: flex; align-items: center; gap: 11px; margin: 0 0 30px 5px; font-family: var(--font-display); font-size: 19px; font-weight: 700; letter-spacing: -.025em; }
+  .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid color-mix(in srgb, var(--accent-ink) 24%, transparent); border-radius: 12px 12px 12px 5px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 82%, #18382f), var(--accent)); color: var(--accent-ink); font: 700 11px var(--font-sans); box-shadow: 0 3px 8px color-mix(in srgb, var(--accent) 18%, transparent); }
+  .rail-label { display: flex; align-items: center; justify-content: space-between; margin: 0 8px 10px; color: var(--ink-3); font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
   .rail-tools { display: flex; align-items: center; gap: 7px; }
-  .icon-btn { border: 0; background: transparent; color: var(--ink-2); font: inherit; font-size: 20px; cursor: pointer; }
-  .icon-btn:hover { color: var(--accent); }
+  .icon-btn { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--ink-2); font: inherit; font-size: 20px; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+  .icon-btn:hover { color: var(--accent); border-color: var(--line); background: var(--surface); }
+  .icon-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
   .rail-composer { position: absolute; top: 76px; left: 12px; right: 12px; z-index: 25; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
   .rail-composer .field { margin-bottom: 8px; }
   .rail-composer .btn { width: 100%; }
   .mobile-locale { display: none; }
   .rail-rooms { flex: 1; min-height: 0; overflow: auto; list-style: none; margin: 0; padding: 0; }
-  #roomListChat .room-row { padding: 10px 12px; border-color: transparent; }
-  #roomListChat .room-row.selected { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+  #roomListChat .room-row { padding: 11px 12px; border-color: transparent; border-radius: 12px; }
+  #roomListChat .room-row.selected { background: linear-gradient(110deg, color-mix(in srgb, var(--accent-soft) 92%, var(--surface)), var(--accent-soft)); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); box-shadow: inset 3px 0 var(--accent); }
   .r-kind { color: var(--accent); font-size: 11px; font-weight: 700; }
   .r-status { color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
   .r-preview { overflow: hidden; color: var(--ink-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .r-badge { position: absolute; top: 8px; right: 9px; display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 700; }
-  .rail-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 13px 8px 0; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+  .rail-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 12px 4px 0; border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent); font-size: 12px; color: var(--ink-3); }
   .rail-foot .anchor { width: 100%; }
-  .user-menu-trigger { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 6px; border: 1px solid transparent; border-radius: 11px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; }
-  .user-menu-trigger:hover, .user-menu-trigger[aria-expanded="true"] { border-color: var(--line); background: var(--surface); }
+  .user-menu-trigger { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 7px; border: 1px solid transparent; border-radius: 12px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; transition: border-color .16s, background .16s, box-shadow .16s; }
+  .user-menu-trigger:hover, .user-menu-trigger[aria-expanded="true"] { border-color: color-mix(in srgb, var(--accent) 20%, var(--line)); background: color-mix(in srgb, var(--surface) 84%, var(--accent-soft)); box-shadow: 0 2px 8px rgb(25 50 42 / .06); }
   .user-menu-trigger:focus-visible, .menu-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .user-menu-trigger #railIdentity { flex: 1; min-width: 0; overflow: hidden; color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
-  .user-menu-trigger .rail-avatar { flex: none; width: 32px; height: 32px; font-size: 14px; font-weight: 700; }
+  .user-menu-trigger .rail-avatar { flex: none; width: 34px; height: 34px; border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--line)); font-size: 13px; font-weight: 700; }
   .user-menu-caret { font-size: 14px; }
   .user-menu-panel { top: auto; right: auto; bottom: calc(100% + 8px); left: 0; max-height: min(65dvh, 560px); overflow: auto; }
   .room-options-panel { display: grid; gap: 4px; width: 190px; }
@@ -72,15 +73,16 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .admin-access { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
   .admin-access summary { margin: 0 0 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
-  .admin-dialog { width: min(980px, calc(100vw - 24px)); max-width: none; max-height: 90dvh; overflow: auto; padding: 20px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
-  .admin-dialog::backdrop { background: rgb(9 16 22 / .55); }
+  .admin-dialog { width: min(1020px, calc(100vw - 32px)); max-width: none; max-height: 90dvh; overflow: auto; padding: 24px; color: var(--ink); background: linear-gradient(145deg, var(--surface), color-mix(in srgb, var(--accent-soft) 16%, var(--surface))); border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line)); border-radius: 20px; box-shadow: 0 24px 80px rgb(10 25 20 / .2); }
+  .admin-dialog::backdrop { background: rgb(9 22 18 / .52); backdrop-filter: blur(4px); }
   .admin-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .admin-dialog-head h2 { margin: 0; font-size: 20px; }
-  .admin-dialog h3 { margin: 18px 0 8px; font-size: 15px; }
-  .admin-columns { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(0, 1.2fr); gap: 22px; }
-  .admin-columns > section { min-width: 0; }
+  .admin-dialog-head h2 { margin: 0; font-family: var(--font-display); font-size: 25px; font-weight: 600; letter-spacing: -.02em; }
+  .admin-dialog h3 { margin: 20px 0 9px; font-size: 14px; font-weight: 700; letter-spacing: .01em; }
+  .admin-columns { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(0, 1.2fr); gap: 26px; }
+  .admin-columns > section { min-width: 0; padding: 14px; border: 1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius: 14px; background: color-mix(in srgb, var(--surface) 84%, var(--accent-soft)); }
+  .admin-columns > section > h3:first-child { margin-top: 0; }
   .admin-columns .field { margin-bottom: 10px; }
-  .admin-dialog .admin-select { width: 100%; min-height: 36px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); font: inherit; }
+  .admin-dialog .admin-select { width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface); font: inherit; }
   .admin-overview, .admin-list { margin: 0; padding: 0; list-style: none; }
   .admin-overview p, .admin-list li { margin: 6px 0; padding: 9px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; }
   .admin-list li { display: grid; gap: 7px; }
@@ -90,11 +92,17 @@
   @media (max-width: 620px) { .admin-dialog { padding: 15px; } .admin-columns { grid-template-columns: minmax(0, 1fr); gap: 0; } }
   .rail-avatar { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; color: var(--accent); background: var(--accent-soft); }
   .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #609773; box-shadow: 0 0 0 3px color-mix(in srgb, #609773 16%, transparent); }
-  #chatView > .chat-head { grid-column: 2; grid-row: 1; min-width: 0; padding: 17px 24px; background: color-mix(in srgb, var(--surface) 93%, var(--accent)); }
+  #chatView > .chat-head { grid-column: 2; grid-row: 1; min-width: 0; }
+  @media (min-width: 901px) {
+    #chatView > .chat-head .action-icon { display: none; }
+  }
+  @media (max-width: 900px) {
+    #chatView > .chat-head .action-icon { display: block; }
+    #chatView > .chat-head .action-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+  }
   #chatView > .conn-bar { grid-column: 2; grid-row: 2; }
   #chatView > .msg-scroll { grid-column: 2; grid-row: 3; min-height: 0; }
   #chatView > .composer { grid-column: 2; grid-row: 4; }
-  .chat-head-main h1 { font-size: 21px; }
   .thread { padding: 28px 24px 12px; }
   .msg-text { max-width: min(82%, 680px); padding: 10px 14px; }
   .composer { padding: 14px 24px calc(14px + env(safe-area-inset-bottom)); }
@@ -103,9 +111,6 @@
   .member-action { border: 0; background: transparent; padding: 2px 4px; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; }
   .member-action:hover { text-decoration: underline; }
   #memberList li { align-items: center; }
-  .msg-text pre { position: relative; padding-top: 32px; }
-  .code-copy { position: absolute; top: 5px; right: 6px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 11px; cursor: pointer; }
-  .code-copy:hover { color: var(--accent); border-color: var(--accent); }
   .msg-text table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
   .msg-text th, .msg-text td { padding: 5px 9px; border: 1px solid var(--line); text-align: left; }
   .msg-text td { overflow-wrap: normal; }
@@ -123,12 +128,8 @@
     .chat-head-main h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
     .chat-head-actions { flex: none; flex-wrap: nowrap; gap: 4px; }
     .chat-head-actions > .locale-control { display: none; }
-    #chatView > .chat-head .chip:not(.rooms-drawer-trigger) { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; font-size: 0; }
-    #btnQuestions::before { content: "?"; font-size: 17px; }
+    #chatView > .chat-head .chip:not(.rooms-drawer-trigger) { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; font-size: 0; }
     #btnQuestions .question-badge { position: absolute; top: -5px; right: -5px; margin: 0; font-size: 10px; }
-    #btnAnnouncements::before { content: "▤"; font-size: 16px; }
-    #btnMembers::before { content: "♧"; font-size: 18px; }
-    #btnRoomOptions::before { content: "···"; font-size: 19px; letter-spacing: 1px; }
   }
 
   @media (max-width: 760px) {
@@ -154,14 +155,10 @@
     .chat-head-main { flex: 1; min-width: 0; }
     .room-title-row { gap: 6px; }
     .chat-head-main h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
-    .chat-head .chip { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; font-size: 0; }
+    .chat-head .chip { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; font-size: 0; }
+    #chatView > .chat-head .action-icon { display: block; }
     .rooms-drawer-trigger { display: grid; flex: none; }
-    #btnRoomsDrawer::before { content: "☰"; font-size: 16px; }
-    #btnQuestions::before { content: "?"; font-size: 17px; }
-    #btnAnnouncements::before { content: "▤"; font-size: 16px; }
     #btnQuestions .question-badge { position: absolute; top: -5px; right: -5px; margin: 0; font-size: 10px; }
-    #btnMembers::before { content: "♧"; font-size: 18px; }
-    #btnRoomOptions::before { content: "···"; font-size: 19px; letter-spacing: 1px; }
     .room-options-panel { right: 0; left: auto; }
     .thread { padding: 14px 12px 6px; }
     .msg-text { max-width: 92%; font-size: 15px; }
@@ -175,9 +172,12 @@
   @media (max-width: 420px) {
     #chatView > .chat-head { align-items: center; }
     .chat-head-actions { justify-content: flex-start; gap: 2px; }
-    .chat-head-actions .chip { width: 30px; height: 30px; padding: 0; font-size: 0; }
     .chat-head-actions .panel { max-height: min(70dvh, 520px); overflow: auto; }
     .room-meta { max-width: 100px; overflow: hidden; }
+  }
+  @media (max-width: 300px) {
+    .chat-head .chip { width: 36px; height: 36px; }
+    #btnRoomsDrawer { width: 36px; height: 36px; }
   }
   @media (max-width: 260px) {
     #msgInput:placeholder-shown { min-height: calc(7.25em + 20px); }
@@ -186,7 +186,7 @@
   @media (max-width: 220px) {
     #chatView > .chat-head { padding: 8px; gap: 3px; }
     .chat-head-actions { gap: 1px; }
-    .chat-head-actions .chip { width: 26px; height: 26px; }
-    .rooms-drawer-trigger { width: 26px; height: 26px; }
+    .chat-head .chip { width: 28px; height: 28px; }
+    #btnRoomsDrawer { width: 28px; height: 28px; }
     .room-title-row { gap: 3px; }
   }

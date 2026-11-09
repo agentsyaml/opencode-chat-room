@@ -1,5 +1,5 @@
 import { LS } from "./state.js";
-import { copyCodeFromButton, copyTextToClipboard } from "./markdown.js";
+import { copyTextToClipboard } from "./markdown.js";
 
 export function initEvents(app) {
   const $ = app.$;
@@ -243,8 +243,6 @@ export function initEvents(app) {
     app.queueReceiptRefresh();
   });
   $("#msgList").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-copy-code]");
-    if (button) void copyCodeFromButton(button, app);
     const messageButton = event.target.closest("[data-copy-message]");
     if (messageButton) void copyTextToClipboard(messageButton._copyText).then((copied) => app.flash(messageButton, copied ? "copiedMessage" : "copyMessageFailed"));
   });

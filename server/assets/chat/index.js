@@ -8,9 +8,11 @@ import { initQuestions } from "./questions.js";
 import { initReceipts } from "./receipts.js";
 import { initAnnouncements } from "./announcements.js";
 import { initAdmin } from "./admin.js";
+import { initAttachments } from "./attachments.js";
 
 initMentions(app);
 initMessages(app);
+initAttachments(app);
 initReceipts(app);
 initMembers(app);
 initRooms(app);

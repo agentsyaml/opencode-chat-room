@@ -8,9 +8,13 @@ test("resource API keeps uploads member-gated and serves safe ranged content", a
   const child = Bun.spawn([process.execPath, "-e", `
     process.env.CHAT_ROOM_STATE_DIR = ${JSON.stringify(dir)};
     process.env.CHAT_ROOM_SERVER_TOKEN = "resource-test-token";
+    process.env.CHAT_ROOM_MAX_FILE_SIZE_MB = "3";
     const { default: server } = await import(${JSON.stringify(path.resolve("server/chat-server.ts"))});
     const req = (url, method="GET", headers={}, body) => server.fetch(new Request("http://local"+url,{method,headers:{Authorization:"Bearer resource-test-token",...headers},body}));
-    const room = await (await req("/rooms","POST",{"Content-Type":"application/json"},JSON.stringify({name:"resources",ownerId:"agent",sessionID:"member"}))).json();
+    const config = await req("/resources/config");
+    if (config.status !== 200 || (await config.json()).maxFileSizeBytes !== 3 * 1024 * 1024 || config.headers.get("Cache-Control") !== "no-store") throw new Error("upload configuration was incorrect");
+    if ((await server.fetch(new Request("http://local/resources/config"))).status !== 401) throw new Error("upload configuration bypassed authentication");
+    const room = await (await req("/rooms","POST",{"Content-Type":"application/json"},JSON.stringify({name:"__Test_resources",ownerId:"agent",sessionID:"member"}))).json();
     const unauth = await server.fetch(new Request("http://local/rooms/"+room.id+"/resources",{method:"POST",headers:{"X-Session-ID":"member","X-File-Name":"x","Content-Type":"application/octet-stream"},body:new Uint8Array([1])}));
     if (unauth.status !== 401) throw new Error("unauthenticated upload was accepted");
     const denied = await req("/rooms/"+room.id+"/resources","POST",{"X-Session-ID":"outsider","X-File-Name":"x","Content-Type":"application/octet-stream"},new Uint8Array([1]));

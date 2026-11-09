@@ -8,12 +8,14 @@ export function initMessages(app) {
   let pollDelay = 2000;
 
   app.autoGrow = (textarea) => {
+    const thread = $("#thread"), atBottom = Boolean(app.state.room && Math.abs(thread.scrollHeight - thread.clientHeight - thread.scrollTop) < 1);
     textarea.style.overflowY = "hidden";
     const style = getComputedStyle(textarea), line = parseFloat(style.lineHeight);
     const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
     const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
     if (!textarea.value) {
       textarea.style.height = `${Math.max(line + padding + border, parseFloat(style.minHeight) || 0)}px`;
+      if (atBottom) thread.scrollTop = thread.scrollHeight;
       return;
     }
     textarea.style.height = "auto";
@@ -21,6 +23,7 @@ export function initMessages(app) {
     const overflow = textarea.scrollHeight > limit + 1;
     textarea.style.height = `${Math.min(textarea.scrollHeight, limit) + border}px`;
     textarea.style.overflowY = overflow ? "auto" : "hidden";
+    if (atBottom) thread.scrollTop = thread.scrollHeight;
   };
   app.updateSendState = () => { $("#btnSend").disabled = !$("#msgInput").value.trim(); };
   app.updateDraftCount = () => app.setText($("#draftCount"), "messageCount", { count: $("#msgInput").value.length });
@@ -61,6 +64,7 @@ export function initMessages(app) {
       const updated = await app.api(`/rooms/${encodeURIComponent(roomId)}/messages`, {
         method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text: item.text, isQuestion: Boolean(item.isQuestion) }),
       });
+      app.completeAttachmentsFromText?.(roomId, item.text);
       const entry = app.state.rooms.get(roomId);
       if (entry) {
         entry.room = mergeRoom(entry.room, updated);
@@ -266,20 +270,25 @@ export function initMessages(app) {
   };
 
   app.send = async () => {
-    const input = $("#msgInput"), text = input.value.trim(), room = app.state.room, isQuestion = Boolean(app.isQuestionSending?.());
-    if (!text || !room) return;
+    const input = $("#msgInput"), room = app.state.room, isQuestion = Boolean(app.isQuestionSending?.());
+    if (!room || app.state.sendingRooms?.has(room.id)) return;
+    const message = app.prepareMessage?.(room.id, input.value) || { text: input.value.trim(), ids: [], ready: Boolean(input.value.trim()) };
+    if (!message.ready) return;
+    const text = message.text;
     const revision = app.state.draftRevision.get(room.id) || 0;
+    app.state.sendingRooms ||= new Set(); app.state.sendingRooms.add(room.id);
     app.closeMention();
     input.value = "";
     app.clearDraft(room.id);
     app.autoGrow(input);
-    app.updateSendState();
     app.updateDraftCount();
+    app.updateSendState();
     app.hideSendError();
     try {
       const updated = await app.api(`/rooms/${encodeURIComponent(room.id)}/messages`, {
         method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, isQuestion }),
       });
+      app.completeAttachments?.(room.id, message.ids);
       if (app.state.room?.id !== room.id) return;
       app.state.room = updated;
       const entry = app.state.rooms.get(room.id);
@@ -300,6 +309,7 @@ export function initMessages(app) {
       const unchanged = (app.state.draftRevision.get(room.id) || 0) === revision;
       const failures = app.state.failedMessages.get(room.id) || [];
       app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, isQuestion }]);
+      app.completeAttachments?.(room.id, message.ids);
       app.renderFailedMessages();
       if (app.state.room?.id !== room.id) return;
       if (unchanged) app.clearDraft(room.id);
@@ -308,6 +318,9 @@ export function initMessages(app) {
       app.updateDraftCount();
       if (error.status === 401) { app.openChatSettings(); app.showSendError("sendAuth"); }
       else app.showSendError(error.network ? "sendNetwork" : "sendFailed", { message: error.message });
+    } finally {
+      app.state.sendingRooms.delete(room.id);
+      if (app.state.room?.id === room.id) app.updateSendState();
     }
   };
 

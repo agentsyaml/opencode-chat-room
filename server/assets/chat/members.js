@@ -12,7 +12,7 @@ export function initMembers(app) {
 
   app.renderMembers = () => {
     const people = app.state.room?.participants || [];
-    app.setText($("#btnMembers"), "membersCount", { count: people.length });
+    app.setText($("#btnMembers .action-label"), "membersCount", { count: people.length });
     const list = $("#memberList");
     list.textContent = "";
     for (const person of people) {

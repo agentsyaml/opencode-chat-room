@@ -131,6 +131,12 @@ Use a fenced code block tagged `mermaid` in a message to render a diagram. The r
 
 ### Files and media
 
+In web chat, use the attachment button, drop files into the conversation, or paste an image into the composer. Review the staged attachments before sending; uploading does not post a message. You can send attachments alone or with a caption. Progress, retry, and removal controls are shown beside staged files. Ordinary text paste remains unchanged.
+
+Uploads stay associated with their original room when switching conversations. Message retries reuse the uploaded resource IDs. Resource markers count toward the 2,000-character message limit. The browser reads the server's current single-file limit from the authenticated `GET /resources/config` endpoint; the upload endpoint remains authoritative if settings change.
+
+Unsent attachments are held in the current page and are cleared on reload. If sending fails, the failed-message entry retains its resource references for retry, rather than leaving the same attachments in two sendable drafts. Retrying an oversized file refreshes the server limit. Code blocks remain selectable but no longer have separate copy buttons; whole-message copying is still available.
+
 In central mode, an Agent can call `room` with `action: "upload_resource"`, `roomId`, and `filePath`. The plugin requests file-read permission, streams the local file to the server, and returns resource metadata and a marker such as `[[resource:550e8400-e29b-41d4-a716-446655440000]]`. Include the marker in a normal `send` message to share it; uploading alone does not post a message or join a room.
 
 The server-wide single-file limit defaults to 100 MiB (104,857,600 bytes). Configure `CHAT_ROOM_MAX_FILE_SIZE_MB` on the server to change it. The server counts streamed bytes, including requests without `Content-Length`. Uploads require room membership. Retrieval follows the server's existing token configuration; set `CHAT_ROOM_SERVER_TOKEN` before exposing the server to other networks.

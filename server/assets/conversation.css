@@ -3,22 +3,22 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 8px 14px;
-    padding: 14px 20px;
+    gap: 10px 18px;
+    padding: 16px 24px;
     border-bottom: 1px solid var(--line);
-    background: var(--surface);
+    background: linear-gradient(115deg, color-mix(in srgb, var(--accent-soft) 38%, var(--surface)), var(--surface) 62%);
   }
-  .chat-head-main h1 { margin: 0; font-family: var(--font-sans); font-size: 20px; font-weight: 650; line-height: 1.25; letter-spacing: -.02em; }
+  .chat-head-main h1 { margin: 0; font-family: var(--font-display); font-size: 22px; font-weight: 600; line-height: 1.2; letter-spacing: -.025em; }
   .room-title-row { display: flex; align-items: center; min-width: 0; gap: 8px; }
   .room-title-row h1 { flex: 1; min-width: 0; }
   .rooms-drawer-trigger { display: none; }
   .room-drawer-backdrop { position: fixed; inset: 0; z-index: 49; border: 0; background: rgb(9 16 22 / .38); }
-  .room-meta { margin: 2px 0 0; font-size: 13px; color: var(--ink-2); }
+  .room-meta { margin: 4px 0 0; font-size: 11px; color: var(--ink-3); }
   .mono { font-family: var(--font-mono); }
   .copy-id {
     appearance: none;
     font: inherit;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--ink-3);
     background: none;
     border: none;
@@ -33,6 +33,7 @@
   .copy-id.copied .copy-ok { display: inline; color: var(--accent); }
 
   .chat-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+  .chat-head .action-icon { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
   .question-panel { width: min(390px, calc(100vw - 32px)); max-height: min(70vh, 620px); overflow: auto; }
   .questions-trigger { position: relative; }
   .question-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -61,7 +62,8 @@
     cursor: pointer;
     transition: color .12s, border-color .12s, background .12s;
   }
-  .chip:hover { color: var(--ink); border-color: var(--ink-3); }
+  .chip:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft); }
+  .chip[aria-expanded="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 44%, var(--line)); background: var(--accent-soft); }
   .profile-trigger { display: grid; place-items: center; width: 36px; height: 36px; padding: 3px; border-radius: 50%; }
   .profile-trigger .rail-avatar { width: 25px; height: 25px; font-size: 12px; font-weight: 700; }
   .chip.danger { color: var(--danger); }
@@ -74,11 +76,12 @@
     right: 0;
     z-index: 20;
     width: min(320px, calc(100vw - 32px));
-    padding: 16px;
+    padding: 17px;
     background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 14px;
+    border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--line));
+    border-radius: 16px;
     box-shadow: var(--shadow);
+    backdrop-filter: blur(12px);
     animation: rise .18s ease both;
   }
   .panel h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
@@ -150,17 +153,18 @@
     right: 20px;
     bottom: 16px;
     z-index: 5;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 9px 14px;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
     font: inherit;
     font-size: 13px;
     font-weight: 600;
     color: var(--accent-ink);
     background: var(--accent);
     border: none;
-    border-radius: 999px;
+    border-radius: 50%;
     cursor: pointer;
     box-shadow: var(--shadow);
     transition: filter .12s, transform .1s;
@@ -168,6 +172,9 @@
   .jump:hover { filter: brightness(1.07); }
   .jump:active { transform: translateY(1px); }
   .jump .badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -181,12 +188,12 @@
     border-radius: 999px;
   }
 
-  .msg { display: flex; flex-direction: column; margin-bottom: 14px; }
+  .msg { display: flex; flex-direction: column; margin-bottom: 16px; }
   .msg.in, .sys.in, .day-sep.in { animation: msg-in .25s ease both; }
   .msg.own { align-items: flex-end; }
   .msg.repeat { margin-bottom: 8px; }
   .msg-meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
-  .msg-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .msg-name { font-size: 13px; font-weight: 650; color: var(--ink-2); }
   .msg.own .msg-name { color: var(--accent); }
   .question-mark { padding: 1px 6px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 10px; line-height: 1.5; }
   .msg.repeat .msg-name { display: none; }
@@ -195,8 +202,10 @@
     display: inline-block;
     width: max-content;
     max-width: min(86%, 540px);
-    padding: 8px 12px;
-    border-radius: 14px;
+    padding: 9px 13px;
+    border: 1px solid color-mix(in srgb, var(--ink) 5%, transparent);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgb(20 40 32 / .035);
     background: var(--surface-2);
     border-bottom-left-radius: 4px;
     font-size: 16px;
@@ -204,7 +213,7 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
-  .msg.own .msg-text { background: var(--accent-soft); border-bottom-left-radius: 14px; border-bottom-right-radius: 4px; }
+  .msg.own .msg-text { background: linear-gradient(145deg, color-mix(in srgb, var(--accent-soft) 86%, var(--surface)), var(--accent-soft)); border-color: color-mix(in srgb, var(--accent) 12%, transparent); border-bottom-left-radius: 16px; border-bottom-right-radius: 5px; }
   .msg.own .msg-text ::selection { color: var(--accent-ink); background: var(--accent); }
   .msg-content { position: relative; display: flex; align-items: flex-end; gap: 6px; width: 100%; max-width: 100%; }
   .msg.own .msg-content { flex-direction: row-reverse; }
@@ -217,13 +226,15 @@
     color: var(--ink-3);
     background: transparent;
     font: inherit;
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .04em;
     cursor: pointer;
   }
   .msg.own .message-copy { align-self: flex-end; margin-right: 4px; }
   .message-copy:hover, .message-copy:focus-visible { color: var(--ink); background: var(--surface-2); }
   .message-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .message-readers { flex: 0 0 22px; align-self: flex-end; margin: 0 0 4px; padding: 0; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font: inherit; font-size: 10px; cursor: pointer; }
+  .message-readers { flex: 0 0 24px; align-self: flex-end; margin: 0 0 4px; padding: 0; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font: inherit; font-size: 10px; cursor: pointer; box-shadow: 0 1px 3px rgb(20 40 32 / .06); }
   .message-readers[data-reader-state="empty"], .message-readers[data-reader-state="unknown"] { background: var(--surface-2); }
   .message-readers:hover, .message-readers[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
   .message-readers:focus-visible, .reader-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -238,7 +249,7 @@
   .reader-close { flex: none; width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 21px; cursor: pointer; }
   .reader-excerpt { max-height: 110px; overflow: auto; margin: 16px 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
   .reader-panel .receipt-reader-list li { display: grid; gap: 3px; padding: 10px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
-  .chat-resource { display: grid; gap: 8px; min-width: 0; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+  .chat-resource { display: grid; gap: 9px; min-width: 0; margin: 10px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-2) 76%, var(--surface)); }
   .resource-info, .resource-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .resource-name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
   .resource-size, .resource-status { color: var(--ink-3); font-size: 12px; }
@@ -383,29 +394,29 @@
 
   .gap { padding: 6px 0 2px; text-align: center; font-size: 12px; color: var(--ink-3); }
 
-  .chat-empty { padding: 56px 0 40px; text-align: center; font-size: 13px; color: var(--ink-3); }
+  .chat-empty { padding: 64px 0 44px; text-align: center; font-family: var(--font-display); font-size: 16px; color: var(--ink-3); }
   .chat-empty::before {
     content: "";
     display: block;
     width: 56px;
     height: 56px;
     margin: 0 auto 14px;
-    border: 1.5px dashed var(--line);
+    border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
     border-radius: 50%;
-    background: radial-gradient(circle at 50% 50%, var(--ink-3) 0 3px, transparent 4px);
+    background: radial-gradient(circle at 50% 50%, var(--accent) 0 3px, transparent 4px), var(--accent-soft);
   }
 
   .composer {
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    gap: 9px;
+    padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line);
-    background: var(--surface);
+    background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--accent-soft) 18%, var(--surface)));
   }
-  .composer-row { display: flex; gap: 10px; align-items: flex-end; }
-  .composer-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: min(940px, 100%); min-width: 0; margin: -2px auto 0; }
+  .composer-row { display: flex; gap: 9px; align-items: flex-end; }
+  .composer-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: min(940px, 100%); min-width: 0; margin: -1px auto 0; }
   .question-toggle { min-width: 0; margin: 0; color: var(--ink-2); font-size: 12px; }
   .question-toggle input { accent-color: var(--accent); vertical-align: -1px; }
   .composer .input { flex: 1; }
@@ -414,6 +425,8 @@
     min-height: 0;
     padding: 12px 13px;
     line-height: 1.5;
+    border-radius: 15px;
+    background: color-mix(in srgb, var(--surface) 92%, var(--accent-soft));
     resize: none;
     overflow-y: hidden;
   }
@@ -426,3 +439,27 @@
   .failed-message p { flex: 1; min-width: 0; max-height: 48px; overflow: auto; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
   .failed-message button { flex: none; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; }
   .failed-message button:disabled { opacity: .5; cursor: default; }
+  .attachment-button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 24px; cursor: pointer; }
+  .attachment-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+  .attachment-button:hover { color: var(--accent); border-color: var(--accent); }
+  .attachment-button:disabled { opacity: .5; cursor: default; }
+  .attachment-tray { width: min(940px, 100%); margin: 0 auto; }
+  .attachment-volatile { margin: 0 0 3px; color: var(--ink-3); font-size: 10.5px; }
+  .attachment-status { display: inline-flex; width: fit-content; margin: 5px 0 0; padding: 3px 8px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 10.5px; }
+  .attachment-status.danger-text { color: var(--danger); background: var(--danger-soft); }
+  .attachment-status:empty { display: none; }
+  .attachment-list { display: grid; gap: 6px; max-height: 132px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+  .attachment-item { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); box-shadow: 0 1px 2px rgb(20 40 32 / .035); }
+  .attachment-preview { display: grid; place-items: center; width: 38px; height: 38px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--ink) 5%, transparent); border-radius: 8px; background: var(--surface-2); color: var(--ink-3); font-size: 11px; font-weight: 700; }
+  .attachment-preview img { width: 100%; height: 100%; object-fit: cover; }
+  .attachment-file { min-width: 0; }
+  .attachment-name { overflow: hidden; margin: 0; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  .attachment-detail { margin: 0; color: var(--ink-3); font-size: 10px; }
+  .attachment-item progress { display: block; width: 100%; height: 5px; accent-color: var(--accent); }
+  .attachment-actions { display: flex; gap: 4px; }
+  .attachment-actions button { min-width: 44px; min-height: 44px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 11px; cursor: pointer; }
+  .attachment-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .attachment-over-limit { color: var(--danger); }
+  #draftCount.over-limit { color: var(--danger); font-weight: 700; }
+  .attachment-drop-overlay { position: fixed; inset: 12px; z-index: 100; place-items: center; border: 2px dashed var(--accent); border-radius: 18px; color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 88%, transparent); font-size: clamp(18px, 4vw, 28px); font-weight: 700; pointer-events: none; }
+  #chatView.drag-over .attachment-drop-overlay { display: grid; }

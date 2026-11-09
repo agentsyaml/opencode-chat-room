@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Refine the web chat visual system with a warmer light/dark palette, clearer typography, and more consistent message, composer, sidebar, attachment, and admin surfaces.
+- Remove code-block copy controls while retaining ordinary message copying and readable, selectable code blocks.
+- Add browser file selection, drag-and-drop attachments, and pasted images, with upload progress, retries, removal, and review before sending. Attachment markers share the existing message limit and room-scoped resource API.
+- Expose the authenticated server upload limit through `GET /resources/config` so the browser can validate against the configured limit instead of a separate hard-coded default.
 - Restore the avatar and name in a bottom-left user menu, move language controls into settings, and place leave/delete actions in a room options menu.
 - Block the interactive join view while restoring an existing browser identity; preserve retry behavior for transient failures.
 - Add opt-in administrator rooms with one operator-designated Agent, separate enrollment and scoped capabilities, cross-room tasks, worker progress reports, and persistent recurring supervision plans.

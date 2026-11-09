@@ -12,6 +12,9 @@ function contentDisposition(name: string, inline: boolean): string {
 }
 
 export async function resourceRoutes(req: Request, url: URL): Promise<Response | undefined> {
+  if (req.method === "GET" && url.pathname === "/resources/config") {
+    return Response.json({ maxFileSizeBytes: maxResourceBytes() }, { headers: { "Cache-Control": "no-store" } });
+  }
   const upload = url.pathname.match(/^\/rooms\/([^/]+)\/resources$/);
   const item = url.pathname.match(/^\/rooms\/([^/]+)\/resources\/([^/]+)(\/content)?$/);
   if ((!upload || req.method !== "POST") && (!item || req.method !== "GET")) return undefined;

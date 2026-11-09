@@ -184,7 +184,9 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(await message.locator("pre .mention-chip").count()).toBe(0);
     expect(await message.locator("script, [onerror], a[href^='javascript:']").count()).toBe(0);
     expect(await alice.evaluate(() => (window as any).__chatXss ?? false)).toBe(false);
-    const copyButton = message.locator("[data-copy-code]");
+    expect(await message.locator("[data-copy-code]").count()).toBe(0);
+    expect(await message.locator("pre code").textContent()).toContain('const fake = "<at>@all</at>";');
+    const copyButton = alice.locator(".msg").last().locator("[data-copy-message]");
     await copyButton.click();
     expect(await alice.evaluate(() => navigator.clipboard.readText())).toContain('const fake = "<at>@all</at>";');
     await alice.locator("#thread").evaluate((thread: HTMLElement) => { thread.scrollTop = 0; });
@@ -199,13 +201,14 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.waitForTimeout(250);
     await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-zh.png"), fullPage: true });
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    await alice.evaluate(() => { document.body.dataset.lightBg = getComputedStyle(document.body).backgroundColor; document.body.dataset.lightSelection = getComputedStyle(document.querySelector("#roomListChat .selected")!).backgroundImage; });
     await alice.emulateMedia({ colorScheme: "dark" });
-    await alice.waitForFunction(() => getComputedStyle(document.body).backgroundColor === "rgb(21, 26, 32)");
-    await alice.waitForFunction(() => getComputedStyle(document.querySelector("#roomListChat .selected")!).backgroundColor === "rgb(38, 63, 73)");
+    await alice.waitForFunction(() => getComputedStyle(document.body).backgroundColor !== document.body.dataset.lightBg);
+    await alice.waitForFunction(() => getComputedStyle(document.querySelector("#roomListChat .selected")!).backgroundImage !== document.body.dataset.lightSelection);
     await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-dark.png"), fullPage: true });
     await alice.emulateMedia({ colorScheme: "light" });
     await alice.waitForFunction(() => !matchMedia("(prefers-color-scheme: dark)").matches);
-    await alice.waitForFunction(() => getComputedStyle(document.querySelector("#btnMembers")!).backgroundColor === "rgb(255, 255, 255)");
+    await alice.waitForFunction(() => { const button = document.querySelector<HTMLElement>("#btnMembers")!, sample = document.createElement("div"); sample.style.backgroundColor = "var(--surface)"; document.body.append(sample); const surface = getComputedStyle(sample).backgroundColor; sample.remove(); return getComputedStyle(button).backgroundColor === surface; });
     await alice.setViewportSize({ width: 768, height: 900 }); const tabletHeader = await alice.evaluate(() => { const actions = document.querySelector<HTMLElement>(".chat-head-actions")!, options = document.querySelector<HTMLElement>("#btnRoomOptions")!; return { rail: getComputedStyle(document.querySelector(".room-rail")!).display, drawerTrigger: getComputedStyle(document.querySelector("#btnRoomsDrawer")!).display, header: actions.getBoundingClientRect().top, options: options.getBoundingClientRect().top, overflow: document.documentElement.scrollWidth > innerWidth }; });
     expect(tabletHeader.rail).toBe("flex"); expect(tabletHeader.drawerTrigger).toBe("none"); expect(tabletHeader.options).toBe(tabletHeader.header); expect(tabletHeader.overflow).toBe(false); await alice.screenshot({ path: path.join(screenshotDir, "chat-tablet-768.png"), fullPage: true });
     await alice.setViewportSize({ width: 375, height: 812 }); expect(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true); const enMobileGeometry = await localeGeometry(alice);
