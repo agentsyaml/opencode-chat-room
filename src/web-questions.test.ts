@@ -234,11 +234,10 @@ test.skipIf(!browserModule)("questions can be answered inline without replacing 
     await page.keyboard.press("Enter");
     await page.waitForFunction(async (url: string) => (await import(url)).app.state.room.messages.at(-1)?.text === "<at>@Question author</at>", "/assets/chat/state.js");
     expect(answerPayloads.at(-1)?.text).toBe("<at>@Question author</at>");
-    await page.evaluate(async ({ url, authorSession }: { url: string; authorSession: string }) => {
-      const { app } = await import(url), members = app.state.memberSessions.get(app.state.room.id), author = members.find((member: any) => member.sessionID === authorSession);
-      members.push({ ...author, sessionID: "duplicate-author-session" });
-    }, { url: "/assets/chat/state.js", authorSession });
-    expect(await page.evaluate(async (url: string) => (await import(url)).app.state.memberSessions.get((await import(url)).app.state.room.id).filter((member: any) => member.name === "Question author").length, "/assets/chat/state.js")).toBe(2);
+    const duplicateAuthorSession = "duplicate-author-session";
+    await api(origin, `/rooms/${roomId}/join`, "POST", { sessionID: duplicateAuthorSession, participantId: "Question author", participantName: "Question author" });
+    await page.evaluate(async (url: string) => (await import(url)).app.loadManageableMembers(), "/assets/chat/state.js");
+    await page.waitForFunction(async ({ url }: { url: string }) => (await import(url)).app.state.memberSessions.get((await import(url)).app.state.room.id).filter((member: any) => member.name === "Question author").length === 2, { url: "/assets/chat/state.js" });
     const ambiguous = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: authorSession, text: "Ambiguous author question", isQuestion: true });
     const ambiguousId = ambiguous.messages.at(-1).id;
     await page.locator("#btnRefreshQuestions").click();
