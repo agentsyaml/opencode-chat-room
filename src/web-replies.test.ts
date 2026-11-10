@@ -230,6 +230,8 @@ async function api(origin: string, route: string, method = "GET", body?: unknown
 
 async function checkComposerEditor(page: any) {
   const editor = page.locator("#msgInput");
+  const undo = await editor.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform) ? "Meta+z" : "Control+z");
+  const redo = undo.replace("+z", "+Shift+z");
   await editor.fill("");
   await page.evaluate(() => {
     const editor = document.querySelector<HTMLElement>("#msgInput")!, data = new DataTransfer();
@@ -254,12 +256,12 @@ async function checkComposerEditor(page: any) {
   expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at>");
   expect(await editor.evaluate((node: any) => node.getSelectionOffsets())).toEqual([14, 14]);
   await page.evaluate(() => { delete (crypto as any).randomUUID; });
-  await page.keyboard.insertText("!"); await page.keyboard.press("Meta+z");
+  await page.keyboard.insertText("!"); await page.keyboard.press(undo);
   await editor.evaluate((node: any) => node.setSelectionRange(0, 14));
   expect(await editor.evaluate((node: any) => node.getSelectionOffsets())).toEqual([0, 14]); await page.keyboard.press("Backspace");
-  await page.keyboard.press("Meta+z"); expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at>");
-  await page.keyboard.press("Meta+Shift+z"); expect(await editor.evaluate((node: any) => node.value)).toBe("");
-  await page.keyboard.press("Meta+z");
+  await page.keyboard.press(undo); expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at>");
+  await page.keyboard.press(redo); expect(await editor.evaluate((node: any) => node.value)).toBe("");
+  await page.keyboard.press(undo);
   await editor.evaluate((node: any) => {
     const chip = node.querySelector(".editor-mention")!.cloneNode(true) as HTMLElement;
     chip.dataset.mention = "all"; chip.textContent = "@all"; node.append(chip);
