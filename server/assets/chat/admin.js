@@ -8,6 +8,28 @@ export function initAdmin(app) {
   const select = (node, values, label, id = (item) => item.id) => {
     node.replaceChildren(new Option(label, ""), ...values.map((item) => new Option(item.name, id(item))));
   };
+  app.state.adminRoomIds = new Set();
+  const renderRoomOptions = app.renderRoomOptions;
+  app.renderRoomOptions = (list, available) => {
+    renderRoomOptions(list, available);
+    for (const button of list?.querySelectorAll(".room-row[data-room-id]") || []) {
+      if (!app.state.adminRoomIds.has(button.dataset.roomId)) continue;
+      const badge = document.createElement("span"); badge.className = "room-admin-badge"; badge.textContent = app.t("adminRoomBadge");
+      button.querySelector(".r-name")?.after(badge);
+    }
+  };
+  const renderHead = app.renderHead;
+  app.renderHead = () => {
+    renderHead();
+    const badge = $("#activeAdminBadge");
+    if (badge) badge.hidden = !app.state.adminRoomIds.has(app.state.room?.id);
+  };
+  function setAdminRooms(items) {
+    app.state.adminRoomIds = new Set(items.map((item) => item.roomId));
+    app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
+    app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
+    if (app.state.room) app.renderHead();
+  }
   function renderAdminRooms() {
     $("#adminRoomSelect").replaceChildren(new Option(app.t("chooseAdminRoom"), ""), ...rooms.map((room) => new Option(`${room.name}${bindings.some((item) => item.roomId === room.id) ? ` · ${app.t("adminRoomBadge")}` : ""}`, room.id)));
   }
@@ -15,9 +37,14 @@ export function initAdmin(app) {
   async function verifyToken() {
     const generation = ++tokenGeneration, token = LS.adminToken, error = $("#adminAccessError"), button = $("#btnOpenAdmin");
     error.hidden = true; button.hidden = true;
-    if (!token) return;
-    try { await app.adminApi("/admin/rooms"); if (generation === tokenGeneration && token === LS.adminToken) button.hidden = false; }
-    catch (failure) { if (generation === tokenGeneration) { error.textContent = failure.message; error.hidden = false; } }
+    if (!token) { setAdminRooms([]); return; }
+    try {
+      const result = await app.adminApi("/admin/rooms");
+      if (generation !== tokenGeneration || token !== LS.adminToken) return;
+      setAdminRooms(result.rooms || []); button.hidden = false;
+    } catch (failure) {
+      if (generation === tokenGeneration && token === LS.adminToken) { setAdminRooms([]); error.textContent = failure.message; error.hidden = false; }
+    }
   }
   async function open() {
     const generation = ++viewGeneration;
@@ -29,7 +56,7 @@ export function initAdmin(app) {
     try {
       const [adminResult, roomResult] = await Promise.all([app.adminApi("/admin/rooms"), app.api(`/rooms?sessionID=${encodeURIComponent(LS.sessionID)}`)]);
       if (generation !== viewGeneration || !dialog.open) return;
-      bindings = adminResult.rooms || []; rooms = roomResult || [];
+      bindings = adminResult.rooms || []; setAdminRooms(bindings); rooms = roomResult || [];
       renderAdminRooms();
       $("#adminRoomSelect").value = bindings[0]?.roomId || rooms[0]?.id || "";
       select($("#adminTargetRoom"), rooms, app.t("chooseTargetRoom"), (room) => room.id);
@@ -38,7 +65,7 @@ export function initAdmin(app) {
       if (rooms.length) $("#adminTaskRoom").value = rooms[0].id;
       status(rooms.length ? "" : app.t("createAdminRoomFirst"));
       await Promise.all([loadDesignationAgents(), loadTaskAgents()]); await loadBinding(generation);
-    } catch (error) { if (generation === viewGeneration) status(error.message, true); }
+    } catch (error) { if (generation === viewGeneration) { setAdminRooms([]); status(error.message, true); } }
     finally { if (generation === viewGeneration) { $("#adminRoomSelect").disabled = $("#adminTargetRoom").disabled = $("#adminTargetAgent").disabled = false; $("#adminTaskRoom").disabled = $("#adminTaskAgent").disabled = false; } }
   }
   async function registryAgents(roomId) {
@@ -127,13 +154,13 @@ export function initAdmin(app) {
     catch (error) { if (generation === viewGeneration) status(error.message, true); }
     finally { button.disabled = false; }
   }
-  $("#btnSaveAdminToken").addEventListener("click", async () => { ++viewGeneration; ++designationGeneration; ++taskGeneration; clearEnrollment(); LS.adminToken = $("#inAdminToken").value.trim(); $("#inAdminToken").value = LS.adminToken; await verifyToken(); });
+  $("#btnSaveAdminToken").addEventListener("click", async () => { ++viewGeneration; ++designationGeneration; ++taskGeneration; clearEnrollment(); setAdminRooms([]); LS.adminToken = $("#inAdminToken").value.trim(); $("#inAdminToken").value = LS.adminToken; await verifyToken(); });
   $("#btnOpenAdmin").addEventListener("click", () => { app.closePanels(); void open(); });
   $("#btnRefreshAdmin").addEventListener("click", async () => {
     const id = $("#adminRoomSelect").value;
     const generation = ++viewGeneration;
-    try { const result = await app.adminApi("/admin/rooms"); if (generation !== viewGeneration || !dialog.open) return; bindings = result.rooms || []; renderAdminRooms(); $("#adminRoomSelect").value = id; await loadBinding(generation); }
-    catch (error) { if (generation === viewGeneration) status(error.message, true); }
+    try { const result = await app.adminApi("/admin/rooms"); if (generation !== viewGeneration || !dialog.open) return; bindings = result.rooms || []; setAdminRooms(bindings); renderAdminRooms(); $("#adminRoomSelect").value = id; await loadBinding(generation); }
+    catch (error) { if (generation === viewGeneration) { setAdminRooms([]); status(error.message, true); } }
   });
   $("#btnCloseAdmin").addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => { ++viewGeneration; ++designationGeneration; ++taskGeneration; clearEnrollment(); });
@@ -152,7 +179,7 @@ export function initAdmin(app) {
       const result = await app.adminApi(existing ? `/admin/rooms/${encodeURIComponent(roomId)}` : "/admin/rooms", { method: existing ? "PUT" : "POST", body: json(existing ? body : { roomId, ...body }) });
       if (generation !== viewGeneration || !dialog.open || roomId !== $("#adminRoomSelect").value || body.targetRoomId !== $("#adminTargetRoom").value || agent.sessionID !== $("#adminTargetAgent").value) return;
        if (!existing) bindings.push(result.adminRoom); else bindings = bindings.map((item) => item.roomId === roomId ? result.adminRoom : item);
-       renderAdminRooms(); $("#adminRoomSelect").value = roomId;
+        setAdminRooms(bindings); renderAdminRooms(); $("#adminRoomSelect").value = roomId;
        await loadBinding(generation);
        if (generation !== viewGeneration || roomId !== $("#adminRoomSelect").value || body.targetRoomId !== $("#adminTargetRoom").value) return;
        const box = $("#adminEnrollment"), instruction = document.createElement("code"), copy = document.createElement("button"), warning = document.createElement("p");
@@ -168,7 +195,7 @@ export function initAdmin(app) {
     const id = $("#adminRoomSelect").value;
     if (!id || !confirm(app.t("revokeConfirm"))) return;
     const generation = viewGeneration, button = $("#btnRevokeAdmin"); button.disabled = true;
-    try { await app.adminApi(`/admin/rooms/${encodeURIComponent(id)}`, { method: "DELETE", body: json({}) }); if (generation !== viewGeneration || id !== $("#adminRoomSelect").value) return; bindings = bindings.filter((item) => item.roomId !== id); renderAdminRooms(); $("#adminRoomSelect").value = id; clearEnrollment(); await loadBinding(generation); }
+    try { await app.adminApi(`/admin/rooms/${encodeURIComponent(id)}`, { method: "DELETE", body: json({}) }); if (generation !== viewGeneration || id !== $("#adminRoomSelect").value) return; bindings = bindings.filter((item) => item.roomId !== id); setAdminRooms(bindings); renderAdminRooms(); $("#adminRoomSelect").value = id; clearEnrollment(); await loadBinding(generation); }
     catch (error) { if (generation === viewGeneration) status(error.message, true); }
     finally { button.disabled = false; }
   });

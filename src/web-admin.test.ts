@@ -21,6 +21,7 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     await waitForServer(origin); browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    binding = null; tasks = []; plans = [];
     const page = await context.newPage(), adminHeaders: any[] = [], normalHeaders: any[] = [], roomJoins: string[] = [];
     let releaseTask!: () => void, taskRequested!: () => void, dispatchedPayload: any;
     const taskGate = new Promise<void>((resolve) => { releaseTask = resolve; }), taskStarted = new Promise<void>((resolve) => { taskRequested = resolve; });
@@ -37,14 +38,44 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     await page.locator("#inToken").fill("ui-test-token"); await page.locator('[data-token-save="inToken"]').click();
     await page.locator("#inName").fill("__Test_Operator"); await page.locator("#inRoomName").fill("__Test_AdminControl"); await page.locator("#btnCreate").click();
     await page.locator("#chatView").waitFor({ state: "visible" });
+    const adminRoomId = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || "");
+    binding = { roomId: adminRoomId, targetRoomId: adminRoomId, sessionID: "agent-session", receiverOwnerID: "owner", membershipID: "membership", enrolled: true };
     await page.locator("#btnSettings").click(); await page.locator("#adminAccessHeading").click(); await page.locator("#inAdminToken").fill("operator-secret"); await page.locator("#btnSaveAdminToken").click();
-    await page.locator("#btnOpenAdmin").waitFor({ state: "visible" }); await page.locator("#btnOpenAdmin").click();
+    await page.locator("#btnOpenAdmin").waitFor({ state: "visible" });
+    await page.waitForFunction(() => !document.querySelector<HTMLElement>("#activeAdminBadge")?.hidden && Boolean(document.querySelector("#roomListChat .room-admin-badge")));
+    expect(await page.locator("#roomListChat .room-admin-badge").count()).toBe(1);
+    expect(await page.evaluate(() => document.body.textContent?.includes("operator-secret"))).toBe(false);
+    await page.reload(); await page.locator("#chatView").waitFor({ state: "visible" });
+    await page.waitForFunction(() => !document.querySelector<HTMLElement>("#activeAdminBadge")?.hidden && Boolean(document.querySelector("#roomListChat .room-admin-badge")));
+    expect(await page.evaluate(() => document.body.textContent?.includes("operator-secret"))).toBe(false);
+    let releaseStale!: () => void, staleStarted!: () => void;
+    const staleGate = new Promise<void>((resolve) => { releaseStale = resolve; }), staleRequest = new Promise<void>((resolve) => { staleStarted = resolve; });
+    await page.route("**/admin/rooms", async (route: BrowserRoute) => {
+      if (route.request().headers()["x-chat-admin-token"] === "stale-token") { staleStarted(); await staleGate; return route.fulfill({ json: { rooms: [] } }); }
+      await route.fallback();
+    });
+    await page.locator("#btnSettings").click(); await page.locator("#adminAccessHeading").click();
+    await page.locator("#inAdminToken").fill("stale-token"); await page.locator("#btnSaveAdminToken").click(); await staleRequest;
+    await page.locator("#inAdminToken").fill("operator-secret"); await page.locator("#btnSaveAdminToken").click();
+    await page.waitForFunction(() => !document.querySelector<HTMLElement>("#activeAdminBadge")?.hidden);
+    releaseStale(); await page.waitForTimeout(50);
+    expect(await page.locator("#roomListChat .room-admin-badge").count()).toBe(1);
+    expect(await page.evaluate(() => document.body.textContent?.includes("operator-secret"))).toBe(false);
+    await page.locator("#btnOpenAdmin").click();
     await page.locator("#adminDialog[open]").waitFor();
+    const adminLayout = await page.evaluate(() => {
+      const refresh = document.querySelector("#btnRefreshAdmin")!.getBoundingClientRect();
+      const close = document.querySelector("#btnCloseAdmin")!.getBoundingClientRect();
+      const select = document.querySelector("#adminRoomSelect")!.getBoundingClientRect();
+      const section = document.querySelector(".admin-columns > section")!.getBoundingClientRect();
+      return { closeAfterRefresh: close.left > refresh.right, selectFitsSection: select.left >= section.left && select.right <= section.right };
+    });
+    expect(adminLayout).toEqual({ closeAfterRefresh: true, selectFitsSection: true });
     await page.locator("#adminRoomSelect:not(:disabled)").waitFor();
     await page.locator("#adminTargetRoom:not(:disabled)").waitFor();
     const roomId = await page.locator("#adminRoomSelect option").nth(1).getAttribute("value");
     const deleteHeaders: any[] = [];
-    await page.route(`**/rooms/${roomId}`, async (route: BrowserRoute) => {
+    await page.route(`${origin}/rooms/${roomId}`, async (route: BrowserRoute) => {
       if (route.request().method() !== "DELETE") return route.continue();
       deleteHeaders.push(route.request().headers());
       await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "operator token required to delete a designated admin or target room" }) });
@@ -56,6 +87,9 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     expect(await page.locator("#adminTargetAgent").inputValue()).toBe(agentId);
     await page.locator("#btnDesignateAgent").click();
     await page.locator("#adminEnrollment code").waitFor({ timeout: 3000 }).catch(async () => { throw new Error(await page.locator("#adminStatus").textContent()); });
+    expect(await page.locator("#activeAdminBadge").isVisible()).toBe(true);
+    expect(await page.locator("#roomListChat .room-admin-badge").count()).toBe(1);
+    expect(await page.locator("body").innerText()).not.toContain("operator-secret");
     expect(await page.locator("#adminEnrollment code").textContent()).toContain("admin(action='admin_claim'");
     if (process.env.CHAT_UI_SCREENSHOT_DIR) { await mkdir(process.env.CHAT_UI_SCREENSHOT_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, "admin-panel-desktop.png"), fullPage: true }); }
     await page.waitForFunction(() => (document.querySelector("#adminTaskAgent") as HTMLSelectElement).options.length > 1);
@@ -70,6 +104,9 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     await page.locator("#adminPlanName").fill("Hourly check"); await page.locator("#adminPlanText").fill("Check status"); await page.locator("#adminPlanForm button[type=submit]").click();
     await page.locator("#adminPlanList li").waitFor(); await page.locator("#adminPlanList li button").first().click(); await page.locator("#adminPlanList li button").first().click();
     page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#adminPlanList li button").nth(1).click();
+    page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#btnRevokeAdmin").click();
+    await page.locator("#btnRevokeAdmin").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.querySelector<HTMLElement>("#activeAdminBadge")?.hidden && !document.querySelector("#roomListChat .room-admin-badge"));
     await page.locator("#btnCloseAdmin").click(); await page.locator("#btnRoomOptions").click();
     await page.evaluate(() => sessionStorage.removeItem("chat.adminToken"));
     page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#btnDeleteRoom").click();

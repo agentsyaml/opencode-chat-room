@@ -13,7 +13,7 @@ const storageDir = () => path.join(path.dirname(databasePath()), "resources");
 const roomDirectory = (roomID: string) => path.join(storageDir(), roomID);
 
 export function maxResourceBytes(): number {
-  const mb = Number(process.env.CHAT_ROOM_MAX_FILE_SIZE_MB ?? "100");
+  const mb = Number(process.env.CHAT_ROOM_MAX_FILE_SIZE_MB ?? "500");
   const bytes = mb * 1024 * 1024;
   if (!Number.isFinite(mb) || mb <= 0 || !Number.isSafeInteger(bytes)) throw new Error("CHAT_ROOM_MAX_FILE_SIZE_MB must be a positive finite number");
   return bytes;

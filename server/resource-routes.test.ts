@@ -8,9 +8,12 @@ test("resource API keeps uploads member-gated and serves safe ranged content", a
   const child = Bun.spawn([process.execPath, "-e", `
     process.env.CHAT_ROOM_STATE_DIR = ${JSON.stringify(dir)};
     process.env.CHAT_ROOM_SERVER_TOKEN = "resource-test-token";
-    process.env.CHAT_ROOM_MAX_FILE_SIZE_MB = "3";
+    delete process.env.CHAT_ROOM_MAX_FILE_SIZE_MB;
     const { default: server } = await import(${JSON.stringify(path.resolve("server/chat-server.ts"))});
     const req = (url, method="GET", headers={}, body) => server.fetch(new Request("http://local"+url,{method,headers:{Authorization:"Bearer resource-test-token",...headers},body}));
+    const defaultConfig = await req("/resources/config");
+    if ((await defaultConfig.json()).maxFileSizeBytes !== 500 * 1024 * 1024) throw new Error("default upload limit was incorrect");
+    process.env.CHAT_ROOM_MAX_FILE_SIZE_MB = "3";
     const config = await req("/resources/config");
     if (config.status !== 200 || (await config.json()).maxFileSizeBytes !== 3 * 1024 * 1024 || config.headers.get("Cache-Control") !== "no-store") throw new Error("upload configuration was incorrect");
     if ((await server.fetch(new Request("http://local/resources/config"))).status !== 401) throw new Error("upload configuration bypassed authentication");
@@ -41,6 +44,9 @@ test("resource API keeps uploads member-gated and serves safe ranged content", a
     if (empty.status !== 201) throw new Error("empty file upload failed");
     const emptyContent = await req("/rooms/"+room.id+"/resources/"+(await empty.json()).resource.id+"/content");
     if (emptyContent.status !== 200 || (await emptyContent.arrayBuffer()).byteLength !== 0) throw new Error("empty file download failed");
+    process.env.CHAT_ROOM_MAX_FILE_SIZE_MB = "0.0000152587890625";
+    const oversized = await req("/rooms/"+room.id+"/resources","POST",{"X-Session-ID":"member","X-File-Name":"oversized.bin","Content-Type":"application/octet-stream"},new Uint8Array(17));
+    if (oversized.status !== 413) throw new Error("configured upload limit was not enforced");
     const wrongRoom = await req("/rooms/missing/resources/"+resource.id);
     if (wrongRoom.status !== 404) throw new Error("wrong-room resource did not return not found");
   `], { env: process.env, stdout: "pipe", stderr: "pipe" });

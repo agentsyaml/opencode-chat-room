@@ -9,6 +9,8 @@ import { initReceipts } from "./receipts.js";
 import { initAnnouncements } from "./announcements.js";
 import { initAdmin } from "./admin.js";
 import { initAttachments } from "./attachments.js";
+import { initReplies } from "./replies.js";
+import { initReminders } from "./reminders.js";
 
 initMentions(app);
 initMessages(app);
@@ -17,6 +19,8 @@ initReceipts(app);
 initMembers(app);
 initRooms(app);
 initQuestions(app);
+initReplies(app);
 initEvents(app);
 initAnnouncements(app);
+initReminders(app);
 initAdmin(app);

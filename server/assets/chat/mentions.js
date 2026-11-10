@@ -1,6 +1,8 @@
+import { editorSelectionOffsets, replaceEditorRange } from "./editor.js";
+
 export function initMentions(app) {
   const $ = app.$;
-  const mention = { active: false, start: 0, query: "", items: [], index: 0 };
+  const mention = { active: false, start: 0, query: "", items: [], index: 0, editor: null };
   app.mention = mention;
   app.mentionActive = false;
   app.updateMentionList = (query = mention.query) => {
@@ -25,50 +27,57 @@ export function initMentions(app) {
     highlightMention(app, mention);
   };
 
-  app.openMention = (start, query) => {
+  app.openMention = (start, query, input = $("#msgInput")) => {
     mention.active = app.mentionActive = true;
+    mention.editor = input;
     mention.start = start;
     app.updateMentionList(query);
-    $("#mentionPicker").hidden = false;
-    $("#msgInput").setAttribute("aria-expanded", "true");
+    const picker = $("#mentionPicker"); picker.hidden = false;
+    if (input.id !== "msgInput") {
+      const rect = input.getBoundingClientRect();
+      Object.assign(picker.style, { position: "fixed", left: `${rect.left}px`, right: `${innerWidth - rect.right}px`, bottom: `${innerHeight - rect.top + 8}px` });
+    }
+    input.setAttribute("aria-expanded", "true");
   };
   app.closeMention = () => {
     mention.active = app.mentionActive = false;
     mention.items = [];
-    $("#mentionPicker").hidden = true;
-    $("#msgInput").setAttribute("aria-expanded", "false");
-    $("#msgInput").removeAttribute("aria-activedescendant");
+    mention.editor?.setAttribute("aria-expanded", "false");
+    mention.editor?.removeAttribute("aria-activedescendant"); mention.editor = null;
+    const picker = $("#mentionPicker"); picker.hidden = true; picker.removeAttribute("style");
   };
 
-  app.recomputeMention = () => {
-    const input = $("#msgInput"), match = currentMention(input);
+  app.recomputeMention = (input = $("#msgInput")) => {
+    if (!(input instanceof HTMLElement)) input = $("#msgInput");
+    if (mention.active && mention.editor !== input) app.closeMention();
+    const match = currentMention(input);
     if (match) {
-      mention.active ? app.updateMentionList(match.query) : app.openMention(match.start, match.query);
-    } else if (mention.active) {
-      const at = input.value.lastIndexOf("@");
-      if (at < 0) return app.closeMention();
-      mention.start = at;
-      app.updateMentionList(input.value.slice(at + 1, input.selectionStart));
-    }
+      mention.active ? app.updateMentionList(match.query) : app.openMention(match.start, match.query, input);
+    } else if (mention.active) app.closeMention();
   };
   app.moveMention = (direction) => {
     if (!mention.items.length) return;
     mention.index = (mention.index + direction + mention.items.length) % mention.items.length;
     highlightMention(app, mention);
   };
-  app.insertMention = (name) => {
-    const input = $("#msgInput"), end = mention.start + 1 + mention.query.length;
-    if (input.value.slice(mention.start, end) !== `@${mention.query}`) return app.closeMention();
-    input.setRangeText(`<at>@${name}</at>`, mention.start, end, "end");
-    app.closeMention();
-    app.autoGrow(input);
-    app.updateSendState();
-    app.updateDraftCount();
-    if (app.state.room) {
-      const id = app.state.room.id;
-      app.state.draftRevision.set(id, (app.state.draftRevision.get(id) || 0) + 1);
-      app.saveDraft(id, input.value);
+  app.handleMentionKey = (event, input) => {
+    if (!mention.active || mention.editor !== input || event.isComposing || event.keyCode === 229) return false;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault(); app.moveMention(event.key === "ArrowDown" ? 1 : -1); return true;
     }
+    if (event.key === "Escape") { event.preventDefault(); app.closeMention(); return true; }
+    if (event.key === "Enter" || event.key === "Tab") {
+      if (mention.items.length) { event.preventDefault(); app.insertMention(mention.items[mention.index]); return true; }
+      app.closeMention(); return event.key === "Tab";
+    }
+    return false;
+  };
+  app.insertMention = (name) => {
+    const input = mention.editor || $("#msgInput"), end = mention.start + 1 + mention.query.length;
+    if (input.value.slice(mention.start, end) !== `@${mention.query}`) return app.closeMention();
+    replaceEditorRange(input, mention.start, end, `<at>@${name}</at>`);
+    app.closeMention();
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
     input.focus({ preventScroll: true });
   };
 }
@@ -109,7 +118,8 @@ function createOption(name, index, query, app) {
 }
 
 function currentMention(input) {
-  const position = input.selectionStart, value = input.value;
+  const [position, end] = editorSelectionOffsets(input), value = input.value;
+  if (position !== end) return null;
   let start = position;
   while (start > 0 && /[\p{L}\p{N}_]/u.test(value[start - 1])) start--;
   const at = start - 1;
@@ -120,7 +130,7 @@ function currentMention(input) {
 }
 
 function highlightMention(app, mention) {
-  const input = app.$("#msgInput"), options = app.$("#mentionPicker").querySelectorAll(".mention-opt");
+  const input = mention.editor || app.$("#msgInput"), options = app.$("#mentionPicker").querySelectorAll(".mention-opt");
   options.forEach((option, index) => {
     option.classList.toggle("active", index === mention.index);
     option.setAttribute("aria-selected", String(index === mention.index));

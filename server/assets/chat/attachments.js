@@ -173,7 +173,7 @@ export function initAttachments(app) {
       xhr.setRequestHeader("X-Session-ID", LS.sessionID);
       xhr.setRequestHeader("X-File-Name", encodeURIComponent(item.file.name));
       if (LS.token) xhr.setRequestHeader("Authorization", `Bearer ${LS.token}`);
-      xhr.timeout = 300000;
+      xhr.timeout = 1800000;
       xhr.upload.onprogress = (event) => {
         item.loaded = event.loaded; item.percent = Math.min(100, event.lengthComputable ? Math.floor(event.loaded / event.total * 100) : item.file.size ? Math.floor(event.loaded / item.file.size * 100) : 100);
         if (roomId() === id) {

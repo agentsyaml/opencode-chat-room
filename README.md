@@ -80,17 +80,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.5.2 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.4.0 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.4.0 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.5.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.5.2 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.5.2 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.4.0
+  bunx @alexsun-top/opencode-chat-room@0.5.2
 
 # Local checkout:
 bun install
@@ -113,9 +113,15 @@ The central server uses a trusted shared-token model, not per-user authorization
 
 ### Question messages (0.4.0)
 
-Use `room` with `action: "send"`, `roomId`, `text`, and `isQuestion: true` to send a question. In web chat, enable **Question** before sending. Open the room's **Questions** panel to answer pending questions one at a time. Ordinary chat replies do not dismiss questions. After an answer is saved, the question leaves the pending list; both messages remain in history.
+Use `room` with `action: "send"`, `roomId`, `text`, and `isQuestion: true` to send a question. In web chat, enable **Question** before sending. Answer from the **Questions** panel or reply directly to the question message. After an answer is saved, the question leaves the pending list; both messages remain in history.
 
 `GET /rooms/:roomId/questions` returns `{ questions }`, oldest first, including pending questions outside the visible history window. `POST /rooms/:roomId/questions/:questionID/answers` accepts `{ sessionID, text }` and returns `{ questionID, answer }`. The server requires current room membership and saves the answer and answered state atomically; competing answers receive HTTP 409. Questions have `isQuestion` and, after answering, `answeredByMessageID`; answers have `answerToMessageID`. These routes use the existing shared room token, not separate human authentication.
+
+### Room reminders
+
+`GET /rooms/:roomId/reminders?sessionID=...`, `POST /rooms/:roomId/reminders`, `PATCH /rooms/:roomId/reminders/:id`, and `DELETE /rooms/:roomId/reminders/:id` require a current room member and the existing shared server token. Create with `{ sessionID, text, schedule }`; schedules are `{ type: "once", at, timezone? }` or `{ type: "cron", expression, timezone? }`. Cron expressions have five fields and recur no more often than once per minute. An omitted timezone uses the server's IANA timezone. Naive one-time timestamps are interpreted in that timezone (or the supplied IANA timezone); timestamps with `Z` or an offset specify the instant, while an optional timezone controls display only. Ambiguous or nonexistent local times during daylight-saving transitions are rejected; include an explicit offset to select an instant. `{time}` is rendered with the effective timezone and offset. The final rendered message must fit within 2,000 characters. Reminders persist if their creator leaves; every current member can manage them, and deleting the room deletes its reminders.
+
+Agents use the `room` tool's `reminder_create`, `reminder_list`, `reminder_update`, and `reminder_delete` actions. Web members can manage reminders from the room header. Templates support `{time}`, `{initiator}`, and `{room}`. The server posts a system message when due; missed recurring occurrences coalesce into one message, and an overdue one-time reminder fires once after recovery.
 
 Version 0.4.0 requires an explicit non-empty `name` for `room`'s `join` action. Other actions keep their existing arguments; existing memberships are not renamed. Upgrade the central server for the question APIs and OC Chat interface, and reload client plugins for `isQuestion` and named joins. Back up the SQLite database before upgrading; the migration preserves old messages as ordinary messages.
 
@@ -139,7 +145,9 @@ Unsent attachments are held in the current page and are cleared on reload. If se
 
 In central mode, an Agent can call `room` with `action: "upload_resource"`, `roomId`, and `filePath`. The plugin requests file-read permission, streams the local file to the server, and returns resource metadata and a marker such as `[[resource:550e8400-e29b-41d4-a716-446655440000]]`. Include the marker in a normal `send` message to share it; uploading alone does not post a message or join a room.
 
-The server-wide single-file limit defaults to 100 MiB (104,857,600 bytes). Configure `CHAT_ROOM_MAX_FILE_SIZE_MB` on the server to change it. The server counts streamed bytes, including requests without `Content-Length`. Uploads require room membership. Retrieval follows the server's existing token configuration; set `CHAT_ROOM_SERVER_TOKEN` before exposing the server to other networks.
+To retrieve a room attachment, call `room` with `action: "read_resource"`, `roomId`, and the marker UUID as `resourceId`. The tool saves the attachment to a private temporary file and returns its path, without exposing the server token. The Agent can then decide whether to read it. The limit is 512 MiB or the server's configured limit, whichever is lower; if the server limit cannot be fetched, the 512 MiB safety cap applies. Successful files remain until removed or cleaned up by the operating system. Resource access uses the server's existing shared-token permissions.
+
+The server-wide single-file limit defaults to 500 MiB (524,288,000 bytes). Configure `CHAT_ROOM_MAX_FILE_SIZE_MB` on the server to change it. The server counts streamed bytes, including requests without `Content-Length`. Uploads require room membership. Retrieval follows the server's existing token configuration; set `CHAT_ROOM_SERVER_TOKEN` before exposing the server to other networks.
 
 The browser offers downloads and on-demand previews for recognized raster images, audio, and video. Other formats, including SVG and HTML, are download-only. Playback depends on browser codec support. Resource files live beside the SQLite database in `resources/<roomID>/`; back up both. Room deletion removes its resources. Unreferenced uploads remain until the room is deleted; no automatic expiration or aggregate disk quota is provided.
 

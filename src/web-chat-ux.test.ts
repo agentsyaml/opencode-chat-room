@@ -57,7 +57,7 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
       const range = document.createRange(); range.selectNodeContents(cell);
       return new Set(Array.from(range.getClientRects()).map((rect) => Math.round(rect.top))).size;
     })).toBe(1);
-    expect(await page.locator("#msgList [data-msg-id]:not(.day-sep)").evaluateAll((rows: Element[]) => rows.every((row) => row.querySelector("[data-copy-message]")))).toBe(true);
+    expect(await page.locator("#msgList [data-msg-id]:not(.sys):not(.day-sep)").evaluateAll((rows: Element[]) => rows.every((row) => row.querySelector("[data-copy-message]")))).toBe(true);
     await page.evaluate(() => {
       let copied = "";
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { copied = text; } } });
@@ -91,11 +91,12 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     const systemLayout = await page.evaluate(async (url: string) => {
       const { app } = await import(url), row = app.renderMessage({ id: "copy-system-fixture", senderId: "system", text: "UX system copy fixture", createdAt: Date.now() }, false);
       document.querySelector("#msgList")!.append(row);
-      const text = row.querySelector("span")!.getBoundingClientRect(), copy = row.querySelector("[data-copy-message]")!.getBoundingClientRect();
+      const hasCopy = Boolean(row.querySelector("[data-copy-message]"));
       row.remove();
-      return { textBottom: text.bottom, copyTop: copy.top };
+      return { hasCopy };
     }, "/assets/chat/state.js");
-    expect(systemLayout.copyTop).toBeGreaterThanOrEqual(systemLayout.textBottom);
+    expect(systemLayout.hasCopy).toBe(false);
+    expect(await page.locator("#msgList .msg [data-copy-message]").count()).toBeGreaterThan(0);
     await checkSelection(page, ".msg-text table");
     await checkSelection(page, ".msg-text pre code");
     await page.evaluate(() => { const thread = document.querySelector<HTMLElement>("#thread")!; thread.scrollTop = 12000; });

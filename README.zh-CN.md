@@ -80,17 +80,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.5.2 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.4.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.4.0 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.4.0 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.5.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.5.2 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.5.2 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.4.0
+  bunx @alexsun-top/opencode-chat-room@0.5.2
 
 # 本地 checkout：
 bun install
@@ -113,9 +113,15 @@ bun run server
 
 ### 问题消息（0.4.0）
 
-Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQuestion: true` 发送问题。网页发送前勾选“问题”，在当前房间的“问题”面板逐条回答。普通聊天回复不会自动消除问题；回答保存成功后，问题移出待回答列表，问题和回答仍保留在历史记录中。
+Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQuestion: true` 发送问题。网页发送前勾选“问题”；可以在“问题”面板回答，也可以直接回复问题消息。回答保存成功后，问题移出待回答列表，问题和回答仍保留在历史记录中。
 
 `GET /rooms/:roomId/questions` 返回 `{ questions }`，按时间从旧到新排列，包含可视历史窗口以外的未回答问题。`POST /rooms/:roomId/questions/:questionID/answers` 接受 `{ sessionID, text }`，返回 `{ questionID, answer }`。服务端要求当前房间成员身份，并原子保存回答和已回答状态；并发重复回答返回 HTTP 409。问题包含 `isQuestion`，回答后增加 `answeredByMessageID`；回答包含 `answerToMessageID`。接口沿用共享令牌，不提供独立的人类身份认证。
+
+### 房间提醒
+
+房间成员可在网页房间头部管理提醒；Agent 可通过 `room` 的 `reminder_create`、`reminder_list`、`reminder_update` 和 `reminder_delete` 操作管理。提醒支持一次性时间或五字段 CRON 表达式，模板可使用 `{time}`、`{initiator}` 和 `{room}`。到期时服务器向房间发送系统消息；错过的周期合并为一条，一次性提醒在服务器恢复后补发一次。创建者离房后提醒继续，删除房间时提醒一并删除。
+
+时区默认使用服务器时区，也可指定 IANA 时区。未带偏移的一次性时间按指定或服务器时区解释；带 `Z` 或偏移的时间表示明确时刻，指定的时区用于显示。夏令时中不存在或有歧义的本地时间会被拒绝，可用明确偏移指定时刻。提醒管理沿用共享令牌及房间成员权限。
 
 0.4.0 中，`room` 的 `join` 操作必须显式传入非空 `name`；其他操作参数不变，已有成员不会被改名。问题接口和 OC Chat 界面需升级中心服务器，`isQuestion` 和具名加入需重新加载客户端插件。升级前请备份 SQLite 数据库；迁移将旧消息保留为普通消息。
 
@@ -139,7 +145,9 @@ Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQues
 
 中心模式下，Agent 调用 `room`，传入 `action: "upload_resource"`、`roomId` 和本地 `filePath`。插件先申请文件读取权限，再流式上传，返回资源信息和 `[[resource:资源UUID]]` 标记。将标记放入普通 `send` 消息即可分享；上传本身不会发送消息或自动加入房间。
 
-服务器默认单文件上限为 100 MiB（104857600 字节），通过服务器环境变量 `CHAT_ROOM_MAX_FILE_SIZE_MB` 统一调整。上传要求已有房间成员身份；读取沿用现有 token 配置，对外部署前应设置 `CHAT_ROOM_SERVER_TOKEN`。服务器按实际接收字节限制大小，不依赖请求声明的长度。
+获取房间附件时，调用 `room` 并传入 `action: "read_resource"`、`roomId` 和标记中的 UUID（`resourceId`）。工具将附件保存到私有临时文件并返回路径，不暴露服务器令牌；Agent 可自行决定是否读取该文件。单个附件上限为 512 MiB 和服务器配置上限中的较小值；无法获取服务器上限时使用 512 MiB 安全上限。成功下载的文件会保留到手动删除或操作系统清理临时目录。资源访问仍使用服务器现有的共享令牌权限。
+
+服务器默认单文件上限为 500 MiB（524288000 字节），通过服务器环境变量 `CHAT_ROOM_MAX_FILE_SIZE_MB` 统一调整。上传要求已有房间成员身份；读取沿用现有 token 配置，对外部署前应设置 `CHAT_ROOM_SERVER_TOKEN`。服务器按实际接收字节限制大小，不依赖请求声明的长度。
 
 网页支持识别到的栅格图片、音频和视频的按需预览，其他文件提供下载；SVG、HTML 不内嵌执行。播放能力取决于浏览器支持的编码。资源存放在 SQLite 数据库旁的 `resources/<roomID>/`，备份时须同时保留。删除房间会清理其资源；未引用的上传文件保留到房间删除，暂不提供自动过期或总磁盘配额。
 

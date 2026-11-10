@@ -1,4 +1,5 @@
 import { LS } from "./state.js";
+import { isOwnMessage } from "./messages.js";
 import { formatRoomPreview, setRoomPreview } from "./system-messages.js";
 
 export function initRooms(app) {
@@ -65,7 +66,7 @@ export function initRooms(app) {
     if (!entry) return;
     if (app.state.room?.id === roomId) return;
     if (app.state.room) {
-      app.saveDraft(app.state.room.id, $("#msgInput").value);
+      app.saveDraft(app.state.room.id, $("#msgInput").draftValue);
       app.captureReadingPosition?.();
     }
     app.stopPolling();
@@ -86,8 +87,9 @@ export function initRooms(app) {
     app.startPolling();
     app.renderMembers();
     if (!restoredPosition) $("#thread").scrollTop = typeof savedPosition === "number" ? savedPosition : entry.position || $("#thread").scrollHeight;
-    $("#msgInput").disabled = false;
-    $("#msgInput").value = app.state.drafts.get(roomId) || "";
+    $("#msgInput").contentEditable = "true";
+    $("#msgInput").setAttribute("aria-disabled", "false"); $("#msgInput").tabIndex = 0;
+    $("#msgInput").draftValue = app.state.drafts.get(roomId) || ""; app.renderReplyPreview?.();
     app.renderFailedMessages();
     app.autoGrow($("#msgInput"));
     app.updateDraftCount();
@@ -177,13 +179,14 @@ export function initRooms(app) {
       app.captureReadingPosition?.();
       app.stopPolling();
       app.closeMention();
-      app.state.room = null;
+      app.state.room = null; app.renderReplyPreview?.();
       app.state.myName = "";
       app.state.unread = 0;
       app.rendered = 0;
       app.firstMessageId = null;
       $("#msgList").textContent = "";
-      $("#msgInput").disabled = true;
+      $("#msgInput").contentEditable = "false";
+      $("#msgInput").setAttribute("aria-disabled", "true"); $("#msgInput").tabIndex = -1;
       $("#btnSend").disabled = true;
     }
     app.state.rooms.delete(roomId);
@@ -470,7 +473,7 @@ async function watchRoom(roomId, app) {
     const previousReceivedTs = entry.receivedTs || 0;
     const sawSystem = (result.items || []).some((message) => message.senderId === "system");
     for (const message of result.items || []) {
-      if (!entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
+      if (!isOwnMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
       if (!entry.room.messages.some((item) => item.id === message.id)) entry.room.messages.push({ ...message, roomId });
       if (message.createdAt >= entry.previewAt) {
         setRoomPreview(entry, message);

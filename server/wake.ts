@@ -1,6 +1,6 @@
 import os from "node:os";
 import type { Message } from "../src/room-service";
-import { formatNotificationLines, formatServeWakePrompt, readState, writeState, type RegistryEntry } from "../src/store";
+import { formatNotificationLines, formatServeWakePrompt, readQuestionExcerpt, readState, writeState, type RegistryEntry } from "../src/store";
 import { clearPendingAdmission, getOrCreatePendingAdmission, markPendingAdmissionAdmitted, pendingAdmission, rejectPendingAdmission, type QueueItem } from "../src/queue";
 import { sendAsyncNotification } from "../src/queue-transport";
 import { readInbox, type InboxItem } from "./inbox";
@@ -46,8 +46,11 @@ async function deliverWake(
   const queued = Math.max(current.lastQueuedTs ?? 0, inbox.queuedTs[roomId] ?? 0);
   if (triggering.createdAt <= (current.lastReadTs ?? 0) || triggering.createdAt <= queued) return;
   const queuedItems = inbox.items.filter((item) => item.createdAt > queued);
-  const trigger: InboxItem = { id: triggering.id, roomId, roomName, roomKind, senderId: triggering.senderId, text: triggering.text, createdAt: triggering.createdAt };
-  const items = queuedItems.some((item) => item.id === trigger.id) ? queuedItems : [...queuedItems, trigger].sort((a, b) => a.createdAt - b.createdAt);
+  const trigger: InboxItem = { id: triggering.id, roomId, roomName, roomKind, senderId: triggering.senderId, text: triggering.text, createdAt: triggering.createdAt,
+    ...(triggering.answerToMessageID ? { answerQuestionExcerpt: await readQuestionExcerpt(roomId, triggering.answerToMessageID) } : {}) };
+  const items = queuedItems.some((item) => item.id === trigger.id)
+    ? queuedItems.map((item) => item.id === trigger.id ? { ...trigger, ...item, answerQuestionExcerpt: item.answerQuestionExcerpt ?? trigger.answerQuestionExcerpt } : item)
+    : [...queuedItems, trigger].sort((a, b) => a.createdAt - b.createdAt);
   const maxTs = items.reduce((max, item) => Math.max(max, item.createdAt), 0);
   const existing = pendingAdmission(sid, roomId);
   const delta = existing?.state === "admitted" && maxTs > existing.maxTs ? items.filter((item) => item.createdAt > existing.maxTs) : items;

@@ -49,7 +49,7 @@ test.skipIf(!browserModule)("restore blocks login, retries transient errors, and
     expect(JSON.parse((await owner.evaluate(() => sessionStorage.getItem("chat.positions")))!)[roomId!]).toEqual(savedPosition);
     await owner.locator("#btnRestoreRetry").click(); await secondRequest; release(); await reload;
     await owner.locator("#chatView").waitFor({ state: "visible" });
-    expect(await owner.locator("#msgInput").inputValue()).toBe("Draft retained through retry");
+    expect(await owner.locator("#msgInput").evaluate((node: any) => node.value)).toBe("Draft retained through retry");
       await owner.waitForFunction((position: { messageId: string; offset: number }) => {
         const thread = document.querySelector("#thread")!, row = Array.from(document.querySelectorAll<HTMLElement>("#msgList [data-msg-id]")).find((item) => item.dataset.msgId === position.messageId);
       return row && Math.abs(row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop + position.offset)) < 2;

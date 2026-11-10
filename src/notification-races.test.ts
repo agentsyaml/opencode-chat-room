@@ -101,6 +101,21 @@ describe.serial("notification membership races", () => {
     expect(receiverState.claimBackgroundAttempt(sessionID, roomID, "service", admission.maxTs)).toBe(false);
   });
 
+  test("a pending retry keeps its quote, but refreshes admission when the excerpt changes", () => {
+    const roomID = `answer-retry-${crypto.randomUUID()}`;
+    const item = { id: "answer", senderId: "alice", text: "yes", createdAt: 10, answerQuestionExcerpt: "old question" };
+    const first = queue.getOrCreatePendingAdmission(sessionID, roomID, [item], "prompt with old question", 10, false);
+    const retry = queue.getOrCreatePendingAdmission(sessionID, roomID, [item], "prompt with old question", 10, false);
+    const later = { ...item, id: "later", createdAt: 11, text: "later message" };
+    const originalRetry = queue.getOrCreatePendingAdmission(sessionID, roomID, [item, later], "combined prompt", 11, false);
+    const refreshedItem = { ...item, answerQuestionExcerpt: "updated question" };
+    const refreshed = queue.getOrCreatePendingAdmission(sessionID, roomID, [refreshedItem], "prompt with updated question", 10, false);
+    expect(retry.id).toBe(first.id);
+    expect(originalRetry.id).toBe(first.id);
+    expect(refreshed.id).not.toBe(first.id);
+    expect(refreshed.prompt).toContain("updated question");
+  });
+
   test("watermarks survive clock advance, 1024 other admissions, and receiver restart", () => {
     const originalNow = Date.now;
     let now = 1_000;

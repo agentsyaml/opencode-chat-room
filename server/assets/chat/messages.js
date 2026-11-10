@@ -1,10 +1,12 @@
 import { createRandomId, LS } from "./state.js";
 import { renderMarkdown } from "./markdown.js";
-import { hasMessageSelection, pruneMessageRows } from "./message-window.js";
+import { hasMessageSelection, pruneMessageRows, trimMessages } from "./message-window.js";
 import { formatSystemMessage, setRoomPreview } from "./system-messages.js";
+import { installEditor } from "./editor.js";
 
 export function initMessages(app) {
   const $ = app.$;
+  installEditor($("#msgInput"));
   let pollDelay = 2000;
 
   app.autoGrow = (textarea) => {
@@ -46,6 +48,11 @@ export function initMessages(app) {
     for (const item of items) {
       const row = document.createElement("article"), text = document.createElement("p");
       row.className = "failed-message";
+      if (item.replyTarget) {
+        const context = document.createElement("small"); context.className = "failed-reply-context";
+        context.textContent = `${item.replyTarget.senderId}: ${String(item.replyTarget.text).slice(0, 120)}`;
+        row.dataset.replyTargetId = item.replyToMessageID; row.append(context);
+      }
       text.textContent = item.text;
       row.append(text, failedAction("retryFailed", roomId, item.id, app), failedAction("discardFailed", roomId, item.id, app));
       panel.append(row);
@@ -61,13 +68,12 @@ export function initMessages(app) {
     app.state.retryingFailedIds.add(failedId);
     app.renderFailedMessages();
     try {
-      const updated = await app.api(`/rooms/${encodeURIComponent(roomId)}/messages`, {
-        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text: item.text, isQuestion: Boolean(item.isQuestion) }),
-      });
+      const questionTarget = item.replyTarget?.isQuestion, entry = app.state.rooms.get(roomId);
+      const updated = questionTarget ? (await app.answerQuestionFromReply(roomId, item.replyToMessageID, item.text), entry?.room)
+        : await app.api(`/rooms/${encodeURIComponent(roomId)}/messages`, { method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text: item.text, isQuestion: Boolean(item.isQuestion), ...(item.replyToMessageID ? { replyToMessageID: item.replyToMessageID } : {}) }) });
       app.completeAttachmentsFromText?.(roomId, item.text);
-      const entry = app.state.rooms.get(roomId);
       if (entry) {
-        entry.room = mergeRoom(entry.room, updated);
+        if (!questionTarget) entry.room = mergeRoom(entry.room, updated);
         const latest = entry.room.messages.at(-1);
         if (latest && latest.createdAt >= entry.previewAt) setRoomPreview(entry, latest);
       }
@@ -130,6 +136,7 @@ export function initMessages(app) {
       for (const [id, message] of entry.unreadIds) if (message.createdAt <= timestamp) entry.unreadIds.delete(id);
       app.state.unread = entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
       app.updateBadge();
+      app.updateJump();
       app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
     } catch { /* The next active poll will retry the read watermark. */ }
@@ -167,27 +174,29 @@ export function initMessages(app) {
       content.append(body, app.createReceiptButton(message, own));
       row.append(meta, content);
     }
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "message-copy";
-    copy.dataset.copyMessage = "";
-    copy.setAttribute("aria-label", app.t("copyMessage"));
-    copy.dataset.i18nAriaLabel = "copyMessage";
-    copy.dataset.i18nTitle = "copyMessage";
-    copy.title = app.t("copyMessage");
-    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.classList.add("message-copy-icon"); icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
-    const back = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    back.setAttribute("x", "4"); back.setAttribute("y", "3"); back.setAttribute("width", "13"); back.setAttribute("height", "15"); back.setAttribute("rx", "2");
-    const front = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    front.setAttribute("x", "8"); front.setAttribute("y", "7"); front.setAttribute("width", "12"); front.setAttribute("height", "14"); front.setAttribute("rx", "2");
-    icon.append(back, front);
-    const feedback = document.createElement("span");
-    feedback.className = "message-copy-feedback"; feedback.dataset.flashOutput = ""; feedback.dataset.i18n = "copyMessage";
-    feedback.hidden = true; feedback.setAttribute("role", "status"); feedback.setAttribute("aria-live", "polite"); feedback.textContent = app.t("copyMessage");
-    copy.append(icon, feedback);
-    copy._copyText = String(message.text ?? "");
-    row.append(copy);
+    if (message.senderId !== "system") {
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "message-copy";
+      copy.dataset.copyMessage = "";
+      copy.setAttribute("aria-label", app.t("copyMessage"));
+      copy.dataset.i18nAriaLabel = "copyMessage";
+      copy.dataset.i18nTitle = "copyMessage";
+      copy.title = app.t("copyMessage");
+      const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      icon.classList.add("message-copy-icon"); icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
+      const back = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      back.setAttribute("x", "4"); back.setAttribute("y", "3"); back.setAttribute("width", "13"); back.setAttribute("height", "15"); back.setAttribute("rx", "2");
+      const front = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      front.setAttribute("x", "8"); front.setAttribute("y", "7"); front.setAttribute("width", "12"); front.setAttribute("height", "14"); front.setAttribute("rx", "2");
+      icon.append(back, front);
+      const feedback = document.createElement("span");
+      feedback.className = "message-copy-feedback"; feedback.dataset.flashOutput = ""; feedback.dataset.i18n = "copyMessage";
+      feedback.hidden = true; feedback.setAttribute("role", "status"); feedback.setAttribute("aria-live", "polite"); feedback.textContent = app.t("copyMessage");
+      copy.append(icon, feedback);
+      copy._copyText = String(message.text ?? "");
+      row.append(copy);
+    }
     if (live) row.classList.add("in");
     return row;
   };
@@ -283,7 +292,8 @@ export function initMessages(app) {
   };
 
   app.send = async () => {
-    const input = $("#msgInput"), room = app.state.room, isQuestion = Boolean(app.isQuestionSending?.());
+    const input = $("#msgInput"), room = app.state.room, replyTarget = room && app.replyTargetFor?.(room.id);
+    const isQuestion = !replyTarget && Boolean(app.isQuestionSending?.());
     if (!room || app.state.sendingRooms?.has(room.id)) return;
     const message = app.prepareMessage?.(room.id, input.value) || { text: input.value.trim(), ids: [], ready: Boolean(input.value.trim()) };
     if (!message.ready) return;
@@ -291,6 +301,7 @@ export function initMessages(app) {
     const revision = app.state.draftRevision.get(room.id) || 0;
     app.state.sendingRooms ||= new Set(); app.state.sendingRooms.add(room.id);
     app.closeMention();
+    app.clearReplyTarget?.(room.id);
     input.value = "";
     app.clearDraft(room.id);
     app.autoGrow(input);
@@ -298,8 +309,10 @@ export function initMessages(app) {
     app.updateSendState();
     app.hideSendError();
     try {
-      const updated = await app.api(`/rooms/${encodeURIComponent(room.id)}/messages`, {
-        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, isQuestion }),
+      let updated;
+      if (replyTarget?.isQuestion) { await app.answerQuestionFromReply(room.id, replyTarget.id, text); updated = app.state.rooms.get(room.id)?.room || room; }
+      else updated = await app.api(`/rooms/${encodeURIComponent(room.id)}/messages`, {
+        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, isQuestion, ...(!isQuestion && replyTarget ? { replyToMessageID: replyTarget.id } : {}) }),
       });
       app.completeAttachments?.(room.id, message.ids);
       if (app.state.room?.id !== room.id) return;
@@ -321,7 +334,7 @@ export function initMessages(app) {
     } catch (error) {
       const unchanged = (app.state.draftRevision.get(room.id) || 0) === revision;
       const failures = app.state.failedMessages.get(room.id) || [];
-      app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, isQuestion }]);
+      app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, isQuestion, ...(!isQuestion && replyTarget ? { replyToMessageID: replyTarget.id, replyTarget } : {}) }]);
       app.completeAttachments?.(room.id, message.ids);
       app.renderFailedMessages();
       if (app.state.room?.id !== room.id) return;
@@ -396,7 +409,7 @@ export function initMessages(app) {
        }
       if (entry) entry.receivedTs = items.reduce((latest, item) => Number.isSafeInteger(item.createdAt) ? Math.max(latest, item.createdAt) : latest, previousReceivedTs);
       if (entry) entry.unreadOverflow = Boolean(data.hasMore);
-      if (messages.length > 500) messages.splice(0, messages.length - 500);
+       if (messages.length > 500) { const anchorId = app.state.positions.get(roomId)?.messageId, anchor = anchorId && messages.find((item) => item.id === anchorId); messages.splice(0, messages.length - 500); if (anchor && !messages.includes(anchor)) messages.unshift(anchor); }
       const rendered = app.renderMessages(true);
       if (sawSystem) {
         await app.refreshRoomMeta(roomId, generation);
@@ -474,33 +487,12 @@ export function initMessages(app) {
     return { ...updated, messages: [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500) };
   }
 
-function trimMessages(list, app) {
-    if (list.children.length <= 400 || hasMessageSelection(list)) return;
-    const saved = app.state.positions.get(app.state.room?.id), rows = [...list.querySelectorAll("[data-msg-id]")];
-    const anchor = saved?.messageId && rows.find((row) => row.dataset.msgId === saved.messageId);
-    if (anchor && rows.indexOf(anchor) < rows.length - 280) {
-      const recent = rows.at(-300);
-      while (list.firstElementChild && list.firstElementChild !== anchor) list.firstElementChild.remove();
-      let next = anchor.nextElementSibling;
-      while (next && next !== recent) { const after = next.nextElementSibling; next.remove(); next = after; }
-      const gap = document.createElement("li"); gap.className = "gap"; app.setText(gap, "messagesBetweenOmitted"); anchor.after(gap);
-      return;
-    }
-    while (list.children.length > 300) list.removeChild(list.firstChild);
-    if (list.firstElementChild && !list.firstElementChild.classList.contains("gap")) {
-      const gap = document.createElement("li");
-      gap.className = "gap";
-      app.setText(gap, "earlierMessages");
-      list.insertBefore(gap, list.firstChild);
-    }
 }
 
-function isOwnMessage(message, app) {
-  const room = app.state.room, direct = room.kind === "direct";
+export function isOwnMessage(message, app, room = app.state.room, myName = app.state.myName) {
+  const direct = room.kind === "direct";
   const sameName = app.state.memberSessions.get(room.id)?.filter((member) => member.name === message.senderId);
   return direct ? message.senderId === LS.sessionID
     : message.senderSessionID ? message.senderSessionID === LS.sessionID
-      : message.senderId === app.state.myName && sameName?.length === 1 && sameName[0].sessionID === LS.sessionID;
-}
-
+      : message.senderId === myName && sameName?.length === 1 && sameName[0].sessionID === LS.sessionID;
 }

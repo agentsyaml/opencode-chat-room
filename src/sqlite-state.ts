@@ -43,6 +43,19 @@ export async function initializeAdminSchema(file: string): Promise<void> {
   });
 }
 
+export async function initializeReminderSchema(file: string): Promise<void> {
+  await withStateTransaction(file, db => db.exec(`CREATE TABLE IF NOT EXISTS room_reminders(
+    id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    creator_session_id TEXT NOT NULL, text TEXT NOT NULL, schedule_type TEXT NOT NULL,
+    at TEXT, expression TEXT, timezone TEXT, paused INTEGER NOT NULL DEFAULT 0,
+    next_run_at INTEGER NOT NULL, created_at INTEGER NOT NULL, last_error TEXT);`));
+  await withStateTransaction(file, db => {
+    const columns = db.query("PRAGMA table_info(room_reminders)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "initiator")) db.exec("ALTER TABLE room_reminders ADD COLUMN initiator TEXT NOT NULL DEFAULT ''");
+    if (!columns.some(column => column.name === "last_error")) db.exec("ALTER TABLE room_reminders ADD COLUMN last_error TEXT");
+  });
+}
+
 async function initialize(file: string): Promise<Database> {
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   chmodSync(path.dirname(file), 0o700);
@@ -347,6 +360,33 @@ export async function answerQuestion(file: string, roomID: string, questionID: s
   });
 }
 
+export async function sendReply(file: string, roomID: string, targetID: string, sessionID: string, text: string): Promise<{ status: "ok"; message: Message } | { status: "missing" | "member" | "target" | "question" }> {
+  const db = await openStateDatabase(file);
+  return immediate(db, () => {
+    if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return { status: "missing" };
+    const member = db.query("SELECT g.name,r.kind FROM registry g JOIN rooms r ON r.id=g.room_id JOIN participants p ON p.room_id=g.room_id AND p.id=CASE WHEN r.kind='direct' THEN g.session_id ELSE g.name END WHERE g.room_id=? AND g.session_id=?").get(roomID, sessionID) as { name: string; kind: string } | null;
+    if (!member) return { status: "member" };
+    const target = db.query("SELECT is_question FROM messages WHERE room_id=? AND id=?").get(roomID, targetID) as { is_question: number } | null;
+    if (!target) return { status: "target" };
+    if (target.is_question) return { status: "question" };
+    const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(roomID) as { created_at: number } | null;
+    const message: Message = { id: randomUUID(), roomId: roomID, senderId: member.kind === "direct" ? sessionID : member.name, senderSessionID: sessionID, text, createdAt: Math.max(Date.now(), (tail?.created_at ?? 0) + 1), answerToMessageID: targetID };
+    db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to) VALUES(?,?,?,?,?,?,0,?)").run(message.id, roomID, message.senderId, sessionID, text, message.createdAt, targetID);
+    return { status: "ok", message };
+  });
+}
+
+function questionExcerpt(text: string): string {
+  const chars = Array.from(text);
+  return chars.length <= 200 ? text : `${chars.slice(0, 100).join("")}…${chars.slice(-100).join("")}`;
+}
+
+export async function readQuestionExcerpt(file: string, roomID: string, questionID: string): Promise<string | undefined> {
+  const db = await openStateDatabase(file);
+  const row = db.query("SELECT text FROM messages WHERE room_id=? AND id=? AND is_question=1").get(roomID, questionID) as { text: string } | null;
+  return row ? questionExcerpt(row.text) : undefined;
+}
+
 export async function readUnreadPage(file: string, roomID: string, afterTs: number, limit = 100, sessionID?: string, senderName?: string, newest = false): Promise<Page<Message>> {
   const db = await openStateDatabase(file);
   const take = Math.min(200, Math.max(1, limit));
@@ -364,8 +404,8 @@ export async function readInboxPage(file: string, sessionID: string, roomFilter:
   return db.transaction(() => {
   const take = Math.min(200, Math.max(1, limit));
   const members = db.query("SELECT room_id,last_queued_ts FROM registry WHERE session_id=? AND (? IS NULL OR room_id=?)").all(sessionID, roomFilter, roomFilter) as Array<{ room_id: string; last_queued_ts: number | null }>;
-  const rows = db.query(`SELECT m.id,m.room_id,m.sender_id,m.sender_session_id,m.text,m.created_at,m.is_question,m.answer_to,m.answered_by,r.name AS room_name,r.kind AS room_kind
-    FROM messages m JOIN registry g ON g.room_id=m.room_id JOIN rooms r ON r.id=m.room_id
+  const rows = db.query(`SELECT m.id,m.room_id,m.sender_id,m.sender_session_id,m.text,m.created_at,m.is_question,m.answer_to,m.answered_by,r.name AS room_name,r.kind AS room_kind,q.text AS answer_question_text
+    FROM messages m JOIN registry g ON g.room_id=m.room_id JOIN rooms r ON r.id=m.room_id LEFT JOIN messages q ON q.room_id=m.room_id AND q.id=m.answer_to AND q.is_question=1
     WHERE g.session_id=? AND (? IS NULL OR m.room_id=?) AND
     m.created_at > coalesce(?,CASE WHEN ? THEN max(coalesce(g.last_read_ts,0),coalesce(g.last_queued_ts,0)) ELSE coalesce(g.last_read_ts,0) END) AND
     (?=0 OR (m.sender_session_id IS NOT NULL AND m.sender_session_id!=?) OR (m.sender_session_id IS NULL AND m.sender_id!=g.name))
@@ -374,7 +414,7 @@ export async function readInboxPage(file: string, sessionID: string, roomFilter:
   const hasMore = rows.length > take;
   const items = rows.slice(0, take).map((row) => {
     const message = rowMessage(row);
-    return { ...message, roomName: String(row.room_name), roomKind: (row.room_kind === "direct" ? "direct" : "group") as "direct" | "group" };
+    return { ...message, ...(row.answer_question_text !== null ? { answerQuestionExcerpt: questionExcerpt(String(row.answer_question_text)) } : {}), roomName: String(row.room_name), roomKind: (row.room_kind === "direct" ? "direct" : "group") as "direct" | "group" };
   });
   const queuedTs = Object.fromEntries(members.map((member) => [member.room_id, member.last_queued_ts ?? 0]));
     return { member: members.length > 0, items, queuedTs, hasMore };

@@ -5,7 +5,7 @@ import { acquireDeliveryLease, deleteReceiptCandidate, markReceiptCandidateReady
 
 // shortcut: expire unobserved proofs after seven days; increase if hosts may stay disconnected longer.
 const UNOBSERVED_TTL = 7 * 24 * 60 * 60_000;
-type Item = { id?: string; text: string; senderId?: string; createdAt?: number };
+type Item = { id?: string; text: string; senderId?: string; createdAt?: number; answerQuestionExcerpt?: string };
 type CappedItem = Item & { senderId: string; createdAt: number };
 export type ReceiptCandidate = {
   admissionID: string; sessionID: string; roomID: string; membershipID: string;
@@ -38,25 +38,20 @@ export function prepareReceiptCandidate(input: {
     if (cappedItems.length !== input.items.length) return undefined;
     const closing = input.prompt.lastIndexOf("\n</notification>");
     if (closing < 0) return undefined;
-    const renderedCounts = new Map<string, number>();
+    const rendered = formatNotificationLines(cappedItems);
+    const block = `\n${rendered.lines.join("\n")}\n</notification>`;
+    if (!input.prompt.endsWith(block)) return undefined;
+    const displayedCounts = new Map<string, number>();
+    for (const line of rendered.lines.filter((value) => value.startsWith("- ["))) displayedCounts.set(line, (displayedCounts.get(line) ?? 0) + 1);
+    const candidateCounts = new Map<string, number>();
     for (const item of cappedItems) {
-      const prefix = `\n- [${timeOf(item.createdAt)}] ${item.senderId}: `;
-      const key = `${prefix}${item.text}`;
-      renderedCounts.set(key, (renderedCounts.get(key) ?? 0) + 1);
+      const line = `- [${timeOf(item.createdAt)}] ${item.senderId}: ${item.text}`;
+      candidateCounts.set(line, (candidateCounts.get(line) ?? 0) + 1);
     }
-    let tail = input.prompt.slice(0, closing);
-    evidenceItems = [];
-    for (let index = cappedItems.length - 1; index >= 0; index--) {
-      const item = cappedItems[index]!;
-      const prefix = `\n- [${timeOf(item.createdAt)}] ${item.senderId}: `;
-      const line = tail.lastIndexOf(prefix);
-      if (line < 0) break;
-      const displayedText = tail.slice(line + prefix.length);
-      if (displayedText.includes("\n")) break;
-      if (displayedText === item.text && renderedCounts.get(`${prefix}${item.text}`) === 1 && !formatNotificationLines([item]).capped) evidenceItems.push(item);
-      tail = tail.slice(0, line);
-    }
-    evidenceItems.reverse();
+    evidenceItems = rendered.visibleIndices.map((index) => cappedItems[index]!).filter((item) => {
+      const line = `- [${timeOf(item.createdAt)}] ${item.senderId}: ${item.text}`;
+      return candidateCounts.get(line) === 1 && displayedCounts.get(line) === 1 && !formatNotificationLines([item]).capped;
+    });
   }
   if (!evidenceItems.length) return undefined;
   const candidate: ReceiptCandidate = {

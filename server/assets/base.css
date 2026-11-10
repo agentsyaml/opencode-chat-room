@@ -189,6 +189,16 @@
   .danger-text { color: var(--danger) !important; }
   .announcement-content { white-space: pre-wrap; overflow-wrap: anywhere; }
 
+  .panel.reminder-panel { width: min(410px, calc(100vw - 32px)); max-height: min(72dvh, 640px); overflow: auto; }
+  .reminder-form { border-top: 1px solid var(--line); padding-top: 10px; }
+  .reminder-form .field { margin: 0 0 9px; }
+  .reminder-form textarea { resize: vertical; }
+  .reminder-list { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 8px; }
+  .reminder-list li { padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .reminder-list p { margin: 0 0 6px; overflow-wrap: anywhere; }
+  .reminder-list .hint { margin: 2px 0 7px; }
+  .reminder-list .btn { margin: 0 6px 0 0; }
+
   .token-box { margin-top: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
   .token-box summary {
     cursor: pointer;

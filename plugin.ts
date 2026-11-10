@@ -30,7 +30,9 @@ import { createV2Setup, type V2Runtime } from "./src/v2-plugin";
 import { createV1Server } from "./src/v1-plugin";
 import { runAnnouncementTool } from "./src/announcement-tool";
 import { uploadAgentResource } from "./src/resource-upload";
+import { readAgentResource, resourceReadFailure } from "./src/resource-read";
 import { adminTool, adminToolDescription, adminToolSchema } from "./src/admin-client";
+import { runReminderTool } from "./src/reminder-client";
 // ponytail: CHAT_ROOM_SERVER_URL switches to central mode (all state on a
 // central server); unset = standalone local-file mode
 const centerUrl = process.env.CHAT_ROOM_SERVER_URL ?? "";
@@ -243,15 +245,19 @@ export async function pollKnownSessions(
 
 const READ_ONLY_ACTIONS = new Set(["list", "members", "poll", "announcement_list", "announcement_read"]);
 
-const roomArgs = z.object({
-  action: z.enum(["create", "join", "leave", "list", "send", "poll", "members", "upload_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete"]),
+export const roomArgs = z.object({
+  action: z.enum(["create", "join", "leave", "list", "send", "poll", "members", "upload_resource", "read_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete"]),
   name: z.string().max(64).optional().describe("For join: your own participant display name, NOT the room name (required). For create: the new room name."),
   roomId: z.string().optional(),
+  resourceId: z.string().optional(),
   filePath: z.string().optional().describe("Local regular file to upload; central mode only; requires host read permission."),
   text: z.string().max(2000).optional(),
   isQuestion: z.boolean().optional(),
   announcementName: z.string().optional().describe("Name of a room announcement; distinct from participant or room name."),
   content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters."),
+  reminderId: z.string().optional(),
+  schedule: z.discriminatedUnion("type", [z.object({ type: z.literal("once"), at: z.string(), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() }), z.object({ type: z.literal("cron"), expression: z.string().regex(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() })]).optional(),
+  paused: z.boolean().optional(),
 }).superRefine((args, ctx) => {
   if (args.action === "join" && !args.name?.trim()) {
     ctx.addIssue({ code: "custom", path: ["name"], message: "name is required to join a room" });
@@ -261,11 +267,20 @@ type RoomArguments = z.infer<typeof roomArgs>;
 
 const roomExecute = async (
   args: RoomArguments,
-  context: V1ToolContext,
+  context: V1ToolContext & { signal?: AbortSignal },
 ) => {
     if (args.action === "join" && !args.name?.trim()) return "error: name is required to join a room";
     const runtime = currentRuntime();
+    if (args.action === "reminder_list" || args.action === "reminder_create" || args.action === "reminder_update" || args.action === "reminder_delete") {
+      return await runReminderTool(runtime.center, args, context.sessionID);
+    }
     if (args.action === "upload_resource") return uploadAgentResource(runtime.center, args.roomId ?? "", args.filePath ?? "", context.sessionID, context);
+    if (args.action === "read_resource") {
+      try {
+        if (!context.ask) return "error: host webfetch permission is unavailable";
+        return await readAgentResource(runtime.center, args.roomId ?? "", args.resourceId ?? "", context, context.abort ?? context.signal);
+      } catch (error) { return `error: ${resourceReadFailure(error)}`; }
+    }
     try {
       const explicitV2Join = runtime.protocol === "v2" && (args.action === "create" || args.action === "join");
       const receiverOwnerID = explicitV2Join && runtime.transport.verifySession
@@ -454,7 +469,7 @@ const roomExecute = async (
     }
 };
 const room = tool({
-  description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; upload files and media",
+  description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; manage reminders. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup.",
   args: roomArgs.shape,
   execute: roomExecute,
 });

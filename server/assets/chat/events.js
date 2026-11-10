@@ -193,17 +193,18 @@ export function initEvents(app) {
     if (failedAction === "retry") void app.retryFailedMessage(failedRoom, failedId);
     else app.discardFailedMessage(failedRoom, failedId);
   });
-  input.addEventListener("input", () => {
+  input.addEventListener("input", (event) => {
     app.autoGrow(input);
     app.updateSendState();
     app.updateDraftCount();
     if (app.state.room) {
       const id = app.state.room.id;
       app.state.draftRevision.set(id, (app.state.draftRevision.get(id) || 0) + 1);
-      app.saveDraft(id, input.value);
+      app.saveDraft(id, input.draftValue);
     }
-    app.recomputeMention();
+    if (!event.isComposing) app.recomputeMention();
   });
+  input.addEventListener("compositionend", () => app.recomputeMention(input));
   input.addEventListener("keydown", (event) => handleMessageKey(event, app));
   input.addEventListener("keyup", (event) => {
     if (app.mentionActive && /^(ArrowLeft|ArrowRight|Home|End)$/.test(event.key)) app.recomputeMention();
@@ -330,7 +331,8 @@ function saveAccessToken(button, app) {
 }
 
 function handleMessageKey(event, app) {
-  if (app.mentionActive && !event.isComposing) {
+  if (app.handleMentionKey(event, event.currentTarget)) return;
+  if (app.mentionActive && !event.isComposing && event.keyCode !== 229) {
     if (event.key === "ArrowDown") { event.preventDefault(); app.moveMention(1); return; }
     if (event.key === "ArrowUp") { event.preventDefault(); app.moveMention(-1); return; }
     if (event.key === "Escape") { event.preventDefault(); app.closeMention(); return; }
@@ -344,7 +346,7 @@ function handleMessageKey(event, app) {
       if (event.key === "Tab") return;
     }
   }
-  if (event.key === "Enter" && !event.isComposing && (event.ctrlKey || !event.shiftKey)) {
+  if (event.key === "Enter" && !event.isComposing && event.keyCode !== 229 && (event.ctrlKey || !event.shiftKey)) {
     event.preventDefault();
     void app.send();
   }

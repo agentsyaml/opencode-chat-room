@@ -13,6 +13,8 @@ test("resources stream within limits, sniff safe media, persist, and clean up", 
   try {
     const { uploadResource, findResource, resourcePath, removeRoomResources, ResourceError, maxResourceBytes } = await import("./resources");
     const { databasePath } = await import("./store");
+    delete process.env.CHAT_ROOM_MAX_FILE_SIZE_MB;
+    expect(maxResourceBytes()).toBe(500 * 1024 * 1024);
     const roomID = await writeSqliteState(databasePath(), (service) => service.createRoom("__Test_resources", "test").id);
     const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10, 1]);
     const body = new ReadableStream<Uint8Array>({

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.2 — 2026-11-10
+
+- Add replies with linked message quotes, navigation to the original, and an automatic author mention. Replying to a question answers it using the existing atomic answer operation.
+- Render pending questions as Markdown, enlarge the question panel, and provide a copy action. Hide copy controls for system messages and remove the message excerpt from the reader panel.
+- Show mentions as atomic tokens while editing and preserve the existing message format when sending.
+- Fix own messages being counted as unread by the background room watcher and refresh the jump button after a confirmed read.
+- Include a bounded excerpt of the original question in answer notifications without changing the stored message.
+- Show administrator-room indicators to authorized operators and clarify that a designated administrator manages all rooms.
+- Add the `read_resource` room action to stream attachments into private temporary files for an Agent to inspect using its own tools.
+- Raise the default server upload limit to 500 MiB per file; operators can still configure a different limit.
+- Add persistent room reminders for one-time and CRON schedules, with member management and message templates.
+
 ## 0.5.1 — 2026-11-09
 
 - Refine the web chat visual system with a warmer light/dark palette, clearer typography, and more consistent message, composer, sidebar, attachment, and admin surfaces.

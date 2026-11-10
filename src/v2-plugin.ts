@@ -20,7 +20,7 @@ export type V2Runtime = {
 export function createV2Setup(deps: {
   runtime(directory: string, transport: QueueTransport): V2Runtime;
   run<T>(runtime: V2Runtime, callback: () => T): T;
-  execute(args: z.infer<ReturnType<typeof roomSchema>>, sessionID: string, permissionContext: { directory: string; worktree?: string; ask(input: { permission: string; patterns: string[]; always: string[]; metadata: Record<string, unknown> }): Promise<void> }): Promise<string>;
+  execute(args: z.infer<ReturnType<typeof roomSchema>>, sessionID: string, permissionContext: { directory: string; worktree?: string; signal?: AbortSignal; ask(input: { permission: string; patterns: string[]; always: string[]; metadata: Record<string, unknown> }): Promise<void> }): Promise<string>;
   admin?: (args: z.infer<typeof adminToolSchema>, sessionID: string, transport: QueueTransport, center: CenterOptions) => Promise<string>;
   observe(runtime: V2Runtime, sessionID: string): Promise<void>;
   poll(sessions: ReadonlySet<string>, transport: QueueTransport, center: CenterOptions): Promise<void>;
@@ -80,7 +80,7 @@ export function createV2Setup(deps: {
       });
       toolRegistration = await context.tool.transform((editor) => editor.add({
         name: "room",
-        description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; upload files and media",
+        description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; manage reminders. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup.",
         options: { codemode: false },
         input: roomSchema(),
         execute: async (args, toolContext) => {
@@ -90,6 +90,7 @@ export function createV2Setup(deps: {
             const permissionContext = {
               directory: context.location.directory,
               worktree: context.location.directory,
+              signal: toolContext.signal,
               ask: (input: { permission: string; patterns: string[]; always: string[]; metadata: Record<string, unknown> }) => context.permission.assert({
                 sessionID: toolContext.sessionID,
                 agent: toolContext.agent,
@@ -100,7 +101,8 @@ export function createV2Setup(deps: {
                 source: { type: "tool", messageID: toolContext.messageID, id: toolContext.id },
               }),
             };
-            return { content: [{ type: "text", text: await deps.execute(args, toolContext.sessionID, permissionContext) }] };
+            const result = await deps.execute(args, toolContext.sessionID, permissionContext);
+            return { content: [{ type: "text", text: result }] };
           });
         },
       }));
@@ -148,16 +150,20 @@ export function createV2Setup(deps: {
   };
 }
 
-function roomSchema() {
+export function roomSchema() {
   return z.object({
-    action: z.enum(["create", "join", "leave", "list", "send", "poll", "members", "upload_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete"]),
+    action: z.enum(["create", "join", "leave", "list", "send", "poll", "members", "upload_resource", "read_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete"]),
     name: z.string().max(64).optional().describe("For join: your own participant display name, NOT the room name (required). For create: the new room name."),
     roomId: z.string().optional(),
+    resourceId: z.string().optional(),
     filePath: z.string().optional().describe("Local regular file to upload; central mode only; requires host read permission."),
     text: z.string().max(2000).optional(),
     isQuestion: z.boolean().optional(),
     announcementName: z.string().optional().describe("Name of a room announcement; distinct from participant or room name."),
     content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters."),
+    reminderId: z.string().optional(),
+    schedule: z.discriminatedUnion("type", [z.object({ type: z.literal("once"), at: z.string(), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() }), z.object({ type: z.literal("cron"), expression: z.string().regex(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() })]).optional(),
+    paused: z.boolean().optional(),
   }).superRefine((args, ctx) => {
     if (args.action === "join" && !args.name?.trim()) {
       ctx.addIssue({ code: "custom", path: ["name"], message: "name is required to join a room" });

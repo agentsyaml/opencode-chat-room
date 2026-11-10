@@ -22,6 +22,37 @@ function directory(name: string) {
 }
 
 describe("SQLite local state", () => {
+  test("inbox answer excerpts are Unicode-safe and scoped to the answered question room", async () => {
+    const dir = await directory("answer-excerpt-inbox");
+    process.env.CHAT_ROOM_STATE_DIR = dir;
+    const sessionID = "answer-reader";
+    const roomID = await store.writeState((service, registry) => {
+      const room = service.createRoom("answer excerpt", "owner");
+      service.joinRoom(room.id, { id: "reader", name: "reader" });
+      service.joinRoom(room.id, { id: "answerer", name: "answerer" });
+      const question = service.sendMessage(room.id, "owner", `${"😀".repeat(100)}${"x".repeat(20)}${"界".repeat(100)}`, "owner");
+      question.isQuestion = true;
+      registry[room.id] = {
+        [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v2", receiverOwnerID: "answer-owner", name: "reader" },
+        "answerer-session": { serverUrl: "", apiPrefix: "/api", name: "answerer" },
+      };
+      return room.id;
+    });
+    const questionID = (await store.readQuestions(roomID))[0]!.id;
+    await store.answerQuestion(roomID, questionID, "answerer-session", "answered");
+    const inbox = await store.readInboxMessages(sessionID, roomID, true, 20, 0);
+    const answer = inbox.items.find((item) => item.text === "answered");
+    expect(answer?.answerQuestionExcerpt).toBe(`${"😀".repeat(100)}…${"界".repeat(100)}`);
+    expect(await store.readQuestionExcerpt("not-this-room", questionID)).toBeUndefined();
+    let prompt = "";
+    await pollKnownSessions(new Set([sessionID]), {
+      protocol: "v2", receiverOwnerID: "answer-owner",
+      promptQueue: async (_target, id, text, delivery) => { prompt = text; return { id, sessionID, delivery }; },
+    }, { center: "", token: "" });
+    expect(prompt).toContain(`${"😀".repeat(100)}…${"界".repeat(100)}`);
+    expect(prompt).toContain("answered");
+  });
+
   test("migrates complete JSON history once and keeps working window bounded", async () => {
     const dir = await directory("migration");
     process.env.CHAT_ROOM_STATE_DIR = dir;

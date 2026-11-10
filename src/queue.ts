@@ -9,6 +9,7 @@ export type QueueItem = {
   text: string;
   createdAt: number;
   roomKind?: "group" | "direct";
+  answerQuestionExcerpt?: string;
 };
 
 export type QueueBody = {
@@ -52,6 +53,7 @@ export function queueAdmissionId(
       item.text,
       item.createdAt,
       item.roomKind ?? "",
+      item.answerQuestionExcerpt ?? "",
     ]),
   });
   return `msg_${createHash("sha256").update(fingerprint).digest("hex")}`;
@@ -80,14 +82,17 @@ export function getOrCreatePendingAdmission(
 ): PendingAdmission {
   const now = Date.now();
   const existing = readPendingAdmission<PendingAdmission>(sessionID, roomId, now);
+  const id = queueAdmissionId(sessionID, roomId, items, prompt);
+  const retriesOriginal = existing?.state === "pending" && existing.items.length < items.length &&
+    queueAdmissionId(sessionID, roomId, existing.items) === queueAdmissionId(sessionID, roomId, items.slice(0, existing.items.length));
   if (
     existing &&
-    (existing.state !== "admitted" || maxTs <= existing.maxTs)
+    (existing.state === "admitted" ? maxTs <= existing.maxTs : existing.id === id || retriesOriginal)
   ) {
     return existing;
   }
   const admission: PendingAdmission = {
-    id: queueAdmissionId(sessionID, roomId, items, prompt),
+    id,
     createdAt: now,
     prompt,
     itemCount: items.length,

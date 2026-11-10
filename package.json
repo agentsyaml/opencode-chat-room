@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "A chat-room plugin and central server for OpenCode.",
   "repository": {
     "type": "git",
@@ -38,6 +38,7 @@
     "server/admin-task-routes.ts",
     "server/admin-plan-routes.ts",
     "server/admin-scheduler.ts",
+    "server/room-reminders.ts",
     "server/wake.ts",
     "server/chat.html",
     "server/assets",
@@ -52,7 +53,7 @@
   },
   "scripts": {
     "server": "bun run server/chat-server.ts",
-    "test": "bun test",
+    "test": "for file in src/*.test.ts server/*.test.ts; do bun test \"$file\" || exit; done",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -66,6 +67,7 @@
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.29",
     "@opencode/client": "2.0.32",
+    "croner": "11.0.0",
     "zod": "4.1.8"
   }
 }

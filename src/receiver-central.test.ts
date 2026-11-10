@@ -158,6 +158,41 @@ describe.serial("central receiver membership scope", () => {
     expect(text).not.toContain("acknowledge it once per distinct request");
   });
 
+  test("immediate wake for an answer quotes the related question", async () => {
+    const sessionID = "answer-wake-target";
+    const { roomID, questionID } = await store.writeState((service, registry) => {
+      const room = service.createRoom("answer wake", "owner");
+      service.joinRoom(room.id, { id: "bob", name: "bob" });
+      service.joinRoom(room.id, { id: "answerer", name: "answerer" });
+      const question = service.sendMessage(room.id, "owner", `${"a".repeat(110)}${"b".repeat(110)}`, "owner");
+      question.isQuestion = true;
+      registry[room.id] = {
+        [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "bob", host: hostname(), lastReadTs: 0, lastQueuedTs: 0 },
+        "answerer-session": { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "answerer", host: hostname() },
+      };
+      return { roomID: room.id, questionID: question.id };
+    });
+    const response = await store.answerQuestion(roomID, questionID, "answerer-session", "@bob choose B");
+    expect(response.status).toBe("ok");
+    if (response.status !== "ok") return;
+    const previousFetch = globalThis.fetch;
+    let body: Record<string, unknown> = {};
+    let finish!: () => void;
+    const posted = new Promise<void>((resolve) => { finish = resolve; });
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      finish();
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    try {
+      await wakeMentionedSessions("http://serve.invalid", roomID, "answer wake", response.answer.text, "answerer-session", response.answer);
+      await posted;
+    } finally { globalThis.fetch = previousFetch; }
+    const text = (body.parts as Array<{ text: string }>)[0]!.text;
+    expect(text).toContain(`${"a".repeat(100)}…${"b".repeat(100)}`);
+    expect(text).toContain("@bob choose B");
+  });
+
   test("immediately wakes direct peers and group @all recipients", async () => {
     const created = await store.writeState((service, registry) => {
       const room = service.createRoom("direct wake", "sender-dm");

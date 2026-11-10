@@ -4,7 +4,7 @@
 import path from "node:path";
 import os from "node:os";
 import RoomService, { type Message, type Room } from "./room-service";
-import { answerQuestion as sqliteAnswerQuestion, readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestions as sqliteReadQuestions, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state";
+import { answerQuestion as sqliteAnswerQuestion, sendReply as sqliteSendReply, readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestionExcerpt as sqliteQuestionExcerpt, readQuestions as sqliteReadQuestions, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state";
 
 export function statePath(): string {
   // JSON path remains the migration source; SQLite lives beside it.
@@ -36,6 +36,8 @@ export async function readHistory(roomID: string, beforeSeq?: number, limit = 10
 }
 export async function readQuestions(roomID: string): Promise<Message[]> { return sqliteReadQuestions(databasePath(), roomID); }
 export async function answerQuestion(roomID: string, questionID: string, sessionID: string, text: string) { return sqliteAnswerQuestion(databasePath(), roomID, questionID, sessionID, text); }
+export async function sendReply(roomID: string, targetID: string, sessionID: string, text: string) { return sqliteSendReply(databasePath(), roomID, targetID, sessionID, text); }
+export async function readQuestionExcerpt(roomID: string, questionID: string) { return sqliteQuestionExcerpt(databasePath(), roomID, questionID); }
 
 export async function loadRooms(): Promise<Room[]> {
   return (await readSqliteState(databasePath())).rooms;
@@ -109,20 +111,32 @@ const MAX_LINES = 20;
 // lines were folded or message text was truncated; callers must not advance
 // the watermark until a full poll confirms it.
 export function formatNotificationLines(
-  items: ReadonlyArray<{ createdAt: number; senderId: string; text: string }>,
-): { lines: string[]; capped: boolean } {
-  const countCapped = items.length > MAX_LINES;
+  items: ReadonlyArray<{ createdAt: number; senderId: string; text: string; answerQuestionExcerpt?: string }>,
+): { lines: string[]; capped: boolean; visibleIndices: number[] } {
+  const visible: Array<{ item: typeof items[number]; index: number }> = [];
+  let lineCount = 0;
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index]!;
+    const required = item.answerQuestionExcerpt ? 2 : 1;
+    if (lineCount + required > MAX_LINES) break;
+    visible.unshift({ item, index });
+    lineCount += required;
+  }
+  const countCapped = visible.length < items.length;
   const textCapped = items.some((it) => it.text.length > MAX_LINE);
   const capped = countCapped || textCapped;
-  const lines = items.slice(-MAX_LINES).map((it) => {
+  const lines = visible.flatMap(({ item: it }) => {
     const text =
       it.text.length > MAX_LINE ? `${it.text.slice(0, MAX_LINE)}\u2026` : it.text;
-    return `- [${timeOf(it.createdAt)}] ${it.senderId}: ${text}`;
+    return [
+      ...(it.answerQuestionExcerpt ? [`  ↳ Answer to: “${it.answerQuestionExcerpt.replace(/[\r\n]+/g, " ")}”`] : []),
+      `- [${timeOf(it.createdAt)}] ${it.senderId}: ${text}`,
+    ];
   });
   if (countCapped) {
-    lines.unshift(`\u2026 and ${items.length - MAX_LINES} earlier messages`);
+    lines.unshift(`\u2026 and ${items.length - visible.length} earlier messages`);
   }
-  return { lines, capped };
+  return { lines, capped, visibleIndices: visible.map(({ index }) => index) };
 }
 
 export function authHeader(): string {

@@ -81,7 +81,6 @@ export function initReceipts(app) {
     const readers = readersFor(message);
     $("#readerHeading").textContent = app.t("readerPanelTitle");
     $("#readerCount").textContent = readerStatus(message, readers);
-    $("#readerExcerpt").textContent = message.text;
     const list = $("#readerList"); list.textContent = "";
     const members = app.state.memberSessions.get(app.state.room.id) || [];
     for (const reader of readers) {

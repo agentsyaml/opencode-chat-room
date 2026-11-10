@@ -155,14 +155,14 @@ async function persistentBrowserFlow(context: any, origin: string, token: string
   pageB.on("request", (request: any) => { if (request.method() === "POST" && /\/join(?:\?|$)/.test(request.url())) joins.push(request.url()); });
   await pageB.goto(`${origin}/chat`);
   await pageB.waitForFunction(() => document.querySelector("#roomName")?.textContent === "Persistent identity room");
-  expect(await pageB.locator("#msgInput").inputValue()).toBe("");
+  expect(await pageB.locator("#msgInput").evaluate((node: any) => node.value)).toBe("");
   expect(await pageB.evaluate(() => JSON.parse(localStorage.getItem("chat.browserIdentity") || "{}").sessionID)).toBe(identity.sessionID);
   await pageA.evaluate(async (args: { id: string; url: string }) => (await import(args.url)).app.savePosition(args.id, 123), { id: room.id, url: "/assets/chat/state.js" });
   expect(await pageB.evaluate((id: string) => JSON.parse(sessionStorage.getItem("chat.positions") || "{}")[id], room.id)).toBeUndefined();
   expect(joins).toEqual([]);
   await pageA.reload();
   await pageA.waitForFunction(() => document.querySelector("#roomName")?.textContent === "Persistent identity room");
-  expect(await pageA.locator("#msgInput").inputValue()).toBe("Draft belongs to tab A");
+  expect(await pageA.locator("#msgInput").evaluate((node: any) => node.value)).toBe("Draft belongs to tab A");
   await pageB.evaluate(async (url: string) => (await import(url)).app.stopPolling(), "/assets/chat/state.js");
   const cursor = await pageB.evaluate(async (args: { id: string; url: string }) => (await import(args.url)).app.state.rooms.get(args.id).receivedTs, { id: room.id, url: "/assets/chat/state.js" });
   await pageA.locator("#msgInput").fill("OWN-TAB-A");

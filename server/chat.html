@@ -111,11 +111,11 @@
       </div>
     </aside>
     <dialog id="adminDialog" class="admin-dialog" aria-labelledby="adminHeading">
-      <header class="admin-dialog-head"><h2 id="adminHeading" data-i18n="administration">Administration</h2><button id="btnRefreshAdmin" class="btn ghost small" type="button" data-i18n="refreshAdmin">Refresh</button><button id="btnCloseAdmin" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close">×</button></header>
+      <header class="admin-dialog-head"><h2 id="adminHeading" data-i18n="administration">Administration</h2><div class="admin-dialog-actions"><button id="btnRefreshAdmin" class="btn ghost small" type="button" data-i18n="refreshAdmin">Refresh</button><button id="btnCloseAdmin" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close">×</button></div></header>
       <p id="adminStatus" class="hint" role="status" aria-live="polite"></p>
       <div class="admin-columns">
-        <section><h3 data-i18n="designations">Designations</h3><label class="field"><span class="field-label" data-i18n="adminRoom">Admin room</span><select id="adminRoomSelect" class="admin-select"></select></label>
-          <label class="field"><span class="field-label" data-i18n="targetRoom">Agent room</span><select id="adminTargetRoom" class="admin-select"></select></label>
+        <section><h3 data-i18n="designations">Designations</h3><p class="hint admin-scope-note" data-i18n="adminScopeNote">An administrator manages every room, including this one and rooms created later. The Agent room below is where the selected Agent is a member; it does not limit access.</p><label class="field"><span class="field-label" data-i18n="adminRoom">Administrator room</span><select id="adminRoomSelect" class="admin-select"></select></label>
+          <label class="field"><span class="field-label" data-i18n="targetRoom">Agent membership room</span><select id="adminTargetRoom" class="admin-select"></select></label>
           <label class="field"><span class="field-label" data-i18n="targetAgent">Registered agent</span><select id="adminTargetAgent" class="admin-select"></select></label>
           <button id="btnDesignateAgent" class="btn primary small" type="button" data-i18n="designate">Designate and issue enrollment</button><div id="adminEnrollment" class="admin-enrollment" hidden></div>
           <button id="btnRevokeAdmin" class="btn ghost small danger-text" type="button" data-i18n="revokeDesignation">Revoke designation</button>
@@ -129,7 +129,7 @@
     <button id="roomDrawerBackdrop" class="room-drawer-backdrop" type="button" aria-label="Close room list" data-i18n-aria-label="closeRoomList" hidden></button>
     <header class="chat-head">
       <div class="chat-head-main">
-        <div class="room-title-row"><h1 id="roomName"></h1><button id="btnRoomsDrawer" class="chip rooms-drawer-trigger" type="button" aria-label="Open room list" data-i18n-aria-label="roomsMenu" aria-controls="roomRail" aria-expanded="false"><svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="action-label">Rooms</span></button></div>
+        <div class="room-title-row"><h1 id="roomName"></h1><span id="activeAdminBadge" class="admin-badge" data-i18n="adminRoomBadge" hidden>Admin</span><button id="btnRoomsDrawer" class="chip rooms-drawer-trigger" type="button" aria-label="Open room list" data-i18n-aria-label="roomsMenu" aria-controls="roomRail" aria-expanded="false"><svg class="action-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="action-label">Rooms</span></button></div>
         <p class="room-meta">
           <button type="button" id="btnCopyId" class="copy-id" aria-label="Copy room ID" data-i18n-aria-label="copyRoomId" title="Click to copy the full room ID" data-i18n-title="copyRoomIdTitle">
             <span class="mono" id="roomIdShort"></span><span class="copy-ok" data-i18n="copied">Copied</span>
@@ -147,6 +147,23 @@
             <p id="questionStatus" class="hint" role="status" aria-live="polite" data-i18n="questionsLoading">Loading questions…</p>
             <ul id="questionList" class="question-list" aria-label="Pending questions" data-i18n-aria-label="pendingQuestions"></ul>
             <div id="questionReply" class="question-reply" hidden></div>
+          </section>
+        </div>
+        <div class="anchor">
+          <button class="chip" type="button" id="btnReminders" aria-haspopup="true" aria-expanded="false" aria-controls="reminderPanel"><span class="action-label" data-i18n="reminders">Reminders</span></button>
+          <section class="panel reminder-panel" id="reminderPanel" aria-labelledby="reminderHeading" hidden>
+            <div class="announcement-head"><h3 id="reminderHeading" tabindex="-1" data-i18n="reminders">Reminders</h3><button type="button" id="btnRefreshReminders" class="question-refresh" data-i18n="refreshQuestions">Refresh</button></div>
+            <p id="reminderStatus" class="hint" role="status" aria-live="polite"></p><ul id="reminderList" class="reminder-list"></ul>
+            <form id="reminderForm" class="reminder-form">
+              <label class="field"><span class="field-label" data-i18n="reminderSchedule">Schedule</span><select id="reminderType" class="input"><option value="once" data-i18n="reminderOnce">One time</option><option value="cron">CRON</option></select></label>
+              <label class="field" id="reminderOnceField"><span class="field-label" data-i18n="reminderDate">Date and time</span><input id="reminderAt" class="input" type="datetime-local" required></label>
+              <div id="reminderCronFields" hidden><label class="field"><span class="field-label" data-i18n="reminderCron">5-field CRON expression</span><input id="reminderCron" class="input" placeholder="0 9 * * 1-5" autocomplete="off"></label></div>
+              <label class="field"><span class="field-label" data-i18n="reminderTimezone">Timezone override (optional)</span><input id="reminderTimezone" class="input" autocomplete="off"></label>
+              <p class="hint" data-i18n="reminderTimezoneHint">Leave blank to use the server timezone. Enter an IANA timezone to override it.</p>
+              <label class="field"><span class="field-label" data-i18n="reminderText">Reminder text</span><textarea id="reminderText" class="input" rows="3" maxlength="1000" required></textarea></label>
+              <p class="hint" data-i18n="reminderTemplateHint">Use {time}, {initiator}, and {room} in your message.</p>
+              <button class="btn primary small" type="submit" data-i18n="reminderCreate">Create reminder</button>
+            </form>
           </section>
         </div>
         <div class="anchor">
@@ -201,12 +218,12 @@
         <div><p id="readerCount" class="hint"></p><h2 id="readerHeading" tabindex="-1" data-i18n="readerPanelTitle">Message readers</h2></div>
         <button type="button" id="btnCloseReaders" class="reader-close" data-i18n-aria-label="close" aria-label="Close">×</button>
       </div>
-      <blockquote id="readerExcerpt" class="reader-excerpt"></blockquote>
       <ul id="readerList" class="receipt-reader-list" aria-label="Message readers" data-i18n-aria-label="readerPanelTitle"></ul>
     </aside>
 
     <footer class="composer">
       <p id="sendError" class="send-error" role="alert" hidden></p>
+      <section id="replyPreview" class="reply-preview" aria-label="Replying to" data-i18n-aria-label="replyingTo" hidden><div><span data-i18n="replyingTo">Replying to</span> <strong id="replyPreviewName"></strong><p id="replyPreviewText"></p></div><button id="replyCancel" type="button" class="reply-cancel" aria-label="Cancel reply" data-i18n-aria-label="cancelReply">×</button></section>
       <div id="mentionPicker" class="mention-picker" role="listbox" aria-label="Choose a member to mention" data-i18n-aria-label="mentionMembers" hidden></div>
       <section id="attachmentTray" class="attachment-tray" aria-label="Attachments" data-i18n-aria-label="attachments" hidden>
         <p id="attachmentVolatile" class="attachment-volatile" data-i18n="attachmentVolatile" hidden></p>
@@ -216,7 +233,7 @@
       <div class="composer-row">
         <button class="attachment-button" type="button" id="btnAddAttachments" aria-label="Add files" data-i18n-aria-label="addFiles" aria-controls="attachmentPicker" disabled><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg></button>
         <input id="attachmentPicker" type="file" multiple hidden>
-        <textarea id="msgInput" class="input" rows="1" maxlength="2000" placeholder="Type a message, Enter to send, Shift+Enter for a new line" data-i18n-placeholder="messagePlaceholder" autocomplete="off" aria-autocomplete="list" aria-controls="mentionPicker" aria-expanded="false" disabled></textarea>
+        <div id="msgInput" class="input message-editor" role="textbox" aria-multiline="true" aria-label="Message" data-i18n-aria-label="messagePlaceholder" aria-placeholder="Type a message, Enter to send, Shift+Enter for a new line" data-i18n-aria-placeholder="messagePlaceholder" aria-autocomplete="list" aria-controls="mentionPicker" aria-expanded="false" contenteditable="false" aria-disabled="true" tabindex="-1"></div>
         <button class="btn primary" type="button" id="btnSend" data-i18n="send" disabled>Send</button>
       </div>
       <div class="composer-meta">

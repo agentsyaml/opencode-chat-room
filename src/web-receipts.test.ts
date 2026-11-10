@@ -162,7 +162,7 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     expect(Math.abs((await page.locator(`[data-msg-id="${targetMessageID}"]`).boundingBox())!.y - targetTop)).toBeLessThan(3);
     expect(await page.locator("#readerList li").count()).toBeGreaterThan(0);
-    expect(await page.locator("#readerExcerpt").textContent()).toBe("Visible receipt target");
+    expect(await page.locator("#readerExcerpt").count()).toBe(0);
     const readerGeometry = () => page.locator("#readerPanel").evaluate((node: HTMLElement) => ({
       height: node.getBoundingClientRect().height,
       children: Array.from(node.children).map((child) => ({ text: child.textContent, height: (child as HTMLElement).getBoundingClientRect().height })),

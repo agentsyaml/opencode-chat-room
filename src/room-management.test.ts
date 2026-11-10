@@ -69,11 +69,30 @@ describe.serial("shared-token room management", () => {
     expect((await call(`/rooms/${id}/questions/missing/answers`, "POST", { sessionID: "outsider", text: "reply" })).status).toBe(409);
     expect((await call(`/rooms/${id}/questions/missing/answers`, "POST", { sessionID: "human", text: " " })).status).toBe(400);
   });
+  test("ordinary replies persist in history and inbox without changing read watermarks", async () => {
+    const { id } = await (await call("/rooms", "POST", { name: "replies", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
+    await call(`/rooms/${id}/join`, "POST", { sessionID: "human", participantId: "human", participantName: "human" });
+    const targetResponse = await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "target" });
+    const target = (await targetResponse.json() as { messages: Array<{ id: string }> }).messages.at(-1)!.id;
+    const before = await store.readState((_svc, registry) => ({ ...registry[id]!["human"] }));
+    const replyResponse = await call(`/rooms/${id}/messages`, "POST", { sessionID: "human", text: "reply", replyToMessageID: target });
+    expect(replyResponse.status).toBe(201);
+    const history = await store.readHistory(id);
+    expect(history.messages.find((message) => message.text === "reply")).toMatchObject({ answerToMessageID: target });
+    expect((await (await call(`/inbox?sessionID=owner&roomId=${id}`)).json() as { items: Array<{ text: string; answerToMessageID?: string }> }).items).toContainEqual(expect.objectContaining({ text: "reply", answerToMessageID: target }));
+    expect(await store.readState((_svc, registry) => ({ lastReadTs: registry[id]!["human"]!.lastReadTs, lastQueuedTs: registry[id]!["human"]!.lastQueuedTs }))).toEqual({ lastReadTs: before.lastReadTs, lastQueuedTs: before.lastQueuedTs });
+    const other = await (await call("/rooms", "POST", { name: "other", ownerId: "other", sessionID: "other" })).json() as { id: string };
+    const foreign = await call(`/rooms/${other.id}/messages`, "POST", { sessionID: "other", text: "foreign" });
+    const foreignID = (await foreign.json() as { messages: Array<{ id: string }> }).messages.at(-1)!.id;
+    expect((await call(`/rooms/${id}/messages`, "POST", { sessionID: "human", text: "bad", replyToMessageID: foreignID })).status).toBe(404);
+    expect((await call(`/rooms/${id}/messages`, "POST", { sessionID: "human", text: "bad", replyToMessageID: "missing" })).status).toBe(404);
+  });
   test("concurrent answers commit one reply and malformed JSON values leave questions pending", async () => {
     const { id } = await (await call("/rooms", "POST", { name: "atomic", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
     await call(`/rooms/${id}/join`, "POST", { sessionID: "human", participantId: "human", participantName: "human" });
     const sent = await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "choose one", isQuestion: true });
     const questionID = (await sent.json() as { messages: Array<{ id: string }> }).messages.at(-1)!.id;
+    expect((await call(`/rooms/${id}/messages`, "POST", { sessionID: "human", text: "not atomic", replyToMessageID: questionID })).status).toBe(409);
     expect((await call(`/rooms/${id}/questions/${questionID}/answers`, "POST", null)).status).toBe(400);
     expect((await (await call(`/rooms/${id}/questions`)).json() as { questions: unknown[] }).questions).toHaveLength(1);
     const replies = await Promise.all(["first", "second"].map((text) => call(`/rooms/${id}/questions/${questionID}/answers`, "POST", { sessionID: "human", text })));

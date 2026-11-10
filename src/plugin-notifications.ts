@@ -5,6 +5,7 @@ import {
   formatNotificationLines,
   loadRegistry,
   loadRooms,
+  readQuestionExcerpt,
   statePath,
   timeOf,
 } from "./store";
@@ -74,6 +75,9 @@ export function createNotifier(deps: {
     batch: NotifyBatch,
     transport: QueueTransport,
   ): Promise<NotifyAttempt | undefined> {
+    batch = { ...batch, messages: await Promise.all(batch.messages.map(async (message) => message.answerToMessageID
+      ? { ...message, answerQuestionExcerpt: await readQuestionExcerpt(batch.roomId, message.answerToMessageID) }
+      : message)) };
     const [registry, rooms] = await Promise.all([loadRegistry(), loadRooms()]);
     const entry = registry[batch.roomId]?.[sessionID];
     const roomKind = batch.roomKind ?? rooms.find((room) => room.id === batch.roomId)?.kind ?? "group";

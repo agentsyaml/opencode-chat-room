@@ -54,7 +54,7 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     configUnavailable = false;
     expect(await page.locator("#attachmentList img").count()).toBe(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const stagedLayout = await page.evaluate(() => { const thread = document.querySelector<HTMLElement>("#thread")!, input = document.querySelector<HTMLTextAreaElement>("#msgInput")!; return { gap: thread.scrollHeight - thread.clientHeight - thread.scrollTop, inputFits: input.scrollHeight <= input.clientHeight }; });
+    const stagedLayout = await page.evaluate(() => { const thread = document.querySelector<HTMLElement>("#thread")!, input = document.querySelector<HTMLElement>("#msgInput")!; return { gap: thread.scrollHeight - thread.clientHeight - thread.scrollTop, inputFits: input.scrollHeight <= input.clientHeight }; });
     expect(Math.abs(stagedLayout.gap)).toBeLessThan(1); expect(stagedLayout.inputFits).toBe(true);
     if (process.env.CHAT_UI_SCREENSHOT_DIR) await writeFile(path.join(process.env.CHAT_UI_SCREENSHOT_DIR, "chat-attachments-metrics.json"), JSON.stringify({ viewport: [390, 844], initialBottomGap: initialGap, fiveLineInputBottomGap: inputGap, stagedTrayBottomGap: stagedLayout.gap, fiveLineInputFits: stagedLayout.inputFits }, null, 2));
     await page.waitForFunction(() => getComputedStyle(document.querySelector("#chatView")!).opacity === "1");
@@ -78,7 +78,7 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     await page.waitForFunction(() => document.querySelectorAll("#attachmentList .attachment-item").length === 5 && Array.from(document.querySelectorAll("#attachmentList .attachment-detail")).every((node) => node.textContent?.includes("Ready to send")));
     await page.locator("#msgInput").fill("__Test_next_draft"); releaseSend();
     await page.locator("#msgList").getByText("__Test_caption").waitFor(); await page.unroute(messagePattern);
-    expect(await page.locator("#msgInput").inputValue()).toBe("__Test_next_draft");
+    expect(await page.locator("#msgInput").evaluate((node: any) => node.value)).toBe("__Test_next_draft");
     await page.waitForFunction(() => document.querySelectorAll("#attachmentList .attachment-item").length === 1 && document.querySelector("#attachmentList .attachment-name")?.textContent === "__Test_during_send.txt");
     const firstMessage = (await api(origin, `/rooms/${info.roomId}`)).messages.find((message: any) => message.text.startsWith("__Test_caption"));
     expect(firstMessage.isQuestion).toBe(true);
@@ -104,7 +104,7 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
       const file = new File([bytes], "__Test_clipboard.png", { type: "image/png", lastModified: 123 });
       transfer.items.add(file); transfer.setData("text/plain", "Clipboard caption");
       const event = new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true });
-      document.querySelector<HTMLTextAreaElement>("#msgInput")!.dispatchEvent(event); return !event.defaultPrevented;
+      document.querySelector<HTMLElement>("#msgInput")!.dispatchEvent(event); return !event.defaultPrevented;
     }, png.toString("base64"));
     expect(pastedTextAllowed).toBe(true);
     await page.waitForFunction(() => document.querySelectorAll("#attachmentList .attachment-item").length === 1 && document.querySelector("#attachmentList .attachment-detail")?.textContent?.includes("Ready to send"));
@@ -139,7 +139,7 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     await page.locator("#msgInput").fill("__Test_next_caption"); releaseFailure(); await page.locator(".failed-message").waitFor();
     const failedText = await page.locator(".failed-message p").textContent(); expect(failedText).toContain("[[resource:");
     expect(await page.locator("#attachmentList .attachment-name").filter({ hasText: "__Test_next_after_failure.txt" }).textContent()).toBe("__Test_next_after_failure.txt");
-    expect(await page.locator("#msgInput").inputValue()).toBe("__Test_next_caption");
+    expect(await page.locator("#msgInput").evaluate((node: any) => node.value)).toBe("__Test_next_caption");
     expect(await page.locator("#attachmentList .attachment-item").filter({ hasText: "__Test_next_after_failure.txt" }).locator("[data-upload-action=remove]").isVisible()).toBe(true);
     await page.unroute(messagePattern); await page.locator(".failed-message [data-failed-action=retry]").click();
     await page.locator("#msgList").getByText("__Test_retry_caption").waitFor(); await page.locator(".failed-message").waitFor({ state: "hidden" });

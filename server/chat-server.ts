@@ -8,7 +8,7 @@ import RoomService, {
   type Message,
   type Room,
 } from "../src/room-service";
-import { answerQuestion, readQuestions, readState, writeState, type Registry, type RegistryEntry } from "../src/store";
+import { answerQuestion, sendReply, readQuestions, readState, writeState, type Registry, type RegistryEntry } from "../src/store";
 import {
   admissionMatches,
   clearPendingAdmission,
@@ -22,6 +22,7 @@ import { memberRoutes } from "./member-routes";
 import { resourceRoutes } from "./resource-routes";
 import { maxResourceBytes } from "../src/resources";
 import { adminRoutes } from "./admin-routes";
+import { roomReminderRoutes, startRoomReminderScheduler } from "./room-reminders";
 
 function parsePort(value: string): number {
   const port = Number(value);
@@ -109,7 +110,7 @@ async function handle(req: Request): Promise<Response> {
   // ponytail: F1 — reject non-JSON POSTs; a text/plain simple request from a
   // malicious page would otherwise mutate rooms cross-origin (no preflight)
   if (
-    ["POST", "PUT", "DELETE"].includes(req.method) &&
+    ["POST", "PUT", "PATCH", "DELETE"].includes(req.method) &&
     !req.headers.get("content-type")?.includes("application/json") &&
     !(/^\/rooms\/[^/]+\/resources$/.test(p) && req.method === "POST")
   ) {
@@ -119,6 +120,8 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "unauthorized" }, 401);
   }
   try {
+    const reminders = await roomReminderRoutes(req, url);
+    if (reminders) return reminders;
     const admin = await adminRoutes(req, url); if (admin) return admin;
     const resource = await resourceRoutes(req, url);
     if (resource) return resource;
@@ -384,6 +387,21 @@ async function handle(req: Request): Promise<Response> {
         if (text.length > 2000) {
           return json({ error: "text too long (max 2000)" }, 400);
         }
+        const replyTo = (body as Record<string, unknown>).replyToMessageID;
+        if (replyTo !== undefined && (typeof replyTo !== "string" || !replyTo)) return json({ error: "replyToMessageID must be a non-empty message ID" }, 400);
+        if (replyTo !== undefined) {
+          const result = await sendReply(roomId, replyTo, sessionID, text);
+          if (result.status !== "ok") {
+            if (result.status === "missing") return json({ error: "room not found" }, 404);
+            if (result.status === "target") return json({ error: "reply target not found in room" }, 404);
+            if (result.status === "question") return json({ error: "use the question answers endpoint to reply to a question" }, 409);
+            return json({ error: "session is not a room member" }, 409);
+          }
+          touchActive(sessionID);
+          const room = await read((svc) => svc.getRoom(roomId));
+          void wakeMentionedSessions(serveWakeUrl, roomId, room.name, text, sessionID, result.message);
+          return json(serializeRoom(room), 201);
+        }
         const room = await mutate((svc, reg) => {
           const senderEntry = reg[roomId]?.[sessionID];
           if (!senderEntry) throw new RoomError("NOT_JOINED", "session is not a room member");
@@ -491,6 +509,7 @@ export default {
 console.log(
   `chat-room center listening on http://${displayHostname}:${port}${token ? " (token auth on)" : ""}`,
 );
+startRoomReminderScheduler();
 if (!token) {
   console.warn(
     "chat-room center has NO token auth — set CHAT_ROOM_SERVER_TOKEN if this port is reachable from other hosts",

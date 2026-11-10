@@ -117,7 +117,7 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     await page.evaluate(() => { const thread = document.querySelector<HTMLElement>("#thread")!; thread.scrollTop = thread.scrollHeight / 2; });
     await frame(page); const reentryAnchor = await readingAnchor(page);
     const otherRoomId = await switchRoom(page, "__Test_ComposerOther", roomId);
-    expect(await input.inputValue()).toBe("word ".repeat(100));
+    expect(await input.evaluate((node: any) => node.value)).toBe("word ".repeat(100));
     expect(await readingAnchor(page)).toMatchObject({ id: reentryAnchor.id });
     expect(Math.abs((await readingAnchor(page)).offset - reentryAnchor.offset)).toBeLessThan(3);
     await selectRoom(page, otherRoomId);
@@ -181,7 +181,7 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     await input.fill("");
     expect(await measure(input)).toMatchObject({ overflow: "hidden", fits: true });
     await input.fill("send reset"); await page.locator("#btnSend").click();
-    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>("#msgInput")?.value === "");
+    await page.waitForFunction(() => (document.querySelector<HTMLElement & { value: string }>("#msgInput")?.value ?? null) === "");
     expect(await measure(input)).toMatchObject({ overflow: "hidden", fits: true });
     if (browserErrors.length) throw new Error(JSON.stringify({ browserErrors, resourceCalls }));
     await page.close();

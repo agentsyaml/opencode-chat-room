@@ -34,18 +34,25 @@
 
   .chat-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
   .chat-head .action-icon { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
-  .question-panel { width: min(390px, calc(100vw - 32px)); max-height: min(70vh, 620px); overflow: auto; }
+  .panel.question-panel { width: min(720px, calc(100vw - 32px)); max-height: min(86vh, 820px); overflow: auto; }
   .questions-trigger { position: relative; }
   .question-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .question-panel-head h3 { margin-bottom: 0; }
   .question-refresh { border: 0; padding: 4px 7px; color: var(--accent); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
-  .question-list { list-style: none; max-height: 260px; overflow: auto; margin: 10px 0 0; padding: 0; }
-  .question-item { width: 100%; padding: 9px 10px; border: 1px solid transparent; border-radius: 9px; color: var(--ink); background: transparent; font: inherit; font-size: 13px; line-height: 1.5; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
-  .question-item:hover, .question-item[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: var(--accent-soft); }
+  .question-list { list-style: none; max-height: 40vh; overflow: auto; margin: 10px 0 0; padding: 0; }
+  .question-item { display: grid; gap: 8px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--surface-2); font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; cursor: pointer; }
+  .question-item-body { min-width: 0; }
+  .question-item:hover, .question-item.selected { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: var(--accent-soft); }
+  .question-select { justify-self: end; border: 0; padding: 3px 5px; color: var(--accent); background: transparent; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
+  .question-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
   .question-reply { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
-  .question-reply-quote { max-height: 72px; overflow: auto; margin: 0 0 8px; padding: 8px 10px; border-left: 3px solid var(--accent); border-radius: 4px; background: var(--surface-2); font-size: 12px; overflow-wrap: anywhere; }
+  .question-copy { margin-bottom: 4px; }
+  .question-copy-feedback { min-height: 1.4em; margin: 0 0 6px; color: var(--ink-2); font-size: 12px; }
+  .question-panel p, .question-panel ul, .question-panel ol, .question-panel pre, .question-panel blockquote, .question-panel table { margin-top: 0; margin-bottom: 6px; }
+  .question-panel pre { max-width: 100%; overflow-x: auto; }
+  .question-panel table { display: block; max-width: 100%; overflow-x: auto; }
   .question-reply-form { display: grid; gap: 8px; }
-  .question-reply-form textarea { min-height: 62px; resize: vertical; }
+  .question-reply-form .message-editor { position: relative; min-height: 62px; resize: vertical; }
   .question-reply-form .btn { justify-self: end; }
   .question-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 5px; padding: 0 4px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: 10px; }
   .chip {
@@ -240,8 +247,18 @@
   .message-copy:hover, .message-copy:focus-visible, .message-copy.is-flashing { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
   .message-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .message-copy-feedback { position: absolute; z-index: 25; left: 0; bottom: calc(100% + 5px); width: max-content; max-width: min(260px, calc(100vw - 32px)); padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow); font-size: 11px; font-weight: 500; line-height: 1.4; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  .message-actions { display: flex; align-items: center; gap: 2px; }
+  .message-reply { min-height: 32px; padding: 0 7px; border: 1px solid transparent; border-radius: 8px; color: var(--ink-3); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+  .message-reply:hover, .message-reply:focus-visible { border-color: var(--line); color: var(--accent); background: var(--accent-soft); }
+  .reply-preview { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: min(940px, 100%); margin: 0 auto; padding: 8px 12px; border-left: 3px solid var(--accent); border-radius: 6px; background: var(--accent-soft); }
+  .reply-preview strong { font-size: 12px; color: var(--accent); }
+  .reply-preview p { overflow: hidden; margin: 2px 0 0; color: var(--ink-2); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  .reply-cancel { flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; color: var(--ink-2); background: transparent; font: inherit; font-size: 20px; cursor: pointer; }
+  .reply-cancel:hover { color: var(--danger); background: var(--surface); }
+  .reply-quote { display: block; max-width: min(82%, 500px); overflow: hidden; margin: 0 0 5px; padding: 5px 10px; border: 0; border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; color: var(--ink-2); background: var(--surface-2); font: inherit; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .reply-quote:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); }
+  .reply-quote:disabled { cursor: default; opacity: .7; }
   .msg.own .message-copy-feedback { left: auto; right: 0; }
-  .sys .message-copy-feedback { left: 50%; right: auto; transform: translateX(-50%); }
   .message-readers { flex: 0 0 24px; align-self: flex-end; margin: 0 0 4px; padding: 0; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font: inherit; font-size: 10px; cursor: pointer; box-shadow: 0 1px 3px rgb(20 40 32 / .06); }
   .message-readers[data-reader-state="empty"], .message-readers[data-reader-state="unknown"] { background: var(--surface-2); }
   .message-readers:hover, .message-readers[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
@@ -255,7 +272,6 @@
   .reader-panel-head h2 { margin: 0; font-family: var(--font-sans); font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
   .reader-panel-head .hint { margin: 0 0 4px; }
   .reader-close { flex: none; width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 21px; cursor: pointer; }
-  .reader-excerpt { max-height: 110px; overflow: auto; margin: 16px 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
   .reader-panel .receipt-reader-list li { display: grid; gap: 3px; padding: 10px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
   .chat-resource { display: grid; gap: 9px; min-width: 0; margin: 10px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-2) 76%, var(--surface)); }
   .resource-info, .resource-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
@@ -386,7 +402,6 @@
   }
   .sys::before { content: ""; position: absolute; top: 9px; left: 0; right: 0; height: 1px; background: var(--line); }
   .sys span { position: relative; padding: 0 10px; background: var(--surface); }
-  .sys .message-copy { align-self: center; margin: -8px 0 0; }
 
   .day-sep {
     display: flex;
@@ -430,6 +445,7 @@
   .composer .input { flex: 1; }
   .composer .input:disabled { opacity: .5; }
   #msgInput {
+    position: relative;
     min-height: 0;
     padding: 12px 13px;
     line-height: 1.5;
@@ -438,6 +454,10 @@
     resize: none;
     overflow-y: hidden;
   }
+  #msgInput:empty, #msgInput:has(> br:only-child), #msgInput:has(> div:only-child > br:only-child) { height: 50px !important; }
+  .message-editor { white-space: pre-wrap; overflow-wrap: anywhere; outline: none; }
+  .message-editor:empty::before, .message-editor:has(> br:only-child)::before, .message-editor:has(> div:only-child > br:only-child)::before { content: attr(aria-placeholder); position: absolute; inset: 12px 13px auto; overflow: hidden; color: var(--ink-3); pointer-events: none; text-overflow: ellipsis; white-space: nowrap; }
+  .editor-mention { display: inline-block; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--mention-blue) 32%, transparent); border-radius: 999px; color: var(--mention-blue); background: color-mix(in srgb, var(--mention-blue) 14%, transparent); font-size: .92em; font-weight: 600; vertical-align: baseline; white-space: nowrap; }
   #btnSend { padding: 12px 22px; }
   .send-error { margin: 0; font-size: 12.5px; color: var(--danger); }
   .draft-count { flex: none; margin: 0; color: var(--ink-3); text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -445,6 +465,7 @@
   .failed-messages h3 { margin: 0 0 5px; color: var(--danger); font-size: 12px; }
   .failed-message { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); }
   .failed-message p { flex: 1; min-width: 0; max-height: 48px; overflow: auto; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+  .failed-reply-context { flex: 0 0 100%; overflow: hidden; color: var(--accent); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .failed-message button { flex: none; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; }
   .failed-message button:disabled { opacity: .5; cursor: default; }
   .attachment-button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 24px; cursor: pointer; }
