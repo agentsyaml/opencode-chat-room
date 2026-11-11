@@ -64,7 +64,7 @@ test.skipIf(!browserModule)("agent uploads render and download real browser medi
       const card = page.locator(`.chat-resource[data-resource-id="${resource.id}"]`);
       await card.getByText(resource.name).waitFor();
       // Media in your own message previews automatically.
-      await card.locator("img, audio, video").first().waitFor();
+      await card.getByRole("button", { name: /Hide/ }).waitFor();
       if (resource.name.endsWith(".png")) {
         const img = card.locator("img"); await img.waitFor();
         expect(await img.evaluate((node: HTMLImageElement) => node.complete && node.naturalWidth === 1)).toBe(true);

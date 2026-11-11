@@ -414,6 +414,11 @@ async function mermaidAndResourceWorks(page: any, token: string, artifacts: stri
   });
   await input.fill(`See this [[resource:${id}]]`); await page.locator("#btnSend").click();
   const file = page.locator(".chat-resource").last(); await file.getByText("preview.png").waitFor();
+  // Media in your own message previews automatically; collapse it to test the click path.
+  await file.locator("img").waitFor();
+  await file.getByRole("button", { name: /Hide/ }).click();
+  await file.locator("img").waitFor({ state: "detached" });
+  const loadsBefore = resourceCalls.filter((path) => path.endsWith("/content")).length;
   const preview = file.getByRole("button", { name: /Preview/ });
   await preview.evaluate(async (button: HTMLButtonElement, url: string) => {
     const state = await import(url), current = state.app.state.room;
@@ -422,7 +427,7 @@ async function mermaidAndResourceWorks(page: any, token: string, artifacts: stri
   }, "/assets/chat/state.js");
   await file.locator("img").waitFor();
   expect(await file.locator("img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth === 1)).toBe(true);
-  expect(resourceCalls.filter((path) => path.endsWith("/content"))).toHaveLength(1);
+  expect(resourceCalls.filter((path) => path.endsWith("/content"))).toHaveLength(loadsBefore + 1);
   expect(resourceCalls).toContain(`/rooms/${roomId}/resources/${id}/content`);
   expect(authorized).toBe(true);
   return resourceCalls;

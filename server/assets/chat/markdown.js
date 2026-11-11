@@ -137,11 +137,14 @@ async function loadResourceCard(card, roomId, app) {
     }
   } catch { if (card.isConnected) setResourceError(card, app); }
 }
+function setResourceButton(button, key, name, app) {
+  button.dataset.i18n = key; button.textContent = app.t(key);
+  button.setAttribute("aria-label", `${app.t(key)}: ${name}`);
+}
 function resourceButton(key, name, action, app) {
   const button = document.createElement("button");
   button.type = "button"; button.className = "btn ghost small resource-button";
-  button.dataset.i18n = key; button.textContent = app.t(key);
-  button.setAttribute("aria-label", `${app.t(key)}: ${name}`);
+  setResourceButton(button, key, name, app);
   button.addEventListener("click", action); return button;
 }
 async function downloadResource(card, roomId, id, resource, app, status, button) {
@@ -163,9 +166,11 @@ async function previewResource(card, roomId, id, resource, type, button, app, st
   button.disabled = true;
   if (card._previewElement) {
     try {
-      await app.preserveReadingLayout(() => card._previewElement.remove());
+      await app.preserveReadingLayout(() => {
+        card._previewElement.remove();
+        setResourceButton(button, "resourcePreview", resource.name, app); button.disabled = false;
+      });
       URL.revokeObjectURL(card._resourceUrl); previewUrls.delete(card); delete card._resourceUrl; delete card._previewElement;
-      if (card.isConnected) { button.dataset.i18n = "resourcePreview"; button.textContent = app.t("resourcePreview"); }
     } catch {
       if (!card.isConnected) return;
     } finally { if (card.isConnected) button.disabled = false; }
@@ -182,10 +187,15 @@ async function previewResource(card, roomId, id, resource, type, button, app, st
     else { media.controls = true; media.preload = "metadata"; }
     media.addEventListener("error", () => { if (card.isConnected) status.textContent = app.t("resourceFailed"); });
     media.src = url;
-    await app.preserveReadingLayout(async () => { status.textContent = ""; card.append(media); await ready; });
+    // Update the control inside the layout step: a stalled animation frame must not
+    // leave the preview open with a disabled button.
+    await app.preserveReadingLayout(async () => {
+      status.textContent = ""; card.append(media);
+      setResourceButton(button, "resourceHide", resource.name, app); button.disabled = false;
+      await ready;
+    });
     if (!card.isConnected) { URL.revokeObjectURL(url); return; }
     card._resourceUrl = url; card._previewElement = media; previewUrls.set(card, url); watchPreviewRemoval();
-    button.dataset.i18n = "resourceHide"; button.textContent = app.t("resourceHide");
   } catch { if (url) URL.revokeObjectURL(url); if (card.isConnected) status.textContent = app.t("resourceFailed"); }
   finally { if (card.isConnected) button.disabled = false; }
 }
