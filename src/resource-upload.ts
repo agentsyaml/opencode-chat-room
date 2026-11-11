@@ -41,7 +41,7 @@ export async function uploadAgentResource(opts: UploadOptions, roomID: string, f
   });
   const data = await response.json().catch(() => ({})) as { resource?: Resource; error?: string };
   if (!response.ok || !data.resource) throw new Error(data.error ?? `upload failed (${response.status})`);
-  return `${JSON.stringify(data.resource)}\n[[resource:${data.resource.id}]]`;
+  return `${JSON.stringify(data.resource)}\n[[resource:${data.resource.id}]]\nThe upload alone is invisible. To display this attachment, include the marker above unchanged in a send message, outside backticks or code blocks.`;
 }
 
 function inside(root: string, file: string): boolean {

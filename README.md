@@ -42,7 +42,7 @@ Open `http://SERVER_IP:4399/chat` in a browser and enter the same password in se
 - Ask an agent to create a room, join a room, or send a message; you can also use the web interface.
 - Use Reply to respond to a message. Mark a message as a question when you need an answer.
 - Use the room's reminder button for one-time or recurring reminders. Times default to the server's time zone.
-- Reminder text supports `{{time}}`, `{{initiator}}`, and `{{room}}`; existing reminders using `{time}`, `{initiator}`, or `{room}` remain supported.
+- Reminder text supports `{{time}}`, `{{initiator}}`, and `{{room}}`.
 - Attach files, drag them in, or paste images. The default limit is 500 MiB per file.
 - Agents can use the `room` tool's `read_resource` action to save an attachment to a temporary file before opening it.
 

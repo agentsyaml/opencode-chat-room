@@ -136,10 +136,22 @@ test.skipIf(!browserModule)("admin UI binds agents and privately claims designat
   try {
     await waitForServer(origin); browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } }); await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    const page = await context.newPage(), adminPaths: string[] = []; page.on("request", (request: BrowserRequest) => { const pathname = new URL(request.url()).pathname; if (pathname.startsWith("/admin/")) adminPaths.push(pathname); }); await page.goto(`${origin}/chat`); await page.locator("#joinView").waitFor({ state: "visible" });
-    await page.locator("#inToken").fill(bearer); await page.locator('[data-token-save="inToken"]').click();
+    const page = await context.newPage(), adminPaths: string[] = []; page.on("request", (request: BrowserRequest) => { const pathname = new URL(request.url()).pathname; if (pathname.startsWith("/admin/")) adminPaths.push(pathname); });
+    let releaseOldList!: () => void, oldListStarted!: () => void, oldListCompleted!: () => void, heldOldList = false;
+    const oldListGate = new Promise<void>((resolve) => { releaseOldList = resolve; }), oldListRequested = new Promise<void>((resolve) => { oldListStarted = resolve; }), oldListReleased = new Promise<void>((resolve) => { oldListCompleted = resolve; });
+    await page.route("**/rooms*", async (route: BrowserRoute) => {
+      const request = route.request(), url = new URL(request.url());
+      if (!heldOldList && request.method() === "GET" && url.pathname === "/rooms" && url.searchParams.has("sessionID") && request.headers().authorization === `Bearer ${bearer}`) { heldOldList = true; const response = await route.fetch(); oldListStarted(); await oldListGate; await route.fulfill({ response }); oldListCompleted(); }
+      else await route.continue();
+    });
+    await page.goto(`${origin}/chat`); await page.locator("#joinView").waitFor({ state: "visible" });
+    await page.locator("#inToken").fill(bearer); await page.locator('[data-token-save="inToken"]').click(); await oldListRequested;
     await page.locator("#inName").fill("__Test_Operator"); await page.locator("#inRoomName").fill("__Test_AdminControl"); await page.locator("#btnCreate").click(); await page.locator("#chatView").waitFor({ state: "visible" });
     roomId = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || ""); sessionID = await page.evaluate(() => sessionStorage.getItem("chat.sessionID") || "");
+    const stillJoined = () => page.evaluate((id: string) => sessionStorage.getItem("chat.roomId") === id && JSON.parse(sessionStorage.getItem("chat.joinedRoomIds") || "[]").includes(id), roomId);
+    expect(await stillJoined()).toBe(true);
+    releaseOldList(); await oldListReleased; await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(await stillJoined()).toBe(true);
     const agentSession = randomUUID(), ownerID = randomUUID(), membershipID = `__Test_${randomUUID()}`;
     const targetResponse = await request("/rooms", "POST", { name: "__Test_V2Agent", ownerId: "__Test_V2Agent", sessionID: agentSession, protocol: "v2", receiverOwnerID: ownerID });
     expect(targetResponse.status).toBe(201); agentRoomId = (await targetResponse.json() as { id: string }).id;
@@ -179,10 +191,97 @@ test.skipIf(!browserModule)("admin UI binds agents and privately claims designat
     expect(await page.locator("#adminRoomSelect").inputValue()).toBe(roomId);
     page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#btnRevokeAdmin").click();
     await page.locator("#btnRevokeAdmin").waitFor({ state: "hidden" });
+    await page.locator("#btnCloseAdmin").click();
+    await page.locator("#roomListEmpty").evaluate((node: HTMLElement) => { node.hidden = false; });
+    expect((await request(`/rooms/${roomId}/leave`, "POST", { sessionID })).status).toBe(200);
+    await page.locator("#btnRefreshRooms").click(); await page.locator("#joinView").waitFor({ state: "visible" });
+    expect(await page.evaluate((id: string) => JSON.parse(sessionStorage.getItem("chat.joinedRoomIds") || "[]").includes(id), roomId)).toBe(false);
+    expect(await page.locator("#roomListEmpty").isHidden()).toBe(true);
+    expect((await request(`/rooms/${roomId}/join`, "POST", { sessionID, participantId: "__Test_Operator", participantName: "__Test_Operator" })).status).toBe(201);
     expect((await request(`/rooms/${roomId}`, "DELETE", { sessionID }, true)).status).toBe(200);
     expect((await request(`/rooms/${agentRoomId}`, "DELETE", { sessionID: agentSession }, true)).status).toBe(200);
     await context.close();
   } finally { await browser?.close(); server.kill(); await rm(stateDir, { recursive: true, force: true }); }
+}, 90000);
+
+test.skipIf(!browserModule)("user navigation supersedes room restoration", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href), stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-web-room-intent-")), port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any, releaseMembers = () => {}, releaseCreate = () => {}, releaseActiveMembers = () => {}, releaseJoin = () => {};
+  try {
+    await waitForServer(origin); browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } }), page = await context.newPage();
+    await page.goto(`${origin}/chat`); await page.locator("#tokenBox").evaluate((details: HTMLDetailsElement) => { details.open = true; });
+    await page.locator("#inToken").fill("ui-test-token"); await page.locator('[data-token-save="inToken"]').click();
+    await page.locator("#inName").fill("__Test_Operator"); await page.locator("#inRoomName").fill("__Test_OldRoom"); await page.locator("#btnCreate").click(); await page.locator("#chatView").waitFor({ state: "visible" });
+    const oldRoom = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || ""), sessionID = await page.evaluate(() => sessionStorage.getItem("chat.sessionID") || "");
+    let membersStarted!: () => void, createStarted!: () => void;
+    const membersPending = new Promise<void>((resolve) => { membersStarted = resolve; }), createPending = new Promise<void>((resolve) => { createStarted = resolve; });
+    let releaseMembersNow!: () => void, releaseCreateNow!: () => void;
+    const membersGate = new Promise<void>((resolve) => { releaseMembersNow = resolve; }), createGate = new Promise<void>((resolve) => { releaseCreateNow = resolve; });
+    releaseMembers = releaseMembersNow; releaseCreate = releaseCreateNow;
+    await page.route(`${origin}/rooms/${oldRoom}/members`, async (route: BrowserRoute) => { const response = await route.fetch(); membersStarted(); await membersGate; await route.fulfill({ response }); });
+    await page.route(`${origin}/rooms`, async (route: BrowserRoute) => {
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch(); createStarted(); await createGate; await route.fulfill({ response });
+    });
+    await page.reload(); await membersPending;
+    await page.evaluate(() => { (document.querySelector("#inName") as HTMLInputElement).value = "__Test_Operator"; (document.querySelector("#inRoomName") as HTMLInputElement).value = "__Test_NewRoom"; document.querySelector("#createForm")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); await createPending;
+    releaseMembers(); await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(await page.locator("#chatView").isHidden()).toBe(true);
+    releaseCreate(); await page.locator("#chatView").waitFor({ state: "visible" });
+    expect(await page.evaluate(() => sessionStorage.getItem("chat.roomId"))).not.toBe(oldRoom);
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("chat.joinedRoomIds") || "[]").includes(sessionStorage.getItem("chat.roomId")))).toBe(true);
+    let activeRoom = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || "");
+    const targetResponse = await fetch(`${origin}/rooms`, { method: "POST", headers: { Authorization: "Bearer ui-test-token", "Content-Type": "application/json" }, body: JSON.stringify({ name: "__Test_JoinTarget", ownerId: "__Test_JoinTarget" }) });
+    expect(targetResponse.status).toBe(201); const targetRoom = (await targetResponse.json() as { id: string }).id;
+    let activeMembersStarted!: () => void, joinStarted!: () => void, releaseActive!: () => void, releaseJoinNow!: () => void;
+    const activeMembersPending = new Promise<void>((resolve) => { activeMembersStarted = resolve; }), joinPending = new Promise<void>((resolve) => { joinStarted = resolve; }), activeGate = new Promise<void>((resolve) => { releaseActive = resolve; }), joinGate = new Promise<void>((resolve) => { releaseJoinNow = resolve; });
+    releaseActiveMembers = releaseActive; releaseJoin = releaseJoinNow;
+    await page.route(`${origin}/rooms/${activeRoom}/members`, async (route: BrowserRoute) => { const response = await route.fetch(); activeMembersStarted(); await activeGate; await route.fulfill({ response }); });
+    await page.reload(); await activeMembersPending;
+    await page.route(`${origin}/rooms/${targetRoom}/join`, async (route: BrowserRoute) => { const response = await route.fetch(); joinStarted(); await joinGate; await route.fulfill({ response }); });
+    await page.evaluate((id: string) => { (document.querySelector("#inRoomId") as HTMLInputElement).value = id; (document.querySelector("#inName") as HTMLInputElement).value = "__Test_Operator"; document.querySelector("#joinForm")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }, targetRoom); await joinPending;
+    releaseActiveMembers(); await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))); expect(await page.locator("#chatView").isHidden()).toBe(true);
+    releaseJoin(); await page.locator("#chatView").waitFor({ state: "visible" }); activeRoom = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || ""); expect(activeRoom).toBe(targetRoom);
+    const workerSession = randomUUID(), ownerID = randomUUID();
+    const joined = await fetch(`${origin}/rooms/${activeRoom}/join`, { method: "POST", headers: { Authorization: "Bearer ui-test-token", "Content-Type": "application/json" }, body: JSON.stringify({ sessionID: workerSession, participantId: "__Test_Worker", participantName: "__Test_Worker", protocol: "v2", receiverOwnerID: ownerID }) });
+    expect(joined.status).toBe(201);
+    const direct = await fetch(`${origin}/direct`, { method: "POST", headers: { Authorization: "Bearer ui-test-token", "Content-Type": "application/json" }, body: JSON.stringify({ roomId: activeRoom, sessionID, targetSessionID: workerSession }) });
+    expect(direct.status).toBe(201); const directRoom = (await direct.json() as { id: string }).id;
+    let directFailed!: () => void, groupMembersStarted!: () => void, groupMembersDone!: () => void, releaseGroupMembers!: () => void;
+    const directFailure = new Promise<void>((resolve) => { directFailed = resolve; }), groupMembers = new Promise<void>((resolve) => { groupMembersStarted = resolve; }), groupGate = new Promise<void>((resolve) => { releaseGroupMembers = resolve; }), groupDone = new Promise<void>((resolve) => { groupMembersDone = resolve; });
+    await page.route(`${origin}/rooms/${directRoom}/members`, async (route: BrowserRoute) => { directFailed(); await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "retry discovery" }) }); });
+    await page.locator("#btnRefreshRooms").click(); await directFailure;
+    await page.route(`${origin}/rooms/${activeRoom}/members`, async (route: BrowserRoute) => { const response = await route.fetch(); groupMembersStarted(); await groupGate; await route.fulfill({ response }); groupMembersDone(); });
+    await groupMembers;
+    await page.locator("#btnRoomOptions").click(); await page.locator("#btnLeave").click(); await page.waitForFunction((id: string) => sessionStorage.getItem("chat.roomId") !== id, activeRoom);
+    releaseGroupMembers(); await groupDone; await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(await page.evaluate(() => sessionStorage.getItem("chat.roomId"))).not.toBe(activeRoom);
+    expect(await page.evaluate((id: string) => JSON.parse(sessionStorage.getItem("chat.joinedRoomIds") || "[]").includes(id), activeRoom)).toBe(false);
+    await context.close();
+  } finally { releaseMembers(); releaseCreate(); releaseActiveMembers(); releaseJoin(); await browser?.close(); server.kill(); await rm(stateDir, { recursive: true, force: true }); }
+}, 90000);
+
+test.skipIf(!browserModule)("automatic room-list retries reuse a slow in-flight request", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href), stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-web-room-retry-")), port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any, releaseRequest = () => {}, heldCount = 0;
+  try {
+    await waitForServer(origin); browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await (await browser.newContext()).newPage(); let firstRetry!: () => void;
+    const retryStarted = new Promise<void>((resolve) => { firstRetry = resolve; }), retryGate = new Promise<void>((resolve) => { releaseRequest = resolve; });
+    await page.route("**/rooms*", async (route: BrowserRoute) => {
+      const request = route.request(), url = new URL(request.url());
+      if (request.method() !== "GET" || url.pathname !== "/rooms" || !url.searchParams.has("sessionID") || request.headers().authorization !== "Bearer ui-test-token") return route.continue();
+      if (++heldCount <= 2) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "temporary list failure" }) });
+      const response = await route.fetch(); if (heldCount === 3) firstRetry(); await retryGate; await route.fulfill({ response });
+    });
+    await page.goto(`${origin}/chat`); await page.locator("#inToken").fill("ui-test-token"); await page.locator('[data-token-save="inToken"]').click(); await retryStarted;
+    await page.waitForTimeout(5500); expect(heldCount).toBe(3);
+    releaseRequest(); await page.locator("#restoreView").waitFor({ state: "hidden" }); expect(heldCount).toBe(3);
+    await page.context().close();
+  } finally { releaseRequest(); await browser?.close(); server.kill(); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 
 let binding: any;

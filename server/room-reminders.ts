@@ -106,10 +106,8 @@ function template(text: string, at: number, initiator: string, room: string, tim
     const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "longOffset" }).formatToParts(at).map(part => [part.type, part.value]));
     return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second} ${parts.timeZoneName} [${timezone}]`;
   })() : new Date(at).toISOString();
-  const result = text.replace(/\{\{(time|initiator|room)\}\}|\{(time|initiator|room)\}/g, (_m, doubleKey: string, singleKey: string) => {
-    const key = doubleKey ?? singleKey;
-    return key === "time" ? time : key === "initiator" ? initiator : room;
-  });
+  const result = text.replace(/\{\{(time|initiator|room)\}\}/g, (_m, key: string) =>
+    key === "time" ? time : key === "initiator" ? initiator : room);
   if (result.length > 2000) throw new Error("rendered reminder text exceeds 2000 characters");
   return result;
 }

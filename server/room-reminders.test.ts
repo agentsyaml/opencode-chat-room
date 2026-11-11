@@ -94,7 +94,7 @@ test("due reminders coalesce downtime and isolate corrupt schedules", async () =
   expect(denied?.status).toBe(404);
   const at = "2032-01-15T12:30:00", future = Date.parse("2032-01-15T12:35:00-05:00");
   const onceResp = await request("POST", "", { sessionID: "member", text: "Hi {{initiator}} in {{room}} at {{time}}", schedule: { type: "once", at, timezone: "America/New_York" } });
-  const cronResp = await request("POST", "", { sessionID: "member", text: "recurring {initiator} {room}", schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" } });
+  const cronResp = await request("POST", "", { sessionID: "member", text: "recurring {{initiator}} {{room}} literal {room}", schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" } });
   expect(onceResp?.status).toBe(201); expect(cronResp?.status).toBe(201);
   const once = (await onceResp!.json() as { reminder: { id: string } }).reminder;
   const recurring = (await cronResp!.json() as { reminder: { id: string } }).reminder;
@@ -120,13 +120,13 @@ test("due reminders coalesce downtime and isolate corrupt schedules", async () =
   expect(rows.messages[0]!.text).toContain("Updated Alice in Test room at");
   expect(rows.messages[0]!.text).toContain("[America/New_York]");
   expect(rows.messages[0]!.text).not.toMatch(/[{}]/);
-  expect(rows.messages[1]!.text).toBe("recurring Alice Test room");
+  expect(rows.messages[1]!.text).toBe("recurring Alice Test room literal {room}");
   expect(rows.recurring.next_run_at).toBeGreaterThan(future);
   expect(rows.poison.paused).toBe(1); expect(rows.poison.last_error).toContain("time zone");
   expect(rows.once).toBeNull();
   const reminderInbox = await readInboxMessages("member3", roomId, true);
   expect(reminderInbox.items.map(item => item.text)).toContain(rows.messages[0]!.text);
-  expect(reminderInbox.items.map(item => item.text)).toContain("recurring Alice Test room");
+  expect(reminderInbox.items.map(item => item.text)).toContain("recurring Alice Test room literal {room}");
   expect(reminderInbox.items.map(item => item.text)).not.toContain("must not send");
   const repaired = await request("PATCH", `/${poison}`, { sessionID: "member2", paused: false, schedule: { type: "cron", expression: "5 * * * *", timezone: "UTC" } });
   expect(repaired?.status).toBe(200);

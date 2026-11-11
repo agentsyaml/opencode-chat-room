@@ -1,11 +1,15 @@
 import { LS } from "./state.js";
-import { isOwnMessage } from "./messages.js";
 import { formatRoomPreview, setRoomPreview } from "./system-messages.js";
+import { watchRoom } from "./room-watcher.js";
 
 export function initRooms(app) {
   const $ = app.$;
+  let roomListGeneration = 0;
+  let autoRefresh;
+  const invalidateRoomList = () => { autoRefresh = undefined; return ++roomListGeneration; };
 
-  app.showJoin = (refresh = true) => {
+  app.showJoin = (refresh = true, preserveRoomListGeneration = false) => {
+    if (!preserveRoomListGeneration) invalidateRoomList();
     document.documentElement.classList.remove("session-restore");
     if (!$("#inName").value) $("#inName").value = LS.name;
     $("#chatView").hidden = true;
@@ -60,11 +64,12 @@ export function initRooms(app) {
     app.startRoomWatcher();
   };
 
-  app.activateRoom = (roomId) => {
+  app.activateRoom = (roomId, preserveRoomListGeneration = false) => {
     app.state.navigationGeneration++;
     const entry = app.state.rooms.get(roomId);
     if (!entry) return;
     if (app.state.room?.id === roomId) return;
+    if (!preserveRoomListGeneration) invalidateRoomList();
     if (app.state.room) {
       app.saveDraft(app.state.room.id, $("#msgInput").draftValue);
       app.captureReadingPosition?.();
@@ -106,7 +111,7 @@ export function initRooms(app) {
 
   app.joinRoom = async (roomId, name) => {
     if (app.state.rooms.has(roomId)) return app.activateRoom(roomId);
-    const intent = ++app.state.navigationGeneration;
+    const intent = ++app.state.navigationGeneration; invalidateRoomList();
     app.state.pendingAction = null;
     app.setJoinBusy(true);
     app.hideJoinError();
@@ -115,6 +120,7 @@ export function initRooms(app) {
         method: "POST",
         body: JSON.stringify({ sessionID: LS.sessionID, participantId: name, participantName: name }),
       });
+      invalidateRoomList();
       LS.name = name;
       app.enterRoom(room, name, intent);
     } catch (error) {
@@ -122,7 +128,7 @@ export function initRooms(app) {
         app.state.pendingAction = { type: "join", roomId, name };
         if (app.state.room) { app.openChatSettings(); app.showSendError("sendAuth"); }
         else { app.openTokenBox(); app.showJoinError("authRetry"); }
-      } else app.showJoinError(error.network ? "networkRetry" : "joinFailed", { message: error.message });
+      } else { app.showJoinError(error.network ? "networkRetry" : "joinFailed", { message: error.message }); void app.refreshRoomList(); }
     } finally { app.setJoinBusy(false); }
   };
 
@@ -131,7 +137,7 @@ export function initRooms(app) {
     const name = pending?.name || (fromChat ? app.state.myName : $("#inName").value.trim()) || LS.name || app.t("guest");
     const roomName = pending?.roomName || $(fromChat ? "#inRoomNameChat" : "#inRoomName").value.trim();
     if (!roomName) return fromChat ? app.showSendError("roomNameRequired") : app.showJoinError("roomNameRequired");
-    const intent = ++app.state.navigationGeneration;
+    const intent = ++app.state.navigationGeneration; invalidateRoomList();
     app.setJoinBusy(true);
     app.hideJoinError();
     app.state.pendingAction = null;
@@ -141,6 +147,7 @@ export function initRooms(app) {
         method: "POST",
         body: JSON.stringify({ name: roomName, ownerId: name, sessionID: LS.sessionID }),
       });
+      invalidateRoomList();
       LS.name = name;
       if (fromChat) {
         $("#inRoomNameChat").value = "";
@@ -152,8 +159,8 @@ export function initRooms(app) {
         app.state.pendingAction = { type: "create", name, roomName, fromChat };
         if (fromChat) { app.openChatSettings(); app.showSendError("sendAuth"); }
         else { app.openTokenBox(); app.showJoinError("authRetry"); }
-      } else if (fromChat) app.showSendError("sendFailed", { message: error.message });
-      else app.showJoinError("createFailed", { message: error.message });
+      } else if (fromChat) { app.showSendError("sendFailed", { message: error.message }); void app.refreshRoomList(); }
+      else { app.showJoinError("createFailed", { message: error.message }); void app.refreshRoomList(); }
     } finally {
       app.setJoinBusy(false);
       $("#btnCreateChatRoom").disabled = false;
@@ -169,7 +176,8 @@ export function initRooms(app) {
     const roomId = app.state.room?.id;
     if (roomId) void app.removeJoinedRoom(roomId, { leaveServer: !silent });
   };
-  app.removeJoinedRoom = async (roomId, { leaveServer = false, reason = false } = {}) => {
+  app.removeJoinedRoom = async (roomId, { leaveServer = false, reason = false, reconcile = false } = {}) => {
+    if (!reconcile) invalidateRoomList();
     const active = app.state.room?.id === roomId;
     const entry = app.state.rooms.get(roomId);
     app.disposeRoomAttachments?.(roomId);
@@ -202,10 +210,10 @@ export function initRooms(app) {
     }
     if (active) {
       const next = app.state.rooms.keys().next().value;
-      if (next) app.activateRoom(next);
+      if (next) app.activateRoom(next, true);
       else {
         LS.roomId = "";
-        app.showJoin();
+        app.showJoin(false, true);
         if (reason) app.showJoinError("roomNotFound");
       }
     }
@@ -220,29 +228,39 @@ export function initRooms(app) {
     app.state.watcherTimer = setTimeout(async () => {
       const inactive = [...app.state.rooms.keys()].filter((id) => id !== app.state.room?.id);
       await bounded(inactive, 3, (roomId) => watchRoom(roomId, app));
-      if (app.state.restorePending?.size || app.state.restoreRetry) void app.refreshRoomList();
+      if (app.state.restorePending?.size || app.state.restoreRetry) void app.refreshRoomList(true);
       app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
       app.startRoomWatcher();
     }, 5000);
   };
 
-  app.refreshRoomList = async () => {
+  app.refreshRoomList = (automatic = false) => {
+    if (automatic && autoRefresh?.generation === roomListGeneration) return autoRefresh.promise;
+    const generation = invalidateRoomList(), promise = loadRoomList(generation);
+    if (automatic) { autoRefresh = { generation, promise }; const clear = () => { if (autoRefresh?.promise === promise) autoRefresh = undefined; }; void promise.then(clear, clear); }
+    return promise;
+  };
+
+  async function loadRoomList(generation) {
     const empty = $("#roomListEmpty"), chatEmpty = $("#roomListChatEmpty");
     try {
       const rooms = await app.api(`/rooms?sessionID=${encodeURIComponent(LS.sessionID)}`);
+      if (generation !== roomListGeneration) return;
       app.state.restoreRetry = false;
       app.state.availableRooms = rooms;
-      if (!app.state.restored || app.state.restorePending?.size) await app.restoreJoinedRooms(rooms);
+      if (!app.state.restored || app.state.restorePending?.size) await app.restoreJoinedRooms(rooms, generation);
       else {
         syncCachedRooms(rooms, app);
-        await app.discoverDirectRooms(rooms);
+        await app.discoverDirectRooms(rooms, generation);
       }
+      if (generation !== roomListGeneration) return;
       app.renderRoomOptions($("#roomList"), rooms);
       app.renderRoomOptions($("#roomListChat"), rooms);
       empty.hidden = rooms.length > 0;
       chatEmpty.hidden = rooms.length > 0;
     } catch (error) {
+      if (generation !== roomListGeneration) return;
       if (error.status === 401) {
         if (!app.state.room && !app.state.restored) { app.showJoin(false); app.openTokenBox(); app.showJoinError("authRetry"); }
         else app.state.room ? app.openChatSettings() : app.openTokenBox();
@@ -260,13 +278,11 @@ export function initRooms(app) {
         app.startRoomWatcher();
       }
     }
-  };
+  }
 
-  app.restoreJoinedRooms = async (rooms) => {
-    if (app.state.restoring) {
-      while (app.state.restoring) await new Promise((resolve) => setTimeout(resolve, 10));
-      return;
-    }
+  app.restoreJoinedRooms = async (rooms, generation = roomListGeneration) => {
+    while (app.state.restoring) { await new Promise((resolve) => setTimeout(resolve, 10)); if (generation !== roomListGeneration) return; }
+    if (generation !== roomListGeneration) return;
     app.state.restoring = true;
     try {
     const activeId = LS.roomId;
@@ -276,14 +292,18 @@ export function initRooms(app) {
     const unresolved = new Set();
     let authFailed = false;
     await bounded(candidates, 3, async (roomId) => {
+      if (generation !== roomListGeneration) return;
       try {
         const room = rooms.find((item) => item.id === roomId) || await app.api(`/rooms/${encodeURIComponent(roomId)}`);
+        if (generation !== roomListGeneration) return;
         const members = await app.api(`/rooms/${encodeURIComponent(roomId)}/members`);
+        if (generation !== roomListGeneration) return;
         const me = members.find((member) => member.sessionID === LS.sessionID);
         if (!me) return;
         valid.add(roomId);
         app.ensureJoinedRoom(room, me.name);
       } catch (error) {
+        if (generation !== roomListGeneration) return;
         if (error.status !== 404) {
           unresolved.add(roomId);
           if (error.status === 401) authFailed = true;
@@ -291,34 +311,38 @@ export function initRooms(app) {
         }
       }
     });
+    if (generation !== roomListGeneration) return;
     app.state.joinedIds = new Set([...valid, ...unresolved]);
     app.state.restorePending = unresolved;
     app.saveJoinedIds();
     app.state.restored = unresolved.size === 0;
-    if (authFailed) { app.showJoin(false); app.openTokenBox(); app.showJoinError("authRetry"); return; }
-    if (activeId && valid.has(activeId)) app.activateRoom(activeId);
+    if (authFailed) { app.showJoin(false, true); app.openTokenBox(); app.showJoinError("authRetry"); return; }
+    if (activeId && valid.has(activeId)) app.activateRoom(activeId, true);
     else if (activeId && unresolved.has(activeId)) {
       app.showRestoreFailure(app.t("networkRetry"));
     }
     else {
       LS.roomId = "";
       const fallback = valid.values().next().value;
-      if (fallback) app.activateRoom(fallback);
+      if (fallback) app.activateRoom(fallback, true);
       else if (unresolved.size) app.showRestoreFailure(app.t("networkRetry"));
-      else app.showJoin(false);
+      else app.showJoin(false, true);
     }
     app.startRoomWatcher();
     } finally { app.state.restoring = false; }
   };
 
-  app.discoverDirectRooms = async (rooms) => {
+  app.discoverDirectRooms = async (rooms, generation = roomListGeneration) => {
     const candidates = rooms.filter((room) => room.kind === "direct" && !app.state.rooms.has(room.id));
     await bounded(candidates, 3, async (room) => {
+      if (generation !== roomListGeneration) return;
       try {
         const members = await app.api(`/rooms/${encodeURIComponent(room.id)}/members`);
+        if (generation !== roomListGeneration) return;
         const me = members.find((member) => member.sessionID === LS.sessionID);
         if (me) app.ensureJoinedRoom(room, me.name);
       } catch (error) {
+        if (generation !== roomListGeneration) return;
         if (error.status !== 404) {
           app.state.restorePending ||= new Set();
           app.state.restorePending.add(room.id);
@@ -329,6 +353,7 @@ export function initRooms(app) {
         }
       }
     });
+    if (generation !== roomListGeneration) return;
     if (app.state.restorePending?.size) app.startRoomWatcher();
   };
 
@@ -450,50 +475,11 @@ function syncCachedRooms(rooms, app) {
   const remote = new Map(rooms.map((room) => [room.id, room]));
   for (const [roomId, entry] of app.state.rooms) {
     const fresh = remote.get(roomId);
-    if (!fresh || fresh.joined === false) { void app.removeJoinedRoom(roomId, { reason: app.state.room?.id === roomId }); continue; }
+    if (!fresh || fresh.joined === false) { void app.removeJoinedRoom(roomId, { reason: app.state.room?.id === roomId, reconcile: true }); continue; }
     if (app.state.room?.id === roomId) continue;
     const messages = new Map([...entry.room.messages, ...fresh.messages].map((message) => [message.id, message]));
     entry.room = { ...fresh, messages: [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500) };
     const latest = entry.room.messages.at(-1);
     if (latest) setRoomPreview(entry, latest);
-  }
-}
-
-async function watchRoom(roomId, app) {
-  const entry = app.state.rooms.get(roomId);
-  if (!entry || app.state.room?.id === roomId) return;
-  try {
-    const query = new URLSearchParams({ sessionID: app.LS.sessionID, roomId, excludeSelf: "0", timeout: "0" });
-    query.set("afterTs", String(entry.receivedTs || 0));
-    const result = await app.api(`/inbox?${query}`);
-    if (app.state.rooms.get(roomId) !== entry) return;
-    if (result.member === false) { await app.removeJoinedRoom(roomId, { reason: false }); return; }
-    if (result.member !== true || !Array.isArray(result.items)) return;
-    if (app.state.room?.id === roomId) return;
-    const previousReceivedTs = entry.receivedTs || 0;
-    const sawSystem = (result.items || []).some((message) => message.senderId === "system");
-    for (const message of result.items || []) {
-      if (!isOwnMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
-      if (!entry.room.messages.some((item) => item.id === message.id)) entry.room.messages.push({ ...message, roomId });
-      if (message.createdAt >= entry.previewAt) {
-        setRoomPreview(entry, message);
-      }
-    }
-    entry.receivedTs = (result.items || []).reduce((latest, message) => Number.isSafeInteger(message.createdAt) ? Math.max(latest, message.createdAt) : latest, previousReceivedTs);
-    if (sawSystem || result.hasMore) {
-      const latest = await app.api(`/rooms/${encodeURIComponent(roomId)}`);
-      if (app.state.rooms.get(roomId) !== entry || app.state.room?.id === roomId) return;
-      entry.room.participants = latest.participants;
-      const messages = new Map([...entry.room.messages, ...latest.messages].map((message) => [message.id, message]));
-      entry.room.messages = [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500);
-      const newest = latest.messages.at(-1);
-      if (newest && newest.createdAt >= entry.previewAt) setRoomPreview(entry, newest);
-    }
-    entry.unreadOverflow = Boolean(result.hasMore);
-    if (entry.room.messages.length > 500) entry.room.messages.splice(0, entry.room.messages.length - 500);
-    if (result.hasMore && entry.receivedTs > previousReceivedTs) await watchRoom(roomId, app);
-  } catch (error) {
-    if (error.status === 401) app.openChatSettings();
-    else if (error.status === 404) await app.removeJoinedRoom(roomId, { reason: false });
   }
 }

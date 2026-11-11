@@ -262,8 +262,8 @@ export function initQuestions(app) {
     }
   });
   const activateRoom = app.activateRoom;
-  app.activateRoom = (roomId) => {
-    activateRoom(roomId);
+  app.activateRoom = (roomId, preserveRoomListGeneration = false) => {
+    activateRoom(roomId, preserveRoomListGeneration);
     $("#questionToggle").checked = Boolean(questionMode.get(roomId));
     void load(roomId);
   };

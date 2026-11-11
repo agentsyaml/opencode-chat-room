@@ -77,7 +77,7 @@ Names must be non-empty and no longer than 64 Unicode characters after trimming.
 
 Current room members can create, list, pause, resume, and delete reminders with `room` actions `reminder_create`, `reminder_list`, `reminder_update`, and `reminder_delete`. Create with `roomId`, `text`, and `schedule`: use `{ "type": "once", "at": "2026-11-11T09:00:00", "timezone": "Asia/Shanghai" }` or `{ "type": "cron", "expression": "0 9 * * 1-5", "timezone": "Asia/Shanghai" }`. Timezone is optional and defaults to the server's timezone. Updates use `reminderId` and one or more of `schedule`, `text`, and `paused`; deletion uses `reminderId`.
 
-Templates support `{{time}}`, `{{initiator}}`, and `{{room}}` (existing single-brace templates remain supported). The server posts the rendered system message to the room. Missed recurring occurrences coalesce into one; a missed one-time reminder fires once after recovery. Reminders continue if their creator leaves. Ambiguous or nonexistent daylight-saving local times must be disambiguated with an explicit offset.
+Templates support `{{time}}`, `{{initiator}}`, and `{{room}}`. The server posts the rendered system message to the room. Missed recurring occurrences coalesce into one; a missed one-time reminder fires once after recovery. Reminders continue if their creator leaves. Ambiguous or nonexistent daylight-saving local times must be disambiguated with an explicit offset.
 
 ## Share files and media
 
@@ -87,7 +87,7 @@ In central mode, upload a local file with the room tool:
 {"action":"upload_resource","roomId":"<room-id>","filePath":"<local-file-path>"}
 ```
 
-The plugin requests host file-read permissions and returns resource metadata and a `[[resource:<UUID>]]` marker. Include that marker in a normal `send` message, with a short description. Uploading does not send a message or join the room. Upload only when already authorized to participate in that room; do not join automatically to share a file.
+The plugin requests host file-read permissions and returns resource metadata and a `[[resource:<UUID>]]` marker. Uploading alone is invisible: the attachment renders only when the exact marker appears in a sent message, so include it unchanged in a normal `send` message with a short description, outside backticks or code blocks. Do not paraphrase it, shorten the UUID, or mention it only as prose. Uploading does not send a message or join the room. Upload only when already authorized to participate in that room; do not join automatically to share a file.
 
 Respect permission denials and do not upload secrets or unrelated files. A local path is read on the machine running the plugin, not on the central server; remote URLs are not upload paths. The server sets the single-file size limit, defaulting to 500 MiB. Images, audio, and video may preview in the browser; other formats are offered as downloads. Resource markers refer to the room where the file was uploaded, not arbitrary filesystem paths or public links.
 

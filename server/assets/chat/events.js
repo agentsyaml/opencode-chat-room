@@ -121,24 +121,24 @@ export function initEvents(app) {
     if (app.state.room?.id === roomId) cancelAnchorLoads();
     return removeJoinedRoom(roomId, options);
   };
-  function activateNow(id) {
-    activateRoom(id); captureReadingPosition();
+  function activateNow(id, preserveRoomListGeneration = false) {
+    activateRoom(id, preserveRoomListGeneration); captureReadingPosition();
     if (roomRail.classList.contains("drawer-open")) closeRoomDrawer();
   }
-  app.activateRoom = (id) => {
+  app.activateRoom = (id, preserveRoomListGeneration = false) => {
     cancelAnchorLoads();
     const entry = app.state.rooms.get(id), saved = app.state.positions.get(id);
     const intent = ++app.state.navigationGeneration;
-    if (!entry) return activateNow(id);
+    if (!entry) return activateNow(id, preserveRoomListGeneration);
     const readTs = entry.readTs || app.state.lastReadTs.get(id) || 0;
     const needAnchor = saved?.messageId && !entry.room.messages.some((message) => message.id === saved.messageId);
     const latest = entry.room.messages.at(-1);
     const needBoundary = !saved?.messageId && readTs && (!latest || latest.createdAt > readTs && !entry.room.messages.some((message) => message.createdAt <= readTs));
-    if (!needAnchor && !needBoundary) return activateNow(id);
+    if (!needAnchor && !needBoundary) return activateNow(id, preserveRoomListGeneration);
     const controller = new AbortController();
     const task = loadAnchorHistory(id, entry, saved?.messageId, app, needBoundary ? readTs : 0, controller.signal).catch(() => {}).finally(() => {
       if (pendingAnchorLoads.get(id)?.controller === controller) pendingAnchorLoads.delete(id);
-      if (intent === app.state.navigationGeneration) activateNow(id);
+      if (intent === app.state.navigationGeneration) activateNow(id, preserveRoomListGeneration);
     });
     pendingAnchorLoads.set(id, { controller, task });
   };

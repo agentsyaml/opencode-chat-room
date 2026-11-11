@@ -469,7 +469,7 @@ const roomExecute = async (
     }
 };
 const room = tool({
-  description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; manage reminders. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup.",
+  description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; manage reminders. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup.",
   args: roomArgs.shape,
   execute: roomExecute,
 });

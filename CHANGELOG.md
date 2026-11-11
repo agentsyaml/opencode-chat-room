@@ -4,7 +4,7 @@
 
 - Fix reply preview overflow and add an accessible cancel button and reply icon.
 - Make the automatic reply mention and its separator removable with one Backspace.
-- Show and support double-braced reminder variables, while preserving existing templates.
+- Show and support double-braced reminder variables. Single-brace variables are now literal text.
 - Select administrator Agents from the administrator room while retaining cross-room management.
 - Replace administrator tasks and schedules with room messages and reminders. Upgrading removes the old administrator task and schedule records.
 - Hide the jump-to-bottom button when the conversation is already at the bottom.
