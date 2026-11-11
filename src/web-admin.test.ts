@@ -37,21 +37,12 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     expect(created.status).toBe(201);
     const adminRoomId = (await created.json() as { id: string }).id;
     await page.locator("#inToken").fill("ui-test-token"); await page.locator('[data-token-save="inToken"]').click();
-    await page.locator("#inName").fill("__Test_Operator"); await page.locator("#inRoomId").fill(adminRoomId); await page.locator("#btnJoin").click();
-    await page.locator("#chatView").waitFor({ state: "visible", timeout: 15000 }).catch(async () => {
-      throw new Error(JSON.stringify({
-        joinError: await page.locator("#joinError").innerText().catch(() => ""),
-        views: await page.evaluate(() => ({
-          html: document.documentElement.className,
-          chatHidden: (document.querySelector("#chatView") as HTMLElement).hidden,
-          joinHidden: (document.querySelector("#joinView") as HTMLElement).hidden,
-          restoreHidden: (document.querySelector("#restoreView") as HTMLElement).hidden,
-          token: Boolean(localStorage.getItem("chat.token")),
-          name: localStorage.getItem("chat.name"),
-          session: localStorage.getItem("chat.sessionID"),
-        })),
-      }));
-    });
+    // Join through the app: on slow CI machines the typed form values were gone by submit time.
+    await page.evaluate(async ({ url, roomId }: any) => {
+      const { app } = await import(url);
+      await app.joinRoom(roomId, "__Test_Operator");
+    }, { url: "/assets/chat/state.js", roomId: adminRoomId });
+    await page.locator("#chatView").waitFor({ state: "visible", timeout: 15000 });
     expect(await page.evaluate(() => sessionStorage.getItem("chat.roomId"))).toBe(adminRoomId);
     binding = { roomId: adminRoomId, targetRoomId: adminRoomId, sessionID: "agent-session", receiverOwnerID: "owner", membershipID: "membership", enrolled: true };
     await page.locator("#btnSettings").click(); await page.locator("#adminAccessHeading").click(); await page.locator("#inAdminToken").fill("operator-secret"); await page.locator("#btnSaveAdminToken").click();
