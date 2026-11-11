@@ -63,8 +63,8 @@ test.skipIf(!browserModule)("agent uploads render and download real browser medi
     for (const resource of resources) {
       const card = page.locator(`.chat-resource[data-resource-id="${resource.id}"]`);
       await card.getByText(resource.name).waitFor();
-      const preview = card.getByRole("button", { name: /Preview/ });
-      await preview.click();
+      // Media in your own message previews automatically.
+      await card.locator("img, audio, video").first().waitFor();
       if (resource.name.endsWith(".png")) {
         const img = card.locator("img"); await img.waitFor();
         expect(await img.evaluate((node: HTMLImageElement) => node.complete && node.naturalWidth === 1)).toBe(true);
@@ -83,6 +83,15 @@ test.skipIf(!browserModule)("agent uploads render and download real browser medi
       expect(Buffer.compare(await Bun.file(downloadPath!).arrayBuffer().then(Buffer.from), resource.bytes)).toBe(0);
       await page.screenshot({ path: path.join(artifacts, `resource-${resource.name}.png`) });
     }
+    const peer = "__Test_MediaPeer";
+    await fetch(`${origin}/rooms/${encodeURIComponent(roomID)}/join`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ sessionID: peer, participantId: peer, participantName: peer }) });
+    await page.evaluate(async ({ url, id, text }: any) => {
+      const { app } = await import(url);
+      await app.api(`/rooms/${encodeURIComponent(id)}/messages`, { method: "POST", body: JSON.stringify({ sessionID: "__Test_MediaPeer", text }) });
+    }, { url: "/assets/chat/state.js", id: roomID, text: `[[resource:${resources[0]!.id}]]` });
+    const peerCard = page.locator(`.msg[data-sender="__Test_MediaPeer"] .chat-resource[data-resource-id="${resources[0]!.id}"]`);
+    await peerCard.getByRole("button", { name: /Preview/ }).waitFor({ timeout: 15000 });
+    expect(await peerCard.locator("img, audio, video").count()).toBe(0);
     expect(resourceQueries.length).toBeGreaterThan(0);
     expect(resourceQueries.every((query) => query === "")).toBe(true);
   } finally {

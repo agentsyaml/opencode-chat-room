@@ -77,8 +77,10 @@ export function initMentions(app) {
     if (input.value.slice(mention.start, end) !== `@${mention.query}`) return app.closeMention();
     replaceEditorRange(input, mention.start, end, `<at>@${name}</at>`);
     app.closeMention();
-    input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+    // Chrome can reset the selection while focus() lands; restore the caret last.
     input.focus({ preventScroll: true });
+    input.setCaret?.(mention.start + `<at>@${name}</at>`.length);
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
   };
 }
 

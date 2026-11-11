@@ -85,6 +85,7 @@ export function initAdmin(app) {
     if (!agents.length) status(app.t("noAgents")); else status("");
   }
   $("#btnSaveAdminToken").addEventListener("click", async () => { ++viewGeneration; ++designationGeneration; clearEnrollment(); setAdminRooms([]); LS.adminToken = $("#inAdminToken").value.trim(); $("#inAdminToken").value = LS.adminToken; await verifyToken(); });
+  app.verifyAdminToken = verifyToken;
   $("#btnOpenAdmin").addEventListener("click", () => { app.closePanels(); void open(); });
   $("#btnRefreshAdmin").addEventListener("click", async () => {
     const id = $("#adminRoomSelect").value;
@@ -110,15 +111,9 @@ export function initAdmin(app) {
       setAdminRooms(bindings); renderAdminRooms(); $("#adminRoomSelect").value = roomId;
       await loadBinding(generation);
       if (generation !== viewGeneration || roomId !== $("#adminRoomSelect").value) return;
-      const box = $("#adminEnrollment"), instruction = `admin(action='admin_claim',roomId='${roomId}',enrollmentKey='${result.enrollmentKey}')`, copy = document.createElement("button"), warning = document.createElement("p"), fallback = document.createElement("textarea");
-      warning.textContent = app.t("privateEnrollment", { expires: new Date(result.expiresAt).toLocaleString() });
-      warning.id = "adminEnrollmentHelp"; fallback.className = "input"; fallback.readOnly = true; fallback.rows = 3; fallback.setAttribute("aria-label", app.t("copyEnrollment")); fallback.setAttribute("aria-describedby", warning.id);
-      copy.className = "btn ghost small"; copy.type = "button"; copy.textContent = app.t("copyEnrollment");
-      copy.addEventListener("click", async () => {
-        try { if (!navigator.clipboard?.writeText) throw new Error(); await navigator.clipboard.writeText(instruction); status(app.t("enrollmentCopied")); }
-        catch { fallback.value = instruction; box.replaceChildren(warning, fallback, copy); fallback.focus(); fallback.select(); status(warning.textContent || ""); }
-      });
-      box.replaceChildren(warning, copy); box.hidden = false; $("#btnRevokeAdmin").hidden = false; status("");
+      const box = $("#adminEnrollment"), note = document.createElement("p");
+      note.textContent = app.t("adminDesignated");
+      box.replaceChildren(note); box.hidden = false; $("#btnRevokeAdmin").hidden = false; status("");
     } catch (error) { if (generation === viewGeneration) status(error.message, true); }
     finally { button.disabled = false; }
   });

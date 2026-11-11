@@ -32,7 +32,8 @@ export function initReminders(app) {
       text.textContent = reminder.text; detail.className = "hint";
       const timezone = reminder.schedule.timezone;
       const schedule = reminder.schedule.type === "once" ? formatTime(reminder.schedule.at, timezone) : `${reminder.schedule.expression} · ${timezone}`;
-      detail.textContent = `${schedule}${reminder.paused ? ` · ${app.t("reminderPaused")}` : reminder.nextRunAt ? ` · ${app.t("reminderNext", { time: formatTime(reminder.nextRunAt, timezone) })}` : ""}`;
+      const next = reminder.schedule.type === "cron" && reminder.nextRunAt ? ` · ${app.t("reminderNext", { time: formatTime(reminder.nextRunAt, timezone) })}` : "";
+      detail.textContent = `${schedule}${reminder.paused ? ` · ${app.t("reminderPaused")}` : next}`;
       const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "btn ghost small"; toggle.textContent = app.t(reminder.paused ? "reminderResume" : "reminderPause");
       toggle.addEventListener("click", () => void update(reminder, !reminder.paused));
       const remove = document.createElement("button"); remove.type = "button"; remove.className = "btn ghost small danger-text"; remove.textContent = app.t("reminderDelete");
@@ -51,8 +52,7 @@ export function initReminders(app) {
     } catch (error) { if (current(id, context) && generation === request) status(errorText(error)); }
   }
   function validCron(expression) {
-    const fields = expression.trim().split(/\s+/);
-    return fields.length === 5 && fields.every((field) => /^[0-9*/?,\-]+$/.test(field));
+    return expression.trim().split(/\s+/).length === 5;
   }
   async function update(reminder, paused) {
     const id = roomId(), context = roomGeneration;

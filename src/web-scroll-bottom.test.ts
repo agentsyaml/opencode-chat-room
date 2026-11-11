@@ -36,9 +36,11 @@ test.skipIf(!browserModule)("physical scroll reaches a stable zero-gap thread bo
         const { app } = await import(url), entry = app.state.rooms.get(app.state.room.id);
         entry.unreadIds.set("__Test_stale_unread", { id: "__Test_stale_unread", createdAt: Date.now() });
         app.state.unread = 1; app.updateBadge(); app.updateJump();
-        return { hidden: document.querySelector<HTMLElement>("#btnJump")!.hidden, unread: app.state.unread };
+        app.renderRoomOptions(document.querySelector("#roomList"), app.state.availableRooms || []);
+        return { hidden: document.querySelector<HTMLElement>("#btnJump")!.hidden, unread: app.state.unread,
+          activeBadges: document.querySelectorAll(`#roomList [data-room-id="${app.state.room.id}"] .r-badge`).length };
       }, "/assets/chat/state.js");
-      expect(staleUnread).toEqual({ hidden: true, unread: 1 });
+      expect(staleUnread).toEqual({ hidden: true, unread: 1, activeBadges: 0 });
       const thread = page.locator("#thread"), box = await thread.boundingBox();
       await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.wheel(0, -10000); await page.waitForTimeout(30);
       const scrolledUp = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollTop < node.scrollHeight - node.clientHeight; });
@@ -50,6 +52,7 @@ test.skipIf(!browserModule)("physical scroll reaches a stable zero-gap thread bo
       });
       expect(wheelAwayFromEdge).toBe(false);
       await page.locator("#btnJump").waitFor({ state: "visible" });
+      expect(await page.locator("#jumpBadge").textContent()).toBe("1");
       const jump = await page.evaluate(() => { const button = document.querySelector<HTMLElement>("#btnJump")!, icon = button.firstElementChild!.getBoundingClientRect(), box = button.getBoundingClientRect(); return { width: box.width, height: box.height, radius: getComputedStyle(button).borderRadius, centered: Math.abs(icon.left + icon.width / 2 - (box.left + box.width / 2)) < 1 && Math.abs(icon.top + icon.height / 2 - (box.top + box.height / 2)) < 1, badgePosition: getComputedStyle(document.querySelector("#jumpBadge")!).position }; });
       expect(jump).toEqual({ width: 44, height: 44, radius: "50%", centered: true, badgePosition: "absolute" });
       if (process.env.CHAT_UI_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, `scroll-jump-${width}-dpr-${scale}.png`), fullPage: true });

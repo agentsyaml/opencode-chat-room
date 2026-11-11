@@ -55,6 +55,38 @@ describe.serial("shared-token room management", () => {
     expect((await call(`/rooms/${id}/questions/${questionID}/answers`, "POST", { sessionID: "human", text: "second" })).status).toBe(409);
     expect((await (await call(`/rooms/${id}/questions`)).json() as { questions: unknown[] }).questions).toHaveLength(0);
   });
+  test("clamps a forged queued timestamp to the room tail", async () => {
+    const { id } = await (await call("/rooms", "POST", { name: "queued clamp", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
+    await call(`/rooms/${id}/join`, "POST", { sessionID: "reader", participantId: "reader", participantName: "reader" });
+    const sent = await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "tail" });
+    const tail = (await sent.json() as { messages: Array<{ createdAt: number }> }).messages.at(-1)!.createdAt;
+    expect((await call("/queued", "POST", { roomId: id, sessionID: "reader", ts: Number.MAX_SAFE_INTEGER })).status).toBe(200);
+    expect(await store.readState((_svc, registry) => registry[id]!["reader"]!.lastQueuedTs)).toBe(tail);
+  });
+  test("rejects JSON null bodies with 400 instead of 500", async () => {
+    for (const route of ["/rooms", "/queued", "/active", "/wake-claim", "/read", "/rooms/x/messages", "/rooms/x/join", "/rooms/x/leave"]) {
+      const response = await server.fetch(new Request(`http://local${route}`, {
+        method: "POST", headers: { Authorization: "Bearer management-test-token", "Content-Type": "application/json" }, body: "null",
+      }));
+      expect(`${route} ${response.status}`).toBe(`${route} 400`);
+    }
+    const numericText = await server.fetch(new Request("http://local/rooms/x/messages", {
+      method: "POST", headers: { Authorization: "Bearer management-test-token", "Content-Type": "application/json" }, body: JSON.stringify({ sessionID: "s", text: 5 }),
+    }));
+    expect(numericText.status).toBe(400);
+  });
+  test("consecutive messages get strictly increasing timestamps and the inbox waits at the tail", async () => {
+    const { id } = await (await call("/rooms", "POST", { name: "cursor", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
+    await call(`/rooms/${id}/join`, "POST", { sessionID: "reader", participantId: "reader", participantName: "reader" });
+    const first = (await (await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "one" })).json() as { messages: Array<{ createdAt: number }> }).messages.at(-1)!;
+    const second = (await (await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "two" })).json() as { messages: Array<{ createdAt: number }> }).messages.at(-1)!;
+    expect(second.createdAt).toBeGreaterThan(first.createdAt);
+    const started = Date.now();
+    const page = await (await call(`/inbox?sessionID=reader&roomId=${id}&excludeSelf=0&timeout=300&afterTs=${second.createdAt}`)).json() as { items: unknown[] };
+    expect(Date.now() - started).toBeGreaterThanOrEqual(250);
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(page.items).toEqual([]);
+  });
   test("rejects invalid flags and answers to ordinary or foreign messages", async () => {
     const { id } = await (await call("/rooms", "POST", { name: "validation", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
     await call(`/rooms/${id}/join`, "POST", { sessionID: "human", participantId: "human", participantName: "human" });

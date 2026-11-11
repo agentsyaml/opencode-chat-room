@@ -11,6 +11,8 @@ export function agentHeadersMatch(request: Request, binding: Binding): boolean {
 }
 
 export function hasAdminCapability(request: Request, binding: Binding): boolean {
-  return Boolean(binding.capability_hash && agentHeadersMatch(request, binding) &&
-    matchesHash(request.headers.get("x-chat-admin-capability") ?? "", binding.capability_hash));
+  if (!agentHeadersMatch(request, binding)) return false;
+  // Operator designation is the grant; the optional claim capability is legacy.
+  if (!binding.capability_hash) return true;
+  return matchesHash(request.headers.get("x-chat-admin-capability") ?? "", binding.capability_hash);
 }

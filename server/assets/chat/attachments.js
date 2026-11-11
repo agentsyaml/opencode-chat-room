@@ -112,7 +112,10 @@ export function initAttachments(app) {
     item.cancelled = true; item.xhr?.abort();
     if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
     const remaining = filesFor(id).filter((entry) => entry !== item);
-    if (remaining.length) drafts.set(id, remaining); else { drafts.delete(id); statuses.delete(id); }
+    if (remaining.length) {
+      drafts.set(id, remaining);
+      if (statuses.get(id)?.error && !remaining.some((entry) => entry.status === "failed")) statuses.delete(id);
+    } else { drafts.delete(id); statuses.delete(id); }
     if (roomId() === id) render();
   }
   function clearRoom(id) {

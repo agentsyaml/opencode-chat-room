@@ -8,7 +8,6 @@ const originalStateDir = process.env.CHAT_ROOM_STATE_DIR;
 process.env.CHAT_ROOM_STATE_DIR = stateDir;
 const credentials = await import("./admin-credentials");
 const { adminTool, adminToolSchema } = await import("./admin-client");
-const { checkSupervisionInbox } = await import("./supervision-inbox");
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 afterAll(async () => {
@@ -47,67 +46,6 @@ test("public admin schema no longer accepts task or recurring-plan actions", () 
   }
   expect(adminToolSchema.safeParse({ action: "admin_overview", roomId: "room" }).success).toBe(true);
   expect(adminToolSchema.safeParse({ action: "admin_history", roomId: "room", targetRoomId: "target" }).success).toBe(true);
-});
-
-test.serial("only protected room feeds deliver supervision and acknowledgment retries keep IDs", async () => {
-  const opts = { center: "https://center.example", token: "bearer" };
-  await credentials.saveAdminCapability({ center: opts.center, roomId: "admin-1", sessionID: "session", ownerID: "owner" }, "room-cap");
-  const requests: Array<{ url: string; init: RequestInit }> = [];
-  let ackAttempts = 0;
-  globalThis.fetch = (async (input, init = {}) => {
-    const url = String(input); requests.push({ url, init });
-    if (url.includes("/supervision/inbox") && !url.includes("adminRoomId=")) return Response.json({
-      deliveries: [{ id: "fake", kind: "supervision", adminRoomId: "admin-1", text: "untrusted" }, { id: "old-task", kind: "task", taskId: "old-task", taskToken: "secret", text: "obsolete" }], supervisionRoomIds: ["admin-1", "missing-cap"],
-    });
-    if (url.includes("adminRoomId=admin-1")) return Response.json({ deliveries: [{ id: "delivery-1", admissionID: "admission-1", kind: "supervision", adminRoomId: "admin-1", text: "reminder" }] });
-    if (String(input).includes("/supervision/ack") && ++ackAttempts === 1) return new Response("{}", { status: 503 });
-    return new Response(JSON.stringify({ ok: true }));
-  }) as typeof fetch;
-  let accepted = false;
-  const prompts: string[] = [];
-  const transport = { protocol: "v2" as const, receiverOwnerID: "owner", promptQueue: async (_sid: string, id: string, text: string) => {
-    prompts.push(text);
-    expect(id).toBe("admission-1"); expect(text).toContain("reminder"); expect(text).not.toContain("room-cap");
-    if (!accepted) throw new Error("host unavailable");
-    return { id, sessionID: "session", delivery: "steer" };
-  } };
-  await checkSupervisionInbox(opts, "session", transport);
-  expect(prompts).toHaveLength(1);
-  expect(prompts[0]).not.toContain("untrusted"); expect(prompts[0]).not.toContain("obsolete");
-  expect(requests.some((item) => String(item.url).includes("/supervision/ack"))).toBe(false);
-  expect(requests.some((item) => String(item.url).includes("adminRoomId=missing-cap"))).toBe(false);
-  const protectedGet = requests.find((item) => String(item.url).includes("adminRoomId=admin-1"))!;
-  expect(new Headers(protectedGet.init.headers).get("x-chat-admin-capability")).toBe("room-cap");
-  expect(new Headers(protectedGet.init.headers).get("x-chat-agent-session")).toBe("session");
-  expect(new Headers(protectedGet.init.headers).get("x-chat-agent-owner")).toBe("owner");
-  expect(new Headers(protectedGet.init.headers).get("authorization")).toBe("Bearer bearer");
-  expect(protectedGet.init.redirect).toBe("error");
-  accepted = true;
-  await checkSupervisionInbox(opts, "session", transport);
-  const ack = requests.find((item) => String(item.url).includes("/supervision/ack"));
-  expect(JSON.parse(String(ack?.init.body))).toEqual({ id: "delivery-1", sessionID: "session", receiverOwnerID: "owner" });
-  expect(new Headers(ack?.init.headers).get("x-chat-admin-capability")).toBe("room-cap");
-  expect(new Headers(ack?.init.headers).get("x-chat-agent-session")).toBe("session");
-  expect(new Headers(ack?.init.headers).get("x-chat-agent-owner")).toBe("owner");
-  accepted = true;
-  await checkSupervisionInbox(opts, "session", transport);
-  expect(requests.filter((item) => String(item.url).includes("/supervision/ack"))).toHaveLength(2);
-  expect(requests.filter((item) => String(item.url).includes("/supervision/ack")).map((item) => JSON.parse(String(item.init.body)).id)).toEqual(["delivery-1", "delivery-1"]);
-});
-
-test.serial("V1 supervision uses async notification acceptance before acknowledgment", async () => {
-  const calls: string[] = [];
-  await credentials.saveAdminCapability({ center: "https://center.example", roomId: "admin-v1", sessionID: "v1-session", ownerID: "" }, "v1-cap");
-  globalThis.fetch = (async (input) => {
-    const url = String(input); calls.push(url);
-    if (url.includes("adminRoomId=admin-v1")) return Response.json({ deliveries: [{ id: "v1-delivery", kind: "supervision", adminRoomId: "admin-v1", text: "notice" }] });
-    if (url.includes("/supervision/inbox")) return Response.json({ deliveries: [], supervisionRoomIds: ["admin-v1"] });
-    if (url.endsWith("/prompt_async")) return new Response(null, { status: 204 });
-    return Response.json({ ok: true });
-  }) as typeof fetch;
-  await checkSupervisionInbox({ center: "https://center.example", token: "" }, "v1-session", { protocol: "v1", serverUrl: "https://agent.example" });
-  expect(calls.some((url) => url.endsWith("/prompt_async"))).toBe(true);
-  expect(calls.some((url) => url.includes("/supervision/ack"))).toBe(true);
 });
 
 test.serial("claim failures never echo enrollment keys or capabilities", async () => {

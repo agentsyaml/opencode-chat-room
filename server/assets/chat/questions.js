@@ -7,6 +7,10 @@ export function initQuestions(app) {
   let request = 0;
   const panel = $("#questionPanel"), trigger = $("#btnQuestions"), list = $("#questionList"), status = $("#questionStatus");
   app.isQuestionSending = () => Boolean(questionMode.get(app.state.room?.id));
+  // Undefined until the server list for this room has loaded; callers must not
+  // treat that as "no open questions".
+  app.unansweredQuestionIds = (roomId = app.state.room?.id) => pending.has(roomId)
+    ? new Set((pending.get(roomId) || []).map((item) => item.id)) : undefined;
   $("#questionToggle").addEventListener("change", (event) => {
     if (app.state.room) questionMode.set(app.state.room.id, event.target.checked);
   });
@@ -29,6 +33,9 @@ export function initQuestions(app) {
     const items = pending.get(roomId) || [];
     const active = app.state.room?.id === roomId;
     if (active) {
+      const signature = `${roomId}\0${app.locale}\0${selected.get(roomId) || ""}\0${items.map((question) => `${question.id}\0${question.text}`).join("\u0001")}`;
+      if (list.dataset.signature === signature) { renderReply(roomId); return; }
+      list.dataset.signature = signature;
       $("#questionBadge").textContent = items.length > 99 ? "99+" : String(items.length);
       $("#questionBadge").hidden = !items.length;
       trigger.setAttribute("aria-label", `${app.t("questions")}: ${items.length}`);
@@ -218,6 +225,10 @@ export function initQuestions(app) {
 
   function applyAnswer(roomId, questionId, result) {
     const entry = app.state.rooms.get(roomId);
+    if (entry && result.answer) {
+      const question = entry.room.messages.find((item) => item.id === questionId);
+      if (question) question.answeredByMessageID = result.answer.id;
+    }
     if (entry && result.answer && !entry.room.messages.some((item) => item.id === result.answer.id)) {
       entry.room.messages.push({ ...result.answer, roomId }); entry.room.messages.sort((a, b) => a.createdAt - b.createdAt);
       if (entry.room.messages.length > 500) entry.room.messages.splice(0, entry.room.messages.length - 500);

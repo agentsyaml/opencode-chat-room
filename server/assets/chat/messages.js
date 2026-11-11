@@ -11,6 +11,7 @@ export function initMessages(app) {
 
   app.autoGrow = (textarea) => {
     const thread = $("#thread"), atBottom = Boolean(app.state.room && Math.abs(thread.scrollHeight - thread.clientHeight - thread.scrollTop) < 1);
+    const scrollTop = textarea.scrollTop;
     textarea.style.overflowY = "hidden";
     const style = getComputedStyle(textarea), line = parseFloat(style.lineHeight);
     const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
@@ -25,6 +26,8 @@ export function initMessages(app) {
     const overflow = textarea.scrollHeight > limit + 1;
     textarea.style.height = `${Math.min(textarea.scrollHeight, limit) + border}px`;
     textarea.style.overflowY = overflow ? "auto" : "hidden";
+    // Collapsing the height to measure content resets scrollTop; keep the caret view where it was.
+    if (overflow) textarea.scrollTop = scrollTop;
     if (atBottom) thread.scrollTop = thread.scrollHeight;
   };
   app.updateSendState = () => { $("#btnSend").disabled = !$("#msgInput").value.trim(); };
@@ -100,7 +103,7 @@ export function initMessages(app) {
     app.state.unread = entry ? entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0) : 0;
     app.updateBadge();
     app.updateJump();
-    void app.markActiveRoomRead();
+    void app.markActiveRoomRead(true);
   };
   app.updateJump = () => {
     const thread = $("#thread");
@@ -113,33 +116,55 @@ export function initMessages(app) {
     badge.hidden = app.state.unread === 0;
     app.updateTitle();
   };
-  app.markActiveRoomRead = async () => {
+  app.markActiveRoomRead = async (interactive = false) => {
     const room = app.state.room, entry = room && app.state.rooms.get(room.id);
     const generation = app.state.pollGeneration;
     const thread = $("#thread");
-    if (!room || !entry || document.hidden || !document.hasFocus()
+    if (!room || !entry || document.hidden || (!interactive && !document.hasFocus())
         || thread.scrollHeight - thread.scrollTop - thread.clientHeight >= 80) return;
     if (app.state.readAnchorGuard?.roomId === room.id) {
-      if (performance.now() > app.state.userScrollIntentUntil) return;
+      if (!interactive && performance.now() > app.state.userScrollIntentUntil) return;
       app.state.readAnchorGuard = null;
     }
     const timestamp = room.messages.reduce((latest, message) => Math.max(latest, message.createdAt), entry.readTs);
-    if (!timestamp || timestamp <= entry.readTs) return;
-    try {
-      await app.api("/read", {
-        method: "POST", body: JSON.stringify({ roomId: room.id, sessionID: LS.sessionID, ts: timestamp }),
-      });
-      if (app.state.room?.id !== room.id || app.state.pollGeneration !== generation) return;
-      entry.readTs = timestamp;
-      app.saveReadTs(room.id, timestamp);
-      entry.unreadOverflow = false;
-      for (const [id, message] of entry.unreadIds) if (message.createdAt <= timestamp) entry.unreadIds.delete(id);
-      app.state.unread = entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
+    const unreadBefore = entry.unreadIds.size, overflowBefore = entry.unreadOverflow;
+    let advanced = false;
+    if (timestamp > entry.readTs) {
+      try {
+        await app.api("/read", {
+          method: "POST", body: JSON.stringify({ roomId: room.id, sessionID: LS.sessionID, ts: timestamp }),
+        });
+        if (app.state.room?.id !== room.id || app.state.pollGeneration !== generation) return;
+        entry.readTs = timestamp;
+        app.saveReadTs(room.id, timestamp);
+        entry.unreadOverflow = false;
+        advanced = true;
+      } catch { return; /* The next active poll will retry the read watermark. */ }
+    }
+    // Unanswered questions stay unread until answered.
+    const known = new Map(room.messages.map((message) => [message.id, message]));
+    const answered = new Set(room.messages.filter((message) => message.answerToMessageID).map((message) => message.answerToMessageID));
+    const listed = app.unansweredQuestionIds?.();
+    const open = (message) => {
+      if (!message.isQuestion || message.answeredByMessageID) return false;
+      // A question outside the message window is judged by the server list.
+      return known.has(message.id) ? !answered.has(message.id) : !listed || listed.has(message.id);
+    };
+    for (const [id, message] of entry.unreadIds) {
+      const current = known.get(id) || message;
+      if (current.createdAt <= entry.readTs && !open(current)) entry.unreadIds.delete(id);
+      else if (known.has(id)) entry.unreadIds.set(id, current);
+    }
+    for (const message of room.messages) {
+      if (open(message) && !isOwnMessage(message, app, room)) entry.unreadIds.set(message.id, message);
+    }
+    app.state.unread = entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
+    if (advanced || entry.unreadIds.size !== unreadBefore || entry.unreadOverflow !== overflowBefore) {
       app.updateBadge();
       app.updateJump();
       app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
-    } catch { /* The next active poll will retry the read watermark. */ }
+    }
   };
 
   app.renderMessage = (message, live) => {
@@ -316,11 +341,20 @@ export function initMessages(app) {
       });
       app.completeAttachments?.(room.id, message.ids);
       if (app.state.room?.id !== room.id) return;
-      app.state.room = updated;
       const entry = app.state.rooms.get(room.id);
+      // The POST snapshot is older than anything polling received while it was
+      // in flight; merge instead of dropping those messages.
+      let current = updated;
       if (entry) {
-        entry.room = updated;
-        const latest = updated.messages.at(-1);
+        const merged = new Map([...entry.room.messages, ...updated.messages].map((item) => [item.id, { ...item, roomId: updated.id }]));
+        const messages = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
+        if (messages.length > 500) messages.splice(0, messages.length - 500);
+        current = { ...updated, messages };
+      }
+      app.state.room = current;
+      if (entry) {
+        entry.room = current;
+        const latest = current.messages.at(-1);
         if (latest) setRoomPreview(entry, latest);
       }
       app.renderMessages(true);
@@ -418,6 +452,7 @@ export function initMessages(app) {
        if (added || unreadChanged || entry && previousUnreadOverflow !== entry.unreadOverflow) {
         app.state.unread = entry ? entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0) : app.state.unread + added;
         app.updateBadge();
+        app.updateJump();
       }
       if (rendered.skipped === 0) void app.markActiveRoomRead();
       app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);

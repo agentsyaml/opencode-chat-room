@@ -91,19 +91,16 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     await page.locator("#adminTargetAgent").selectOption("agent-session");
     expect(await page.locator("#adminTargetAgent").inputValue()).toBe("agent-session");
     await page.locator("#btnDesignateAgent").click();
-    await page.locator("#adminEnrollment button").waitFor({ timeout: 3000 }).catch(async () => { throw new Error(await page.locator("#adminStatus").textContent()); });
+    await page.locator("#adminEnrollment").getByText(/immediately|stays until/i).waitFor({ timeout: 3000 }).catch(async () => { throw new Error(await page.locator("#adminStatus").textContent()); });
     expect(await page.locator("#activeAdminBadge").isVisible()).toBe(true);
     expect(await page.locator("#roomListChat .room-admin-badge").count()).toBe(1);
     expect(await page.locator("body").innerText()).not.toContain("operator-secret");
     expect(await page.locator("#adminEnrollment code").count()).toBe(0);
-    expect(await page.locator("#adminEnrollment").innerText()).toMatch(/private|privately/i);
+    expect(await page.locator("#adminEnrollment").innerText()).toMatch(/immediately|stays until/i);
     expect(await page.locator("#adminEnrollment").innerText()).not.toContain("admin(action=");
     expect(await page.locator("#adminEnrollment textarea").count()).toBe(0);
+    expect(await page.locator("#adminEnrollment button").count()).toBe(0);
     if (process.env.CHAT_UI_SCREENSHOT_DIR) { await mkdir(process.env.CHAT_UI_SCREENSHOT_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, "admin-panel-desktop.png"), fullPage: true }); }
-    await page.locator("#adminEnrollment button").click();
-    const manualInstruction = `admin(action='admin_claim',roomId='${roomId}',enrollmentKey='private-key')`;
-    expect(await page.locator("#adminEnrollment textarea").inputValue()).toBe(manualInstruction);
-    expect(await page.locator("#adminEnrollment textarea").evaluate((field: HTMLTextAreaElement) => ({ readOnly: field.readOnly, selected: field.selectionStart === 0 && field.selectionEnd === field.value.length }))).toEqual({ readOnly: true, selected: true });
     expect(adminPaths.some((pathname) => /\/(overview|tasks|plans)(\/|$)/.test(pathname))).toBe(false);
     page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#btnRevokeAdmin").click();
     await page.locator("#btnRevokeAdmin").waitFor({ state: "hidden" });
@@ -175,18 +172,14 @@ test.skipIf(!browserModule)("admin UI binds agents and privately claims designat
     await page.locator("#btnDesignateAgent").click();
     const enrollment = await issuedResult;
     expect(enrollment.adminRoom).toMatchObject({ roomId, targetRoomId: roomId, sessionID: agentSession, receiverOwnerID: ownerID, membershipID, enrolled: false });
-    await page.locator("#adminEnrollment button").waitFor();
-    expect(await page.locator("#adminEnrollment code").count()).toBe(0);
-    expect(await page.locator("#adminEnrollment").innerText()).toMatch(/private|privately/i);
-    await page.locator("#adminEnrollment button").click();
-    const instruction = await page.evaluate(() => navigator.clipboard.readText());
-    expect(instruction).toBe(`admin(action='admin_claim',roomId='${roomId}',enrollmentKey='${enrollment.enrollmentKey}')`);
-    expect(instruction).not.toContain(adminToken);
-    const claim = await page.evaluate(async (input: { roomId: string; sessionID: string; receiverOwnerID: string; enrollmentKey: string }) => {
-      const response = await fetch(`/admin/rooms/${input.roomId}/claim`, { method: "POST", headers: { Authorization: "Bearer ui-test-token", "Content-Type": "application/json" }, body: JSON.stringify({ sessionID: input.sessionID, receiverOwnerID: input.receiverOwnerID, enrollmentKey: input.enrollmentKey }) });
-      return { status: response.status, body: await response.json() };
-    }, { roomId, sessionID: agentSession, receiverOwnerID: ownerID, enrollmentKey: enrollment.enrollmentKey });
-    expect(claim.status).toBe(200); expect(claim.body.adminRoom.enrolled).toBe(true); expect(claim.body.capability).toBeTruthy();
+    await page.locator("#adminEnrollment").getByText(/immediately|stays until/i).waitFor();
+    expect(await page.locator("#adminEnrollment button").count()).toBe(0);
+    expect(await page.locator("#adminEnrollment textarea").count()).toBe(0);
+    const direct = await fetch(`${origin}/admin/rooms/${roomId}/overview`, {
+      headers: { Authorization: `Bearer ${bearer}`, "x-chat-agent-session": agentSession, "x-chat-agent-owner": ownerID },
+    });
+    expect(direct.status).toBe(200);
+    expect((await direct.json() as { rooms: unknown[] }).rooms.length).toBeGreaterThan(0);
     expect(adminPaths.some((pathname) => /\/(overview|tasks|plans)(\/|$)/.test(pathname))).toBe(false);
     expect(await page.locator("#adminRoomSelect").inputValue()).toBe(roomId);
     page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#btnRevokeAdmin").click();

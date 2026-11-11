@@ -13,12 +13,15 @@ export async function watchRoom(roomId, app) {
     if (result.member !== true || !Array.isArray(result.items) || app.state.room?.id === roomId) return;
     const previousReceivedTs = entry.receivedTs || 0;
     const sawSystem = result.items.some((message) => message.senderId === "system");
+    const before = new Set(entry.room.messages.map((message) => message.id));
     for (const message of result.items) {
-      if (!isOwnMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
-      if (!entry.room.messages.some((item) => item.id === message.id)) entry.room.messages.push({ ...message, roomId });
+      if (message.createdAt > entry.readTs && !isOwnMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
+      if (message.answerToMessageID && entry.unreadIds.get(message.answerToMessageID)?.isQuestion) entry.unreadIds.delete(message.answerToMessageID);
+      if (!before.has(message.id)) entry.room.messages.push({ ...message, roomId });
       if (message.createdAt >= entry.previewAt) setRoomPreview(entry, message);
     }
     entry.receivedTs = result.items.reduce((latest, message) => Number.isSafeInteger(message.createdAt) ? Math.max(latest, message.createdAt) : latest, previousReceivedTs);
+    entry.unreadOverflow = Boolean(result.hasMore);
     if (sawSystem || result.hasMore) {
       const latest = await app.api(`/rooms/${encodeURIComponent(roomId)}`);
       if (app.state.rooms.get(roomId) !== entry || app.state.room?.id === roomId) return;
@@ -26,8 +29,13 @@ export async function watchRoom(roomId, app) {
       entry.room.messages = [...new Map([...entry.room.messages, ...latest.messages].map((message) => [message.id, message])).values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500);
       const newest = latest.messages.at(-1);
       if (newest && newest.createdAt >= entry.previewAt) setRoomPreview(entry, newest);
+      // A full refresh pages past the inbox window; count what arrived since the last look.
+      for (const message of latest.messages) {
+        if (message.answeredByMessageID) entry.unreadIds.delete(message.id);
+        if (message.createdAt > previousReceivedTs && message.createdAt > entry.readTs && !isOwnMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
+      }
+      if (newest && Number.isSafeInteger(newest.createdAt)) entry.receivedTs = Math.max(entry.receivedTs, newest.createdAt);
     }
-    entry.unreadOverflow = Boolean(result.hasMore);
     if (entry.room.messages.length > 500) entry.room.messages.splice(0, entry.room.messages.length - 500);
     if (result.hasMore && entry.receivedTs > previousReceivedTs) await watchRoom(roomId, app);
   } catch (error) {

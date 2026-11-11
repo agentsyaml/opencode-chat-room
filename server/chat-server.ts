@@ -8,7 +8,7 @@ import RoomService, {
   type Message,
   type Room,
 } from "../src/room-service";
-import { answerQuestion, sendReply, readQuestions, readState, writeState, type Registry, type RegistryEntry } from "../src/store";
+import { acknowledgeQueued, answerQuestion, appendRoomMessage, sendReply, readQuestions, readState, writeState, type Registry, type RegistryEntry } from "../src/store";
 import {
   admissionMatches,
   clearPendingAdmission,
@@ -17,6 +17,7 @@ import { readInbox } from "./inbox";
 import { isReceiverOwnerID } from "../src/receiver-owner";
 import { claimWake, touchActive, wakeMentionedSessions } from "./wake";
 import { historyRoute } from "./history-route";
+import { jsonObject } from "./json-body";
 import { roomManagement } from "./newrooms";
 import { memberRoutes } from "./member-routes";
 import { resourceRoutes } from "./resource-routes";
@@ -161,7 +162,8 @@ async function handle(req: Request): Promise<Response> {
     const management = await roomManagement(req, url);
     if (management) return management;
     if (req.method === "POST" && p === "/rooms") {
-      const body = (await req.json()) as Record<string, string>;
+      const body = await jsonObject<Record<string, string>>(req);
+      if (!body) return json({ error: "JSON object body is required" }, 400);
       if (body.protocol !== undefined && body.protocol !== "v2" || body.receiverOwnerID !== undefined && !isReceiverOwnerID(body.receiverOwnerID)) {
         return json({ error: "invalid receiver ownership" }, 400);
       }
@@ -226,13 +228,14 @@ async function handle(req: Request): Promise<Response> {
       while (result.items.length === 0 && Date.now() < deadline) {
         // ponytail: 2s between disk scans (orc-1 #7) — 1s × 25 iterations
         // doubles the file reads on shared-mount deployments
-        await sleep(2000);
+        await sleep(Math.max(1, Math.min(2000, deadline - Date.now())));
         result = await readInbox(sessionID, roomFilter, excludeSelf, afterTs);
       }
       return json(result);
     }
     if (req.method === "POST" && p === "/queued") {
-      const body = (await req.json()) as Record<string, unknown>;
+      const body = await jsonObject<Record<string, unknown>>(req);
+      if (!body) return json({ error: "JSON object body is required" }, 400);
       const ts = Number(body.ts);
       const roomId = String(body.roomId ?? "");
       const sessionID = String(body.sessionID ?? "");
@@ -245,32 +248,28 @@ async function handle(req: Request): Promise<Response> {
       ) {
         return json({ error: "roomId/sessionID/finite ts are required" }, 400);
       }
-      const updated = await writeState((_svc, reg) => {
-        const entry = reg[roomId]?.[sessionID];
-        if (!entry) {
-          return false;
-        }
-        entry.lastQueuedTs = Math.max(entry.lastQueuedTs ?? 0, ts);
-        return true;
-      });
-      if (!updated) {
+      // Clamp to the room tail so a forged future ts cannot silence delivery.
+      const updated = await acknowledgeQueued(roomId, sessionID, ts);
+      if (updated === null) {
         return json({ error: "registry entry not found" }, 404);
       }
-      clearPendingAdmission(sessionID, roomId, ts);
+      clearPendingAdmission(sessionID, roomId, updated);
       touchActive(sessionID);
       return json({ ok: true });
     }
     if (req.method === "POST" && p === "/active") {
       // ponytail: 活跃上报——插件对"进程内自推成功"的 session 调用（真实
       // 活跃）；服务器据此避免 serve 双唤起
-      const body = (await req.json()) as Record<string, unknown>;
+      const body = await jsonObject<Record<string, unknown>>(req);
+      if (!body) return json({ error: "JSON object body is required" }, 400);
       touchActive(String(body.sessionID ?? ""));
       return json({ ok: true });
     }
     if (req.method === "POST" && p === "/wake-claim") {
       // ponytail: atomic cross-process wake dedupe (see claimWake) — the
       // server only arbitrates, it never spawns anything itself
-      const body = (await req.json()) as Record<string, unknown>;
+      const body = await jsonObject<Record<string, unknown>>(req);
+      if (!body) return json({ error: "JSON object body is required" }, 400);
       const sessionID = String(body.sessionID ?? "");
       const ok = claimWake(sessionID);
       return json({ ok });
@@ -278,7 +277,8 @@ async function handle(req: Request): Promise<Response> {
     const m = p.match(/^\/rooms\/([^/]+)\/(join|leave|messages)$/);
     if (m) {
       const roomId = decodeURIComponent(m[1]!);
-      const body = (await req.json()) as Record<string, string>;
+      const body = await jsonObject<Record<string, string>>(req);
+      if (!body) return json({ error: "JSON object body is required" }, 400);
       const sessionID = typeof body.sessionID === "string" ? body.sessionID : "";
       if (req.method === "POST" && m[2] === "join") {
         if (body.protocol !== undefined && body.protocol !== "v2" || body.receiverOwnerID !== undefined && !isReceiverOwnerID(body.receiverOwnerID)) {
@@ -380,7 +380,7 @@ async function handle(req: Request): Promise<Response> {
         const isQuestion = (body as Record<string, unknown>).isQuestion;
         if (isQuestion !== undefined && typeof isQuestion !== "boolean") return json({ error: "isQuestion must be a boolean" }, 400);
         // ponytail: F3 — mirror the plugin's zod limit at the HTTP boundary
-        const text = (body.text ?? "").trim();
+        const text = typeof body.text === "string" ? body.text.trim() : "";
         if (!text) {
           return json({ error: "text is required" }, 400);
         }
@@ -402,26 +402,15 @@ async function handle(req: Request): Promise<Response> {
           void wakeMentionedSessions(serveWakeUrl, roomId, room.name, text, sessionID, result.message);
           return json(serializeRoom(room), 201);
         }
-        const room = await mutate((svc, reg) => {
-          const senderEntry = reg[roomId]?.[sessionID];
-          if (!senderEntry) throw new RoomError("NOT_JOINED", "session is not a room member");
-          const sender = svc.getRoom(roomId).kind === "direct" ? sessionID : senderEntry.name;
-          svc.sendMessage(roomId, sender, text, sessionID, isQuestion === true);
-          return svc.getRoom(roomId);
-        });
-        touchActive(sessionID); // 发送者活跃
-        // ponytail: 即时唤起——仅 @ 点名成员时（核心需求）
-        const sent = room.messages.at(-1);
-        if (sent) {
-          void wakeMentionedSessions(
-            serveWakeUrl,
-            roomId,
-            room.name,
-            text,
-            sessionID,
-            sent,
-          );
+        const result = await appendRoomMessage(roomId, sessionID, text, isQuestion === true);
+        if (result.status !== "ok") {
+          if (result.status === "missing") return json({ error: "room not found" }, 404);
+          return json({ error: "session is not a room member" }, 409);
         }
+        touchActive(sessionID); // 发送者活跃
+        const room = await read((svc) => svc.getRoom(roomId));
+        // ponytail: 即时唤起——仅 @ 点名成员时（核心需求）
+        void wakeMentionedSessions(serveWakeUrl, roomId, room.name, text, sessionID, result.message);
         return json(serializeRoom(room), 201);
       }
     }

@@ -87,6 +87,8 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
     await page.locator(".reminder-list li").waitFor();
     expect(calls.findLast((call) => call.method === "POST")?.body.schedule).toEqual({ type: "once", at: "2027-12-15T09:20:00" });
     expect(await page.locator(".reminder-list li .hint").last().textContent()).toContain("UTC");
+    // A one-shot reminder has no next run to show.
+    expect(await page.locator(".reminder-list li .hint").last().textContent()).not.toMatch(/next/i);
     await page.locator("#reminderText").fill("Explicit zone reminder");
     await page.locator("#reminderAt").fill("2027-12-20T09:20");
     await page.locator("#reminderTimezone").fill("Asia/Tokyo");

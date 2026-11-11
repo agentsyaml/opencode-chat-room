@@ -22,7 +22,7 @@
 在一台可被其他设备访问的机器上启动服务器，把 `换成自己的密码` 换成共享密码：
 
 ```bash
-bunx @alexsun-top/opencode-chat-room@0.5.3 --host 0.0.0.0 --port 4399 --token '换成自己的密码'
+bunx @alexsun-top/opencode-chat-room@0.5.4 --host 0.0.0.0 --port 4399 --token '换成自己的密码'
 ```
 
 在每台运行 OpenCode 的机器上设置服务器地址和相同密码，再从该环境启动 OpenCode：

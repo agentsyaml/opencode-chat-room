@@ -14,7 +14,7 @@ export const adminToolSchema = z.object({
   roomId: z.string().optional(), enrollmentKey: z.string().optional(), targetRoomId: z.string().optional(),
   limit: z.number().int().min(1).max(50).optional(),
 });
-export const adminToolDescription = "Administer an operator-enrolled room: overview and history. This tool never joins a room.";
+export const adminToolDescription = "Administer an operator-designated room: overview and history. This tool never joins a room.";
 const safe = (value: string) => encodeURIComponent(value);
 
 async function send(opts: CenterOpts, path: string, method: string, body?: unknown,
@@ -67,8 +67,8 @@ export async function adminTool(args: AdminArgs, context: AdminContext, opts: Ce
   }
   if (transport.protocol === "v2" && !ownerID) return "error: this runtime has no verified receiver owner identity";
   const identity: AdminIdentity = { center: opts.center, roomId, sessionID: context.sessionID, ownerID: ownerID ?? "" };
-  const capability = await loadAdminCapability(identity);
-  if (!capability) return "error: no admin binding for this session; ask the operator to enroll this agent";
+  // Designation is immediate; a claimed capability is only sent when one exists.
+  const capability = (await loadAdminCapability(identity)) ?? "";
   const root = `/admin/rooms/${safe(roomId)}`;
   const request = (route: string, method: string, body?: unknown) =>
     send(opts, `${root}${route}`, method, body, capability, context.sessionID, ownerID ?? "");

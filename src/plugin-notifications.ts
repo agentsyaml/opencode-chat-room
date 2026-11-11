@@ -96,10 +96,11 @@ export function createNotifier(deps: {
     const service = backgroundServiceKey(targetTransport);
     const cutoff = Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0);
     prunePendingAdmission(sessionID, batch.roomId, cutoff, (items) => render(batch, entry.name, roomKind, items));
-    const unread = batch.messages.filter((m) =>
+    const unreadAll = batch.messages.filter((m) =>
       m.createdAt > cutoff &&
       (m.senderSessionID !== undefined ? m.senderSessionID !== sessionID : m.senderId !== (roomKind === "direct" ? sessionID : entry.name)),
-    ).slice(0, 20).map((item) => ({ ...item, roomKind }));
+    );
+    const unread = unreadAll.slice(-20).map((item) => ({ ...item, roomKind }));
     const existing = pendingAdmission(sessionID, batch.roomId);
     if (!unread.length && existing?.state !== "pending") return undefined;
     const maxTs = unread.reduce((max, m) => Math.max(max, m.createdAt), 0);
@@ -108,7 +109,7 @@ export function createNotifier(deps: {
       : unread;
     const eligibleItems = existing?.state === "pending" ? existing.items : delta.slice(-20);
     if (mentionOnly && !eligibleItems.some((message) => explicitlyAddresses(message, entry.name, sessionID, roomKind)) &&
-      !delta.slice(-20).some((message) => explicitlyAddresses(message, entry.name, sessionID, roomKind))) return undefined;
+      !unreadAll.some((message) => explicitlyAddresses(message, entry.name, sessionID, roomKind))) return undefined;
     const base = entry.serverUrl ? new URL(entry.serverUrl) : undefined;
     const prefix = entry.protocol === "v2" ? (entry.apiPrefix || "/api").replace(/^\/+|\/+$/g, "") : "";
     const endpoint = entry.protocol === "v2" ? "prompt" : "prompt_async";

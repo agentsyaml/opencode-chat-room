@@ -27,7 +27,10 @@ function mime(bytes: Uint8Array): string {
   if (String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WAVE") return "audio/wav";
   if (String.fromCharCode(...bytes.slice(0, 3)) === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0)) return "audio/mpeg";
   if (String.fromCharCode(...bytes.slice(0, 4)) === "OggS") return "audio/ogg";
-  if (String.fromCharCode(...bytes.slice(4, 8)) === "ftyp") return "video/mp4";
+  if (String.fromCharCode(...bytes.slice(4, 8)) === "ftyp") {
+    const brand = String.fromCharCode(...bytes.slice(8, 12));
+    return brand === "avif" || brand === "avis" ? "image/avif" : "video/mp4";
+  }
   if (starts(0x1a, 0x45, 0xdf, 0xa3)) return "video/webm";
   return "application/octet-stream";
 }

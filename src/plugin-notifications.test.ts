@@ -332,6 +332,26 @@ describe.serial("local V2 notification admission", () => {
     expect(acknowledged).toBe(20);
   });
 
+  test("a restored local mention beyond the first 20 unread messages still wakes", async () => {
+    const room = `room-${crypto.randomUUID()}`;
+    const ownerID = "123e4567-e89b-42d3-a456-426614174001";
+    await setRegistry({ [room]: { [sessionID]: {
+      serverUrl: "", apiPrefix: "/api", protocol: "v2", receiverOwnerID: ownerID, name: "bob", lastReadTs: 0,
+    } } });
+    const messages = Array.from({ length: 25 }, (_, index) => ({
+      ...msg, id: `note-${index}`, roomId: room, text: `ordinary note ${index}`, createdAt: index + 1,
+    }));
+    messages.push({ ...msg, id: "late-mention", roomId: room, text: "@bob late mention", createdAt: 30 });
+    let notification = "";
+    const target = notifier({ protocol: "v2", receiverOwnerID: ownerID, mentionOnlySessions: new Set([sessionID]),
+      promptQueue: async (sid, id, text, delivery) => { notification = text; return { id, sessionID: sid, delivery }; },
+    }, async () => true);
+    await target.notifyTarget(sessionID, { roomId: room, roomName: "dev", messages });
+    expect(notification).toContain("@bob late mention");
+    expect(notification).toContain("ordinary note 24");
+    expect(notification).not.toContain("ordinary note 0");
+  });
+
   test("a new mention retries the original pending admission before steering its own message", async () => {
     const room = `room-${crypto.randomUUID()}`;
     const ownerID = "123e4567-e89b-42d3-a456-426614174000";

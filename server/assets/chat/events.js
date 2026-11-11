@@ -61,6 +61,7 @@ export function initEvents(app) {
     const readTs = entry?.readTs || app.state.lastReadTs.get(roomId) || 0;
     const boundary = readTs && entry?.room.messages.find((message) => message.createdAt > readTs);
     if (boundary && align(boundary.id, 0)) return { messageId: boundary.id };
+    if (!saved && !boundary) return false;
     return saved?.messageId || readTs ? { messageId: saved?.messageId || null, missing: true } : false;
   };
   function closeRoomDrawer(restore = true) {
@@ -227,6 +228,9 @@ export function initEvents(app) {
     if (event.deltaY < 0 && thread.scrollTop <= 0 || event.deltaY > 0 && gap <= 2) event.preventDefault();
   }, { passive: false });
   thread.addEventListener("touchmove", markScrollIntent, { passive: true });
+  thread.addEventListener("keydown", (event) => {
+    if (/^(PageDown|PageUp|End|Home|ArrowDown|ArrowUp| )$/.test(event.key)) markScrollIntent();
+  });
   thread.addEventListener("pointerdown", (event) => {
     if (event.clientX >= thread.getBoundingClientRect().right - 18) markScrollIntent();
   });
@@ -234,7 +238,7 @@ export function initEvents(app) {
     const adjusting = (app.state.resizeScrollAdjusting || app.state.layoutScrollAdjusting)
       && performance.now() > app.state.userScrollIntentUntil;
     if (!adjusting || performance.now() <= app.state.userScrollIntentUntil) captureReadingPosition();
-    if (!adjusting && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80) void app.markActiveRoomRead();
+    if (!adjusting && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80) void app.markActiveRoomRead(performance.now() <= app.state.userScrollIntentUntil);
     app.queueReceiptRefresh();
     if (!adjusting) app.queueReceiptObservation();
     app.updateJump();
@@ -327,6 +331,7 @@ function saveAccessToken(button, app) {
   try { persistent = localStorage.getItem("chat.token") === LS.token; } catch { /* Memory fallback is tab-scoped. */ }
   app.flash(button, persistent ? "saved" : "savedMemory");
   void app.refreshRoomList();
+  void app.verifyAdminToken?.();
   app.retryPendingAction();
 }
 

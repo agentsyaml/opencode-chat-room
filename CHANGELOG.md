@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.4 — 2026-11-11
+
+- Keep unanswered questions unread, including when they are answered from another room, and stop own messages from raising unread counts. The sidebar badge now clears once the conversation is read.
+- Fix the first character being dropped when typing with an IME, and keep the caret stable after inserting a mention.
+- Merge a send response with the polling result so a stale snapshot no longer erases newer messages.
+- Make timestamps increase monotonically inside the write transaction and resume long polling from the exact cursor.
+- Write sends, read acknowledgements, and queued watermarks directly instead of rewriting the whole state file.
+- Keep per-room drafts, including mentions, and restore them after a reload.
+- Show the next run only for recurring reminders; one-shot reminders show just their trigger time.
+- Preview attachments you sent automatically and keep other people's attachments collapsed.
+- Increase text selection contrast with an inverted accent background in both themes.
+- Designate administrators in one step: the designation applies immediately and stays until revoked. The enrollment code and claim step are gone; existing claimed capabilities keep working.
+- Render AVIF images and show a visible banner when an attachment upload fails.
+- Stop rebuilding the question panel every few seconds and fix the CRON timezone label.
+- Reject malformed JSON bodies with 400 instead of failing with 500.
+- Re-check the operator token on every admin request and cap the in-memory wake table.
+- Trim the queued watermark per room and remove the unused supervision inbox.
+
 ## 0.5.3 — 2026-11-11
 
 - Fix reply preview overflow and add an accessible cancel button and reply icon.

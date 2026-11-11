@@ -4,7 +4,7 @@
 import path from "node:path";
 import os from "node:os";
 import RoomService, { type Message, type Room } from "./room-service";
-import { answerQuestion as sqliteAnswerQuestion, sendReply as sqliteSendReply, readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestionExcerpt as sqliteQuestionExcerpt, readQuestions as sqliteReadQuestions, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state";
+import { acknowledgeQueued as sqliteAcknowledgeQueued, acknowledgeRead as sqliteAcknowledgeRead, answerQuestion as sqliteAnswerQuestion, appendRoomMessage as sqliteAppendRoomMessage, sendReply as sqliteSendReply, readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestionExcerpt as sqliteQuestionExcerpt, readQuestions as sqliteReadQuestions, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state";
 
 export function statePath(): string {
   // JSON path remains the migration source; SQLite lives beside it.
@@ -35,8 +35,11 @@ export async function readHistory(roomID: string, beforeSeq?: number, limit = 10
   return readHistoryPage(databasePath(), roomID, beforeSeq, limit, exclude?.sessionID, exclude?.name);
 }
 export async function readQuestions(roomID: string): Promise<Message[]> { return sqliteReadQuestions(databasePath(), roomID); }
+export function acknowledgeRead(roomID: string, sessionID: string, ts: number) { return sqliteAcknowledgeRead(databasePath(), roomID, sessionID, ts); }
+export function acknowledgeQueued(roomID: string, sessionID: string, ts: number) { return sqliteAcknowledgeQueued(databasePath(), roomID, sessionID, ts); }
 export async function answerQuestion(roomID: string, questionID: string, sessionID: string, text: string) { return sqliteAnswerQuestion(databasePath(), roomID, questionID, sessionID, text); }
 export async function sendReply(roomID: string, targetID: string, sessionID: string, text: string) { return sqliteSendReply(databasePath(), roomID, targetID, sessionID, text); }
+export function appendRoomMessage(roomID: string, sessionID: string, text: string, isQuestion: boolean) { return sqliteAppendRoomMessage(databasePath(), roomID, sessionID, text, isQuestion); }
 export async function readQuestionExcerpt(roomID: string, questionID: string) { return sqliteQuestionExcerpt(databasePath(), roomID, questionID); }
 
 export async function loadRooms(): Promise<Room[]> {

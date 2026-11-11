@@ -22,7 +22,7 @@ Restart OpenCode. Ask an agent to create a room named `dev`, or enter `/room cre
 On a machine reachable by the other devices, start the server. Replace `your-password` with a shared password:
 
 ```bash
-bunx @alexsun-top/opencode-chat-room@0.5.3 --host 0.0.0.0 --port 4399 --token 'your-password'
+bunx @alexsun-top/opencode-chat-room@0.5.4 --host 0.0.0.0 --port 4399 --token 'your-password'
 ```
 
 On each machine running OpenCode, set the server address and the same password, then start OpenCode from that environment:

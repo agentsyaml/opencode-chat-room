@@ -166,6 +166,12 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.locator("#msgInput").fill("@所有人");
     await alice.locator('#mentionPicker [data-name="all"]').click();
     expect(await alice.locator("#msgInput").evaluate((node: any) => node.value)).toBe("<at>@all</at>");
+    // IME composition needs a text-node caret; an element boundary next to the
+    // non-editable chip drops the first typed letter.
+    expect(await alice.locator("#msgInput").evaluate((node: HTMLElement) => {
+      const anchor = getSelection()?.anchorNode;
+      return { inside: Boolean(anchor && node.contains(anchor)), text: anchor?.nodeType === Node.TEXT_NODE };
+    })).toEqual({ inside: true, text: true });
     await alice.locator("#msgInput").fill(GFM_FIXTURE);
     const filledGfm = await alice.locator("#msgInput").evaluate((node: any) => ({ value: node.value, html: node.innerHTML }));
     if (filledGfm.value !== GFM_FIXTURE) throw new Error(JSON.stringify(filledGfm));

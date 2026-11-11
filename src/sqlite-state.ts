@@ -360,6 +360,24 @@ export async function answerQuestion(file: string, roomID: string, questionID: s
   });
 }
 
+export async function appendRoomMessage(file: string, roomID: string, sessionID: string, text: string, isQuestion: boolean): Promise<{ status: "ok"; message: Message } | { status: "missing" | "member" }> {
+  const db = await openStateDatabase(file);
+  return immediate(db, () => {
+    if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return { status: "missing" };
+    const member = db.query("SELECT g.name,r.kind FROM registry g JOIN rooms r ON r.id=g.room_id JOIN participants p ON p.room_id=g.room_id AND p.id=CASE WHEN r.kind='direct' THEN g.session_id ELSE g.name END WHERE g.room_id=? AND g.session_id=?").get(roomID, sessionID) as { name: string; kind: string } | null;
+    if (!member) return { status: "member" };
+    const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(roomID) as { created_at: number } | null;
+    const message: Message = {
+      id: randomUUID(), roomId: roomID, senderId: member.kind === "direct" ? sessionID : member.name,
+      senderSessionID: sessionID, text, createdAt: Math.max(Date.now(), (tail?.created_at ?? 0) + 1),
+      ...(isQuestion ? { isQuestion: true } : {}),
+    };
+    db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question) VALUES(?,?,?,?,?,?,?)")
+      .run(message.id, roomID, message.senderId, sessionID, text, message.createdAt, isQuestion ? 1 : 0);
+    return { status: "ok", message };
+  });
+}
+
 export async function sendReply(file: string, roomID: string, targetID: string, sessionID: string, text: string): Promise<{ status: "ok"; message: Message } | { status: "missing" | "member" | "target" | "question" }> {
   const db = await openStateDatabase(file);
   return immediate(db, () => {
@@ -448,6 +466,28 @@ export async function readMessageReceipts(file: string, roomID: string, messageI
     for (const row of rows) grouped.get(String(row.message_id))?.push({ sessionID: String(row.session_id), name: String(row.name), evidence: String(row.evidence) as ReceiptEvidence, readAt: Number(row.read_at) });
     return ids.map((messageID) => ({ messageID, readers: grouped.get(messageID)! }));
   }).deferred();
+}
+
+export async function acknowledgeQueued(file: string, roomID: string, sessionID: string, ts: number): Promise<number | null> {
+  const db = await openStateDatabase(file);
+  return immediate(db, () => {
+    if (!db.query("SELECT 1 FROM registry WHERE room_id=? AND session_id=?").get(roomID, sessionID)) return null;
+    const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(roomID) as { created_at: number } | null;
+    const capped = Math.min(ts, tail?.created_at ?? 0);
+    db.query("UPDATE registry SET last_queued_ts=max(coalesce(last_queued_ts,0),?) WHERE room_id=? AND session_id=?").run(capped, roomID, sessionID);
+    return capped;
+  });
+}
+
+export async function acknowledgeRead(file: string, roomID: string, sessionID: string, ts: number): Promise<number | null> {
+  const db = await openStateDatabase(file);
+  return immediate(db, () => {
+    if (!db.query("SELECT 1 FROM registry WHERE room_id=? AND session_id=?").get(roomID, sessionID)) return null;
+    const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(roomID) as { created_at: number } | null;
+    const actualTs = Math.min(ts, tail?.created_at ?? 0);
+    if (actualTs > 0) db.query("UPDATE registry SET last_read_ts=max(coalesce(last_read_ts,0),?) WHERE room_id=? AND session_id=?").run(actualTs, roomID, sessionID);
+    return actualTs;
+  });
 }
 
 export async function writeMessageReceipts(file: string, roomID: string, sessionID: string, messageIDs: string[], evidence: ReceiptEvidence, identity: ReceiptIdentity, readAt: number, readThroughTs?: number): Promise<ReceiptWriteResult> {

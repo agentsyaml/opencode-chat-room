@@ -1,9 +1,10 @@
 import { memberActivity, type WorkState } from "../src/member-state";
-import { acknowledgeReadWithReceipts, readReceipts, readState, recordMessageReceipts, reportPresence, writeState, type ReceiptEvidence, type ReceiptIdentity } from "../src/store";
+import { acknowledgeRead, acknowledgeReadWithReceipts, readReceipts, readState, recordMessageReceipts, reportPresence, type ReceiptEvidence, type ReceiptIdentity } from "../src/store";
 import { isReceiverOwnerID } from "../src/receiver-owner";
 import { clearPendingAdmission } from "../src/queue";
 import { touchActive } from "./wake";
 import { announcementRoutes } from "./announcement-routes";
+import { jsonObject } from "./json-body";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const states = new Set<WorkState>(["working", "idle", "waiting", "unknown"]);
@@ -17,7 +18,8 @@ export async function memberRoutes(req: Request, url: URL): Promise<Response | u
   const announcements = await announcementRoutes(req, url);
   if (announcements) return announcements;
   if (req.method === "POST" && url.pathname === "/read") {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await jsonObject<Record<string, unknown>>(req);
+    if (!body) return json({ error: "JSON object body is required" }, 400);
     const ts = body.ts;
     const roomId = String(body.roomId ?? "");
     const sessionID = String(body.sessionID ?? "");
@@ -48,15 +50,11 @@ export async function memberRoutes(req: Request, url: URL): Promise<Response | u
       touchActive(sessionID);
       return json({ ok: true, acceptedIDs: result.acceptedIDs });
     }
-    const updated = await writeState((svc, reg) => {
-      const entry = reg[roomId]?.[sessionID];
-      if (!entry) return false;
-      const actualTs = Math.min(ts, svc.getMessages(roomId).at(-1)?.createdAt ?? 0);
-      if (actualTs > 0) entry.lastReadTs = Math.max(entry.lastReadTs ?? 0, actualTs);
-      return { actualTs };
-    });
-    if (!updated) return json({ error: "registry entry not found" }, 404);
-    clearPendingAdmission(sessionID, roomId, updated.actualTs);
+    // Read watermark is the hottest write path; update the registry row directly
+    // instead of rewriting every room and message.
+    const actualTs = await acknowledgeRead(roomId, sessionID, ts);
+    if (actualTs === null) return json({ error: "registry entry not found" }, 404);
+    clearPendingAdmission(sessionID, roomId, actualTs);
     touchActive(sessionID);
     return json({ ok: true });
   }

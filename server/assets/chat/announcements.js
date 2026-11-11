@@ -54,7 +54,14 @@ export function initAnnouncements(app) {
       items = Array.isArray(result.announcements) ? result.announcements : [];
       status("");
       const chosen = items.find((item) => item.name === selected);
-      if (!chosen) select(null); else select(chosen);
+      if (!chosen) {
+        const stale = selected && draft(id, selected);
+        if (stale) {
+          drafts.set(key(id, ""), { ...stale, name: $("#announcementName").value.trim() || stale.name });
+          drafts.delete(key(id, selected));
+        }
+        select(null);
+      } else select(chosen);
       render();
     } catch (error) {
       if (roomId() !== id || context !== roomGeneration || generation !== request) return;
@@ -83,6 +90,15 @@ export function initAnnouncements(app) {
         generation++; items = [...items.filter((item) => item.name !== name), result.announcement]; render();
         clearDraftIfUnchanged(id, draftName, captured);
         if (editorMatches(captured)) { select(result.announcement); status(app.t("announcementSaved")); }
+        else if (!selected) {
+          // Keep editing the newer draft under the name the create just reserved.
+          drafts.delete(key(id, draftName));
+          selected = result.announcement.name;
+          $("#announcementName").value = selected; $("#announcementName").readOnly = true;
+          $("#btnDeleteAnnouncement").hidden = false;
+          drafts.set(key(id, selected), { name: selected, content: $("#announcementContent").value });
+          render();
+        }
       }
     } catch (error) {
       if (currentRoom(id, context) && editorMatches(captured)) status(error.status === 403 ? error.message : app.t("announcementLoadFailed"));

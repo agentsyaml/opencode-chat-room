@@ -54,7 +54,7 @@
       var(--bg);
     -webkit-tap-highlight-color: transparent;
   }
-  ::selection { background: var(--accent-soft); }
+  ::selection { color: var(--accent-ink); background: var(--accent); }
 
   #app {
     max-width: 760px;

@@ -1,4 +1,5 @@
 import { LS } from "./state.js";
+import { isOwnMessage } from "./messages.js";
 import { formatRoomPreview, setRoomPreview } from "./system-messages.js";
 import { watchRoom } from "./room-watcher.js";
 
@@ -50,10 +51,16 @@ export function initRooms(app) {
     const entry = existing || { unreadIds: new Map(), unreadOverflow: false, preview: "", previewAt: 0, position: 0, readTs: 0, receivedTs: room.messages.at(-1)?.createdAt ?? 0 };
     entry.unreadIds ||= new Map();
     entry.unreadOverflow ||= false;
-    entry.readTs ||= app.state.lastReadTs.get(room.id) || 0;
+    const latest = room.messages.at(-1), savedReadTs = app.state.lastReadTs.get(room.id);
+    entry.readTs ||= savedReadTs || 0;
     entry.room = room;
     entry.name = name;
-    const latest = room.messages.at(-1);
+    // Only rebuild unread history when this browser already has a read watermark;
+    // a never-opened room is not a burst of unread messages.
+    if (!existing && savedReadTs !== undefined) for (const message of room.messages) {
+      const unread = message.createdAt > entry.readTs || (message.isQuestion && !message.answeredByMessageID);
+      if (unread && !isOwnMessage(message, app, room, name)) entry.unreadIds.set(message.id, message);
+    }
     entry.receivedTs ??= latest?.createdAt ?? 0;
     if (latest && (!existing || latest.createdAt >= entry.previewAt)) setRoomPreview(entry, latest);
     app.state.rooms.set(room.id, entry);
@@ -183,7 +190,7 @@ export function initRooms(app) {
     app.disposeRoomAttachments?.(roomId);
     if (active) {
       app.state.navigationGeneration++;
-      app.saveDraft(roomId, $("#msgInput").value);
+      app.saveDraft(roomId, $("#msgInput").draftValue);
       app.captureReadingPosition?.();
       app.stopPolling();
       app.closeMention();
@@ -386,7 +393,7 @@ export function initRooms(app) {
       status.className = "r-status";
       app.setText(status, entry ? "joined" : "joinAction");
       button.append(name, kind, meta, preview, status);
-      const unread = entry?.unreadIds.size || (entry?.unreadOverflow ? 100 : 0);
+      const unread = entry && app.state.room?.id !== room.id ? (entry.unreadOverflow ? 100 : entry.unreadIds.size) : 0;
       if (unread) {
         const badge = document.createElement("span");
         badge.className = "r-badge";

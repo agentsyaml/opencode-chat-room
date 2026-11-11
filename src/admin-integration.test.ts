@@ -57,11 +57,10 @@ if (!process.env.CHAT_ROOM_ADMIN_INTEGRATION_CHILD) {
       expect((await api("POST", "/admin/rooms", { roomId: "forged-room", targetRoomId: supervisorRoom, sessionID: "__Test_supervisor-session", receiverOwnerID: supervisorOwner, membershipID: supervisorMember }, {})).status).toBe(401);
       const bound = await api("POST", "/admin/rooms", { roomId: adminRoom, targetRoomId: supervisorRoom, sessionID: "__Test_supervisor-session", receiverOwnerID: supervisorOwner, membershipID: supervisorMember }, operatorHeaders);
       expect(bound.status).toBe(201);
-      const enrollmentKey = (await bound.json() as { enrollmentKey: string }).enrollmentKey;
       const transport = { protocol: "v2" as const, receiverOwnerID: supervisorOwner };
-      const claimed = await adminTool({ action: "admin_claim", roomId: adminRoom, enrollmentKey }, { sessionID: "__Test_supervisor-session" }, opts, transport);
-      expect(claimed).toContain("enrolled"); expect(claimed).not.toContain(enrollmentKey);
       const overview = async () => JSON.parse(await adminTool({ action: "admin_overview", roomId: adminRoom }, { sessionID: "__Test_supervisor-session" }, opts, transport));
+      // Designation is effective immediately; no claim step is required.
+      expect(Array.isArray((await overview()).rooms)).toBe(true);
       await stop(); await start();
       expect(Array.isArray((await overview()).rooms)).toBe(true);
     } finally {

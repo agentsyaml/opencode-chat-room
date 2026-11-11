@@ -43,6 +43,18 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     expect(await measure(input)).toMatchObject({ overflow: "hidden", fits: true });
     await input.fill("1\n2\n3\n4\n5\n6");
     expect(await measure(input)).toMatchObject({ overflow: "auto", fits: false });
+    await input.fill("1\n2\n3\n4\n5\n6\n7\n8\n9\n10");
+    await input.evaluate((node: any) => node.setCaret(node.value.length));
+    await page.keyboard.insertText("last-visible-line");
+    const composerScroll = await input.evaluate((node: HTMLElement) => {
+      const range = getSelection()!.getRangeAt(0).cloneRange(); range.collapse(true);
+      const caret = range.getBoundingClientRect(), box = node.getBoundingClientRect();
+      return { scrollTop: node.scrollTop, caretTop: caret.top, boxTop: box.top, caretBottom: caret.bottom, boxBottom: box.bottom };
+    });
+    expect(composerScroll.scrollTop).toBeGreaterThan(0);
+    expect(composerScroll.caretTop).toBeGreaterThanOrEqual(composerScroll.boxTop);
+    expect(composerScroll.caretBottom).toBeLessThanOrEqual(composerScroll.boxBottom + 1);
+    await input.fill("");
     await seedMessages(page);
     expect(await selectionContrast(page)).toBe(true);
     await page.waitForTimeout(300);

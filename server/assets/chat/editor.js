@@ -91,9 +91,22 @@ function lengthBefore(root, target, position) {
 }
 
 export function setCaret(editor, offset) {
-  const selection = getSelection(), range = document.createRange(), point = editorPoint(editor, offset);
-  range.setStart(point[0], point[1]); range.collapse(true);
+  const selection = getSelection(), range = document.createRange();
+  // Chromium starts IME composition poorly at an element boundary next to a
+  // non-editable chip; keep the caret inside a real text node instead.
+  const [container, index] = textPoint(editorPoint(editor, offset));
+  range.setStart(container, index); range.collapse(true);
   selection.removeAllRanges(); selection.addRange(range);
+}
+
+function textPoint([container, offset]) {
+  if (container.nodeType !== Node.ELEMENT_NODE) return [container, offset];
+  const child = container.childNodes[offset], previous = container.childNodes[offset - 1];
+  if (child?.nodeType === Node.TEXT_NODE) return [child, 0];
+  if (previous?.nodeType === Node.TEXT_NODE) return [previous, previous.length];
+  const text = document.createTextNode("");
+  container.insertBefore(text, child || null);
+  return [text, 0];
 }
 
 export function setEditorSelection(editor, start, end = start) {

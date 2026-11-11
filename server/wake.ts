@@ -11,12 +11,21 @@ const activeSessions = new Map<string, number>();
 const WAKE_CLAIM_MS = 30_000;
 const WAKE_INACTIVE_MS = 2 * 60_000;
 
+const MAX_TRACKED = 10_000;
+function track(map: Map<string, number>, id: string, ttl: number): void {
+  map.set(id, Date.now());
+  if (map.size <= MAX_TRACKED) return;
+  const floor = Date.now() - ttl;
+  for (const [key, at] of map) if (at < floor) map.delete(key);
+  for (const key of map.keys()) { if (map.size <= MAX_TRACKED) break; map.delete(key); }
+}
+
 export function claimWake(id: string): boolean {
   if (Date.now() - (wakeClaims.get(id) ?? 0) < WAKE_CLAIM_MS) return false;
-  wakeClaims.set(id, Date.now());
+  track(wakeClaims, id, WAKE_CLAIM_MS);
   return true;
 }
-export function touchActive(id: string): void { if (id) activeSessions.set(id, Date.now()); }
+export function touchActive(id: string): void { if (id) track(activeSessions, id, WAKE_INACTIVE_MS); }
 
 export async function wakeMentionedSessions(
   serveWakeUrl: string, roomId: string, roomName: string, text: string,

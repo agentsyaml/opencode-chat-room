@@ -132,6 +132,8 @@ async function loadResourceCard(card, roomId, app) {
     if (previewKind(type)) {
       const preview = resourceButton("resourcePreview", resource.name, () => previewResource(card, roomId, id, resource, type, preview, app, status), app);
       actions.append(preview);
+      // Media you sent yourself is shown inline; other people's media stays collapsed.
+      if (card.closest(".msg.own")) void previewResource(card, roomId, id, resource, type, preview, app, status);
     }
   } catch { if (card.isConnected) setResourceError(card, app); }
 }
