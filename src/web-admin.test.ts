@@ -36,10 +36,10 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     const created = await fetch(`${origin}/rooms`, { method: "POST", headers: { Authorization: "Bearer ui-test-token", "Content-Type": "application/json" }, body: JSON.stringify({ name: "__Test_AdminControl", ownerId: "__Test_Operator" }) });
     expect(created.status).toBe(201);
     const adminRoomId = (await created.json() as { id: string }).id;
-    await page.locator("#inToken").fill("ui-test-token"); await page.locator('[data-token-save="inToken"]').click();
-    // Join through the app: on slow CI machines the typed form values were gone by submit time.
+    // Drive setup through the app: form values typed on slow CI machines were gone by submit time.
     await page.evaluate(async ({ url, roomId }: any) => {
       const { app } = await import(url);
+      app.setToken("ui-test-token");
       await app.joinRoom(roomId, "__Test_Operator");
     }, { url: "/assets/chat/state.js", roomId: adminRoomId });
     await page.locator("#chatView").waitFor({ state: "visible", timeout: 15000 });
@@ -209,8 +209,13 @@ test.skipIf(!browserModule)("user navigation supersedes room restoration", async
     await waitForServer(origin); browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } }), page = await context.newPage();
     await page.goto(`${origin}/chat`); await page.locator("#tokenBox").evaluate((details: HTMLDetailsElement) => { details.open = true; });
-    await page.locator("#inToken").fill("ui-test-token"); await page.locator('[data-token-save="inToken"]').click();
-    await page.locator("#inName").fill("__Test_Operator"); await page.locator("#inRoomName").fill("__Test_OldRoom"); await page.locator("#btnCreate").click(); await page.locator("#chatView").waitFor({ state: "visible" });
+    // Drive setup through the app: form values typed on slow CI machines were gone by submit time.
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      app.setToken("ui-test-token");
+      await app.createRoom({ name: "__Test_Operator", roomName: "__Test_OldRoom" });
+    }, "/assets/chat/state.js");
+    await page.locator("#chatView").waitFor({ state: "visible" });
     const oldRoom = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || ""), sessionID = await page.evaluate(() => sessionStorage.getItem("chat.sessionID") || "");
     let membersStarted!: () => void, createStarted!: () => void;
     const membersPending = new Promise<void>((resolve) => { membersStarted = resolve; }), createPending = new Promise<void>((resolve) => { createStarted = resolve; });
