@@ -33,10 +33,13 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     await page.route("**/registry", (route: BrowserRoute) => { registryRooms.push(new URL(route.request().url()).pathname.split("/")[2]!); return route.fulfill({ contentType: "application/json", body: JSON.stringify({ "human-session": { name: "Human", membershipID: "human-member" }, "legacy-session": { name: "Legacy Agent", membershipID: "v1-member", protocol: "v1" }, "agent-session": { name: "Agent", membershipID: "membership", receiverOwnerID: "owner", protocol: "v2" } }) }); });
     page.on("request", (request: BrowserRequest) => { const url = new URL(request.url()); if (url.pathname.startsWith("/rooms/")) normalHeaders.push({ method: request.method(), headers: request.headers() }); if (request.method() === "POST" && url.pathname.endsWith("/join")) roomJoins.push(url.pathname); });
     await page.goto(`${origin}/chat`);
+    const created = await fetch(`${origin}/rooms`, { method: "POST", headers: { Authorization: "Bearer ui-test-token", "Content-Type": "application/json" }, body: JSON.stringify({ name: "__Test_AdminControl", ownerId: "__Test_Operator" }) });
+    expect(created.status).toBe(201);
+    const adminRoomId = (await created.json() as { id: string }).id;
     await page.locator("#inToken").fill("ui-test-token"); await page.locator('[data-token-save="inToken"]').click();
-    await page.locator("#inName").fill("__Test_Operator"); await page.locator("#inRoomName").fill("__Test_AdminControl"); await page.locator("#btnCreate").click();
+    await page.locator("#inName").fill("__Test_Operator"); await page.locator("#inRoomId").fill(adminRoomId); await page.locator("#btnJoin").click();
     await page.locator("#chatView").waitFor({ state: "visible" });
-    const adminRoomId = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || "");
+    expect(await page.evaluate(() => sessionStorage.getItem("chat.roomId"))).toBe(adminRoomId);
     binding = { roomId: adminRoomId, targetRoomId: adminRoomId, sessionID: "agent-session", receiverOwnerID: "owner", membershipID: "membership", enrolled: true };
     await page.locator("#btnSettings").click(); await page.locator("#adminAccessHeading").click(); await page.locator("#inAdminToken").fill("operator-secret"); await page.locator("#btnSaveAdminToken").click();
     await page.locator("#btnOpenAdmin").waitFor({ state: "visible" });
@@ -117,7 +120,7 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     expect(adminHeaders.length).toBeGreaterThan(4);
     expect(adminHeaders.every((headers) => headers.token === "operator-secret" && headers.bearer === "Bearer ui-test-token")).toBe(true);
     expect(normalHeaders.filter((request) => request.method !== "DELETE").every((request) => !request.headers["x-chat-admin-token"])).toBe(true);
-    expect(roomJoins).toEqual([]);
+    expect(roomJoins).toEqual([`/rooms/${roomId}/join`]);
     expect(await page.evaluate(() => [sessionStorage.getItem("chat.adminToken"), localStorage.getItem("chat.adminToken")])).toEqual(["operator-secret", null]);
     await context.close();
   } finally { await browser?.close(); server.kill(); await rm(stateDir, { recursive: true, force: true }); }
