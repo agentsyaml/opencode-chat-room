@@ -105,7 +105,7 @@ export function initMessages(app) {
   app.updateJump = () => {
     const thread = $("#thread");
     const away = thread.scrollHeight - thread.scrollTop - thread.clientHeight > 160;
-    $("#btnJump").hidden = !(away || app.state.unread > 0);
+    $("#btnJump").hidden = !away;
   };
   app.updateBadge = () => {
     const badge = $("#jumpBadge");

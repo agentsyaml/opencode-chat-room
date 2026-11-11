@@ -2,6 +2,7 @@ import { LS } from "./state.js";
 
 export function initReminders(app) {
   const $ = app.$, panel = $("#reminderPanel"), trigger = $("#btnReminders"), list = $("#reminderList");
+  app.setText($("#reminderTemplateHint"), "reminderTemplateHint", { time: "{time}", initiator: "{initiator}", room: "{room}" });
   let reminders = [], generation = 0, roomGeneration = 0, activeRoomId;
   const drafts = new Map();
   const roomId = () => app.state.room?.id;

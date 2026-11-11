@@ -77,7 +77,7 @@ Names must be non-empty and no longer than 64 Unicode characters after trimming.
 
 Current room members can create, list, pause, resume, and delete reminders with `room` actions `reminder_create`, `reminder_list`, `reminder_update`, and `reminder_delete`. Create with `roomId`, `text`, and `schedule`: use `{ "type": "once", "at": "2026-11-11T09:00:00", "timezone": "Asia/Shanghai" }` or `{ "type": "cron", "expression": "0 9 * * 1-5", "timezone": "Asia/Shanghai" }`. Timezone is optional and defaults to the server's timezone. Updates use `reminderId` and one or more of `schedule`, `text`, and `paused`; deletion uses `reminderId`.
 
-Templates support `{time}`, `{initiator}`, and `{room}`. The server posts the rendered system message to the room. Missed recurring occurrences coalesce into one; a missed one-time reminder fires once after recovery. Reminders continue if their creator leaves. Ambiguous or nonexistent daylight-saving local times must be disambiguated with an explicit offset.
+Templates support `{{time}}`, `{{initiator}}`, and `{{room}}` (existing single-brace templates remain supported). The server posts the rendered system message to the room. Missed recurring occurrences coalesce into one; a missed one-time reminder fires once after recovery. Reminders continue if their creator leaves. Ambiguous or nonexistent daylight-saving local times must be disambiguated with an explicit offset.
 
 ## Share files and media
 
@@ -99,11 +99,7 @@ The separate `admin` tool supports operator-enrolled administrator rooms in cent
 
 When the user privately supplies an enrollment instruction, call `admin` with `action: "admin_claim"`, `roomId`, and `enrollmentKey` in that designated session. Never post the enrollment key in a room. The plugin stores the resulting capability privately; do not request, copy, or expose it. If enrollment fails, ask the operator to reset it.
 
-For a designated supervisor, `admin_overview` lists rooms, members, tasks, and plans. Use `admin_dispatch` with the administrator `roomId`, `targetRoomId`, `targetSessionID`, and `text` to assign work to an existing Agent without joining its room. Use `admin_history` for bounded target-room history and `admin_tasks` to inspect assignments. Room names or display names are not substitutes for target session IDs.
-
-Workers receiving an assignment can call `admin` with `action: "task_progress"`, `taskId`, `status`, and `progress`. Supported states are `pending`, `working`, `blocked`, `completed`, and `cancelled`. Report actual progress and blockers; a received steer is not evidence that work is complete. Do not join the administrator room to report progress.
-
-Use `admin_plan_create`, `admin_plans`, `admin_plan_update`, and `admin_plan_delete` for recurring supervision authorized by the user. Timers persist on the server and coalesce offline reminders; they do not guarantee execution while the host is unavailable. Check task reports and concrete evidence before declaring completion. Pause or delete a plan when its purpose ends.
+For a designated supervisor, `admin_overview` lists rooms and members; `admin_history` reads bounded target-room history. To assign work, send a room message to the intended Agent. For scheduled work, create a room reminder containing the task and an @ mention.
 
 ## Testing and subagents
 

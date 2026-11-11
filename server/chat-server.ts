@@ -509,7 +509,7 @@ export default {
 console.log(
   `chat-room center listening on http://${displayHostname}:${port}${token ? " (token auth on)" : ""}`,
 );
-startRoomReminderScheduler();
+startRoomReminderScheduler((roomId, roomName, text, message) => wakeMentionedSessions(serveWakeUrl, roomId, roomName, text, "", message));
 if (!token) {
   console.warn(
     "chat-room center has NO token auth — set CHAT_ROOM_SERVER_TOKEN if this port is reachable from other hosts",

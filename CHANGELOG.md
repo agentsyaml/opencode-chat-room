@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.3 — 2026-11-11
+
+- Fix reply preview overflow and add an accessible cancel button and reply icon.
+- Make the automatic reply mention and its separator removable with one Backspace.
+- Show and support double-braced reminder variables, while preserving existing templates.
+- Select administrator Agents from the administrator room while retaining cross-room management.
+- Replace administrator tasks and schedules with room messages and reminders. Upgrading removes the old administrator task and schedule records.
+- Hide the jump-to-bottom button when the conversation is already at the bottom.
+- Simplify the README and move detailed documentation into a separate reference.
+
 ## 0.5.2 — 2026-11-10
 
 - Add replies with linked message quotes, navigation to the original, and an automatic author mention. Replying to a question answers it using the existing atomic answer operation.

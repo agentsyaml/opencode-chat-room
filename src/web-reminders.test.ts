@@ -111,8 +111,10 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
     expect(calls.at(-1)?.body.schedule).toEqual({ type: "once", at: "2027-11-07T01:30:00", timezone: "America/New_York" });
     expect(postCount()).toBe(beforeGaps + 3);
     expect(await page.locator("#reminderText").inputValue()).toBe("Explicit zone reminder");
+    expect(await page.locator("#reminderTemplateHint").textContent()).toBe("Use {{time}}, {{initiator}}, and {{room}} in your message.");
     await page.evaluate(async (url: string) => { const { app } = await import(url); app.locale = "zh-CN"; app.applyLocale(); }, "/assets/chat/state.js");
     expect(await page.locator("#reminderHeading").textContent()).toBe("提醒");
+    expect(await page.locator("#reminderTemplateHint").textContent()).toBe("可使用 {{time}}、{{initiator}} 和 {{room}}。");
     await page.setViewportSize({ width: 375, height: 812 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.locator("#reminderText").fill("Keep this draft when changing rooms");

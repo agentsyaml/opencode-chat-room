@@ -1,5 +1,5 @@
 import { LS } from "./state.js";
-import { installEditor } from "./editor.js";
+import { autoMentionDraft, installEditor } from "./editor.js";
 import { copyTextToClipboard, renderMarkdown } from "./markdown.js";
 
 export function initQuestions(app) {
@@ -116,7 +116,7 @@ export function initQuestions(app) {
       ? members.filter((member) => member.sessionID === question.senderSessionID)
       : members.filter((member) => member.name === question.senderId);
     if (author.length !== 1 || members.filter((member) => member.name === author[0].name).length !== 1 || author[0].sessionID === LS.sessionID || author[0].name === "all") return "";
-    return `<at>@${author[0].name}</at> `;
+    return autoMentionDraft(author[0].name);
   }
 
   async function load(roomId = app.state.room?.id) {

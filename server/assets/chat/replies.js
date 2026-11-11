@@ -3,6 +3,7 @@ import { replaceEditorRange, setEditorSelection, setCaret } from "./editor.js";
 
 export function initReplies(app) {
   const $ = app.$, targets = new Map(Object.entries(LS.replyDrafts || {}).filter(([, item]) => validTarget(item)));
+  $("#replyCancel").textContent = app.t("cancelReply");
   app.replyTargetFor = (roomId) => targets.get(roomId);
   app.setReplyTarget = (roomId, target) => {
     if (validTarget(target)) targets.set(roomId, target); else targets.delete(roomId);
@@ -40,7 +41,7 @@ function bindMessageActions(app) {
     if (copy) {
       const actions = document.createElement("div"), reply = document.createElement("button");
       actions.className = "message-actions";
-      reply.type = "button"; reply.className = "message-reply"; reply.textContent = app.t("replyMessage"); reply.dataset.i18n = "replyMessage";
+      reply.type = "button"; reply.className = "message-reply"; reply.innerHTML = '<svg class="message-reply-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 10 4 15l5 5M4 15h9a7 7 0 0 0 7-7V5"/></svg>';
       reply.setAttribute("aria-label", app.t("replyMessage")); reply.dataset.i18nAriaLabel = "replyMessage"; reply.dataset.replyMessage = message.id;
       copy.before(actions); actions.append(copy, reply);
     }

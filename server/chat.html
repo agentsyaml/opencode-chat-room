@@ -113,17 +113,10 @@
     <dialog id="adminDialog" class="admin-dialog" aria-labelledby="adminHeading">
       <header class="admin-dialog-head"><h2 id="adminHeading" data-i18n="administration">Administration</h2><div class="admin-dialog-actions"><button id="btnRefreshAdmin" class="btn ghost small" type="button" data-i18n="refreshAdmin">Refresh</button><button id="btnCloseAdmin" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close">×</button></div></header>
       <p id="adminStatus" class="hint" role="status" aria-live="polite"></p>
-      <div class="admin-columns">
-        <section><h3 data-i18n="designations">Designations</h3><p class="hint admin-scope-note" data-i18n="adminScopeNote">An administrator manages every room, including this one and rooms created later. The Agent room below is where the selected Agent is a member; it does not limit access.</p><label class="field"><span class="field-label" data-i18n="adminRoom">Administrator room</span><select id="adminRoomSelect" class="admin-select"></select></label>
-          <label class="field"><span class="field-label" data-i18n="targetRoom">Agent membership room</span><select id="adminTargetRoom" class="admin-select"></select></label>
+      <div class="admin-guide"><p class="hint admin-scope-note" data-i18n="adminBindingGuide">Choose a room, then select a registered member. They must privately accept the invitation to finish setup.</p><label class="field"><span class="field-label" data-i18n="adminRoomLabel">Room to administer</span><select id="adminRoomSelect" class="admin-select"></select></label>
           <label class="field"><span class="field-label" data-i18n="targetAgent">Registered agent</span><select id="adminTargetAgent" class="admin-select"></select></label>
-          <button id="btnDesignateAgent" class="btn primary small" type="button" data-i18n="designate">Designate and issue enrollment</button><div id="adminEnrollment" class="admin-enrollment" hidden></div>
+          <button id="btnDesignateAgent" class="btn primary small" type="button" data-i18n="adminDesignateAgent">Designate agent</button><div id="adminEnrollment" class="admin-enrollment" hidden></div>
           <button id="btnRevokeAdmin" class="btn ghost small danger-text" type="button" data-i18n="revokeDesignation">Revoke designation</button>
-        </section>
-        <section><h3 data-i18n="globalStatus">Global status</h3><div id="adminOverview" class="admin-overview"></div><h3 data-i18n="adminTasks">Tasks</h3>
-          <form id="adminTaskForm"><label class="field"><span class="field-label" data-i18n="taskTargetRoom">Target room</span><select id="adminTaskRoom" class="admin-select"></select></label><label class="field"><span class="field-label" data-i18n="taskTargetAgent">Target agent</span><select id="adminTaskAgent" class="admin-select"></select></label><label class="field"><span class="field-label" data-i18n="taskText">Task</span><textarea id="adminTaskText" class="input" rows="2" maxlength="2000" required></textarea></label><button class="btn primary small" type="submit" data-i18n="dispatchTask">Dispatch task</button></form><ul id="adminTaskList" class="admin-list"></ul>
-          <h3 data-i18n="timers">Timers</h3><form id="adminPlanForm" class="admin-plan-form"><input id="adminPlanName" class="input" maxlength="64" required data-i18n-placeholder="planName" placeholder="Timer name"><input id="adminPlanInterval" class="input" type="number" min="60" max="2592000" value="3600" required><textarea id="adminPlanText" class="input" rows="2" maxlength="2000" required></textarea><button class="btn primary small" type="submit" data-i18n="createTimer">Create timer</button></form><ul id="adminPlanList" class="admin-list"></ul>
-        </section>
       </div>
     </dialog>
     <button id="roomDrawerBackdrop" class="room-drawer-backdrop" type="button" aria-label="Close room list" data-i18n-aria-label="closeRoomList" hidden></button>
@@ -161,7 +154,7 @@
               <label class="field"><span class="field-label" data-i18n="reminderTimezone">Timezone override (optional)</span><input id="reminderTimezone" class="input" autocomplete="off"></label>
               <p class="hint" data-i18n="reminderTimezoneHint">Leave blank to use the server timezone. Enter an IANA timezone to override it.</p>
               <label class="field"><span class="field-label" data-i18n="reminderText">Reminder text</span><textarea id="reminderText" class="input" rows="3" maxlength="1000" required></textarea></label>
-              <p class="hint" data-i18n="reminderTemplateHint">Use {time}, {initiator}, and {room} in your message.</p>
+              <p id="reminderTemplateHint" class="hint" data-i18n="reminderTemplateHint">Use {{time}}, {{initiator}}, and {{room}} in your message.</p>
               <button class="btn primary small" type="submit" data-i18n="reminderCreate">Create reminder</button>
             </form>
           </section>

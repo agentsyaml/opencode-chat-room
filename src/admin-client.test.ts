@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, test } from "bun:test";
-import { mkdtemp, readdir, stat, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, stat, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -7,7 +7,7 @@ const stateDir = await mkdtemp(path.join(os.tmpdir(), "admin-isolated-"));
 const originalStateDir = process.env.CHAT_ROOM_STATE_DIR;
 process.env.CHAT_ROOM_STATE_DIR = stateDir;
 const credentials = await import("./admin-credentials");
-const { adminTool } = await import("./admin-client");
+const { adminTool, adminToolSchema } = await import("./admin-client");
 const { checkSupervisionInbox } = await import("./supervision-inbox");
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -41,6 +41,14 @@ test.serial("claim binds native identity, persists capability privately, and nev
   expect((await stat(path.join(stateDir, "admin-capabilities"))).mode & 0o777).toBe(0o700);
 });
 
+test("public admin schema no longer accepts task or recurring-plan actions", () => {
+  for (const action of ["task_progress", "admin_dispatch", "admin_tasks", "admin_task_update", "admin_plans", "admin_plan_create", "admin_plan_update", "admin_plan_delete"]) {
+    expect(adminToolSchema.safeParse({ action, roomId: "room" }).success).toBe(false);
+  }
+  expect(adminToolSchema.safeParse({ action: "admin_overview", roomId: "room" }).success).toBe(true);
+  expect(adminToolSchema.safeParse({ action: "admin_history", roomId: "room", targetRoomId: "target" }).success).toBe(true);
+});
+
 test.serial("only protected room feeds deliver supervision and acknowledgment retries keep IDs", async () => {
   const opts = { center: "https://center.example", token: "bearer" };
   await credentials.saveAdminCapability({ center: opts.center, roomId: "admin-1", sessionID: "session", ownerID: "owner" }, "room-cap");
@@ -49,7 +57,7 @@ test.serial("only protected room feeds deliver supervision and acknowledgment re
   globalThis.fetch = (async (input, init = {}) => {
     const url = String(input); requests.push({ url, init });
     if (url.includes("/supervision/inbox") && !url.includes("adminRoomId=")) return Response.json({
-      deliveries: [{ id: "fake", kind: "supervision", adminRoomId: "admin-1", text: "untrusted" }], supervisionRoomIds: ["admin-1", "missing-cap"],
+      deliveries: [{ id: "fake", kind: "supervision", adminRoomId: "admin-1", text: "untrusted" }, { id: "old-task", kind: "task", taskId: "old-task", taskToken: "secret", text: "obsolete" }], supervisionRoomIds: ["admin-1", "missing-cap"],
     });
     if (url.includes("adminRoomId=admin-1")) return Response.json({ deliveries: [{ id: "delivery-1", admissionID: "admission-1", kind: "supervision", adminRoomId: "admin-1", text: "reminder" }] });
     if (String(input).includes("/supervision/ack") && ++ackAttempts === 1) return new Response("{}", { status: 503 });
@@ -65,7 +73,7 @@ test.serial("only protected room feeds deliver supervision and acknowledgment re
   } };
   await checkSupervisionInbox(opts, "session", transport);
   expect(prompts).toHaveLength(1);
-  expect(prompts[0]).not.toContain("untrusted");
+  expect(prompts[0]).not.toContain("untrusted"); expect(prompts[0]).not.toContain("obsolete");
   expect(requests.some((item) => String(item.url).includes("/supervision/ack"))).toBe(false);
   expect(requests.some((item) => String(item.url).includes("adminRoomId=missing-cap"))).toBe(false);
   const protectedGet = requests.find((item) => String(item.url).includes("adminRoomId=admin-1"))!;
@@ -100,67 +108,6 @@ test.serial("V1 supervision uses async notification acceptance before acknowledg
   await checkSupervisionInbox({ center: "https://center.example", token: "" }, "v1-session", { protocol: "v1", serverUrl: "https://agent.example" });
   expect(calls.some((url) => url.endsWith("/prompt_async"))).toBe(true);
   expect(calls.some((url) => url.includes("/supervision/ack"))).toBe(true);
-});
-
-test.serial("task delivery persists its private token before send and reports with native identity", async () => {
-  const token = "private-task-token", calls: Array<{ url: string; init: RequestInit }> = [];
-  const opts = { center: "https://center.example", token: "bearer" };
-  const transport = { protocol: "v2" as const, receiverOwnerID: "owner", promptQueue: async (_sid: string, id: string, text: string) => {
-    expect(await credentials.loadTaskToken({ center: opts.center, taskId: "task-1", sessionID: "agent-session", ownerID: "owner" })).toBe(token);
-    expect(text).toContain('admin room admin-1'); expect(text).toContain('taskId="task-1"');
-    expect(text).not.toContain(token);
-    return { id, sessionID: "agent-session", delivery: "steer" };
-  } };
-  globalThis.fetch = (async (input, init = {}) => {
-    const url = String(input); calls.push({ url, init });
-    if (url.includes("/supervision/inbox")) return Response.json({ deliveries: [{ id: "delivery", admissionID: "admission", adminRoomId: "admin-1", kind: "task", taskId: "task-1", taskToken: token, text: "Inspect report" }], supervisionRoomIds: [] });
-    return Response.json({ ok: true });
-  }) as typeof fetch;
-  await checkSupervisionInbox(opts, "agent-session", transport);
-  const output = await adminTool({ action: "task_progress", taskId: "task-1", status: "working", progress: "Started" },
-    { sessionID: "agent-session" }, opts, transport);
-  expect(output).toBe("task progress updated"); expect(output).not.toContain(token);
-  const progress = calls.find((call) => call.url.includes("/supervision/tasks/task-1/progress"))!;
-  expect(JSON.parse(String(progress.init.body))).toEqual({ taskToken: token, status: "working", progress: "Started" });
-  expect(new Headers(progress.init.headers).get("x-chat-agent-session")).toBe("agent-session");
-  expect(new Headers(progress.init.headers).get("x-chat-agent-owner")).toBe("owner");
-  expect(new Headers(progress.init.headers).has("x-chat-admin-capability")).toBe(false);
-  const taskAck = calls.find((call) => call.url.endsWith("/supervision/ack"))!;
-  expect(JSON.parse(String(taskAck.init.body))).toEqual({ id: "delivery", sessionID: "agent-session", receiverOwnerID: "owner" });
-  expect(new Headers(taskAck.init.headers).has("x-chat-admin-capability")).toBe(false);
-  const stored = await readdir(path.join(stateDir, "supervision-tokens"));
-  expect(stored).toHaveLength(1);
-  expect((await stat(path.join(stateDir, "supervision-tokens"))).mode & 0o777).toBe(0o700);
-  expect((await stat(path.join(stateDir, "supervision-tokens", stored[0]!))).mode & 0o777).toBe(0o600);
-  expect(await credentials.loadTaskToken({ center: opts.center, taskId: "task-1", sessionID: "other", ownerID: "owner" })).toBeUndefined();
-  expect(await credentials.loadTaskToken({ center: "https://other.example", taskId: "task-1", sessionID: "agent-session", ownerID: "owner" })).toBeUndefined();
-  const failed = await adminTool({ action: "task_progress", taskId: "task-1", status: "working", progress: "wrong agent" },
-    { sessionID: "other" }, opts, transport);
-  expect(failed).toContain("no task progress token");
-  expect(calls.filter((call) => call.url.includes("/supervision/tasks/")).length).toBe(1);
-});
-
-test.serial("task storage failure prevents host send and acknowledgment", async () => {
-  const blocked = path.join(stateDir, "not-a-directory");
-  await writeFile(blocked, "blocked");
-  const previous = process.env.CHAT_ROOM_STATE_DIR;
-  process.env.CHAT_ROOM_STATE_DIR = blocked;
-  const calls: string[] = [];
-  globalThis.fetch = (async (input) => {
-    const url = String(input); calls.push(url);
-    return Response.json({ deliveries: [{ id: "delivery", admissionID: "admission", adminRoomId: "admin", kind: "task", taskId: "task", taskToken: "token", text: "Do work" }] });
-  }) as typeof fetch;
-  let sends = 0;
-  try {
-    await checkSupervisionInbox({ center: "https://center.example", token: "" }, "session", {
-      protocol: "v2", receiverOwnerID: "owner", promptQueue: async () => { sends++; return {}; },
-    });
-  } finally {
-    if (previous === undefined) delete process.env.CHAT_ROOM_STATE_DIR; else process.env.CHAT_ROOM_STATE_DIR = previous;
-    await rm(blocked, { force: true });
-  }
-  expect(sends).toBe(0);
-  expect(calls.some((url) => url.includes("/supervision/ack"))).toBe(false);
 });
 
 test.serial("claim failures never echo enrollment keys or capabilities", async () => {

@@ -20,7 +20,21 @@ export function matchesHash(value: string, stored: string): boolean {
   const left = Buffer.from(hash(value), "hex"), right = Buffer.from(stored, "hex");
   return right.length === 32 && timingSafeEqual(left, right);
 }
-export async function ensureAdminSchema() { await initializeAdminSchema(databasePath()); }
+export async function ensureAdminSchema() {
+  const file = databasePath();
+  const migrated = await withStateTransaction(file, db => {
+    db.exec("CREATE TABLE IF NOT EXISTS server_admin_migrations(version INTEGER PRIMARY KEY,applied_at INTEGER NOT NULL)");
+    return !!db.query("SELECT 1 FROM server_admin_migrations WHERE version=1").get();
+  });
+  if (migrated) return;
+  await initializeAdminSchema(file);
+  await withStateTransaction(file, db => {
+    if (db.query("SELECT 1 FROM server_admin_migrations WHERE version=1").get()) return;
+    // Legacy route producers used only task and supervision delivery kinds.
+    db.exec("DELETE FROM admin_deliveries WHERE kind IN ('task','supervision'); DELETE FROM admin_tasks; DELETE FROM admin_plans;");
+    db.query("INSERT INTO server_admin_migrations(version,applied_at) VALUES(1,?)").run(Date.now());
+  });
+}
 export async function tx<T>(fn: (db: Database) => T) { await ensureAdminSchema(); return withStateTransaction(databasePath(), fn); }
 export function publicRoom(b: Binding): AdminRoom { return { roomId: b.room_id, targetRoomId: b.target_room_id, sessionID: b.session_id, receiverOwnerID: b.receiver_owner_id, membershipID: b.membership_id, generation: b.generation, enrolled: Boolean(b.capability_hash), createdAt: b.created_at }; }
 export function binding(db: Database, roomID: string) { return row<Binding>(db, "SELECT * FROM admin_rooms WHERE room_id=?", roomID); }
@@ -39,9 +53,6 @@ export function enroll(db: Database, roomID: string, targetRoomID: string, sessi
   run(db, `INSERT INTO admin_rooms(room_id,target_room_id,session_id,receiver_owner_id,membership_id,generation,enrollment_hash,enrollment_expires,capability_hash,created_at)
     VALUES(?,?,?,?,?,?,?,?,NULL,?) ON CONFLICT(room_id) DO UPDATE SET target_room_id=excluded.target_room_id,session_id=excluded.session_id,receiver_owner_id=excluded.receiver_owner_id,membership_id=excluded.membership_id,generation=excluded.generation,enrollment_hash=excluded.enrollment_hash,enrollment_expires=excluded.enrollment_expires,capability_hash=NULL`,
     roomID, targetRoomID, sessionID, ownerID, membershipID, generation, hash(nextKey), expiresAt, createdAt);
-  run(db, "UPDATE admin_tasks SET status='cancelled',delivery_token_hash='',updated_at=? WHERE admin_room_id=? AND status IN ('pending','working','blocked')", Date.now(), roomID);
-  run(db, "DELETE FROM admin_deliveries WHERE admin_room_id=?", roomID);
-  run(db, "UPDATE admin_plans SET paused=1 WHERE admin_room_id=?", roomID);
   return { enrollmentKey: nextKey, expiresAt };
 }
 export function isAgentMember(db: Database, roomID: string, sessionID: string, ownerID: string, membershipID: string) {

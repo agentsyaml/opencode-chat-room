@@ -28,9 +28,17 @@ test.skipIf(!browserModule)("physical scroll reaches a stable zero-gap thread bo
       await page.locator("#inRoomName").fill(`__Test_ScrollBottom_${width}`); await page.locator("#btnCreate").click();
       await page.locator("#chatView").waitFor({ state: "visible" });
       const roomInfo = await page.evaluate(async (url: string) => { const { app } = await import(url); return { roomId: app.state.room.id, sessionID: app.LS.sessionID }; }, "/assets/chat/state.js");
+      expect(await page.locator("#btnJump").isVisible()).toBe(false);
       await api(origin, `/rooms/${roomInfo.roomId}/join`, "POST", { sessionID: "__Test_ScrollPeer", participantId: "__Test_ScrollPeer", participantName: "__Test_ScrollPeer" });
       for (let index = 0; index < 24; index++) await api(origin, `/rooms/${roomInfo.roomId}/messages`, "POST", { sessionID: roomInfo.sessionID, text: `__Test_scroll ${index}\n${"A line of conversation content.\n".repeat(3)}` });
       await page.reload(); await page.locator("#msgList .msg").nth(23).waitFor();
+      const staleUnread = await page.evaluate(async (url: string) => {
+        const { app } = await import(url), entry = app.state.rooms.get(app.state.room.id);
+        entry.unreadIds.set("__Test_stale_unread", { id: "__Test_stale_unread", createdAt: Date.now() });
+        app.state.unread = 1; app.updateBadge(); app.updateJump();
+        return { hidden: document.querySelector<HTMLElement>("#btnJump")!.hidden, unread: app.state.unread };
+      }, "/assets/chat/state.js");
+      expect(staleUnread).toEqual({ hidden: true, unread: 1 });
       const thread = page.locator("#thread"), box = await thread.boundingBox();
       await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.wheel(0, -10000); await page.waitForTimeout(30);
       const scrolledUp = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollTop < node.scrollHeight - node.clientHeight; });

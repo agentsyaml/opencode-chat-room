@@ -21,18 +21,16 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     await waitForServer(origin); browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    binding = null; tasks = []; plans = [];
-    const page = await context.newPage(), adminHeaders: any[] = [], normalHeaders: any[] = [], roomJoins: string[] = [];
-    let releaseTask!: () => void, taskRequested!: () => void, dispatchedPayload: any;
-    const taskGate = new Promise<void>((resolve) => { releaseTask = resolve; }), taskStarted = new Promise<void>((resolve) => { taskRequested = resolve; });
+    binding = null;
+    const page = await context.newPage(), adminHeaders: any[] = [], adminPaths: string[] = [], normalHeaders: any[] = [], roomJoins: string[] = [], registryRooms: string[] = [];
+    await page.addInitScript(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined }));
     await page.route("**/admin/**", async (route: BrowserRoute) => {
-      const request = route.request(), url = new URL(request.url()), method = request.method(), body = request.postDataJSON() || {};
+      const request = route.request(), url = new URL(request.url()), method = request.method(), body = request.postDataJSON() || {}; adminPaths.push(url.pathname);
       adminHeaders.push({ token: request.headers()["x-chat-admin-token"], bearer: request.headers().authorization });
-      if (url.pathname.endsWith("/tasks") && method === "POST") { dispatchedPayload = body; taskRequested(); await taskGate; }
       const response = await mockAdmin(url.pathname, method, body);
       await route.fulfill({ status: response.status || 200, contentType: "application/json", body: JSON.stringify(response.body) });
     });
-    await page.route("**/registry", (route: BrowserRoute) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ "agent-session": { name: "Agent", membershipID: "membership", receiverOwnerID: "owner", protocol: "v2" } }) }));
+    await page.route("**/registry", (route: BrowserRoute) => { registryRooms.push(new URL(route.request().url()).pathname.split("/")[2]!); return route.fulfill({ contentType: "application/json", body: JSON.stringify({ "human-session": { name: "Human", membershipID: "human-member" }, "legacy-session": { name: "Legacy Agent", membershipID: "v1-member", protocol: "v1" }, "agent-session": { name: "Agent", membershipID: "membership", receiverOwnerID: "owner", protocol: "v2" } }) }); });
     page.on("request", (request: BrowserRequest) => { const url = new URL(request.url()); if (url.pathname.startsWith("/rooms/")) normalHeaders.push({ method: request.method(), headers: request.headers() }); if (request.method() === "POST" && url.pathname.endsWith("/join")) roomJoins.push(url.pathname); });
     await page.goto(`${origin}/chat`);
     await page.locator("#inToken").fill("ui-test-token"); await page.locator('[data-token-save="inToken"]').click();
@@ -67,13 +65,14 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
       const refresh = document.querySelector("#btnRefreshAdmin")!.getBoundingClientRect();
       const close = document.querySelector("#btnCloseAdmin")!.getBoundingClientRect();
       const select = document.querySelector("#adminRoomSelect")!.getBoundingClientRect();
-      const section = document.querySelector(".admin-columns > section")!.getBoundingClientRect();
+      const section = document.querySelector(".admin-guide")!.getBoundingClientRect();
       return { closeAfterRefresh: close.left > refresh.right, selectFitsSection: select.left >= section.left && select.right <= section.right };
     });
     expect(adminLayout).toEqual({ closeAfterRefresh: true, selectFitsSection: true });
     await page.locator("#adminRoomSelect:not(:disabled)").waitFor();
-    await page.locator("#adminTargetRoom:not(:disabled)").waitFor();
-    const roomId = await page.locator("#adminRoomSelect option").nth(1).getAttribute("value");
+    expect(await page.locator("#adminTargetRoom").count()).toBe(0);
+    const roomId = adminRoomId;
+    await page.locator("#adminRoomSelect").selectOption(roomId);
     const deleteHeaders: any[] = [];
     await page.route(`${origin}/rooms/${roomId}`, async (route: BrowserRoute) => {
       if (route.request().method() !== "DELETE") return route.continue();
@@ -82,28 +81,27 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
     });
     expect(await page.locator("#adminRoomSelect").inputValue()).toBe(roomId);
     await page.waitForFunction(() => (document.querySelector("#adminTargetAgent") as HTMLSelectElement).options.length > 1);
-    const agentId = await page.locator("#adminTargetAgent option").nth(1).getAttribute("value");
-    await page.locator("#adminTargetAgent").evaluate((select: HTMLSelectElement, value: string) => { select.value = value; }, agentId!);
-    expect(await page.locator("#adminTargetAgent").inputValue()).toBe(agentId);
+    expect(registryRooms).toContain(roomId);
+    expect(await page.locator('#adminTargetAgent option[value="human-session"]').count()).toBe(0);
+    expect(await page.locator('#adminTargetAgent option[value="legacy-session"]').count()).toBe(1);
+    expect(await page.locator('#adminTargetAgent option[value="agent-session"]').textContent()).toBe("Agent");
+    await page.locator("#adminTargetAgent").selectOption("agent-session");
+    expect(await page.locator("#adminTargetAgent").inputValue()).toBe("agent-session");
     await page.locator("#btnDesignateAgent").click();
-    await page.locator("#adminEnrollment code").waitFor({ timeout: 3000 }).catch(async () => { throw new Error(await page.locator("#adminStatus").textContent()); });
+    await page.locator("#adminEnrollment button").waitFor({ timeout: 3000 }).catch(async () => { throw new Error(await page.locator("#adminStatus").textContent()); });
     expect(await page.locator("#activeAdminBadge").isVisible()).toBe(true);
     expect(await page.locator("#roomListChat .room-admin-badge").count()).toBe(1);
     expect(await page.locator("body").innerText()).not.toContain("operator-secret");
-    expect(await page.locator("#adminEnrollment code").textContent()).toContain("admin(action='admin_claim'");
+    expect(await page.locator("#adminEnrollment code").count()).toBe(0);
+    expect(await page.locator("#adminEnrollment").innerText()).toMatch(/private|privately/i);
+    expect(await page.locator("#adminEnrollment").innerText()).not.toContain("admin(action=");
+    expect(await page.locator("#adminEnrollment textarea").count()).toBe(0);
     if (process.env.CHAT_UI_SCREENSHOT_DIR) { await mkdir(process.env.CHAT_UI_SCREENSHOT_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, "admin-panel-desktop.png"), fullPage: true }); }
-    await page.waitForFunction(() => (document.querySelector("#adminTaskAgent") as HTMLSelectElement).options.length > 1);
-    await page.locator("#adminTaskAgent").selectOption("agent-session");
-    await page.locator("#adminTaskText").fill("__Test_original_task"); await page.locator("#adminTaskForm button[type=submit]").click(); await taskStarted;
-    expect(dispatchedPayload).toMatchObject({ targetRoomId: roomId, targetSessionID: "agent-session", text: "__Test_original_task" });
-    await page.locator("#adminTaskText").fill("__Test_new_draft"); releaseTask();
-    await page.locator("#adminTaskList li").waitFor();
-    expect(await page.locator("#adminTaskText").inputValue()).toBe("__Test_new_draft");
-    await page.locator("#adminTaskList li select").selectOption("working"); await page.locator("#adminTaskList li textarea").fill("Checking");
-    await page.locator("#adminTaskList li button").click();
-    await page.locator("#adminPlanName").fill("Hourly check"); await page.locator("#adminPlanText").fill("Check status"); await page.locator("#adminPlanForm button[type=submit]").click();
-    await page.locator("#adminPlanList li").waitFor(); await page.locator("#adminPlanList li button").first().click(); await page.locator("#adminPlanList li button").first().click();
-    page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#adminPlanList li button").nth(1).click();
+    await page.locator("#adminEnrollment button").click();
+    const manualInstruction = `admin(action='admin_claim',roomId='${roomId}',enrollmentKey='private-key')`;
+    expect(await page.locator("#adminEnrollment textarea").inputValue()).toBe(manualInstruction);
+    expect(await page.locator("#adminEnrollment textarea").evaluate((field: HTMLTextAreaElement) => ({ readOnly: field.readOnly, selected: field.selectionStart === 0 && field.selectionEnd === field.value.length }))).toEqual({ readOnly: true, selected: true });
+    expect(adminPaths.some((pathname) => /\/(overview|tasks|plans)(\/|$)/.test(pathname))).toBe(false);
     page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#btnRevokeAdmin").click();
     await page.locator("#btnRevokeAdmin").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.querySelector<HTMLElement>("#activeAdminBadge")?.hidden && !document.querySelector("#roomListChat .room-admin-badge"));
@@ -125,77 +123,66 @@ test.skipIf(!browserModule)("admin panel uses scoped session token and mocked ad
   } finally { await browser?.close(); server.kill(); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 
-test.skipIf(!browserModule)("admin UI binds, claims, dispatches, and manages plans against real routes", async () => {
+test.skipIf(!browserModule)("admin UI binds agents and privately claims designation against real routes", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-web-admin-live-")), port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
   const adminToken = "operator-secret", bearer = "ui-test-token";
   const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port, adminToken), stdio: "ignore" });
-  let browser: any, roomId = "", agentRoomId = "", workerRoomId = "", sessionID = "";
+  let browser: any, roomId = "", agentRoomId = "", sessionID = "";
   const request = async (url: string, method: string, body?: unknown, operator = false) => fetch(`${origin}${url}`, { method, headers: { Authorization: `Bearer ${bearer}`, ...(body ? { "Content-Type": "application/json" } : {}), ...(operator ? { "X-Chat-Admin-Token": adminToken } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   try {
     await waitForServer(origin); browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } }); await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    const page = await context.newPage(); await page.goto(`${origin}/chat`); await page.locator("#joinView").waitFor({ state: "visible" });
+    const page = await context.newPage(), adminPaths: string[] = []; page.on("request", (request: BrowserRequest) => { const pathname = new URL(request.url()).pathname; if (pathname.startsWith("/admin/")) adminPaths.push(pathname); }); await page.goto(`${origin}/chat`); await page.locator("#joinView").waitFor({ state: "visible" });
     await page.locator("#inToken").fill(bearer); await page.locator('[data-token-save="inToken"]').click();
     await page.locator("#inName").fill("__Test_Operator"); await page.locator("#inRoomName").fill("__Test_AdminControl"); await page.locator("#btnCreate").click(); await page.locator("#chatView").waitFor({ state: "visible" });
     roomId = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || ""); sessionID = await page.evaluate(() => sessionStorage.getItem("chat.sessionID") || "");
     const agentSession = randomUUID(), ownerID = randomUUID(), membershipID = `__Test_${randomUUID()}`;
-    const workerSession = randomUUID(), workerOwner = randomUUID(), workerMembership = `__Test_${randomUUID()}`;
     const targetResponse = await request("/rooms", "POST", { name: "__Test_V2Agent", ownerId: "__Test_V2Agent", sessionID: agentSession, protocol: "v2", receiverOwnerID: ownerID });
     expect(targetResponse.status).toBe(201); agentRoomId = (await targetResponse.json() as { id: string }).id;
     expect((await request(`/rooms/${agentRoomId}/join`, "POST", { sessionID: agentSession, participantId: "__Test_V2Agent", participantName: "__Test_V2Agent", protocol: "v2", receiverOwnerID: ownerID })).status).toBe(201);
     const db = new Database(path.join(stateDir, "chat-room.sqlite"));
     db.query("UPDATE registry SET membership_id=? WHERE room_id=? AND session_id=?").run(membershipID, agentRoomId, agentSession); db.close();
     expect((await (await request(`/rooms/${agentRoomId}/registry`, "GET")).json())[agentSession]).toMatchObject({ membershipID, receiverOwnerID: ownerID, protocol: "v2" });
-    const workerResponse = await request("/rooms", "POST", { name: "__Test_V2Worker", ownerId: "__Test_V2Worker", sessionID: workerSession, protocol: "v2", receiverOwnerID: workerOwner });
-    expect(workerResponse.status).toBe(201); workerRoomId = (await workerResponse.json() as { id: string }).id;
-    expect((await request(`/rooms/${workerRoomId}/join`, "POST", { sessionID: workerSession, participantId: "__Test_V2Worker", participantName: "__Test_V2Worker", protocol: "v2", receiverOwnerID: workerOwner })).status).toBe(201);
-    const workerDB = new Database(path.join(stateDir, "chat-room.sqlite")); workerDB.query("UPDATE registry SET membership_id=? WHERE room_id=? AND session_id=?").run(workerMembership, workerRoomId, workerSession); workerDB.close();
+    expect((await request(`/rooms/${roomId}/join`, "POST", { sessionID: agentSession, participantId: "__Test_V2Agent", participantName: "__Test_V2Agent", protocol: "v2", receiverOwnerID: ownerID })).status).toBe(201);
+    const adminDB = new Database(path.join(stateDir, "chat-room.sqlite")); adminDB.query("UPDATE registry SET membership_id=? WHERE room_id=? AND session_id=?").run(membershipID, roomId, agentSession); adminDB.close();
     await page.locator("#btnSettings").click(); await page.locator("#adminAccessHeading").click();
     await page.locator("#inAdminToken").fill(adminToken); await page.locator("#btnSaveAdminToken").click();
     await page.locator("#btnOpenAdmin").waitFor({ state: "visible" }); await page.locator("#btnOpenAdmin").click();
-    await page.locator("#adminRoomSelect:not(:disabled)").waitFor(); await page.locator("#adminTargetRoom:not(:disabled)").waitFor();
-    await page.locator("#adminTargetRoom").selectOption(agentRoomId);
+    await page.locator("#adminRoomSelect:not(:disabled)").waitFor();
+    expect(await page.locator("#adminTargetRoom").count()).toBe(0);
+    await page.locator("#adminRoomSelect").selectOption(roomId);
     await page.waitForFunction((id: string) => Array.from((document.querySelector("#adminTargetAgent") as HTMLSelectElement).options).some((option) => option.value === id), agentSession);
+    expect(await page.locator(`#adminTargetAgent option[value="${agentSession}"]`).textContent()).toBe("__Test_V2Agent");
     await page.locator("#adminTargetAgent").selectOption(agentSession);
     let issued!: (value: any) => void; const issuedResult = new Promise<any>((resolve) => { issued = resolve; });
     page.on("response", async (response: BrowserResponse) => { if (response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/rooms") issued(await response.json()); });
     await page.locator("#btnDesignateAgent").click();
     const enrollment = await issuedResult;
-    expect(enrollment.adminRoom).toMatchObject({ roomId, targetRoomId: agentRoomId, sessionID: agentSession, receiverOwnerID: ownerID, membershipID, enrolled: false });
-    await page.locator("#adminEnrollment code").waitFor();
-    const instruction = await page.locator("#adminEnrollment code").textContent();
+    expect(enrollment.adminRoom).toMatchObject({ roomId, targetRoomId: roomId, sessionID: agentSession, receiverOwnerID: ownerID, membershipID, enrolled: false });
+    await page.locator("#adminEnrollment button").waitFor();
+    expect(await page.locator("#adminEnrollment code").count()).toBe(0);
+    expect(await page.locator("#adminEnrollment").innerText()).toMatch(/private|privately/i);
+    await page.locator("#adminEnrollment button").click();
+    const instruction = await page.evaluate(() => navigator.clipboard.readText());
     expect(instruction).toBe(`admin(action='admin_claim',roomId='${roomId}',enrollmentKey='${enrollment.enrollmentKey}')`);
-    expect(instruction).not.toContain(adminToken); await page.locator("#adminEnrollment button").click();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(instruction);
+    expect(instruction).not.toContain(adminToken);
     const claim = await page.evaluate(async (input: { roomId: string; sessionID: string; receiverOwnerID: string; enrollmentKey: string }) => {
       const response = await fetch(`/admin/rooms/${input.roomId}/claim`, { method: "POST", headers: { Authorization: "Bearer ui-test-token", "Content-Type": "application/json" }, body: JSON.stringify({ sessionID: input.sessionID, receiverOwnerID: input.receiverOwnerID, enrollmentKey: input.enrollmentKey }) });
       return { status: response.status, body: await response.json() };
     }, { roomId, sessionID: agentSession, receiverOwnerID: ownerID, enrollmentKey: enrollment.enrollmentKey });
     expect(claim.status).toBe(200); expect(claim.body.adminRoom.enrolled).toBe(true); expect(claim.body.capability).toBeTruthy();
-    expect(await page.locator("#adminOverview").textContent()).toContain("__Test_V2Agent");
-    await page.locator("#adminTaskRoom").selectOption(workerRoomId);
-    await page.waitForFunction((id: string) => Array.from((document.querySelector("#adminTaskAgent") as HTMLSelectElement).options).some((option) => option.value === id), workerSession);
-    await page.locator("#adminTaskAgent").selectOption(workerSession);
-    await page.locator("#adminTaskText").fill("__Test_dispatch"); await page.locator("#adminTaskForm button[type=submit]").click();
-    await page.locator("#adminTaskList li").waitFor(); expect(await page.locator("#adminTaskList li").textContent()).toContain("__Test_dispatch");
-    const dispatched = await (await request(`/admin/rooms/${roomId}/tasks`, "GET", undefined, true)).json();
-    expect(dispatched.tasks[0]).toMatchObject({ targetRoomId: workerRoomId, targetSessionID: workerSession, text: "__Test_dispatch" });
-    await page.locator("#adminTaskList li select").selectOption("working"); await page.locator("#adminTaskList li textarea").fill("__Test_progress"); await page.locator("#adminTaskList li button").click();
-    await page.locator("#adminPlanName").fill("__Test_timer"); await page.locator("#adminPlanText").fill("__Test_timer_prompt"); await page.locator("#adminPlanForm button[type=submit]").click();
-    await page.locator("#adminPlanList li").waitFor(); await page.locator("#adminPlanList li button").first().click(); await page.locator("#adminPlanList li button").first().click();
-    page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#adminPlanList li button").nth(1).click();
+    expect(adminPaths.some((pathname) => /\/(overview|tasks|plans)(\/|$)/.test(pathname))).toBe(false);
     expect(await page.locator("#adminRoomSelect").inputValue()).toBe(roomId);
     page.once("dialog", (dialog: BrowserDialog) => void dialog.accept()); await page.locator("#btnRevokeAdmin").click();
     await page.locator("#btnRevokeAdmin").waitFor({ state: "hidden" });
     expect((await request(`/rooms/${roomId}`, "DELETE", { sessionID }, true)).status).toBe(200);
     expect((await request(`/rooms/${agentRoomId}`, "DELETE", { sessionID: agentSession }, true)).status).toBe(200);
-    expect((await request(`/rooms/${workerRoomId}`, "DELETE", { sessionID: workerSession }, true)).status).toBe(200);
     await context.close();
   } finally { await browser?.close(); server.kill(); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 
-let binding: any, tasks: any[] = [], plans: any[] = [];
+let binding: any;
 async function mockAdmin(pathname: string, method: string, body: any) {
   if (pathname === "/admin/rooms" && method === "GET") return { body: { rooms: binding ? [binding] : [] } };
   if (pathname === "/admin/rooms" && method === "POST" || /^\/admin\/rooms\/[^/]+$/.test(pathname) && method === "PUT") {
@@ -203,15 +190,7 @@ async function mockAdmin(pathname: string, method: string, body: any) {
     return { status: 201, body: { adminRoom: binding, enrollmentKey: "private-key", expiresAt: Date.now() + 60000 } };
   }
   const id = pathname.split("/")[3];
-  if (pathname.endsWith("/overview")) return { body: { rooms: [{ name: "__Test_AdminControl", members: [{ name: "Agent", workState: "working" }] }] } };
-  if (pathname.endsWith("/tasks") && method === "GET") return { body: { tasks } };
-  if (pathname.endsWith("/tasks") && method === "POST") { tasks.push({ id: "task-1", text: body.text, status: "pending", progress: "" }); return { status: 201, body: { task: tasks[0] } }; }
-  if (pathname.includes("/tasks/") && method === "PATCH") { tasks[0] = { ...tasks[0], ...body }; return { body: { task: tasks[0] } }; }
-  if (pathname.endsWith("/plans") && method === "GET") return { body: { plans } };
-  if (pathname.endsWith("/plans") && method === "POST") { plans.push({ id: "plan-1", name: body.name, intervalSeconds: body.intervalSeconds, paused: false, nextRunAt: Date.now() + 3600000 }); return { status: 201, body: { plan: plans[0] } }; }
-  if (pathname.includes("/plans/") && method === "PATCH") { plans[0].paused = body.paused; return { body: { ok: true } }; }
-  if (pathname.includes("/plans/") && method === "DELETE") { plans = []; return { body: { ok: true } }; }
-  if (pathname === `/admin/rooms/${id}` && method === "DELETE") { binding = null; tasks = []; plans = []; return { body: { ok: true } }; }
+  if (pathname === `/admin/rooms/${id}` && method === "DELETE") { binding = null; return { body: { ok: true } }; }
   return { status: 404, body: { error: "mock route not found" } };
 }
 

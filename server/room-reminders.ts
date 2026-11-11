@@ -2,6 +2,7 @@ import { Cron } from "croner";
 import { randomUUID } from "node:crypto";
 import { databasePath } from "../src/store";
 import { initializeReminderSchema, withStateTransaction } from "../src/sqlite-state";
+import type { Message } from "../src/room-service";
 
 type Schedule = { type: "once"; at: string; timezone?: string } | { type: "cron"; expression: string; timezone: string };
 type Row = { id: string; room_id: string; creator_session_id: string; initiator: string; text: string; schedule_type: string; at: string | null; expression: string | null; timezone: string | null; paused: number; next_run_at: number; created_at: number; last_error: string | null };
@@ -105,7 +106,10 @@ function template(text: string, at: number, initiator: string, room: string, tim
     const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "longOffset" }).formatToParts(at).map(part => [part.type, part.value]));
     return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second} ${parts.timeZoneName} [${timezone}]`;
   })() : new Date(at).toISOString();
-  const result = text.replace(/\{(time|initiator|room)\}/g, (_m, key: string) => key === "time" ? time : key === "initiator" ? initiator : room);
+  const result = text.replace(/\{\{(time|initiator|room)\}\}|\{(time|initiator|room)\}/g, (_m, doubleKey: string, singleKey: string) => {
+    const key = doubleKey ?? singleKey;
+    return key === "time" ? time : key === "initiator" ? initiator : room;
+  });
   if (result.length > 2000) throw new Error("rendered reminder text exceeds 2000 characters");
   return result;
 }
@@ -171,11 +175,14 @@ export async function roomReminderRoutes(req: Request, url: URL): Promise<Respon
   return json(bodyOut, status);
 }
 
-export async function tickRoomReminders(now = Date.now()): Promise<void> {
+export type ReminderWake = (roomId: string, roomName: string, text: string, message: Message) => void | Promise<void>;
+
+export async function tickRoomReminders(now = Date.now(), wake?: ReminderWake): Promise<void> {
   await initializeReminderSchema(dbFile());
   const ids = await withStateTransaction(dbFile(), db => (db.query("SELECT id FROM room_reminders WHERE paused=0 AND next_run_at<=? ORDER BY next_run_at LIMIT 100").all(now) as Array<{ id: string }>).map(row => row.id));
   const failures: Array<{ id: string; error: string }> = [];
   for (const id of ids) {
+    let delivered: { roomName: string; message: Message } | undefined;
     const failure = await withStateTransaction(dbFile(), db => {
       const r = db.query("SELECT * FROM room_reminders WHERE id=? AND paused=0 AND next_run_at<=?").get(id, now) as Row | null;
       if (!r) return null;
@@ -188,7 +195,9 @@ export async function tickRoomReminders(now = Date.now()): Promise<void> {
           : (() => { throw new Error(`unsupported reminder schedule type: ${r.schedule_type}`); })();
         const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(r.room_id) as { created_at: number } | null;
         const sentAt = Math.max(now, (tail?.created_at ?? 0) + 1), text = template(r.text, sentAt, r.initiator, room.name, r.timezone ?? undefined);
-        db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question) VALUES(?,?, 'system',NULL,?,?,0)").run(randomUUID(), r.room_id, text, sentAt);
+        const message: Message = { id: `reminder:${randomUUID()}`, roomId: r.room_id, senderId: "system", text, createdAt: sentAt };
+        db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question) VALUES(?,?, 'system',NULL,?,?,0)").run(message.id, r.room_id, text, sentAt);
+        delivered = { roomName: room.name, message };
         if (upcoming === undefined) db.query("DELETE FROM room_reminders WHERE id=?").run(r.id);
         else db.query("UPDATE room_reminders SET next_run_at=?,last_error=NULL WHERE id=?").run(upcoming, r.id);
         })();
@@ -200,13 +209,16 @@ export async function tickRoomReminders(now = Date.now()): Promise<void> {
       }
     });
     if (failure) failures.push(failure);
+    else if (delivered && wake) {
+      try { await wake(delivered.message.roomId, delivered.roomName, delivered.message.text, delivered.message); } catch { /* Inbox polling remains the fallback. */ }
+    }
   }
   for (const failure of failures) console.error(`room reminder ${failure.id} paused after delivery error: ${failure.error}`);
 }
 
 let timer: ReturnType<typeof setInterval> | undefined;
-export function startRoomReminderScheduler(): void {
+export function startRoomReminderScheduler(wake?: ReminderWake): void {
   if (timer) return;
-  timer = setInterval(() => { void tickRoomReminders().catch(() => {}); }, 1000);
+  timer = setInterval(() => { void tickRoomReminders(Date.now(), wake).catch(() => {}); }, 1000);
   timer.unref?.();
 }

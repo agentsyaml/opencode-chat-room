@@ -1,26 +1,20 @@
-import { loadAdminCapability, loadTaskToken, saveAdminCapability, type AdminIdentity } from "./admin-credentials";
+import { loadAdminCapability, saveAdminCapability, type AdminIdentity } from "./admin-credentials";
 import type { CenterOpts } from "./center-client";
 import type { QueueTransport } from "./queue-transport";
 import { z } from "zod";
 
 export type AdminContext = { sessionID: string };
 export type AdminArgs = {
-  action: "task_progress" | "admin_claim" | "admin_overview" | "admin_history" | "admin_dispatch" | "admin_tasks" |
-    "admin_task_update" | "admin_plans" | "admin_plan_create" | "admin_plan_update" | "admin_plan_delete";
-  roomId?: string; enrollmentKey?: string; targetRoomId?: string; targetSessionID?: string;
-  text?: string; name?: string; intervalSeconds?: number; planId?: string; taskId?: string;
-  status?: "pending" | "working" | "blocked" | "completed" | "cancelled";
-  progress?: string; paused?: boolean; limit?: number;
+  action: "admin_claim" | "admin_overview" | "admin_history";
+  roomId?: string; enrollmentKey?: string; targetRoomId?: string;
+  limit?: number;
 };
 export const adminToolSchema = z.object({
-  action: z.enum(["task_progress", "admin_claim", "admin_overview", "admin_history", "admin_dispatch", "admin_tasks", "admin_task_update", "admin_plans", "admin_plan_create", "admin_plan_update", "admin_plan_delete"]),
+  action: z.enum(["admin_claim", "admin_overview", "admin_history"]),
   roomId: z.string().optional(), enrollmentKey: z.string().optional(), targetRoomId: z.string().optional(),
-  targetSessionID: z.string().optional(), text: z.string().max(2000).optional(), name: z.string().max(64).optional(),
-  intervalSeconds: z.number().int().min(60).max(2_592_000).optional(), planId: z.string().optional(), taskId: z.string().optional(),
-  status: z.enum(["pending", "working", "blocked", "completed", "cancelled"]).optional(), progress: z.string().max(2000).optional(), paused: z.boolean().optional(),
   limit: z.number().int().min(1).max(50).optional(),
 });
-export const adminToolDescription = "Administer an operator-enrolled room: overview, history, task dispatch, task progress, and plans. This tool never joins a room.";
+export const adminToolDescription = "Administer an operator-enrolled room: overview and history. This tool never joins a room.";
 const safe = (value: string) => encodeURIComponent(value);
 
 async function send(opts: CenterOpts, path: string, method: string, body?: unknown,
@@ -51,20 +45,6 @@ export function protectedAdminRequest(opts: CenterOpts, path: string, method: "G
 export async function adminTool(args: AdminArgs, context: AdminContext, opts: CenterOpts,
   transport: QueueTransport): Promise<string> {
   if (!opts.center) return "error: admin actions require central mode";
-  if (args.action === "task_progress") {
-    if (!args.taskId || !args.status || args.progress === undefined || args.progress.length > 2000) return "error: taskId, status, and progress (up to 2000 characters) are required";
-    if (transport.protocol === "v2" && !transport.receiverOwnerID) return "error: this runtime has no verified receiver owner identity";
-    const deliveryToken = await loadTaskToken({ center: opts.center, taskId: args.taskId, sessionID: context.sessionID, ownerID: transport.receiverOwnerID ?? "" });
-    if (!deliveryToken) return "error: no task progress token for this task and session";
-    try {
-      await send(opts, `/supervision/tasks/${safe(args.taskId)}/progress`, "POST",
-        { taskToken: deliveryToken, status: args.status, progress: args.progress }, undefined, context.sessionID, transport.receiverOwnerID ?? "");
-      return "task progress updated";
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "task progress update failed";
-      return `error: ${message.replaceAll(deliveryToken, "[redacted]")}`;
-    }
-  }
   const roomId = args.roomId?.trim();
   if (!roomId) return "error: roomId is required";
   const ownerID = transport.receiverOwnerID;
@@ -103,23 +83,6 @@ export async function adminTool(args: AdminArgs, context: AdminContext, opts: Ce
         query.set("limit", String(Math.min(50, Math.max(1, args.limit ?? 20))));
         result = await request(`/history?${query}`, "GET"); break;
       }
-      case "admin_dispatch":
-        if (!args.targetRoomId || !args.targetSessionID || !args.text?.trim()) return "error: targetRoomId, targetSessionID, and text are required";
-        result = await request("/tasks", "POST", { targetRoomId: args.targetRoomId, targetSessionID: args.targetSessionID, text: args.text.trim() }); break;
-      case "admin_tasks": result = await request("/tasks", "GET"); break;
-      case "admin_task_update":
-        if (!args.taskId || !args.status) return "error: taskId and status are required";
-        result = await request(`/tasks/${safe(args.taskId)}`, "PATCH", { status: args.status, ...(args.progress === undefined ? {} : { progress: args.progress }) }); break;
-      case "admin_plans": result = await request("/plans", "GET"); break;
-      case "admin_plan_create":
-        if (!args.name?.trim() || !args.text?.trim() || !args.intervalSeconds) return "error: name, intervalSeconds, and text are required";
-        result = await request("/plans", "POST", { name: args.name.trim(), intervalSeconds: args.intervalSeconds, text: args.text.trim() }); break;
-      case "admin_plan_update":
-        if (!args.planId || args.paused === undefined) return "error: planId and paused are required";
-        result = await request(`/plans/${safe(args.planId)}`, "PATCH", { paused: args.paused }); break;
-      case "admin_plan_delete":
-        if (!args.planId) return "error: planId is required";
-        result = await request(`/plans/${safe(args.planId)}`, "DELETE"); break;
       default: return "error: unsupported admin action";
     }
     return JSON.stringify(result);

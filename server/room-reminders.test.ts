@@ -81,11 +81,11 @@ test("cron schedules validate timezone and minimum cadence", async () => {
   const offsetReminder = (await offsetDisplay!.json() as { reminder: { id: string; schedule: { type: string; at: string; timezone: string } } }).reminder;
   expect(offsetReminder.schedule).toEqual({ type: "once", at: "2032-01-15T17:30:00.000Z", timezone: "UTC" });
   await request("DELETE", `/${offsetReminder.id}`, { sessionID: "member" });
-  const long = await request("POST", "", { sessionID: "member", text: `${"x".repeat(1994)}{time}`, schedule: { type: "once", at: new Date(Date.now() + 120_000).toISOString() } });
+  const long = await request("POST", "", { sessionID: "member", text: `${"x".repeat(1992)}{{time}}`, schedule: { type: "once", at: new Date(Date.now() + 120_000).toISOString() } });
   expect(long?.status).toBe(400);
   const update = await request("POST", "", { sessionID: "member", text: "ok", schedule: { type: "once", at: new Date(Date.now() + 120_000).toISOString() } });
   const updateId = (await update!.json() as { reminder: { id: string } }).reminder.id;
-  expect((await request("PATCH", `/${updateId}`, { sessionID: "member", text: `${"x".repeat(1994)}{time}` }))?.status).toBe(400);
+  expect((await request("PATCH", `/${updateId}`, { sessionID: "member", text: `${"x".repeat(1992)}{{time}}` }))?.status).toBe(400);
   await request("DELETE", `/${updateId}`, { sessionID: "member" });
 });
 
@@ -93,14 +93,14 @@ test("due reminders coalesce downtime and isolate corrupt schedules", async () =
   const denied = await request("GET", "?sessionID=outsider");
   expect(denied?.status).toBe(404);
   const at = "2032-01-15T12:30:00", future = Date.parse("2032-01-15T12:35:00-05:00");
-  const onceResp = await request("POST", "", { sessionID: "member", text: "Hi {initiator} in {room} at {time}", schedule: { type: "once", at, timezone: "America/New_York" } });
-  const cronResp = await request("POST", "", { sessionID: "member", text: "recurring", schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" } });
+  const onceResp = await request("POST", "", { sessionID: "member", text: "Hi {{initiator}} in {{room}} at {{time}}", schedule: { type: "once", at, timezone: "America/New_York" } });
+  const cronResp = await request("POST", "", { sessionID: "member", text: "recurring {initiator} {room}", schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" } });
   expect(onceResp?.status).toBe(201); expect(cronResp?.status).toBe(201);
   const once = (await onceResp!.json() as { reminder: { id: string } }).reminder;
   const recurring = (await cronResp!.json() as { reminder: { id: string } }).reminder;
   await writeState((svc, registry) => { svc.leaveRoom(roomId, "Alice"); delete registry[roomId]!.member; });
   expect((await request("GET", "?sessionID=member2"))?.status).toBe(200);
-  const patched = await request("PATCH", `/${once.id}`, { sessionID: "member2", text: "Updated {initiator} in {room} at {time}" });
+  const patched = await request("PATCH", `/${once.id}`, { sessionID: "member2", text: "Updated {{initiator}} in {{room}} at {{time}}" });
   expect(patched?.status).toBe(200);
   const poison = randomUUID();
   await withStateTransaction(path.join(dir, "chat-room.sqlite"), d => {
@@ -119,12 +119,14 @@ test("due reminders coalesce downtime and isolate corrupt schedules", async () =
   expect(rows.messages.every(m => m.sender_id === "system")).toBe(true);
   expect(rows.messages[0]!.text).toContain("Updated Alice in Test room at");
   expect(rows.messages[0]!.text).toContain("[America/New_York]");
+  expect(rows.messages[0]!.text).not.toMatch(/[{}]/);
+  expect(rows.messages[1]!.text).toBe("recurring Alice Test room");
   expect(rows.recurring.next_run_at).toBeGreaterThan(future);
   expect(rows.poison.paused).toBe(1); expect(rows.poison.last_error).toContain("time zone");
   expect(rows.once).toBeNull();
   const reminderInbox = await readInboxMessages("member3", roomId, true);
   expect(reminderInbox.items.map(item => item.text)).toContain(rows.messages[0]!.text);
-  expect(reminderInbox.items.map(item => item.text)).toContain("recurring");
+  expect(reminderInbox.items.map(item => item.text)).toContain("recurring Alice Test room");
   expect(reminderInbox.items.map(item => item.text)).not.toContain("must not send");
   const repaired = await request("PATCH", `/${poison}`, { sessionID: "member2", paused: false, schedule: { type: "cron", expression: "5 * * * *", timezone: "UTC" } });
   expect(repaired?.status).toBe(200);
@@ -154,6 +156,22 @@ test("pause and resume, direct rooms, and Reminder-named members", async () => {
   expect(await withStateTransaction(path.join(dir, "chat-room.sqlite"), d => d.query("SELECT 1 FROM room_reminders WHERE id=?").get(id))).not.toBeNull();
   await request("PATCH", `/${id}`, { sessionID: "member3", paused: false });
   await tickRoomReminders(future);
+  const immediate = await request("POST", "", { sessionID: "member2", text: "@Reminder immediate", schedule: { type: "once", at: new Date(Date.now() + 120_000).toISOString() } });
+  const immediateId = (await immediate!.json() as { reminder: { id: string } }).reminder.id;
+  const now = Date.now();
+  await withStateTransaction(path.join(dir, "chat-room.sqlite"), d => d.query("UPDATE room_reminders SET next_run_at=? WHERE id=?").run(now - 1, immediateId));
+  let calls = 0;
+  await tickRoomReminders(now, async (_roomId, _roomName, _text, message) => {
+    calls++;
+    expect(message.id).toMatch(/^reminder:/);
+    expect(await withStateTransaction(path.join(dir, "chat-room.sqlite"), d => d.query("SELECT 1 FROM messages WHERE id=?").get(message.id))).not.toBeNull();
+    throw new Error("wake unavailable");
+  });
+  expect(calls).toBe(1);
+  expect(await withStateTransaction(path.join(dir, "chat-room.sqlite"), d => ({
+    count: d.query("SELECT count(*) AS n FROM messages WHERE room_id=? AND text='@Reminder immediate'").get(roomId) as { n: number },
+    reminder: d.query("SELECT 1 FROM room_reminders WHERE id=?").get(immediateId),
+  }))).toMatchObject({ count: { n: 1 }, reminder: null });
   const direct = await requestFor(directRoomId, "POST", "", { sessionID: "directA", text: "direct reminder", schedule: { type: "once", at: new Date(Date.now() + 120_000).toISOString() } });
   const directID = (await direct!.json() as { reminder: { id: string } }).reminder.id;
   await withStateTransaction(path.join(dir, "chat-room.sqlite"), d => d.query("UPDATE room_reminders SET next_run_at=? WHERE id=?").run(Date.now() - 1, directID));

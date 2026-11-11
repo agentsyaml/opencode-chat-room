@@ -1,25 +1,18 @@
 import { databasePath } from "../src/store";
 import { readHistoryPage } from "../src/sqlite-state";
 import { adminEnabled, hasAdminCapability, isOperator } from "./admin-auth";
-import { adminPlanRoutes } from "./admin-plan-routes";
-import { adminTaskRoutes } from "./admin-task-routes";
 import { binding, digest, ensureAdminSchema, exec, isAgentMember, many, matchesHash, newSecret, one, publicRoom, tx, validCurrent, enroll } from "./admin-state";
 import type { Binding } from "./admin-state";
-import { startAdminScheduler } from "./admin-scheduler";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-startAdminScheduler();
+await ensureAdminSchema();
 
 export async function adminRoutes(request: Request, url: URL): Promise<Response | undefined> {
   if (!url.pathname.startsWith("/admin/") && !url.pathname.startsWith("/supervision/")) return undefined;
   if (!adminEnabled) return json({ error: "admin API is disabled" }, 503);
   try {
     await ensureAdminSchema();
-    const task = await adminTaskRoutes(request, url);
-    if (task) return task;
-    const plan = await adminPlanRoutes(request, url);
-    if (plan) return plan;
     return await rootRoutes(request, url);
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof URIError) return json({ error: "invalid request" }, 400);
@@ -126,9 +119,7 @@ async function overview(request: Request, roomID: string): Promise<Response> {
     if (!isOperator(request) && !validCurrent(db, b)) return { status: 409 as const };
     const rooms = many<{ id: string; name: string; createdAt: number }>(db, "SELECT id,name,created_at AS createdAt FROM rooms ORDER BY created_at DESC LIMIT 200")
       .map(room => ({ ...room, members: many(db, "SELECT g.session_id AS sessionID,g.name,g.protocol,g.receiver_owner_id AS receiverOwnerID,g.work_state AS workState,g.last_seen_at AS lastSeenAt FROM registry g WHERE g.room_id=? ORDER BY g.name", room.id) }));
-    const tasks = many(db, "SELECT id,admin_room_id AS adminRoomId,admin_generation AS generation,target_room_id AS targetRoomId,target_session_id AS targetSessionID,text,status,progress,created_at AS createdAt,updated_at AS updatedAt FROM admin_tasks WHERE admin_room_id=? ORDER BY created_at DESC LIMIT 200", roomID);
-    const plans = many(db, "SELECT id,admin_room_id AS adminRoomId,name,interval_seconds AS intervalSeconds,text,paused,next_run_at AS nextRunAt,created_at AS createdAt FROM admin_plans WHERE admin_room_id=? ORDER BY created_at DESC LIMIT 200", roomID);
-    return { rooms, tasks, plans };
+    return { rooms };
   });
   return "status" in result ? json({ error: result.status === 404 ? "admin room not found" : result.status === 401 ? "unauthorized" : "binding is no longer active" }, result.status) : json(result);
 }

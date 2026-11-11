@@ -40,6 +40,10 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
     await page.evaluate(async (url: string) => { const { app } = await import(url); await app.loadManageableMembers(); }, "/assets/chat/state.js");
     await page.locator(`#msgList [data-msg-id="${original.messages.at(-1).id}"] .message-reply`).waitFor();
     await page.locator(`#msgList [data-msg-id="${otherMessage.messages.at(-1).id}"] .message-reply`).waitFor();
+    const replyAction = page.locator(`#msgList [data-msg-id="${original.messages.at(-1).id}"] .message-reply`);
+    expect(await replyAction.getAttribute("aria-label")).toBe("Reply");
+    expect(await replyAction.locator("svg[aria-hidden=true]").count()).toBe(1);
+    expect(await page.locator("#replyCancel").getAttribute("aria-label")).toBe("Cancel reply");
     await checkComposerEditor(page);
     let failReply = true, replyPayload: any, retryPayload: any, releaseConcurrentSend = () => {}, signalConcurrentSend = () => {};
     const concurrentSendStarted = new Promise<void>((resolve) => { signalConcurrentSend = resolve; });
@@ -60,6 +64,31 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
     expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at> ");
     expect(await editor.locator("[data-mention]").count()).toBe(1);
     expect(await page.locator("#replyPreview").isVisible()).toBe(true);
+    const guardedBackspace = await page.evaluate(() => {
+      const input = document.querySelector<any>("#msgInput"), value = input.value, draft = input.draftValue;
+      const dispatch = (options: KeyboardEventInit) => { const event = new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true, ...options }); input.dispatchEvent(event); return event.defaultPrevented; };
+      const composing = dispatch({ isComposing: true }), imeKey = dispatch({ keyCode: 229 });
+      input.value = "x".repeat(value.length); input.setCaret(value.length);
+      const changedPrefix = dispatch({}); input.draftValue = draft; input.setCaret(value.length);
+      return [composing, imeKey, changedPrefix];
+    });
+    expect(guardedBackspace).toEqual([false, false, false]);
+    await page.keyboard.press("Backspace");
+    expect(await editor.evaluate((node: any) => node.value)).toBe("");
+    await page.locator(`#msgList [data-msg-id="${originalId}"] .message-reply`).click();
+    await page.keyboard.insertText("  ");
+    const afterBackspaces: string[] = [];
+    for (let index = 0; index < 3; index++) {
+      await page.keyboard.press("Backspace"); afterBackspaces.push(await editor.evaluate((node: any) => node.value));
+    }
+    expect(afterBackspaces).toEqual(["<at>@Peer</at>  ", "<at>@Peer</at> ", ""]);
+    await page.locator(`#msgList [data-msg-id="${originalId}"] .message-reply`).click();
+    await page.reload(); await page.locator("#chatView").waitFor({ state: "visible" });
+    expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at> ");
+    await editor.focus(); await editor.evaluate((node: any) => node.setCaret(node.value.length));
+    await page.keyboard.press("Backspace");
+    expect(await editor.evaluate((node: any) => node.value)).toBe("");
+    await page.locator(`#msgList [data-msg-id="${originalId}"] .message-reply`).click();
     await page.locator("#replyCancel").click();
     expect(await page.locator("#replyPreview").isVisible()).toBe(false);
     expect(await editor.evaluate((node: any) => node.value)).toBe("");
@@ -269,6 +298,9 @@ async function checkComposerEditor(page: any) {
   });
   expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at>@all");
   expect(await editor.evaluate((node: any) => node.value.includes("<at>@all</at>"))).toBe(false);
+  await editor.fill("@Pe"); await page.locator('#mentionPicker [data-name="Peer"]').waitFor(); await page.keyboard.press("Enter");
+  await page.keyboard.press("Backspace");
+  expect(await editor.evaluate((node: any) => node.value)).toBe("");
   await editor.fill("");
   await editor.fill("Line\n@Pe"); await page.locator('#mentionPicker [data-name="Peer"]').waitFor(); await page.keyboard.press("Enter");
   expect(await editor.evaluate((node: any) => node.value)).toBe("Line\n<at>@Peer</at>");

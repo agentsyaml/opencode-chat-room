@@ -222,6 +222,9 @@ test.skipIf(!browserModule)("questions can be answered inline without replacing 
     expect(await replyEditor.evaluate((node: any) => node.value)).toBe("<at>@Question author</at> ");
     expect(await replyEditor.locator("[data-mention]").count()).toBe(1);
     expect(await replyEditor.locator("[data-mention]").evaluate((node: HTMLElement) => ({ text: node.textContent, editable: node.contentEditable, label: node.getAttribute("aria-label") }))).toEqual({ text: "@Question author", editable: "false", label: "Mention Question author" });
+    await replyEditor.evaluate((node: any) => { node.draftValue = node.draftValue; node.focus(); node.setCaret(node.value.length); });
+    await page.keyboard.press("Backspace");
+    expect(await replyEditor.evaluate((node: any) => node.value)).toBe("");
     await replyEditor.fill("");
     await page.locator("#questionReply").evaluate((node: HTMLElement) => { node.dataset.questionId = "force-draft-restore"; });
     await page.locator(".question-item").getByText("Peer authored test question").click();

@@ -5,7 +5,6 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { adminTool } from "./admin-client";
-import { checkSupervisionInbox } from "./supervision-inbox";
 
 if (!process.env.CHAT_ROOM_ADMIN_INTEGRATION_CHILD) {
   test("admin supervision works over an isolated real server", async () => {
@@ -16,7 +15,7 @@ if (!process.env.CHAT_ROOM_ADMIN_INTEGRATION_CHILD) {
     if (code !== 0) throw new Error(`${stdout}${stderr}`);
   });
 } else {
-  test("operator binding, worker delivery, timer coalescing, and restart persistence", async () => {
+  test("operator binding and restart persistence", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "admin-integration-"));
     const state = path.join(root, "db"), serverToken = "server-secret", adminToken = "operator-secret";
     await import("node:fs/promises").then(({ mkdir }) => mkdir(state, { recursive: true }));
@@ -44,13 +43,12 @@ if (!process.env.CHAT_ROOM_ADMIN_INTEGRATION_CHILD) {
       const opts = { center: base, token: serverToken };
       await start();
       const makeRoom = async (name: string) => { const r = await api("POST", "/rooms", { name: `__Test_${name}`, ownerId: "__Test_owner" }); expect(r.status).toBe(201); return (await r.json() as { id: string }).id; };
-      adminRoom = await makeRoom("admin"); const supervisorRoom = await makeRoom("supervisor"), workerRoom = await makeRoom("worker");
+      adminRoom = await makeRoom("admin"); const supervisorRoom = await makeRoom("supervisor");
       const join = async (room: string, sessionID: string, owner: string, name: string) => {
         const r = await api("POST", `/rooms/${room}/join`, { sessionID, participantId: name, participantName: name, protocol: "v2", receiverOwnerID: owner }); expect(r.status).toBe(201);
       };
-      const supervisorOwner = randomUUID(), workerOwner = randomUUID();
+      const supervisorOwner = randomUUID();
       await join(supervisorRoom, "__Test_supervisor-session", supervisorOwner, "__Test_supervisor");
-      await join(workerRoom, "__Test_worker-session", workerOwner, "__Test_worker");
       const registry = await (await api("GET", `/rooms/${supervisorRoom}/registry`)).json() as Record<string, { membershipID: string }>;
       const supervisorMember = registry["__Test_supervisor-session"]?.membershipID;
       expect(supervisorMember).toBeTruthy();
@@ -64,54 +62,8 @@ if (!process.env.CHAT_ROOM_ADMIN_INTEGRATION_CHILD) {
       const claimed = await adminTool({ action: "admin_claim", roomId: adminRoom, enrollmentKey }, { sessionID: "__Test_supervisor-session" }, opts, transport);
       expect(claimed).toContain("enrolled"); expect(claimed).not.toContain(enrollmentKey);
       const overview = async () => JSON.parse(await adminTool({ action: "admin_overview", roomId: adminRoom }, { sessionID: "__Test_supervisor-session" }, opts, transport));
-      const before = await api("GET", `/rooms/${workerRoom}/members`); const beforeMembers = await before.json();
-      const sent: Array<{ id: string; text: string; delivery: string }> = [];
-      const workerTransport = { protocol: "v2" as const, receiverOwnerID: workerOwner, promptQueue: async (_session: string, id: string, text: string, delivery: "queue" | "steer") => { sent.push({ id, text, delivery }); return { id, sessionID: "__Test_worker-session", delivery, prompt: { text } }; } };
-      const dispatched = await adminTool({ action: "admin_dispatch", roomId: adminRoom, targetRoomId: workerRoom, targetSessionID: "__Test_worker-session", text: "__Test_secret task" }, { sessionID: "__Test_supervisor-session" }, opts, transport);
-      expect(dispatched).toContain('"task"');
-      const workerInbox = await api("GET", `/supervision/inbox?sessionID=__Test_worker-session&receiverOwnerID=${workerOwner}`);
-      const taskDeliveries = (await workerInbox.json()) as { deliveries: Array<{ taskToken: string; targetRoomId: string }> };
-      expect(taskDeliveries.deliveries).toHaveLength(1);
-      expect(taskDeliveries.deliveries[0]!.targetRoomId).toBe(workerRoom);
-      expect(taskDeliveries.deliveries[0]!.taskToken).toBeTruthy();
-      expect(dispatched).not.toContain("taskToken");
-      await checkSupervisionInbox(opts, "__Test_worker-session", workerTransport);
-      expect(sent).toHaveLength(1); expect(sent[0]!.delivery).toBe("steer"); expect(sent[0]!.text).toContain("__Test_secret task");
-      expect(sent[0]!.text).not.toContain("taskToken");
-      const taskId = sent[0]!.text.match(/Task ID: ([^.]*)/)?.[1]; expect(taskId).toBeTruthy();
-      const progress = await adminTool({ action: "task_progress", taskId, status: "working", progress: "__Test_progress" }, { sessionID: "__Test_worker-session" }, opts, workerTransport);
-      expect(progress).toBe("task progress updated");
-      expect(JSON.stringify(await overview())).toContain("__Test_progress");
-      expect(await (await api("GET", `/rooms/${workerRoom}/members`)).json()).toEqual(beforeMembers);
-
-      const planResult = await adminTool({ action: "admin_plan_create", roomId: adminRoom, name: "__Test_timer", intervalSeconds: 60, text: "__Test_reminder" }, { sessionID: "__Test_supervisor-session" }, opts, transport);
-      const planId = (JSON.parse(planResult) as { plan: { id: string } }).plan.id;
-      const database = (await import("./store")).databasePath();
-      const db = await import("./sqlite-state"); await db.openStateDatabase(database);
-      await (await import("../server/admin-state")).ensureAdminSchema();
-      const { tickAdminScheduler } = await import("../server/admin-scheduler"); const now = Date.now();
-      await db.withStateTransaction(database, d => d.query("UPDATE admin_plans SET next_run_at=? WHERE id=?").run(now - 1, planId));
-      await tickAdminScheduler(now);
-      const reminder = async () => db.withStateTransaction(database, d => d.query("SELECT id,admission_id FROM admin_deliveries WHERE admin_room_id=? AND kind='supervision'").get(adminRoom!) as { id: string; admission_id: string } | null);
-      const first = await reminder(); expect(first, JSON.stringify({ planId, plans: await db.withStateTransaction(database, d => d.query("SELECT id,next_run_at FROM admin_plans").all()), bindings: await db.withStateTransaction(database, d => d.query("SELECT room_id,target_room_id FROM admin_rooms").all()) })).toBeTruthy();
-      await db.withStateTransaction(database, d => d.query("UPDATE admin_plans SET next_run_at=? WHERE id=?").run(now + 1, planId));
-      await tickAdminScheduler(now + 1);
-      expect(await reminder()).toEqual(first);
-      const supervisorTransport = { protocol: "v2" as const, receiverOwnerID: supervisorOwner, promptQueue: async (_s: string, id: string, text: string, delivery: "queue" | "steer") => { sent.push({ id, text, delivery }); return { id, sessionID: "__Test_supervisor-session", delivery, prompt: { text } }; } };
-      await checkSupervisionInbox(opts, "__Test_supervisor-session", supervisorTransport);
-      expect(sent.at(-1)!.text).toContain("__Test_reminder");
-      expect((await reminder()) && (await db.withStateTransaction(database, d => d.query("SELECT acknowledged FROM admin_deliveries WHERE id=?").get(first!.id) as { acknowledged: number })).acknowledged).toBe(1);
       await stop(); await start();
-      expect(JSON.stringify(await overview())).toContain("__Test_progress");
-      await db.withStateTransaction(database, d => d.query("UPDATE admin_plans SET next_run_at=? WHERE id=?").run(now + 2, planId));
-      await tickAdminScheduler(now + 2);
-      const next = await reminder(); expect(next!.id).not.toBe(first!.id); expect(next!.admission_id).not.toBe(first!.admission_id);
-      await checkSupervisionInbox(opts, "__Test_supervisor-session", supervisorTransport);
-      expect(sent.at(-1)!.text).toContain("__Test_reminder");
-      for (const args of [{ action: "admin_plan_update", roomId: adminRoom, planId, paused: true }, { action: "admin_plan_update", roomId: adminRoom, planId, paused: false }, { action: "admin_plan_delete", roomId: adminRoom, planId }] as const) {
-        const result = await adminTool(args, { sessionID: "__Test_supervisor-session" }, opts, transport);
-        expect(result.startsWith("error:"), result).toBe(false);
-      }
+      expect(Array.isArray((await overview()).rooms)).toBe(true);
     } finally {
       if (adminRoom) await api("DELETE", `/admin/rooms/${adminRoom}`, undefined, { ...auth, "x-chat-admin-token": adminToken }).catch(() => {});
       await stop(); await rm(root, { recursive: true, force: true });

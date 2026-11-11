@@ -175,7 +175,9 @@ async function persistentBrowserFlow(context: any, origin: string, token: string
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
   await pageA.waitForFunction(() => Array.from(document.querySelectorAll("#msgList .msg-text")).filter((node) => node.textContent?.startsWith("PEER-BURST-")).length === 205, undefined, { timeout: 30000 });
+  await pageA.locator("#thread").evaluate((thread: HTMLElement) => { thread.scrollTop = 0; });
   await pageA.bringToFront();
+  await pageA.waitForFunction(() => { const thread = document.querySelector<HTMLElement>("#thread")!; return thread.scrollHeight - thread.scrollTop - thread.clientHeight > 160; });
   await pageA.locator("#btnJump").waitFor({ state: "visible" });
   await pageA.locator("#btnJump").click();
   await pageA.waitForFunction(() => { const thread = document.querySelector<HTMLElement>("#thread")!; return thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2; });

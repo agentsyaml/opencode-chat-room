@@ -1,6 +1,7 @@
 import { createRandomId } from "./state.js";
 
 const trustedChipNames = new Map();
+const autoSeparator = "\uE000\uE001";
 function mentionName(node) {
   const name = trustedChipNames.get(node.dataset?.chatChip);
   return name !== undefined && node.dataset.mention === name && node.textContent === `@${name}` ? name : null;
@@ -15,7 +16,9 @@ export function editorText(editor, draft = false) {
     if (node.nodeType === Node.TEXT_NODE) value += draft ? encodeDraftText(node.nodeValue) : node.nodeValue;
     else if (node.nodeType === Node.ELEMENT_NODE) {
       const mention = mentionName(node);
-      if (mention !== null) value += `<at>@${mention}</at>`;
+      if (node.dataset?.chatAutoSeparator) value += draft && node.textContent.startsWith(" ")
+        ? autoSeparator + encodeDraftText(node.textContent.slice(1)) : draft ? encodeDraftText(node.textContent) : node.textContent;
+      else if (mention !== null) value += `<at>@${mention}</at>`;
       else if (node.tagName === "BR") value += "\n";
       else node.childNodes.forEach((child, index, all) => {
         if (index && (block(child) || block(all[index - 1]))) value += "\n";
@@ -31,24 +34,20 @@ export function editorText(editor, draft = false) {
 }
 
 export const editorDraftText = (editor) => editorText(editor, true);
+export const autoMentionDraft = (name) => `<at>@${name}</at>${autoSeparator}`;
 const literalMention = /<at>@([^<]+)<\/at>/g;
 function encodeDraftText(text) { return String(text).replace(/\uE000/g, "\uE000\uE000").replace(literalMention, "\uE000$&"); }
 
 export function setEditorText(editor, value, draft = false) {
   editor.replaceChildren();
-  const pattern = draft ? /\uE000\uE000|\uE000<at>@([^<]+)<\/at>|<at>@([^<]+)<\/at>/g : /<at>@([^<]+)<\/at>/g;
+  const pattern = draft ? /\uE000\uE001|\uE000\uE000|\uE000<at>@([^<]+)<\/at>|<at>@([^<]+)<\/at>/g : /<at>@([^<]+)<\/at>/g;
   let offset = 0, match;
   while ((match = pattern.exec(String(value))) !== null) {
     editor.append(document.createTextNode(String(value).slice(offset, match.index)));
+    if (draft && match[0] === autoSeparator) { editor.append(createAutoSeparator()); offset = pattern.lastIndex; continue; }
     if (draft && match[0] === "\uE000\uE000") { editor.append(document.createTextNode("\uE000")); offset = pattern.lastIndex; continue; }
     if (draft && match[0].startsWith("\uE000")) { editor.append(document.createTextNode(match[0].slice(1))); offset = pattern.lastIndex; continue; }
-    const chip = document.createElement("span");
-    const name = match[draft ? 2 : 1];
-    chip.className = "editor-mention"; chip.dataset.mention = name;
-    chip.dataset.chatChip = createRandomId(); trustedChipNames.set(chip.dataset.chatChip, name);
-    chip.contentEditable = "false"; chip.setAttribute("role", "img");
-    chip.setAttribute("aria-label", `Mention ${name}`); chip.textContent = `@${name}`;
-    editor.append(chip); offset = pattern.lastIndex;
+    editor.append(createMention(draft ? match[2] : match[1])); offset = pattern.lastIndex;
   }
   editor.append(document.createTextNode(String(value).slice(offset)));
   pruneTrustedChipNames();
@@ -141,16 +140,18 @@ export function replaceEditorRange(editor, start, end, value, parseMentions = tr
   setEditorSelection(editor, start, end);
   if (!parseMentions && document.execCommand("insertText", false, String(value))) return;
   const marker = `chat-insert-${createRandomId()}`;
-  const source = String(value), token = parseMentions ? /<at>@([^<]+)<\/at>/g : null;
+  const source = String(value), generatedSpace = parseMentions && source.endsWith(" "), content = generatedSpace ? source.slice(0, -1) : source;
+  const token = parseMentions ? /<at>@([^<]+)<\/at>/g : null;
   let html = "", cursor = 0, match;
-  while (token && (match = token.exec(source))) {
-    html += textHTML(source.slice(cursor, match.index));
+  while (token && (match = token.exec(content))) {
+    html += textHTML(content.slice(cursor, match.index));
     const name = escapeHTML(match[1]);
     const chipID = createRandomId(); trustedChipNames.set(chipID, match[1]);
     html += `<span class="editor-mention" data-mention="${name}" data-chat-chip="${chipID}" data-insert-marker="${marker}" contenteditable="false" role="img" aria-label="Mention ${name}">@${name}</span>`;
     cursor = token.lastIndex;
   }
-  html += textHTML(source.slice(cursor));
+  html += textHTML(content.slice(cursor));
+  if (generatedSpace) html += `<span data-chat-auto-separator="true"> </span>`;
   if (document.execCommand("insertHTML", false, html)) {
     editor.querySelectorAll(`[data-insert-marker="${marker}"]`).forEach((chip) => chip.removeAttribute("data-insert-marker"));
     setCaret(editor, start + source.length);
@@ -158,6 +159,7 @@ export function replaceEditorRange(editor, start, end, value, parseMentions = tr
   } else {
     const current = editorText(editor), next = current.slice(0, start) + value + current.slice(end);
     if (parseMentions) setEditorText(editor, next); else editor.replaceChildren(document.createTextNode(next));
+    if (generatedSpace) wrapAutoSeparator(editor, start + source.length - 1);
     setCaret(editor, start + value.length);
     pruneTrustedChipNames();
   }
@@ -165,6 +167,40 @@ export function replaceEditorRange(editor, start, end, value, parseMentions = tr
 
 function escapeHTML(text) { return String(text).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
 function textHTML(text) { return escapeHTML(text).replace(/\r\n|\r|\n/g, "<br>"); }
+
+function createMention(name) {
+  const chip = document.createElement("span");
+  chip.className = "editor-mention"; chip.dataset.mention = name;
+  chip.dataset.chatChip = createRandomId(); trustedChipNames.set(chip.dataset.chatChip, name);
+  chip.contentEditable = "false"; chip.setAttribute("role", "img");
+  chip.setAttribute("aria-label", `Mention ${name}`); chip.textContent = `@${name}`;
+  return chip;
+}
+function createAutoSeparator() {
+  const separator = document.createElement("span");
+  separator.dataset.chatAutoSeparator = "true"; separator.textContent = " ";
+  return separator;
+}
+function wrapAutoSeparator(editor, offset) {
+  const start = editorPoint(editor, offset), end = editorPoint(editor, offset + 1), range = document.createRange();
+  range.setStart(start[0], start[1]); range.setEnd(end[0], end[1]); range.deleteContents(); range.insertNode(createAutoSeparator());
+}
+
+function deleteMentionAtCaret(editor, event) {
+  if (event.isComposing || event.keyCode === 229 || event.key !== "Backspace") return;
+  const [caret, end] = editorSelectionOffsets(editor);
+  if (caret !== end) return;
+  const separator = [...editor.querySelectorAll("[data-chat-auto-separator]")].find((node) => {
+    const start = lengthBefore(editor, node, 0); return node.textContent === " " && caret === start + 1;
+  });
+  const mention = separator?.previousElementSibling || [...editor.querySelectorAll(".editor-mention")].find((node) => {
+    return caret === lengthBefore(editor, node, 0) + `<at>@${mentionName(node)}</at>`.length;
+  });
+  if (!mention || (separator && separator.previousElementSibling !== mention)) return;
+  const start = lengthBefore(editor, mention, 0);
+  event.preventDefault(); mention.remove(); separator?.remove(); setCaret(editor, start);
+  editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+}
 
 function pruneTrustedChipNames() {
   const live = new Set([...document.querySelectorAll("[data-chat-chip]")].map((node) => node.dataset.chatChip));
@@ -189,6 +225,7 @@ export function installEditor(editor) {
   editor.setSelectionRange = (start, end = start) => setEditorSelection(editor, start, end);
   editor.replaceTextRange = (start, end, value) => replaceEditorRange(editor, start, end, value);
   editor.addEventListener("input", pruneTrustedChipNames);
+  editor.addEventListener("keydown", (event) => deleteMentionAtCaret(editor, event));
   editor.addEventListener("paste", (event) => {
     if (event.defaultPrevented || event.clipboardData?.files.length) return;
     event.preventDefault();
