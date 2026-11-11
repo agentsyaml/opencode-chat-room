@@ -177,15 +177,23 @@ async function previewResource(card, roomId, id, resource, type, button, app, st
     return;
   }
   status.textContent = app.t("resourceLoading");
-  let url;
+  let url, media;
+  const fail = () => {
+    media?.remove(); media = undefined;
+    if (url) { URL.revokeObjectURL(url); url = undefined; }
+    setResourceButton(button, "resourcePreview", resource.name, app); button.disabled = false;
+    if (card.isConnected) status.textContent = app.t("resourceFailed");
+  };
   try {
     const blob = await app.apiBlob(`/rooms/${encodeURIComponent(roomId)}/resources/${encodeURIComponent(id)}/content`);
     if (!card.isConnected) return;
     url = URL.createObjectURL(blob);
-    const kind = previewKind(type), media = document.createElement(kind), ready = waitForMediaSize(media, kind);
+    const kind = previewKind(type);
+    media = document.createElement(kind);
+    const ready = waitForMediaSize(media, kind);
     if (kind === "img") media.alt = resource.name;
     else { media.controls = true; media.preload = "metadata"; }
-    media.addEventListener("error", () => { if (card.isConnected) status.textContent = app.t("resourceFailed"); });
+    media.addEventListener("error", fail, { once: true });
     media.src = url;
     // Update the control inside the layout step: a stalled animation frame must not
     // leave the preview open with a disabled button.
@@ -194,9 +202,9 @@ async function previewResource(card, roomId, id, resource, type, button, app, st
       setResourceButton(button, "resourceHide", resource.name, app); button.disabled = false;
       await ready;
     });
-    if (!card.isConnected) { URL.revokeObjectURL(url); return; }
+    if (!card.isConnected) { fail(); return; }
     card._resourceUrl = url; card._previewElement = media; previewUrls.set(card, url); watchPreviewRemoval();
-  } catch { if (url) URL.revokeObjectURL(url); if (card.isConnected) status.textContent = app.t("resourceFailed"); }
+  } catch { fail(); }
   finally { if (card.isConnected) button.disabled = false; }
 }
 function waitForMediaSize(media, kind) {

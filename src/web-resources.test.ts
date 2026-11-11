@@ -92,6 +92,20 @@ test.skipIf(!browserModule)("agent uploads render and download real browser medi
     const peerCard = page.locator(`.msg[data-sender="__Test_MediaPeer"] .chat-resource[data-resource-id="${resources[0]!.id}"]`);
     await peerCard.getByRole("button", { name: /Preview/ }).waitFor({ timeout: 15000 });
     expect(await peerCard.locator("img, audio, video").count()).toBe(0);
+    const brokenId = "9f9f9f9f-9f9f-4f9f-8f9f-9f9f9f9f9f9f";
+    await page.route(`**/resources/${brokenId}`, (route: any) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ resource: { id: brokenId, roomID, name: "broken.png", mimeType: "image/png", size: 6, createdAt: Date.now() } }) }));
+    await page.route(`**/resources/${brokenId}/content`, (route: any) => route.fulfill({ contentType: "image/png", body: Buffer.from("broken") }));
+    await page.evaluate(async ({ url, id, text }: any) => {
+      const { app } = await import(url);
+      await app.api(`/rooms/${encodeURIComponent(id)}/messages`, { method: "POST", body: JSON.stringify({ sessionID: app.LS.sessionID, text }) });
+    }, { url: "/assets/chat/state.js", id: roomID, text: `[[resource:${brokenId}]]` });
+    const broken = page.locator(`.chat-resource[data-resource-id="${brokenId}"]`);
+    await broken.getByText(/could not be loaded/i).waitFor({ timeout: 15000 });
+    // A file that cannot be decoded leaves no media behind and the toggle stays usable.
+    expect(await broken.locator("img, audio, video").count()).toBe(0);
+    await broken.getByRole("button", { name: /Preview/ }).click();
+    await broken.getByText(/could not be loaded/i).waitFor();
+    expect(await broken.locator("img, audio, video").count()).toBe(0);
     expect(resourceQueries.length).toBeGreaterThan(0);
     expect(resourceQueries.every((query) => query === "")).toBe(true);
   } finally {

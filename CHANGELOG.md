@@ -13,6 +13,7 @@
 - Increase text selection contrast with an inverted accent background in both themes.
 - Designate administrators in one step: the designation applies immediately and stays until revoked. The enrollment code and claim step are gone; existing claimed capabilities keep working.
 - Render AVIF images and show a visible banner when an attachment upload fails.
+- Keep the attachment preview toggle clickable and correctly labelled while a preview loads, and clear a preview that cannot be decoded.
 - Stop rebuilding the question panel every few seconds and fix the CRON timezone label.
 - Reject malformed JSON bodies with 400 instead of failing with 500.
 - Re-check the operator token on every admin request and cap the in-memory wake table.
