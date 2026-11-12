@@ -154,7 +154,11 @@ async function handle(req: Request): Promise<Response> {
       const caller = url.searchParams.get("sessionID");
       const rooms = await readState((svc, registry) => svc.listRooms()
         .filter((room) => room.kind !== "direct" ? true : !!caller && room.directSessionIDs?.includes(caller))
-        .map((room) => ({ ...serializeRoom(room), joined: Boolean(caller && registry[room.id]?.[caller]) })));
+        .map((room) => {
+          const entry = caller ? registry[room.id]?.[caller] : undefined;
+          // The browser keeps its watermark per tab; a new tab starts from this one.
+          return { ...serializeRoom(room), joined: Boolean(entry), ...(entry?.lastReadTs ? { lastReadTs: entry.lastReadTs } : {}) };
+        }));
       return json(rooms);
     }
     const members = await memberRoutes(req, url);

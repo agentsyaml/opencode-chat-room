@@ -31,6 +31,12 @@ test.skipIf(!browserModule)("physical scroll reaches a stable zero-gap thread bo
       expect(await page.locator("#btnJump").isVisible()).toBe(false);
       await api(origin, `/rooms/${roomInfo.roomId}/join`, "POST", { sessionID: "__Test_ScrollPeer", participantId: "__Test_ScrollPeer", participantName: "__Test_ScrollPeer" });
       for (let index = 0; index < 24; index++) await api(origin, `/rooms/${roomInfo.roomId}/messages`, "POST", { sessionID: roomInfo.sessionID, text: `__Test_scroll ${index}\n${"A line of conversation content.\n".repeat(3)}` });
+      // Read everything first, so the reload is not expected to land on an unread message.
+      await page.locator("#msgList .msg").nth(23).waitFor();
+      await page.evaluate(async (url: string) => {
+        const { app } = await import(url);
+        app.jumpToBottom(); await app.markActiveRoomRead(true);
+      }, "/assets/chat/state.js");
       await page.reload(); await page.locator("#msgList .msg").nth(23).waitFor();
       const staleUnread = await page.evaluate(async (url: string) => {
         const { app } = await import(url), entry = app.state.rooms.get(app.state.room.id);

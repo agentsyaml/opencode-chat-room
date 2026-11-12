@@ -261,7 +261,11 @@ async function reconciliationWaitsForVisibleBottom(page: any, origin: string, ar
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: false }); document.hasFocus = () => true; });
   await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.markActiveRoomRead(), "/assets/chat/state.js");
   expect(reads).toEqual([]);
-  await thread.evaluate((node: HTMLElement) => { node.scrollTop = node.scrollHeight; });
+  // A restored unread boundary waits for a real user scroll before it counts as read.
+  await thread.evaluate((node: HTMLElement) => {
+    node.scrollTop = node.scrollHeight;
+    node.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true }));
+  });
   await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.markActiveRoomRead(), "/assets/chat/state.js");
   expect(reads).toContain(id);
   await page.screenshot({ path: path.join(artifactDir, "reconcile-visible-bottom.png"), fullPage: true });

@@ -9,6 +9,10 @@
 - Clear a question from unread as soon as its answer arrives, even while the room is open.
 - Keep a replied-to message as the saved position instead of jumping to unread on the next open.
 - Show the unread total for all rooms in the browser tab title.
+- Start a new tab from the read watermark the server stores for that session, so messages read before the tab opened do not appear as read.
+- Sending from inside the history no longer jumps to the newest message or advances the read watermark.
+- Keep messages whose row failed to render unread instead of advancing the watermark past them.
+- Return the text of a reply to an already answered question to the draft instead of queueing an answer that can never succeed.
 - Log every failed notification delivery with its room and session id.
 
 ## 0.5.4 — 2026-11-11

@@ -51,7 +51,8 @@ export function initRooms(app) {
     const entry = existing || { unreadIds: new Map(), unreadOverflow: false, preview: "", previewAt: 0, position: 0, readTs: 0, receivedTs: room.messages.at(-1)?.createdAt ?? 0 };
     entry.unreadIds ||= new Map();
     entry.unreadOverflow ||= false;
-    const latest = room.messages.at(-1), savedReadTs = app.state.lastReadTs.get(room.id);
+    const latest = room.messages.at(-1), savedReadTs = app.state.lastReadTs.get(room.id) ?? (typeof room.lastReadTs === "number" ? room.lastReadTs : undefined);
+    if (savedReadTs !== undefined && !app.state.lastReadTs.has(room.id)) app.saveReadTs(room.id, savedReadTs);
     entry.readTs ||= savedReadTs || 0;
     entry.room = room;
     entry.name = name;
