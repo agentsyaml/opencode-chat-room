@@ -469,7 +469,10 @@ app.flash = (button, key) => {
 };
 app.updateTitle = () => {
   const title = app.state.room ? app.t("roomTitle", { name: app.state.room.name }) : app.t("documentTitle");
-  document.title = app.state.unread ? `(${app.state.unread}) ${title}` : title;
+  const active = app.state.room?.id;
+  let total = 0;
+  for (const [id, entry] of app.state.rooms) total += id === active ? app.state.unread : entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
+  document.title = total ? `(${total}) ${title}` : title;
 };
 app.setOnline = (online) => { app.$("#connBar").hidden = online; };
 app.showSendError = (key, values = {}) => {

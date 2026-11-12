@@ -441,6 +441,10 @@ export function initMessages(app) {
          if (entry && item.createdAt > entry.readTs && !isOwnMessage(item, app) && !entry.unreadIds.has(item.id)) {
            entry.unreadIds.set(item.id, item); unreadChanged = true;
          }
+         // An answer to a question clears that question even before the room is read.
+         if (entry && item.answerToMessageID && entry.unreadIds.get(item.answerToMessageID)?.isQuestion) {
+           entry.unreadIds.delete(item.answerToMessageID); unreadChanged = true;
+         }
        }
       if (entry) entry.receivedTs = items.reduce((latest, item) => Number.isSafeInteger(item.createdAt) ? Math.max(latest, item.createdAt) : latest, previousReceivedTs);
       if (entry) entry.unreadOverflow = Boolean(data.hasMore);

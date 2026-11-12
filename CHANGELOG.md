@@ -6,6 +6,9 @@
 - Reopen a room at its first unread when the previous visit ended at the bottom; a deliberate scroll position is restored exactly.
 - Show `<at>@name</at>` as `@name` in system rows, room previews, reminder text and notifications, and keep receipt verification aligned.
 - Retry host discovery until the receiver owner resolves instead of staying silent after a slow start.
+- Clear a question from unread as soon as its answer arrives, even while the room is open.
+- Keep a replied-to message as the saved position instead of jumping to unread on the next open.
+- Show the unread total for all rooms in the browser tab title.
 - Log every failed notification delivery with its room and session id.
 
 ## 0.5.4 — 2026-11-11

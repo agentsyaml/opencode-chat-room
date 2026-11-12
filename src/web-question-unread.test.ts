@@ -53,6 +53,8 @@ test.skipIf(!browserModule)("an unanswered question stays unread until it is ans
 
     const questionId = (await api(origin, `/rooms/${room.id}/questions`, "GET", undefined) as any).questions[0].id;
     await api(origin, `/rooms/${room.id}/questions/${questionId}/answers`, "POST", { sessionID: "__Test_QuestionPeer", text: "__Test_answer" });
+    // The answer alone clears the question, without scrolling or reloading.
+    await page.waitForFunction(async (url: string) => (await import(url)).app.state.unread === 0, "/assets/chat/state.js", { timeout: 15000 });
     await page.reload();
     await page.locator("#chatView").waitFor({ state: "visible" });
     await page.waitForFunction(async (url: string) => {
