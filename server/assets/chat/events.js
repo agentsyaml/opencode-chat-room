@@ -21,7 +21,7 @@ export function initEvents(app) {
       atBottom: thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 4 };
     const missing = app.state.readAnchorGuard?.roomId === readingPosition.roomId && app.state.readAnchorGuard.missing;
     if (readingPosition.roomId && anchor && (!missing || performance.now() <= app.state.userScrollIntentUntil)) {
-      app.savePosition(readingPosition.roomId, { messageId: readingPosition.messageId, offset: readingPosition.offset });
+      app.savePosition(readingPosition.roomId, { messageId: readingPosition.messageId, offset: readingPosition.offset, atBottom: readingPosition.atBottom });
     }
   }
   app.captureReadingPosition = captureReadingPosition;
@@ -60,8 +60,9 @@ export function initEvents(app) {
     if (typeof saved === "number") { thread.scrollTop = saved; captureReadingPosition(); return { messageId: readingPosition?.messageId, atBottom: atBottom() }; }
     const readTs = entry?.readTs || app.state.lastReadTs.get(roomId) || 0;
     const boundary = readTs && entry?.room.messages.find((message) => message.createdAt > readTs);
-    // Unread messages win over the old offset: open on the first unread instead of leaving it below.
-    if ((entry?.unreadIds.size || entry?.unreadOverflow) && boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };
+    // Leaving at the bottom and returning to new messages lands on the first unread;
+    // a deliberate scroll position is restored exactly.
+    if ((entry?.unreadIds.size || entry?.unreadOverflow) && saved?.atBottom !== false && boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };
     if (saved?.messageId && align(saved.messageId, Number(saved.offset) || 0)) return { messageId: saved.messageId, atBottom: atBottom() };
     if (boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };
     if (!saved && !boundary) return false;

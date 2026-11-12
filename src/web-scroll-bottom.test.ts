@@ -129,7 +129,7 @@ test.skipIf(!browserModule)("reopening a room lands on the first unread message"
       entry.room.messages = messages;
       entry.readTs = messages[19]!.createdAt;
       entry.unreadIds = new Map(messages.slice(20).map((message) => [message.id, message]));
-      app.state.positions.set(roomId, { messageId: "m29", offset: 0 });
+      app.state.positions.set(roomId, { messageId: "m29", offset: 0, atBottom: true });
       app.activateRoom(roomId);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const thread = document.querySelector<HTMLElement>("#thread")!;
