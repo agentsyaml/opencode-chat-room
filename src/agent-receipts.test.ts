@@ -71,6 +71,15 @@ test("capped admission receipts only complete notification lines", async () => {
   expect(posted).toMatchObject({ messageIDs: ["complete-before-long"], evidence: "context" });
 });
 
+test("notification lines show mention tokens as plain text", async () => {
+  const { formatNotificationLines } = await import("./store");
+  const items = [{ id: "mention", senderId: "alice", createdAt: 10, text: "<at>@bob</at> ping" }];
+  const { lines } = formatNotificationLines(items);
+  expect(lines[0]).toEndWith("alice: @bob ping");
+  const prompt = `<notification>\nNew messages:\n${lines.join("\n")}\n</notification>`;
+  expect(prepareReceiptCandidate(base({ admissionID: "mention", items, prompt, capped: false }))?.messageIDs).toEqual(["mention"]);
+});
+
 test("answer notifications quote Unicode question ends without changing answer evidence", async () => {
   const { formatNotificationLines } = await import("./store");
   const short = { senderId: "alice", createdAt: 10, text: "yes", answerQuestionExcerpt: "Short?" };

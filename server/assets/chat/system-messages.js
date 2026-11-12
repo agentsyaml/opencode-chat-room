@@ -1,5 +1,6 @@
 export function formatSystemMessage(message, app) {
-  const text = String(message?.text ?? "");
+  // `<at>@name</at>` is an editor token; system rows and previews show the plain mention.
+  const text = String(message?.text ?? "").replace(/<at>([\s\S]*?)<\/at>/g, "$1");
   if (message?.senderId !== "system") return text;
   const joined = /^(.*?)\s+joined the room$/.exec(text);
   if (joined) return app.t("systemJoined", { name: joined[1] });

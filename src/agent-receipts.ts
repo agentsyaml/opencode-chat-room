@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import { databasePath, formatNotificationLines, recordMessageReceipts, timeOf } from "./store";
+import { databasePath, formatNotificationLines, recordMessageReceipts, timeOf, visibleText } from "./store";
 import { acquireDeliveryLease, deleteReceiptCandidate, markReceiptCandidateReady, ownsDeliveryLease, receiptCandidates, readyReceiptCandidates, releaseDeliveryLease, saveReceiptCandidate } from "./receiver-state";
 
 // shortcut: expire unobserved proofs after seven days; increase if hosts may stay disconnected longer.
@@ -45,11 +45,11 @@ export function prepareReceiptCandidate(input: {
     for (const line of rendered.lines.filter((value) => value.startsWith("- ["))) displayedCounts.set(line, (displayedCounts.get(line) ?? 0) + 1);
     const candidateCounts = new Map<string, number>();
     for (const item of cappedItems) {
-      const line = `- [${timeOf(item.createdAt)}] ${item.senderId}: ${item.text}`;
+      const line = `- [${timeOf(item.createdAt)}] ${item.senderId}: ${visibleText(item.text)}`;
       candidateCounts.set(line, (candidateCounts.get(line) ?? 0) + 1);
     }
     evidenceItems = rendered.visibleIndices.map((index) => cappedItems[index]!).filter((item) => {
-      const line = `- [${timeOf(item.createdAt)}] ${item.senderId}: ${item.text}`;
+      const line = `- [${timeOf(item.createdAt)}] ${item.senderId}: ${visibleText(item.text)}`;
       return candidateCounts.get(line) === 1 && displayedCounts.get(line) === 1 && !formatNotificationLines([item]).capped;
     });
   }

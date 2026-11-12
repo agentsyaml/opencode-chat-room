@@ -113,6 +113,10 @@ const MAX_LINES = 20;
 // Display lines for a push. `capped` means the notification is lossy because
 // lines were folded or message text was truncated; callers must not advance
 // the watermark until a full poll confirms it.
+const MENTION_MARKER = /<at>([\s\S]*?)<\/at>/g;
+// `<at>@name</at>` is an editor token; notifications and receipts show the plain mention.
+export const visibleText = (text: string) => text.replace(MENTION_MARKER, "$1");
+
 export function formatNotificationLines(
   items: ReadonlyArray<{ createdAt: number; senderId: string; text: string; answerQuestionExcerpt?: string }>,
 ): { lines: string[]; capped: boolean; visibleIndices: number[] } {
@@ -126,11 +130,11 @@ export function formatNotificationLines(
     lineCount += required;
   }
   const countCapped = visible.length < items.length;
-  const textCapped = items.some((it) => it.text.length > MAX_LINE);
+  const textCapped = items.some((it) => visibleText(it.text).length > MAX_LINE);
   const capped = countCapped || textCapped;
   const lines = visible.flatMap(({ item: it }) => {
-    const text =
-      it.text.length > MAX_LINE ? `${it.text.slice(0, MAX_LINE)}\u2026` : it.text;
+    const plain = visibleText(it.text);
+    const text = plain.length > MAX_LINE ? `${plain.slice(0, MAX_LINE)}\u2026` : plain;
     return [
       ...(it.answerQuestionExcerpt ? [`  ↳ Answer to: “${it.answerQuestionExcerpt.replace(/[\r\n]+/g, " ")}”`] : []),
       `- [${timeOf(it.createdAt)}] ${it.senderId}: ${text}`,

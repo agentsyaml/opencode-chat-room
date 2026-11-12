@@ -29,7 +29,7 @@ export function initReminders(app) {
     status("");
     for (const reminder of reminders) {
       const row = document.createElement("li"), text = document.createElement("p"), detail = document.createElement("p");
-      text.textContent = reminder.text; detail.className = "hint";
+      text.textContent = String(reminder.text).replace(/<at>([\s\S]*?)<\/at>/g, "$1"); detail.className = "hint";
       const timezone = reminder.schedule.timezone;
       const schedule = reminder.schedule.type === "once" ? formatTime(reminder.schedule.at, timezone) : `${reminder.schedule.expression} · ${timezone}`;
       const next = reminder.schedule.type === "cron" && reminder.nextRunAt ? ` · ${app.t("reminderNext", { time: formatTime(reminder.nextRunAt, timezone) })}` : "";
