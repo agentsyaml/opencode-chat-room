@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.5 — 2026-11-12
+
+- Clear own messages and entries older than the read watermark from the unread set, so a badge can no longer stick.
+- Reopen a room at its first unread when the previous visit ended at the bottom; a deliberate scroll position is restored exactly.
+- Show `<at>@name</at>` as `@name` in system rows, room previews, reminder text and notifications, and keep receipt verification aligned.
+- Retry host discovery until the receiver owner resolves instead of staying silent after a slow start.
+- Log every failed notification delivery with its room and session id.
+
 ## 0.5.4 — 2026-11-11
 
 - Keep unanswered questions unread, including when they are answered from another room, and stop own messages from raising unread counts. The sidebar badge now clears once the conversation is read.

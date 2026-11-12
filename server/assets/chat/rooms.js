@@ -95,7 +95,7 @@ export function initRooms(app) {
     $("#msgList").textContent = "";
     app.renderMessages(false);
     const restoredPosition = app.restoreReadingPosition?.(roomId);
-    // Only that a restore landed above the bottom needs a scroll before marking read.
+    // A restore above the bottom needs a scroll before it counts as read.
     app.state.readAnchorGuard = restoredPosition && !restoredPosition.atBottom ? { roomId, ...restoredPosition } : null;
     app.startPolling();
     app.renderMembers();
