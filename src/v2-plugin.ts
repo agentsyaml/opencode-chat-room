@@ -33,6 +33,7 @@ export function createV2Setup(deps: {
     const version = context.app?.version ?? "";
     const host = version ? await discoverVerifiedHost(version).catch(() => undefined) : undefined;
     const ownerID = host ? await receiverOwnerID(host.origin) : undefined;
+    let ownerRetry: ReturnType<typeof setInterval> | undefined;
     const transport: QueueTransport = {
       directory,
       protocol: "v2",
@@ -138,12 +139,28 @@ export function createV2Setup(deps: {
           return deps.run(runtime, () => deps.poll(ids, target, center));
         },
       });
+      // Host discovery has a short timeout and can miss a slow start. Without an owner
+      // identity the receiver polls nothing, so retry until it resolves.
+      if (!transport.receiverOwnerID && version) {
+        const resolve = async () => {
+          const found = await discoverVerifiedHost(version).catch(() => undefined);
+          const resolved = found ? await receiverOwnerID(found.origin).catch(() => undefined) : undefined;
+          if (!resolved) return;
+          transport.receiverOwnerID = resolved;
+          if (ownerRetry) clearInterval(ownerRetry);
+          ownerRetry = undefined;
+        };
+        ownerRetry = setInterval(() => void resolve(), 5000);
+        ownerRetry.unref?.();
+      }
     } catch (error) {
+      if (ownerRetry) clearInterval(ownerRetry);
       releaseReceiver?.();
       await dispose(toolRegistration, adminRegistration, commandRegistration, promptRegistration, contextRegistration, skillRegistration);
       throw error;
     }
     return async () => {
+      if (ownerRetry) clearInterval(ownerRetry);
       releaseReceiver?.();
       await dispose(toolRegistration, adminRegistration, commandRegistration, promptRegistration, contextRegistration, skillRegistration);
     };
