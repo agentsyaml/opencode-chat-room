@@ -152,7 +152,8 @@ export function initMessages(app) {
     };
     for (const [id, message] of entry.unreadIds) {
       const current = known.get(id) || message;
-      if (current.createdAt <= entry.readTs && !open(current)) entry.unreadIds.delete(id);
+      // Clear what the watermark covers, plus own messages the watcher misread.
+      if ((current.createdAt <= entry.readTs && !open(current)) || isOwnMessage(current, app, room)) entry.unreadIds.delete(id);
       else if (known.has(id)) entry.unreadIds.set(id, current);
     }
     for (const message of room.messages) {
@@ -529,5 +530,6 @@ export function isOwnMessage(message, app, room = app.state.room, myName = app.s
   const sameName = app.state.memberSessions.get(room.id)?.filter((member) => member.name === message.senderId);
   return direct ? message.senderId === LS.sessionID
     : message.senderSessionID ? message.senderSessionID === LS.sessionID
-      : message.senderId === myName && sameName?.length === 1 && sameName[0].sessionID === LS.sessionID;
+      // Without a recorded sender session, fall back to the name unless a namesake is known.
+      : message.senderId === myName && (!sameName || sameName.every((member) => member.sessionID === LS.sessionID));
 }

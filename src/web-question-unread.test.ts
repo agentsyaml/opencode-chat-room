@@ -64,6 +64,40 @@ test.skipIf(!browserModule)("an unanswered question stays unread until it is ans
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 60000);
 
+test.skipIf(!browserModule)("reading clears own messages and entries older than the watermark", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-unread-stuck-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(10000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_StuckOwner");
+    await page.locator("#inRoomName").fill("__Test_UnreadStuck");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const result = await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      const room = app.state.room, entry = app.state.rooms.get(room.id), ts = Date.now();
+      const own = { id: "own-unread", roomId: room.id, senderId: app.state.myName, senderSessionID: app.LS.sessionID, text: "mine", createdAt: ts };
+      const old = { id: "old-unread", roomId: room.id, senderId: "peer", text: "older", createdAt: ts - 5000 };
+      room.messages.push(own, old);
+      entry.unreadIds.set(own.id, own); entry.unreadIds.set(old.id, old);
+      entry.readTs = ts + 1; app.state.lastReadTs.set(room.id, entry.readTs);
+      document.querySelector<HTMLElement>("#thread")!.scrollTop = 1e9;
+      await app.markActiveRoomRead(true);
+      return { unread: app.state.unread, ids: [...entry.unreadIds.keys()] };
+    }, "/assets/chat/state.js");
+    expect(result.ids).toEqual([]);
+    expect(result.unread).toBe(0);
+  } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
+}, 60000);
+
 test.skipIf(!browserModule)("an answered question leaves the unread set while another room is open", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-question-away-"));

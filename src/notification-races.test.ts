@@ -185,7 +185,8 @@ describe.serial("notification membership races", () => {
     await notifier.notifyTarget(sessionID, { roomId: roomID, roomName: "addressed", messages: [addressed, ordinary, newer] }, transport);
     expect(backgrounds).toEqual([1, 2]);
     expect(prompts[1]).toContain("routine follow-up");
-    expect(prompts[2]).toContain("<at>@所有人</at> next");
+    expect(prompts[2]).toContain("@所有人 next");
+    expect(prompts[2]).not.toContain("<at>");
     expect(prompts[2]).not.toContain("@all first");
   });
 
