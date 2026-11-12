@@ -95,7 +95,8 @@ export function initRooms(app) {
     $("#msgList").textContent = "";
     app.renderMessages(false);
     const restoredPosition = app.restoreReadingPosition?.(roomId);
-    app.state.readAnchorGuard = restoredPosition ? { roomId, ...restoredPosition } : null;
+    // Only that a restore landed above the bottom needs a scroll before marking read.
+    app.state.readAnchorGuard = restoredPosition && !restoredPosition.atBottom ? { roomId, ...restoredPosition } : null;
     app.startPolling();
     app.renderMembers();
     if (!restoredPosition) $("#thread").scrollTop = typeof savedPosition === "number" ? savedPosition : entry.position || $("#thread").scrollHeight;
@@ -109,7 +110,7 @@ export function initRooms(app) {
     app.hideSendError();
     app.updateBadge();
     app.updateJump();
-    if (!restoredPosition) app.markActiveRoomRead();
+    if (!restoredPosition || restoredPosition.atBottom) app.markActiveRoomRead();
     app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
     app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
     void app.refreshRoomList();

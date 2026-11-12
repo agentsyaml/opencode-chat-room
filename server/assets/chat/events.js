@@ -50,17 +50,20 @@ export function initEvents(app) {
   };
   app.restoreReadingPosition = (roomId) => {
     const thread = $("#thread"), saved = app.state.positions.get(roomId), entry = app.state.rooms.get(roomId);
+    const atBottom = () => thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 4;
     const align = (messageId, offset) => {
       const row = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((item) => item.dataset.msgId === messageId);
       if (!row) return false;
       thread.scrollTop += row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop + offset);
       captureReadingPosition(); return true;
     };
-    if (typeof saved === "number") { thread.scrollTop = saved; captureReadingPosition(); return { messageId: readingPosition?.messageId }; }
-    if (saved?.messageId && align(saved.messageId, Number(saved.offset) || 0)) return { messageId: saved.messageId };
+    if (typeof saved === "number") { thread.scrollTop = saved; captureReadingPosition(); return { messageId: readingPosition?.messageId, atBottom: atBottom() }; }
     const readTs = entry?.readTs || app.state.lastReadTs.get(roomId) || 0;
     const boundary = readTs && entry?.room.messages.find((message) => message.createdAt > readTs);
-    if (boundary && align(boundary.id, 0)) return { messageId: boundary.id };
+    // Unread messages win over the old offset: open on the first unread instead of leaving it below.
+    if ((entry?.unreadIds.size || entry?.unreadOverflow) && boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };
+    if (saved?.messageId && align(saved.messageId, Number(saved.offset) || 0)) return { messageId: saved.messageId, atBottom: atBottom() };
+    if (boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };
     if (!saved && !boundary) return false;
     return saved?.messageId || readTs ? { messageId: saved?.messageId || null, missing: true } : false;
   };

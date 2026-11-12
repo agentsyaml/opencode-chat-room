@@ -92,6 +92,59 @@ test.skipIf(!browserModule)("physical scroll reaches a stable zero-gap thread bo
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 
+test.skipIf(!browserModule)("reopening a room lands on the first unread message", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-scroll-unread-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_ReadOwner");
+    await page.locator("#inRoomName").fill("__Test_ReadRestore");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const first = await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      return { id: app.state.room.id, name: app.state.myName };
+    }, "/assets/chat/state.js");
+    const second = await page.evaluate(async ({ url, name }: any) => {
+      const { app } = await import(url);
+      const room = await app.api("/rooms", { method: "POST", body: JSON.stringify({ name, ownerId: app.state.myName, sessionID: app.LS.sessionID }) });
+      await app.joinRoom(room.id, app.state.myName);
+      return app.state.room.id;
+    }, { url: "/assets/chat/state.js", name: "__Test_ReadSecond" });
+    expect(second).not.toBe(first.id);
+    const measured = await page.evaluate(async ({ url, roomId }: any) => {
+      const { app } = await import(url), entry = app.state.rooms.get(roomId), base = Date.now();
+      const messages = Array.from({ length: 30 }, (_, index) => ({
+        id: `m${index}`, roomId, senderId: "peer", createdAt: base - 60_000 + index,
+        text: `__Test_row ${index}\n${"Filler line for height.\n".repeat(3)}`,
+      }));
+      entry.room.messages = messages;
+      entry.readTs = messages[19]!.createdAt;
+      entry.unreadIds = new Map(messages.slice(20).map((message) => [message.id, message]));
+      app.state.positions.set(roomId, { messageId: "m29", offset: 0 });
+      app.activateRoom(roomId);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      const top = thread.getBoundingClientRect().top + thread.clientTop;
+      const row = Array.from(document.querySelectorAll<HTMLElement>("#msgList [data-msg-id]")).find((item) => item.textContent?.includes("__Test_row 20"));
+      return { offset: row ? row.getBoundingClientRect().top - top : null, gap: thread.scrollHeight - thread.scrollTop - thread.clientHeight, unread: app.state.unread, active: app.state.room.id };
+    }, { url: "/assets/chat/state.js", roomId: first.id });
+    expect(measured.active).toBe(first.id);
+    expect(measured.offset).not.toBeNull();
+    expect(Math.abs(measured.offset!)).toBeLessThan(3);
+    expect(measured.gap).toBeGreaterThan(0);
+    expect(measured.unread).toBe(10);
+  } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
+}, 60000);
+
 async function api(origin: string, route: string, method: string, body: unknown) {
   const response = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!response.ok) throw new Error(`${method} ${route} failed (${response.status})`);
