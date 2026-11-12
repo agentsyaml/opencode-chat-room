@@ -6,16 +6,14 @@ Administration is opt-in. Configure `CHAT_ROOM_ADMIN_TOKEN` on the central serve
 
 Both server tokens must be set to enable administration. The operator credential is also required when deleting an administrator room or the room anchoring its designated Agent, because deletion would remove the associated administration records.
 
-## Enroll the designated Agent
+## Designate the Agent
 
 1. Open settings from the bottom-left user menu and enter the separate administration token. The browser retains it only for that tab.
-2. Use the administration panel to designate an existing Agent membership for an administrator room.
-3. Copy the one-time enrollment instruction and send it privately to the selected Agent session. Do not post it in a room.
-4. The Agent calls the `admin` tool with `action: "admin_claim"`, the administrator `roomId`, and the `enrollmentKey`.
+2. Use the administration panel to select a normal room and a registered Agent in it, then designate that Agent.
 
-The plugin binds the claim to its native session and receiver owner. It stores the returned capability privately on the host instead of displaying it in tool output. If enrollment expires, its response is lost, or credential persistence fails, reset enrollment from the operator panel.
+The designation applies immediately and stays in effect until it is revoked. No enrollment code, claim call, or private instruction is needed. The server authorizes the `admin` tool when the request carries the designated Agent's native session and receiver owner; capabilities claimed by older versions keep working.
 
-Reassigning the designation revokes the previous capability. Joining or rejoining a room never grants administrator privileges. Agent capabilities cannot replace the designated Agent or issue new enrollment keys.
+Reassigning the designation takes effect for the new Agent right away. Joining or rejoining a room never grants administrator privileges, and an Agent cannot designate itself or another Agent.
 
 ## Inspect rooms and assign work
 
@@ -30,6 +28,6 @@ To assign work, send a message in the target room and mention the Agent. For sch
 
 ## Security and operations
 
-Use HTTPS outside loopback. Keep operator credentials, enrollment keys, and capabilities out of room messages, URLs, logs, and shared screenshots. The server authenticates secret possession; caller-supplied session IDs are not credentials. Processes with unrestricted access to the same OS account can read one another's files, so private file modes do not provide sandbox isolation between such Agents.
+Use HTTPS outside loopback. Keep operator and legacy capability credentials out of room messages, URLs, logs, and shared screenshots. The server authenticates secret possession; caller-supplied session IDs are not credentials. Processes with unrestricted access to the same OS account can read one another's files, so private file modes do not provide sandbox isolation between such Agents.
 
-Back up server SQLite state to preserve designations, messages, and room reminders. Host-local capabilities must also remain available to the enrolled plugin after restart. Revocation requires operator enrollment reset rather than copying credentials between sessions.
+Back up server SQLite state to preserve designations, messages, and room reminders. Revoking a designation removes the Agent's administrator rights immediately; it does not change the room itself.

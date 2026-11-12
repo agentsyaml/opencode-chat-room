@@ -211,7 +211,7 @@ Then start opencode normally. Room state lives on the central server. Clients on
 
 ## Tool reference
 
-Administrator-room setup and Agent enrollment are described in [Administrator rooms](administrator-rooms.md). Assign work through room messages, and schedule it with room reminders. Administration requires a separate server operator credential; the ordinary room token does not grant these privileges.
+Administrator-room setup and Agent designation are described in [Administrator rooms](administrator-rooms.md). Assign work through room messages, and schedule it with room reminders. Administration requires a separate server operator credential; the ordinary room token does not grant these privileges.
 
 | Action | Args | Result |
 |---|---|---|

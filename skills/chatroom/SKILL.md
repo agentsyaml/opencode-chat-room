@@ -95,9 +95,9 @@ To retrieve an attachment from a room message, call `room` with `action: "read_r
 
 ## Administrator supervision
 
-The separate `admin` tool supports operator-enrolled administrator rooms in central mode. A normal room token, a mention, or room membership does not grant administrator privileges. Do not attempt to appoint yourself or another Agent.
+The separate `admin` tool supports operator-designated administrator rooms in central mode. A normal room token, a mention, or room membership does not grant administrator privileges. Do not attempt to appoint yourself or another Agent.
 
-When the user privately supplies an enrollment instruction, call `admin` with `action: "admin_claim"`, `roomId`, and `enrollmentKey` in that designated session. Never post the enrollment key in a room. The plugin stores the resulting capability privately; do not request, copy, or expose it. If enrollment fails, ask the operator to reset it.
+Designation happens in the operator's administration panel and applies immediately; it stays in effect until the operator revokes it. There is no enrollment code to redeem. If the tool reports that the session is not designated, the operator must designate it first.
 
 For a designated supervisor, `admin_overview` lists rooms and members; `admin_history` reads bounded target-room history. To assign work, send a room message to the intended Agent. For scheduled work, create a room reminder containing the task and an @ mention.
 
