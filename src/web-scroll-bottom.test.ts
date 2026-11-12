@@ -145,6 +145,46 @@ test.skipIf(!browserModule)("reopening a room lands on the first unread message"
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 60000);
 
+test.skipIf(!browserModule)("sending while reading history keeps the position and the read watermark", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-send-history-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_SendOwner");
+    await page.locator("#inRoomName").fill("__Test_SendHistory");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const room = await page.evaluate(async (url: string) => { const { app } = await import(url); return { id: app.state.room.id, sessionID: app.LS.sessionID }; }, "/assets/chat/state.js");
+    for (let index = 0; index < 24; index++) await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: room.sessionID, text: `__Test_history ${index}\n${"Filler line for height.\n".repeat(3)}` });
+    await page.reload(); await page.locator("#msgList .msg").nth(23).waitFor();
+    const before = await page.evaluate(async (url: string) => {
+      const { app } = await import(url), thread = document.querySelector<HTMLElement>("#thread")!;
+      thread.scrollTop = 0; await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      app.captureReadingPosition();
+      return { scrollTop: thread.scrollTop, readTs: app.state.rooms.get(app.state.room.id).readTs, rows: document.querySelectorAll("#msgList [data-msg-id]").length };
+    }, "/assets/chat/state.js");
+    await page.locator("#msgInput").fill("__Test_sent_from_history");
+    await page.locator("#btnSend").click();
+    await page.waitForFunction((count: number) => document.querySelectorAll("#msgList [data-msg-id]").length > count, before.rows);
+    await page.waitForTimeout(200);
+    const after = await page.evaluate(async (url: string) => {
+      const { app } = await import(url), thread = document.querySelector<HTMLElement>("#thread")!;
+      return { scrollTop: thread.scrollTop, readTs: app.state.rooms.get(app.state.room.id).readTs, unread: app.state.unread };
+    }, "/assets/chat/state.js");
+    expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThan(60);
+    expect(after.readTs).toBe(before.readTs);
+    expect(after.unread).toBe(0);
+  } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
+}, 60000);
+
 async function api(origin: string, route: string, method: string, body: unknown) {
   const response = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!response.ok) throw new Error(`${method} ${route} failed (${response.status})`);

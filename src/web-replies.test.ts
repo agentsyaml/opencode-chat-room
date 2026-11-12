@@ -209,10 +209,16 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
     await api(origin, `/rooms/${roomId}/questions/${conflictId}/answers`, "POST", { sessionID: conflictSession, text: "Already handled." });
     await page.locator(`#msgList [data-msg-id="${conflictId}"] .message-reply`).click();
     await page.keyboard.press("End"); await page.keyboard.insertText("I was going to answer."); await page.locator("#btnSend").click();
-    const conflictFailed = page.locator(`.failed-message[data-reply-target-id="${conflictId}"]`);
-    await conflictFailed.waitFor();
-    await conflictFailed.locator('[data-failed-action="retry"]').click();
-    await conflictFailed.waitFor();
+    // The question was answered first, so the answer can never be retried; the text
+    // returns to the draft and no failed message is queued.
+    await page.locator("#sendError").waitFor({ state: "visible" });
+    expect(await page.evaluate(async (url: string) => (await import(url)).app.state.drafts.get((await import(url)).app.state.room.id) || "", "/assets/chat/state.js")).toContain("I was going to answer.");
+    expect(await editor.evaluate((node: any) => node.value)).toContain("I was going to answer.");
+    expect(await page.locator(`.failed-message[data-reply-target-id="${conflictId}"]`).count()).toBe(0);
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      app.clearDraft(app.state.room.id); app.$("#msgInput").draftValue = "";
+    }, "/assets/chat/state.js");
     await page.evaluate(async ({ url, peerSessionID }: { url: string; peerSessionID: string }) => {
       const { app } = await import(url), members = app.state.memberSessions.get(app.state.room.id), peer = members.find((member: any) => member.sessionID === peerSessionID);
       members.push({ ...peer, sessionID: "reply-duplicate-peer" });

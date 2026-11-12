@@ -126,7 +126,7 @@ export function initMessages(app) {
       if (!interactive && performance.now() > app.state.userScrollIntentUntil) return;
       app.state.readAnchorGuard = null;
     }
-    const timestamp = room.messages.reduce((latest, message) => Math.max(latest, message.createdAt), entry.readTs);
+    const timestamp = room.messages.reduce((latest, message) => app.failedRenderIds.has(message.id) ? latest : Math.max(latest, message.createdAt), entry.readTs);
     const unreadBefore = entry.unreadIds.size, overflowBefore = entry.unreadOverflow;
     let advanced = false;
     app.state.readRequests ||= new Set();
@@ -328,6 +328,7 @@ export function initMessages(app) {
     const message = app.prepareMessage?.(room.id, input.value) || { text: input.value.trim(), ids: [], ready: Boolean(input.value.trim()) };
     if (!message.ready) return;
     const text = message.text;
+    const thread = $("#thread"), followedBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
     const revision = app.state.draftRevision.get(room.id) || 0;
     app.state.sendingRooms ||= new Set(); app.state.sendingRooms.add(room.id);
     app.closeMention();
@@ -363,7 +364,8 @@ export function initMessages(app) {
         if (latest) setRoomPreview(entry, latest);
       }
       app.renderMessages(true);
-      $("#thread").scrollTop = $("#thread").scrollHeight;
+      // Reading history and sending must not teleport to the newest message or mark it read.
+      if (followedBottom) $("#thread").scrollTop = $("#thread").scrollHeight;
       app.renderMembers();
       app.state.unread = entry ? entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0) : 0;
       app.updateBadge();
@@ -372,12 +374,19 @@ export function initMessages(app) {
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
     } catch (error) {
       const unchanged = (app.state.draftRevision.get(room.id) || 0) === revision;
-      const failures = app.state.failedMessages.get(room.id) || [];
-      app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, isQuestion, ...(!isQuestion && replyTarget ? { replyToMessageID: replyTarget.id, replyTarget } : {}) }]);
+      // Someone answered the question first; retrying the answer can never succeed,
+      // so keep the text as a draft instead of a failed message.
+      const staleReply = Boolean(replyTarget?.isQuestion) && (error.status === 409 || error.status === 404);
+      if (staleReply) app.saveDraft(room.id, text);
+      else {
+        const failures = app.state.failedMessages.get(room.id) || [];
+        app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, isQuestion, ...(!isQuestion && replyTarget ? { replyToMessageID: replyTarget.id, replyTarget } : {}) }]);
+        app.renderFailedMessages();
+      }
       app.completeAttachments?.(room.id, message.ids);
-      app.renderFailedMessages();
       if (app.state.room?.id !== room.id) return;
-      if (unchanged) app.clearDraft(room.id);
+      if (unchanged && !staleReply) app.clearDraft(room.id);
+      if (staleReply) input.draftValue = text;
       app.autoGrow(input);
       app.updateSendState();
       app.updateDraftCount();

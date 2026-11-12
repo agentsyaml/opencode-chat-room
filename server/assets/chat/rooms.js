@@ -406,6 +406,8 @@ export function initRooms(app) {
       row.append(button);
       list.append(row);
     }
+    // Other rooms' unread changes only reach the title through this rerender.
+    app.updateTitle();
   };
 
   app.closePanels = () => {
