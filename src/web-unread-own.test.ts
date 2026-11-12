@@ -29,7 +29,11 @@ test.skipIf(!browserModule)("own poll messages never become unread while peer me
     const peerMessage = await api(origin, `/rooms/${ids.roomId}/messages`, "POST", { sessionID: "__Test_UnreadPeer", text: "__Test_peer_history" });
     await page.reload(); await page.locator("#msgList .msg").nth(20).waitFor();
     await page.evaluate(async (url: string) => { const { app } = await import(url); await app.markActiveRoomRead(); }, "/assets/chat/state.js");
-    await page.waitForFunction(async (url: string) => { const { app } = await import(url); return (app.state.rooms.get(app.state.room.id)?.readTs || 0) > 0; }, "/assets/chat/state.js");
+    await page.waitForFunction(async (url: string) => {
+      const { app } = await import(url), entry = app.state.rooms.get(app.state.room.id);
+      const newest = entry?.room.messages.at(-1)?.createdAt || 0;
+      return Boolean(entry && newest > 0 && entry.readTs >= newest);
+    }, "/assets/chat/state.js");
     await page.locator("#thread").evaluate((thread: HTMLElement) => { thread.scrollTop = 0; });
     await page.waitForTimeout(100);
     const own = await api(origin, `/rooms/${ids.roomId}/messages`, "POST", { sessionID: ids.sessionID, text: "__Test_own_new" });

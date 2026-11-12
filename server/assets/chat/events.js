@@ -1,6 +1,6 @@
 import { LS } from "./state.js";
 import { copyTextToClipboard } from "./markdown.js";
-import { isOwnMessage } from "./messages.js";
+import { isUnreadMessage } from "./messages.js";
 
 export function initEvents(app) {
   const $ = app.$;
@@ -68,7 +68,7 @@ export function initEvents(app) {
     if (typeof saved === "number") { thread.scrollTop = saved; captureReadingPosition(); return { messageId: readingPosition?.messageId, atBottom: atBottom() }; }
     const readTs = entry?.readTs || app.state.lastReadTs.get(roomId) || 0;
     // Own messages never form an unread boundary; landing on them hides the newest activity.
-    const boundary = readTs && entry?.room.messages.find((message) => message.createdAt > readTs && !isOwnMessage(message, app, entry.room, entry.name));
+    const boundary = readTs && entry?.room.messages.find((message) => message.createdAt > readTs && isUnreadMessage(message, app, entry.room, entry.name));
     // Leaving at the bottom and returning to new messages lands on the first unread;
     // a deliberate scroll position is restored exactly.
     if ((entry?.unreadIds.size || entry?.unreadOverflow) && saved?.atBottom !== false && boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };

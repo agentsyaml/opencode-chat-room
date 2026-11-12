@@ -9,7 +9,10 @@
 - Clear a question from unread as soon as its answer arrives, even while the room is open.
 - Keep a replied-to message as the saved position instead of jumping to unread on the next open.
 - Show the unread total for all rooms in the browser tab title.
+- Ship `server/json-body.ts`; 0.5.4 omitted it, so the published standalone server could not start.
 - Start a new tab from the read watermark the server stores for that session, so messages read before the tab opened do not appear as read.
+- Join and leave notices no longer raise unread badges.
+- Show the jump-to-latest button whenever the room is far enough down to count as unread.
 - Stop a position that could not be restored from blocking every later scroll position for that room.
 - Sending from inside the history no longer jumps to the newest message or advances the read watermark.
 - Keep messages whose row failed to render unread instead of advancing the watermark past them.

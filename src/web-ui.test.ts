@@ -159,6 +159,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await sourceCard.click();
     await alice.locator(".msg-text").getByText("A background update").waitFor();
     await alice.locator("#thread").evaluate((thread: HTMLElement) => { thread.scrollTop = 0; });
+    await alice.waitForTimeout(300);
     await alice.locator("#btnJump").waitFor({ state: "visible" });
     await alice.locator("#btnJump").click();
     await sourceCard.locator(".r-badge").waitFor({ state: "detached", timeout: 5000 });

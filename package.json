@@ -26,6 +26,7 @@
     "!src/**/*.test.ts",
     "skills/chatroom/SKILL.md",
     "server/chat-server.ts",
+    "server/json-body.ts",
     "server/inbox.ts",
     "server/history-route.ts",
     "server/newrooms.ts",

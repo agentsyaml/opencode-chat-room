@@ -107,7 +107,8 @@ export function initMessages(app) {
   };
   app.updateJump = () => {
     const thread = $("#thread");
-    const away = thread.scrollHeight - thread.scrollTop - thread.clientHeight > 160;
+    // Match the distance that already counts as read, so unread never hides the button.
+    const away = thread.scrollHeight - thread.scrollTop - thread.clientHeight > 80;
     $("#btnJump").hidden = !away;
   };
   app.updateBadge = () => {
@@ -157,7 +158,7 @@ export function initMessages(app) {
     for (const [id, message] of entry.unreadIds) {
       const current = known.get(id) || message;
       // Clear what the watermark covers, plus own messages the watcher misread.
-      if ((current.createdAt <= entry.readTs && !open(current)) || isOwnMessage(current, app, room)) entry.unreadIds.delete(id);
+      if ((current.createdAt <= entry.readTs && !open(current)) || !isUnreadMessage(current, app, room)) entry.unreadIds.delete(id);
       else if (known.has(id)) entry.unreadIds.set(id, current);
     }
     for (const message of room.messages) {
@@ -451,7 +452,7 @@ export function initMessages(app) {
            if (entry && item.createdAt >= entry.previewAt) setRoomPreview(entry, item);
            added++;
          }
-         if (entry && item.createdAt > entry.readTs && !isOwnMessage(item, app) && !entry.unreadIds.has(item.id)) {
+         if (entry && item.createdAt > entry.readTs && isUnreadMessage(item, app) && !entry.unreadIds.has(item.id)) {
            entry.unreadIds.set(item.id, item); unreadChanged = true;
          }
          // An answer to a question clears that question even before the room is read.
@@ -540,6 +541,11 @@ export function initMessages(app) {
     return { ...updated, messages: [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500) };
   }
 
+}
+
+// Unread means a person said something you have not seen; join/leave notices are not a badge.
+export function isUnreadMessage(message, app, room = app.state.room, myName = app.state.myName) {
+  return message.senderId !== "system" && !isOwnMessage(message, app, room, myName);
 }
 
 export function isOwnMessage(message, app, room = app.state.room, myName = app.state.myName) {

@@ -1,4 +1,4 @@
-import { isOwnMessage } from "./messages.js";
+import { isUnreadMessage } from "./messages.js";
 import { setRoomPreview } from "./system-messages.js";
 
 export async function watchRoom(roomId, app) {
@@ -15,7 +15,7 @@ export async function watchRoom(roomId, app) {
     const sawSystem = result.items.some((message) => message.senderId === "system");
     const before = new Set(entry.room.messages.map((message) => message.id));
     for (const message of result.items) {
-      if (message.createdAt > entry.readTs && !isOwnMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
+      if (message.createdAt > entry.readTs && isUnreadMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
       if (message.answerToMessageID && entry.unreadIds.get(message.answerToMessageID)?.isQuestion) entry.unreadIds.delete(message.answerToMessageID);
       if (!before.has(message.id)) entry.room.messages.push({ ...message, roomId });
       if (message.createdAt >= entry.previewAt) setRoomPreview(entry, message);
@@ -32,7 +32,7 @@ export async function watchRoom(roomId, app) {
       // A full refresh pages past the inbox window; count what arrived since the last look.
       for (const message of latest.messages) {
         if (message.answeredByMessageID) entry.unreadIds.delete(message.id);
-        if (message.createdAt > previousReceivedTs && message.createdAt > entry.readTs && !isOwnMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
+        if (message.createdAt > previousReceivedTs && message.createdAt > entry.readTs && isUnreadMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
       }
       if (newest && Number.isSafeInteger(newest.createdAt)) entry.receivedTs = Math.max(entry.receivedTs, newest.createdAt);
     }

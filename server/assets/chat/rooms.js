@@ -1,5 +1,5 @@
 import { LS } from "./state.js";
-import { isOwnMessage } from "./messages.js";
+import { isUnreadMessage } from "./messages.js";
 import { formatRoomPreview, setRoomPreview } from "./system-messages.js";
 import { watchRoom } from "./room-watcher.js";
 
@@ -60,7 +60,7 @@ export function initRooms(app) {
     // a never-opened room is not a burst of unread messages.
     if (!existing && savedReadTs !== undefined) for (const message of room.messages) {
       const unread = message.createdAt > entry.readTs || (message.isQuestion && !message.answeredByMessageID);
-      if (unread && !isOwnMessage(message, app, room, name)) entry.unreadIds.set(message.id, message);
+      if (unread && isUnreadMessage(message, app, room, name)) entry.unreadIds.set(message.id, message);
     }
     entry.receivedTs ??= latest?.createdAt ?? 0;
     if (latest && (!existing || latest.createdAt >= entry.previewAt)) setRoomPreview(entry, latest);
