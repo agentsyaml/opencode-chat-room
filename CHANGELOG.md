@@ -10,6 +10,7 @@
 - Keep a replied-to message as the saved position instead of jumping to unread on the next open.
 - Show the unread total for all rooms in the browser tab title.
 - Start a new tab from the read watermark the server stores for that session, so messages read before the tab opened do not appear as read.
+- Stop a position that could not be restored from blocking every later scroll position for that room.
 - Sending from inside the history no longer jumps to the newest message or advances the read watermark.
 - Keep messages whose row failed to render unread instead of advancing the watermark past them.
 - Return the text of a reply to an already answered question to the draft instead of queueing an answer that can never succeed.

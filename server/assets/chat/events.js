@@ -20,7 +20,14 @@ export function initEvents(app) {
     const anchor = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((row) => row.getBoundingClientRect().bottom > top);
     readingPosition = { roomId: app.state.room?.id, messageId: anchor?.dataset.msgId, offset: anchor ? anchor.getBoundingClientRect().top - top : 0,
       atBottom: thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 4 };
-    const missing = app.state.readAnchorGuard?.roomId === readingPosition.roomId && app.state.readAnchorGuard.missing;
+    const guard = app.state.readAnchorGuard;
+    let missing = guard?.roomId === readingPosition.roomId && guard.missing;
+    // A failed restore keeps its anchor while the landing stays put; scrolling to a
+    // different message means the reader chose a new position and the old one is stale.
+    if (missing) {
+      if (!guard.landingId) guard.landingId = readingPosition.messageId;
+      else if (readingPosition.messageId !== guard.landingId) missing = guard.missing = false;
+    }
     if (readingPosition.roomId && anchor && (!missing || performance.now() <= app.state.userScrollIntentUntil)) {
       app.savePosition(readingPosition.roomId, { messageId: readingPosition.messageId, offset: readingPosition.offset, atBottom: readingPosition.atBottom });
     }
