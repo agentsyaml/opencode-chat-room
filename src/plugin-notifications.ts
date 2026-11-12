@@ -155,6 +155,8 @@ export function createNotifier(deps: {
       ? await sendQueue(targetTransport, sessionID, admission.prompt, admission.id, "steer")
       : await sendAsyncNotification(targetTransport, sessionID, admission.prompt);
     if (result !== "delivered") {
+      // Keep one line per failure: an idle host that never receives is otherwise invisible.
+      console.warn(`[chat-room] delivery ${result} room=${batch.roomId} session=${sessionID} protocol=${entry.protocol}`);
       if (result === "rejected") rejectPendingAdmission(sessionID, batch.roomId, admission.id);
       return { url, status: result === "unreachable" ? 0 : 400 };
     }

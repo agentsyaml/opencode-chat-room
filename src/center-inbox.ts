@@ -214,6 +214,8 @@ export async function pushItemsToSession(
       ? await sendAsyncNotification(target, sessionID, admission.prompt)
       : await sendQueue(target, sessionID, admission.prompt, admission.id, "steer");
     if (result !== "delivered") {
+      // Keep one line per failure: an idle host that never receives is otherwise invisible.
+      console.warn(`[chat-room] delivery ${result} room=${roomId} session=${sessionID} protocol=${transport.protocol}`);
       if (result === "rejected") rejectPendingAdmission(sessionID, roomId, admission.id);
       if (result === "rejected" || worst === "delivered") worst = result;
       continue;
