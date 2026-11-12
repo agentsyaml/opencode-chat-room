@@ -129,7 +129,10 @@ export function initMessages(app) {
     const timestamp = room.messages.reduce((latest, message) => Math.max(latest, message.createdAt), entry.readTs);
     const unreadBefore = entry.unreadIds.size, overflowBefore = entry.unreadOverflow;
     let advanced = false;
-    if (timestamp > entry.readTs) {
+    app.state.readRequests ||= new Set();
+    // One acknowledgement at a time; scrolling fires this on every frame near the bottom.
+    if (timestamp > entry.readTs && !app.state.readRequests.has(room.id)) {
+      app.state.readRequests.add(room.id);
       try {
         await app.api("/read", {
           method: "POST", body: JSON.stringify({ roomId: room.id, sessionID: LS.sessionID, ts: timestamp }),
@@ -140,6 +143,7 @@ export function initMessages(app) {
         entry.unreadOverflow = false;
         advanced = true;
       } catch { return; /* The next active poll will retry the read watermark. */ }
+      finally { app.state.readRequests.delete(room.id); }
     }
     // Unanswered questions stay unread until answered.
     const known = new Map(room.messages.map((message) => [message.id, message]));
