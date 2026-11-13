@@ -99,6 +99,7 @@
   .locale-control label { font-weight: 600; }
   .locale-select { appearance: auto; min-height: 36px; font: inherit; font-size: 12.5px; line-height: 1.25; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; cursor: pointer; }
   .chat-head-actions .locale-control { margin: 0; }
+  .wordmark-row { display: flex; align-items: baseline; gap: 10px; }
   .wordmark {
     margin: 0;
     font-family: var(--font-display);
@@ -107,6 +108,9 @@
     letter-spacing: -.03em;
     color: var(--ink);
   }
+  .version-tag { font: 600 10px/1 var(--font-mono); color: var(--ink-3); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 7px; white-space: nowrap; }
+  .version-tag:empty { display: none; }
+  .rail-brand .version-tag { align-self: center; }
   .tagline { margin: 8px 0 26px; font-size: 13.5px; color: var(--ink-2); }
 
   .field { display: block; margin-bottom: 14px; }

@@ -123,11 +123,16 @@ export function initMessages(app) {
     const thread = $("#thread");
     if (!room || !entry || document.hidden || (!interactive && !document.hasFocus())
         || thread.scrollHeight - thread.scrollTop - thread.clientHeight >= 80) return;
-    if (app.state.readAnchorGuard?.roomId === room.id) {
-      if (!interactive && performance.now() > app.state.userScrollIntentUntil) return;
-      app.state.readAnchorGuard = null;
+    // Reaching this point means the room is within the read distance of the bottom,
+    // so the restore guard has done its job even without a user scroll.
+    if (app.state.readAnchorGuard?.roomId === room.id) app.state.readAnchorGuard = null;
+    // Stop at the first message that failed to render: a later readable message
+    // must not push the watermark past one we still cannot show.
+    let timestamp = entry.readTs;
+    for (const message of room.messages) {
+      if (app.failedRenderIds.has(message.id)) break;
+      timestamp = Math.max(timestamp, message.createdAt);
     }
-    const timestamp = room.messages.reduce((latest, message) => app.failedRenderIds.has(message.id) ? latest : Math.max(latest, message.createdAt), entry.readTs);
     const unreadBefore = entry.unreadIds.size, overflowBefore = entry.unreadOverflow;
     let advanced = false;
     app.state.readRequests ||= new Set();
@@ -324,7 +329,6 @@ export function initMessages(app) {
 
   app.send = async () => {
     const input = $("#msgInput"), room = app.state.room, replyTarget = room && app.replyTargetFor?.(room.id);
-    const isQuestion = !replyTarget && Boolean(app.isQuestionSending?.());
     if (!room || app.state.sendingRooms?.has(room.id)) return;
     const message = app.prepareMessage?.(room.id, input.value) || { text: input.value.trim(), ids: [], ready: Boolean(input.value.trim()) };
     if (!message.ready) return;
@@ -344,7 +348,7 @@ export function initMessages(app) {
       let updated;
       if (replyTarget?.isQuestion) { await app.answerQuestionFromReply(room.id, replyTarget.id, text); updated = app.state.rooms.get(room.id)?.room || room; }
       else updated = await app.api(`/rooms/${encodeURIComponent(room.id)}/messages`, {
-        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, isQuestion, ...(!isQuestion && replyTarget ? { replyToMessageID: replyTarget.id } : {}) }),
+        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, ...(replyTarget ? { replyToMessageID: replyTarget.id } : {}) }),
       });
       app.completeAttachments?.(room.id, message.ids);
       if (app.state.room?.id !== room.id) return;
@@ -381,7 +385,7 @@ export function initMessages(app) {
       if (staleReply) app.saveDraft(room.id, text);
       else {
         const failures = app.state.failedMessages.get(room.id) || [];
-        app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, isQuestion, ...(!isQuestion && replyTarget ? { replyToMessageID: replyTarget.id, replyTarget } : {}) }]);
+        app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, ...(replyTarget ? { replyToMessageID: replyTarget.id, replyTarget } : {}) }]);
         app.renderFailedMessages();
       }
       app.completeAttachments?.(room.id, message.ids);

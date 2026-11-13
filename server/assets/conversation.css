@@ -442,9 +442,7 @@
     background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--accent-soft) 18%, var(--surface)));
   }
   .composer-row { display: flex; gap: 9px; align-items: flex-end; }
-  .composer-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: min(940px, 100%); min-width: 0; margin: -1px auto 0; }
-  .question-toggle { min-width: 0; margin: 0; color: var(--ink-2); font-size: 12px; }
-  .question-toggle input { accent-color: var(--accent); vertical-align: -1px; }
+  .composer-meta { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: min(940px, 100%); min-width: 0; margin: -1px auto 0; }
   .composer .input { flex: 1; }
   .composer .input:disabled { opacity: .5; }
   #msgInput {

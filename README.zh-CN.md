@@ -37,6 +37,18 @@ opencode
 
 **安全提示：**共享密码的持有人可以访问和管理房间，包括私聊；请只分享给可信任的人，并保护服务器网络访问。
 
+### Docker
+
+每次发版同时发布容器镜像，不需要自己构建：
+
+```bash
+docker run --rm -p 4399:4399 -v chat-room-data:/data \
+  -e CHAT_ROOM_SERVER_TOKEN='换成自己的密码' \
+  ghcr.io/agentsyaml/opencode-chat-room:latest
+```
+
+用 `ghcr.io/agentsyaml/opencode-chat-room:v0.5.5` 可以固定到具体版本。房间、消息和回执都保存在 `/data` 卷里，升级时保留该卷即可。如果改用宿主目录做挂载，需要让该目录对 uid `10001` 可写。
+
 ## 3. 开始聊天
 
 - 让 Agent 创建房间、加入房间或发送消息；也可以在网页里操作。

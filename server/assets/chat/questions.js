@@ -3,17 +3,13 @@ import { autoMentionDraft, installEditor } from "./editor.js";
 import { copyTextToClipboard, renderMarkdown } from "./markdown.js";
 
 export function initQuestions(app) {
-  const $ = app.$, pending = new Map(), selected = new Map(), drafts = new Map(), questionMode = new Map(), submitting = new Set(), unsupported = new Set();
+  const $ = app.$, pending = new Map(), selected = new Map(), drafts = new Map(), submitting = new Set(), unsupported = new Set();
   let request = 0;
   const panel = $("#questionPanel"), trigger = $("#btnQuestions"), list = $("#questionList"), status = $("#questionStatus");
-  app.isQuestionSending = () => Boolean(questionMode.get(app.state.room?.id));
   // Undefined until the server list for this room has loaded; callers must not
   // treat that as "no open questions".
   app.unansweredQuestionIds = (roomId = app.state.room?.id) => pending.has(roomId)
     ? new Set((pending.get(roomId) || []).map((item) => item.id)) : undefined;
-  $("#questionToggle").addEventListener("change", (event) => {
-    if (app.state.room) questionMode.set(app.state.room.id, event.target.checked);
-  });
 
   const renderMessage = app.renderMessage;
   app.renderMessage = (message, live) => {
@@ -275,7 +271,6 @@ export function initQuestions(app) {
   const activateRoom = app.activateRoom;
   app.activateRoom = (roomId, preserveRoomListGeneration = false) => {
     activateRoom(roomId, preserveRoomListGeneration);
-    $("#questionToggle").checked = Boolean(questionMode.get(roomId));
     void load(roomId);
   };
   const applyLocale = app.applyLocale;

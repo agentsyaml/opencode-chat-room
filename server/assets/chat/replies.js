@@ -13,9 +13,6 @@ export function initReplies(app) {
   app.clearReplyTarget = (roomId) => app.setReplyTarget(roomId, null);
   app.renderReplyPreview = () => {
     const roomId = app.state.room?.id, target = roomId && targets.get(roomId), box = $("#replyPreview");
-    const questionToggle = $("#questionToggle");
-    questionToggle.disabled = Boolean(target);
-    if (target && questionToggle.checked) { questionToggle.checked = false; questionToggle.dispatchEvent(new Event("change")); }
     box.hidden = !target;
     if (!target) return;
     $("#replyPreviewName").textContent = senderName(target, app);
@@ -69,7 +66,6 @@ function selectReply(message, app) {
     replaceEditorRange(input, 0, 0, prefix); input.setCaret(prefix.length);
     input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
   }
-  const toggle = app.$("#questionToggle"); toggle.checked = false; toggle.dispatchEvent(new Event("change"));
   app.setReplyTarget(roomId, target);
   input.focus({ preventScroll: true });
 }

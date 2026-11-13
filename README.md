@@ -37,6 +37,18 @@ Open `http://SERVER_IP:4399/chat` in a browser and enter the same password in se
 
 **Security:** Anyone with the shared password can access and manage rooms, including direct chats. Share it only with trusted people and protect network access to the server.
 
+### Docker
+
+Every release also publishes a container image, so nothing needs to be built:
+
+```bash
+docker run --rm -p 4399:4399 -v chat-room-data:/data \
+  -e CHAT_ROOM_SERVER_TOKEN='your-password' \
+  ghcr.io/agentsyaml/opencode-chat-room:latest
+```
+
+Pin a release with `ghcr.io/agentsyaml/opencode-chat-room:v0.5.5`. Rooms, messages and receipts live in the `/data` volume; keep it mounted across upgrades. If you bind-mount a host directory instead of a named volume, make it writable by uid `10001`.
+
 ## 3. Start chatting
 
 - Ask an agent to create a room, join a room, or send a message; you can also use the web interface.

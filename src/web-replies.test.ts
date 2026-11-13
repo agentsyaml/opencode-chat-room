@@ -56,10 +56,7 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
       retryPayload = body; return route.continue();
     });
     const originalId = original.messages.at(-1).id;
-    await page.locator("#questionToggle").check();
     await page.locator(`#msgList [data-msg-id="${originalId}"] .message-reply`).click();
-    expect(await page.locator("#questionToggle").isChecked()).toBe(false);
-    expect(await page.locator("#questionToggle").isDisabled()).toBe(true);
     const editor = page.locator("#msgInput");
     expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at> ");
     expect(await editor.locator("[data-mention]").count()).toBe(1);
@@ -120,10 +117,9 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
     await page.reload(); await page.locator("#chatView").waitFor({ state: "visible" });
     expect(await page.locator("#replyPreview").isVisible()).toBe(true);
     expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at> Thanks for sharing.");
-    await page.evaluate(() => { const toggle = document.querySelector<HTMLInputElement>("#questionToggle")!; toggle.checked = true; toggle.dispatchEvent(new Event("change", { bubbles: true })); });
     await page.locator("#btnSend").click();
     await page.locator(`.failed-message[data-reply-target-id="${originalId}"]`).waitFor();
-    expect(replyPayload).toMatchObject({ replyToMessageID: originalId, isQuestion: false, text: "<at>@Peer</at> Thanks for sharing." });
+    expect(replyPayload).toMatchObject({ replyToMessageID: originalId, text: "<at>@Peer</at> Thanks for sharing." });
     await page.locator(`.failed-message[data-reply-target-id="${originalId}"] [data-failed-action="retry"]`).click();
     await page.waitForFunction(async ({ url, target }: { url: string; target: string }) => {
       const { app } = await import(url); return app.state.room.messages.at(-1)?.answerToMessageID === target;
@@ -190,7 +186,6 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
     await page.waitForFunction(async ({ id, url }: { id: string; url: string }) => (await import(url)).app.state.room.messages.some((item: any) => item.id === id), { id: questionId, url: "/assets/chat/state.js" });
     await page.locator(`#msgList [data-msg-id="${questionId}"] .message-reply`).click();
     expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at> ");
-    expect(await page.locator("#questionToggle").isChecked()).toBe(false);
     await page.keyboard.press("End"); await page.keyboard.insertText("Yes, I can help."); await page.reload();
     await page.locator("#chatView").waitFor({ state: "visible" });
     expect(await page.locator("#replyPreview").isVisible()).toBe(true);

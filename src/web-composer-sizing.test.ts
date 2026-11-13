@@ -478,9 +478,8 @@ async function profileMenuWorks(page: any) {
 }
 async function metaRow(page: any) {
   return page.locator(".composer-meta").evaluate((row: HTMLElement) => {
-    const toggle = row.querySelector(".question-toggle")!.getBoundingClientRect();
     const count = row.querySelector("#draftCount")!.getBoundingClientRect();
-    return Math.abs(toggle.top - count.top) < 3 && toggle.right <= count.left && row.scrollWidth <= row.clientWidth;
+    return count.width > 0 && row.scrollWidth <= row.clientWidth;
   });
 }
 async function switchRoom(page: any, roomName: string, previousRoom: string) {

@@ -40,6 +40,14 @@ async function call(route: string, method = "GET", body?: unknown, auth = true) 
 }
 
 describe.serial("shared-token room management", () => {
+  test("the chat page shows the packaged version next to the app title", async () => {
+    const response = await call("/chat");
+    const html = await response.text();
+    const { version } = await Bun.file(path.join(import.meta.dir, "../package.json")).json() as { version: string };
+    expect(response.status).toBe(200);
+    expect(html).toContain(`>v${version}<`);
+    expect(html).not.toContain("{{version}}");
+  });
   test("question queue survives the message window and answers atomically", async () => {
     const created = await (await call("/rooms", "POST", { name: "questions", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
     const id = created.id;

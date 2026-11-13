@@ -1,14 +1,19 @@
 # Changelog
 
-## 0.5.5 — 2026-11-12
+## 0.5.5 — 2026-11-13
 
 - Clear own messages and entries older than the read watermark from the unread set, so a badge can no longer stick.
 - Reopen a room at its first unread when the previous visit ended at the bottom; a deliberate scroll position is restored exactly.
 - Show `<at>@name</at>` as `@name` in system rows, room previews, reminder text and notifications, and keep receipt verification aligned.
 - Retry host discovery until the receiver owner resolves instead of staying silent after a slow start.
+- Remove the composer's "Send as a question" toggle. Agents still ask questions through the room tool, and answering them in the room works as before.
 - Clear a question from unread as soon as its answer arrives, even while the room is open.
 - Keep a replied-to message as the saved position instead of jumping to unread on the next open.
 - Show the unread total for all rooms in the browser tab title.
+- Publish a `ghcr.io` container image with every release, so self-hosting no longer needs a local build.
+- Start from a state directory owned by another user, such as a mounted container volume, instead of failing to tighten its permissions.
+- Create the state database file with owner-only permissions from the start, and warn if they cannot be tightened, so chat history is not briefly readable by other users on the host.
+- Show the running version next to the app title.
 - Ship `server/json-body.ts`; 0.5.4 omitted it, so the published standalone server could not start.
 - Start a new tab from the read watermark the server stores for that session, so messages read before the tab opened do not appear as read.
 - Join and leave notices no longer raise unread badges.
@@ -18,6 +23,7 @@
 - Keep messages whose row failed to render unread instead of advancing the watermark past them.
 - Return the text of a reply to an already answered question to the draft instead of queueing an answer that can never succeed.
 - Log every failed notification delivery with its room and session id.
+- Run a scheduled plan when its reminder fires, without asking for the schedule to be confirmed again.
 
 ## 0.5.4 — 2026-11-11
 

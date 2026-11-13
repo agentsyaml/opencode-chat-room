@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import RoomService, { type Message, type Room, type Participant } from "./room-service";
 import type { MessageReceipt, PresenceReport, ReceiptEvidence, ReceiptIdentity, ReceiptWriteResult, Registry, RegistryEntry } from "./store";
@@ -57,10 +57,21 @@ export async function initializeReminderSchema(file: string): Promise<void> {
 }
 
 async function initialize(file: string): Promise<Database> {
-  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  chmodSync(path.dirname(file), 0o700);
-  const db = new Database(file, { create: true });
-  chmodSync(file, 0o600);
+  const directory = path.dirname(file);
+  const hint = "Make that directory writable by the process user; in Docker use a named volume or chown it to uid 10001.";
+  try { mkdirSync(directory, { recursive: true, mode: 0o700 }); }
+  catch (error) { throw new Error(`cannot create the state directory ${directory}: ${(error as Error).message}. ${hint}`); }
+  // A mounted state directory may belong to another user (Docker bind mount);
+  // tightening its mode is best effort, not a reason to refuse to start.
+  try { chmodSync(directory, 0o700); } catch { /* keep the mounted permissions */ }
+  // Create the file 0600 up front so the default umask never leaves chat history
+  // readable by other users, even for the instant before the chmod below runs.
+  try { writeFileSync(file, "", { flag: "wx", mode: 0o600 }); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw new Error(`cannot create the state database ${file}: ${(error as Error).message}. ${hint}`); }
+  let db: Database;
+  try { db = new Database(file, { create: true }); }
+  catch (error) { throw new Error(`cannot open the state database ${file}: ${(error as Error).message}. ${hint}`); }
+  try { chmodSync(file, 0o600); } catch { console.warn(`[chat-room] could not tighten permissions on ${file}; check who owns the state directory`); }
   try {
     for (let attempt = 0; ; attempt++) {
       try {

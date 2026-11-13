@@ -146,7 +146,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await bob.locator(`#roomListChat [data-room-id="${sourceRoom}"]`).click();
     await bob.waitForFunction((id: string) => (document.querySelector("#btnCopyId") as HTMLButtonElement | null)?.title.endsWith(id), sourceRoom);
     expect(roomJoins.filter((id) => id === sourceRoom).length).toBe(1);
-    const backgroundText = Array.from({ length: 24 }, () => "A background update").join("\n");
+    const backgroundText = Array.from({ length: 40 }, () => "A background update").join("\n");
     await bob.locator("#msgInput").fill(backgroundText);
     await bob.locator("#btnSend").click();
     const sourceReadsBeforeOpen = aliceRoomReads.filter((id) => id === sourceRoom).length;
@@ -482,7 +482,7 @@ async function localeGeometry(page: any) {
     return {
       head: height("#chatView > .chat-head"), composer: height(".composer"), composerRow: height(".composer-row"),
       input: height("#msgInput"), send: height("#btnSend"), controls: Array.from(document.querySelectorAll<HTMLElement>(".chat-head-actions .chip")).map((node) => node.getBoundingClientRect().height),
-      viewportWidth: innerWidth, meta: height(".composer-meta"), questionToggle: height(".question-toggle"), draftCount: height("#draftCount"),
+      viewportWidth: innerWidth, meta: height(".composer-meta"), draftCount: height("#draftCount"),
       inputStyle: (() => { const node = document.querySelector<HTMLElement & { value: string }>("#msgInput")!, style = getComputedStyle(node); return { height: style.height, minHeight: style.minHeight, lineHeight: style.lineHeight, scrollHeight: node.scrollHeight, placeholder: node.getAttribute("aria-placeholder"), value: node.value }; })(),
       settings: height("#chatSettings"), privacy: height('#chatSettings [data-i18n="privacyNote"]'),
       pageX: document.documentElement.scrollWidth - innerWidth, pageY: document.documentElement.scrollHeight - innerHeight,
@@ -494,7 +494,7 @@ async function localeGeometry(page: any) {
 }
 
 function expectLocaleGeometry(a: Awaited<ReturnType<typeof localeGeometry>>, b: Awaited<ReturnType<typeof localeGeometry>>) {
-  for (const key of ["head", "composer", "composerRow", "input", "send", "privacy", "settings"] as const) if (Math.abs(a[key] - b[key]) > 1) throw new Error(`${key}: ${a[key]} vs ${b[key]} (${JSON.stringify({ en: { width: a.viewportWidth, row: a.composerRow, input: a.input, meta: a.meta, toggle: a.questionToggle, count: a.draftCount, style: a.inputStyle }, zh: { width: b.viewportWidth, row: b.composerRow, input: b.input, meta: b.meta, toggle: b.questionToggle, count: b.draftCount, style: b.inputStyle } })})`);
+  for (const key of ["head", "composer", "composerRow", "input", "send", "privacy", "settings"] as const) if (Math.abs(a[key] - b[key]) > 1) throw new Error(`${key}: ${a[key]} vs ${b[key]} (${JSON.stringify({ en: { width: a.viewportWidth, row: a.composerRow, input: a.input, meta: a.meta, count: a.draftCount, style: a.inputStyle }, zh: { width: b.viewportWidth, row: b.composerRow, input: b.input, meta: b.meta, count: b.draftCount, style: b.inputStyle } })})`);
   expect(a.controls).toHaveLength(b.controls.length);
   a.controls.forEach((height: number, index: number) => expect(Math.abs(height - b.controls[index]!)).toBeLessThanOrEqual(1));
   for (const metrics of [a, b]) {

@@ -61,7 +61,7 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     if (process.env.CHAT_UI_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, "chat-attachments-staged-mobile.png"), fullPage: true });
     await page.locator("#msgInput").fill("x".repeat(2000)); expect(await page.locator("#btnSend").isDisabled()).toBe(true);
     expect(Number((await page.locator("#draftCount").textContent())!.split(" /")[0])).toBeGreaterThan(2000);
-    await page.locator("#msgInput").fill("__Test_caption"); await page.locator("#questionToggle").check();
+    await page.locator("#msgInput").fill("__Test_caption");
     await page.locator("#btnRoomsDrawer").click(); await page.locator("#btnNewRoom").click();
     await page.locator("#inRoomNameChat").fill("__Test_AttachmentSecond"); await page.locator("#btnCreateChatRoom").click();
     await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "__Test_AttachmentSecond");
@@ -81,12 +81,12 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     expect(await page.locator("#msgInput").evaluate((node: any) => node.value)).toBe("__Test_next_draft");
     await page.waitForFunction(() => document.querySelectorAll("#attachmentList .attachment-item").length === 1 && document.querySelector("#attachmentList .attachment-name")?.textContent === "__Test_during_send.txt");
     const firstMessage = (await api(origin, `/rooms/${info.roomId}`)).messages.find((message: any) => message.text.startsWith("__Test_caption"));
-    expect(firstMessage.isQuestion).toBe(true);
+    expect(firstMessage.isQuestion).toBeFalsy();
     expect((firstMessage.text.match(/\[\[resource:/g) || []).length).toBe(4);
     await page.waitForFunction(() => document.querySelectorAll("#msgList .chat-resource").length === 4);
     expect(await page.locator("#msgList .chat-resource").count()).toBe(4);
     for (const name of ["__Test_vector.svg", "__Test_untrusted.html"]) expect(await page.locator("#msgList .chat-resource").filter({ hasText: name }).locator("button").count()).toBe(1);
-    await page.locator("#msgInput").fill(""); await page.locator("#questionToggle").uncheck();
+    await page.locator("#msgInput").fill("");
     expect(await page.locator("#btnSend").isEnabled()).toBe(true); await page.locator("#btnSend").click();
     await page.locator("#attachmentTray").waitFor({ state: "hidden" });
     const attachmentOnly = (await api(origin, `/rooms/${info.roomId}`)).messages.at(-1);
@@ -133,7 +133,7 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     });
     await page.locator("#attachmentPicker").setInputFiles({ name: "__Test_retry.png", mimeType: "image/png", buffer: png });
     await page.waitForFunction(() => document.querySelector("#attachmentList .attachment-detail")?.textContent?.includes("Ready to send"));
-    await page.locator("#questionToggle").check(); await page.locator("#msgInput").fill("__Test_retry_caption"); await page.locator("#btnSend").click(); await failureRequest;
+    await page.locator("#msgInput").fill("__Test_retry_caption"); await page.locator("#btnSend").click(); await failureRequest;
     await page.locator("#attachmentPicker").setInputFiles({ name: "__Test_next_after_failure.txt", mimeType: "text/plain", buffer: Buffer.from("Next draft") });
     await page.waitForFunction(() => document.querySelector("#attachmentList .attachment-detail")?.textContent?.includes("Ready to send"));
     await page.locator("#msgInput").fill("__Test_next_caption"); releaseFailure(); await page.locator(".failed-message").waitFor();
@@ -144,14 +144,13 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     await page.unroute(messagePattern); await page.locator(".failed-message [data-failed-action=retry]").click();
     await page.locator("#msgList").getByText("__Test_retry_caption").waitFor(); await page.locator(".failed-message").waitFor({ state: "hidden" });
     const retried = (await api(origin, `/rooms/${info.roomId}`)).messages.at(-1);
-    expect(retried.text).toBe(failedText); expect(retried.isQuestion).toBe(true);
+    expect(retried.text).toBe(failedText); expect(retried.isQuestion).toBeFalsy();
     expect(uploads.length).toBe(uploadsBeforeRetry + 2);
     await setLocaleThroughProfile(page, "zh-CN");
     expect(await page.locator("#attachmentList .attachment-detail").first().textContent()).toContain("可以发送");
     expect(await page.locator("#attachmentList [data-upload-action=remove]").first().textContent()).toBe("移除");
     await setLocaleThroughProfile(page, "en");
     expect(await page.locator("#attachmentList .attachment-detail").first().textContent()).toContain("Ready to send");
-    await page.locator("#questionToggle").uncheck();
     await page.locator("#btnSend").click(); await page.locator("#msgList").getByText("__Test_next_caption").waitFor();
     const nextText = (await api(origin, `/rooms/${info.roomId}`)).messages.at(-1).text;
     expect(nextText).toContain("__Test_next_caption"); expect(nextText).not.toContain(failedText.match(/\[\[resource:[^\]]+/)?.[0] || "missing-resource");

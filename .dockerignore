@@ -1,0 +1,11 @@
+.git
+.github
+.opencode
+.slim
+node_modules
+docs
+skills
+*.md
+CHANGELOG.md
+**/*.test.ts
+npm-pack.json

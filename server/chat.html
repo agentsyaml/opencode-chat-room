@@ -29,7 +29,7 @@
           <option value="zh-CN">中文</option>
         </select>
       </div>
-       <p class="wordmark" data-i18n="brand">OC Chat</p>
+       <div class="wordmark-row"><p class="wordmark" data-i18n="brand">OC Chat</p><span class="version-tag">{{version}}</span></div>
       <p class="tagline" data-i18n="tagline">A lightweight chat room. Enter a room ID to join, or create a new one.</p>
 
       <form id="joinForm" novalidate>
@@ -79,7 +79,7 @@
    <!-- Shared room workspace. -->
   <section id="chatView" class="view" hidden>
     <aside id="roomRail" class="room-rail" aria-label="Rooms" data-i18n-aria-label="roomsLabel">
-      <div class="rail-brand"><span class="brand-mark">OC</span><span data-i18n="brand">OC Chat</span></div>
+      <div class="rail-brand"><span class="brand-mark">OC</span><span data-i18n="brand">OC Chat</span><span class="version-tag">{{version}}</span></div>
       <div class="rail-label"><span data-i18n="existingRooms">Rooms</span><span class="rail-tools"><button id="btnNewRoom" class="icon-btn" type="button" aria-label="Create a room" data-i18n-aria-label="newRoom"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button><button id="btnRefreshRooms" class="icon-btn" type="button" aria-label="Refresh rooms" data-i18n-aria-label="refreshRooms"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.8-2L20 12M4 12l2.6 5a7 7 0 0 0 11.8-2"/></svg></button></span></div>
       <form id="railRoomForm" class="rail-composer" hidden>
         <label class="field"><span class="field-label" data-i18n="newRoomNameLabel">New room name</span><input id="inRoomNameChat" class="input" maxlength="40" data-i18n-placeholder="newRoomNamePlaceholder" placeholder="e.g. Weekend movie night"></label>
@@ -230,7 +230,6 @@
         <button class="btn primary" type="button" id="btnSend" data-i18n="send" disabled>Send</button>
       </div>
       <div class="composer-meta">
-        <label class="question-toggle"><input id="questionToggle" type="checkbox"><span data-i18n="sendAsQuestion">Send as a question</span></label>
         <p id="draftCount" class="draft-count">0 / 2000</p>
       </div>
     </footer>

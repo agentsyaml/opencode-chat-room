@@ -25,6 +25,13 @@ import { maxResourceBytes } from "../src/resources";
 import { adminRoutes } from "./admin-routes";
 import { roomReminderRoutes, startRoomReminderScheduler } from "./room-reminders";
 
+// The chat page shows this next to the app title; a missing package must not
+// leave a placeholder behind.
+let versionTag: Promise<string> | undefined;
+const chatVersionTag = () => (versionTag ??= Bun.file(path.join(import.meta.dir, "../package.json")).json()
+  .then((pkg) => typeof pkg?.version === "string" && pkg.version ? `v${pkg.version}` : "")
+  .catch(() => ""));
+
 function parsePort(value: string): number {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -89,7 +96,8 @@ async function handle(req: Request): Promise<Response> {
     if (html === null) {
       return json({ error: "chat page not found" }, 404);
     }
-    return new Response(html, {
+    const version = await chatVersionTag();
+    return new Response(html.replaceAll("{{version}}", version), {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
