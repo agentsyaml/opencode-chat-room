@@ -7,7 +7,7 @@ import path from "node:path";
 import { adminTool } from "./admin-client";
 
 if (!process.env.CHAT_ROOM_ADMIN_INTEGRATION_CHILD) {
-  test("admin supervision works over an isolated real server", async () => {
+  test("owner-designated admin access works over an isolated real server", async () => {
     const child = Bun.spawn([process.execPath, "test", "src/admin-integration.test.ts"], {
       env: { ...process.env, CHAT_ROOM_ADMIN_INTEGRATION_CHILD: "1" }, stdout: "pipe", stderr: "pipe",
     });
@@ -15,9 +15,9 @@ if (!process.env.CHAT_ROOM_ADMIN_INTEGRATION_CHILD) {
     if (code !== 0) throw new Error(`${stdout}${stderr}`);
   });
 } else {
-  test("operator binding and restart persistence", async () => {
+  test("owner designation authorizes the native agent across restart", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "admin-integration-"));
-    const state = path.join(root, "db"), serverToken = "server-secret", adminToken = "operator-secret";
+    const state = path.join(root, "db"), serverToken = "server-secret";
     await import("node:fs/promises").then(({ mkdir }) => mkdir(state, { recursive: true }));
     process.env.CHAT_ROOM_STATE_DIR = state;
     process.env.XDG_STATE_HOME = path.join(root, "xdg");
@@ -28,7 +28,7 @@ if (!process.env.CHAT_ROOM_ADMIN_INTEGRATION_CHILD) {
       server.once("error", reject);
       server.listen(0, "127.0.0.1", () => { const address = server.address(); if (!address || typeof address === "string") return reject(new Error("no port")); const value = address.port; server.close(() => resolve(value)); });
     });
-    const env = { ...process.env, HOME: path.join(root, "home"), XDG_STATE_HOME: path.join(root, "xdg"), XDG_CONFIG_HOME: path.join(root, "config"), CHAT_ROOM_STATE_DIR: state, CHAT_ROOM_SERVER_HOST: "127.0.0.1", CHAT_ROOM_SERVER_PORT: String(port), CHAT_ROOM_SERVER_TOKEN: serverToken, CHAT_ROOM_ADMIN_TOKEN: adminToken };
+    const env = { ...process.env, HOME: path.join(root, "home"), XDG_STATE_HOME: path.join(root, "xdg"), XDG_CONFIG_HOME: path.join(root, "config"), CHAT_ROOM_STATE_DIR: state, CHAT_ROOM_SERVER_HOST: "127.0.0.1", CHAT_ROOM_SERVER_PORT: String(port), CHAT_ROOM_SERVER_TOKEN: serverToken };
     const base = `http://127.0.0.1:${port}`, auth = { Authorization: `Bearer ${serverToken}` };
     let server: ReturnType<typeof Bun.spawn> | undefined;
     const start = async () => {
@@ -43,28 +43,23 @@ if (!process.env.CHAT_ROOM_ADMIN_INTEGRATION_CHILD) {
       const opts = { center: base, token: serverToken };
       await start();
       const makeRoom = async (name: string) => { const r = await api("POST", "/rooms", { name: `__Test_${name}`, ownerId: "__Test_owner" }); expect(r.status).toBe(201); return (await r.json() as { id: string }).id; };
-      adminRoom = await makeRoom("admin"); const supervisorRoom = await makeRoom("supervisor");
+      adminRoom = await makeRoom("admin");
       const join = async (room: string, sessionID: string, owner: string, name: string) => {
         const r = await api("POST", `/rooms/${room}/join`, { sessionID, participantId: name, participantName: name, protocol: "v2", receiverOwnerID: owner }); expect(r.status).toBe(201);
       };
-      const supervisorOwner = randomUUID();
-      await join(supervisorRoom, "__Test_supervisor-session", supervisorOwner, "__Test_supervisor");
-      const registry = await (await api("GET", `/rooms/${supervisorRoom}/registry`)).json() as Record<string, { membershipID: string }>;
-      const supervisorMember = registry["__Test_supervisor-session"]?.membershipID;
-      expect(supervisorMember).toBeTruthy();
-      const operatorHeaders = { ...auth, "x-chat-admin-token": adminToken };
-      expect((await api("POST", "/admin/rooms", { roomId: adminRoom, targetRoomId: supervisorRoom, sessionID: "__Test_supervisor-session", receiverOwnerID: supervisorOwner, membershipID: supervisorMember }, { "x-chat-admin-token": serverToken })).status).toBe(401);
-      expect((await api("POST", "/admin/rooms", { roomId: "forged-room", targetRoomId: supervisorRoom, sessionID: "__Test_supervisor-session", receiverOwnerID: supervisorOwner, membershipID: supervisorMember }, {})).status).toBe(401);
-      const bound = await api("POST", "/admin/rooms", { roomId: adminRoom, targetRoomId: supervisorRoom, sessionID: "__Test_supervisor-session", receiverOwnerID: supervisorOwner, membershipID: supervisorMember }, operatorHeaders);
-      expect(bound.status).toBe(201);
-      const transport = { protocol: "v2" as const, receiverOwnerID: supervisorOwner };
-      const overview = async () => JSON.parse(await adminTool({ action: "admin_overview", roomId: adminRoom }, { sessionID: "__Test_supervisor-session" }, opts, transport));
-      // Designation is effective immediately; no claim step is required.
+      const owner = randomUUID();
+      await join(adminRoom, "__Test_owner-session", owner, "__Test_owner");
+      const designated = await api("PATCH", `/rooms/${adminRoom}`, { sessionID: "__Test_owner-session", adminSessionID: "__Test_owner-session" });
+      expect(designated.status).toBe(200);
+      const transport = { protocol: "v2" as const, receiverOwnerID: owner };
+      const overview = async () => JSON.parse(await adminTool({ action: "admin_overview", roomId: adminRoom }, { sessionID: "__Test_owner-session" }, opts, transport));
       expect(Array.isArray((await overview()).rooms)).toBe(true);
+      expect((await api("GET", `/admin/rooms/${adminRoom}/overview`, undefined, { ...auth, "x-chat-agent-session": "wrong-session", "x-chat-agent-owner": owner })).status).toBe(401);
+      expect((await api("GET", `/admin/rooms/${adminRoom}/overview`, undefined, { ...auth, "x-chat-agent-session": "__Test_owner-session", "x-chat-agent-owner": "wrong-owner" })).status).toBe(401);
       await stop(); await start();
       expect(Array.isArray((await overview()).rooms)).toBe(true);
     } finally {
-      if (adminRoom) await api("DELETE", `/admin/rooms/${adminRoom}`, undefined, { ...auth, "x-chat-admin-token": adminToken }).catch(() => {});
+      if (adminRoom) await api("DELETE", `/rooms/${adminRoom}`, { sessionID: "__Test_owner-session" }).catch(() => {});
       await stop(); await rm(root, { recursive: true, force: true });
     }
   });

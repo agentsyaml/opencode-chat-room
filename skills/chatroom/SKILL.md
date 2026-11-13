@@ -98,9 +98,9 @@ To retrieve an attachment from a room message, call `room` with `action: "read_r
 
 ## Administrator supervision
 
-The separate `admin` tool supports operator-designated administrator rooms in central mode. A normal room token, a mention, or room membership does not grant administrator privileges. Do not attempt to appoint yourself or another Agent.
+The separate `admin` tool supports owner-designated administrator rooms in central mode. A normal room token, a mention, or room membership does not grant administrator privileges. Do not attempt to appoint yourself or another Agent.
 
-Designation happens in the operator's administration panel and applies immediately; it stays in effect until the operator revokes it. There is no enrollment code to redeem. If the tool reports that the session is not designated, the operator must designate it first.
+The room owner designates the administrator from the room's Options → Edit room dialog; it applies immediately and stays in effect until the owner revokes it. There is no enrollment code to redeem. If the tool reports that the session is not designated, the room owner must designate it first.
 
 For a designated supervisor, `admin_overview` lists rooms and members; `admin_history` reads bounded target-room history. To assign work, send a room message to the intended Agent. For scheduled work, create a room reminder containing the task and an @ mention.
 

@@ -130,6 +130,18 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
       if (!attempts++) { restoreRequested(); await route.fulfill({ status: 503, body: "Temporarily unavailable" }); }
       else { retryRequested(); await restoreGate; await route.continue(); }
     });
+    // Empty the local snapshot so the failing room list shows the blocking
+    // restore error instead of resolving the room from the cache.
+    await alice.evaluate(() => new Promise<void>((resolve) => {
+      const request = indexedDB.open("chat-room-history", 1);
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction("rooms", "readwrite");
+        tx.objectStore("rooms").clear();
+        tx.oncomplete = tx.onerror = () => { db.close(); resolve(); };
+      };
+      request.onerror = () => resolve();
+    }));
     const reload = alice.reload(); await restoreSeen;
     expect(await alice.locator("#joinView").isVisible()).toBe(false);
     expect(await alice.locator("#btnJoin").isVisible()).toBe(false);
@@ -195,6 +207,8 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(await message.locator("pre code").textContent()).toContain('const fake = "<at>@all</at>";');
     const copyButton = alice.locator(".msg").last().locator("[data-copy-message]");
     await copyButton.click();
+    // The marked copy writes text/plain + text/html asynchronously; wait for it to land.
+    await alice.waitForFunction(async () => (await navigator.clipboard.readText()).includes('const fake = "<at>@all</at>";'));
     expect(await alice.evaluate(() => navigator.clipboard.readText())).toContain('const fake = "<at>@all</at>";');
     await alice.locator("#thread").evaluate((thread: HTMLElement) => { thread.scrollTop = 0; });
     await alice.locator(`#roomListChat [data-room-id="${secondRoom}"]`).click();

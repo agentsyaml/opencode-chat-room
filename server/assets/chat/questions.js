@@ -1,4 +1,4 @@
-import { LS } from "./state.js";
+import { LS, LOADED_MESSAGE_LIMIT } from "./state.js";
 import { autoMentionDraft, installEditor } from "./editor.js";
 import { copyTextToClipboard, renderMarkdown } from "./markdown.js";
 
@@ -27,6 +27,14 @@ export function initQuestions(app) {
 
   function render(roomId) {
     const items = pending.get(roomId) || [];
+    const entry = app.state.rooms.get(roomId);
+    // Keep the room's question-mark badge in sync with the loaded question list.
+    if (entry && pending.has(roomId) && Number(entry.room.openQuestions) !== items.length) {
+      entry.room.openQuestions = items.length;
+      app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
+      app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
+      if (app.state.room?.id === roomId) app.renderHead();
+    }
     const active = app.state.room?.id === roomId;
     if (active) {
       const signature = `${roomId}\0${app.locale}\0${selected.get(roomId) || ""}\0${items.map((question) => `${question.id}\0${question.text}`).join("\u0001")}`;
@@ -73,7 +81,7 @@ export function initQuestions(app) {
     copy.type = "button"; copy.className = "btn ghost small question-copy"; copy.textContent = app.t("copyQuestion");
     feedback.className = "question-copy-feedback"; feedback.setAttribute("role", "status"); feedback.setAttribute("aria-live", "polite");
     copy.addEventListener("click", async () => {
-      feedback.dataset.copyState = await copyTextToClipboard(question.text) ? "questionCopied" : "questionCopyFailed";
+      feedback.dataset.copyState = await copyTextToClipboard(question.text, true) ? "questionCopied" : "questionCopyFailed";
       feedback.textContent = app.t(feedback.dataset.copyState);
     });
     form.className = "question-reply-form";
@@ -227,7 +235,7 @@ export function initQuestions(app) {
     }
     if (entry && result.answer && !entry.room.messages.some((item) => item.id === result.answer.id)) {
       entry.room.messages.push({ ...result.answer, roomId }); entry.room.messages.sort((a, b) => a.createdAt - b.createdAt);
-      if (entry.room.messages.length > 500) entry.room.messages.splice(0, entry.room.messages.length - 500);
+      if (entry.room.messages.length > LOADED_MESSAGE_LIMIT) entry.room.messages.splice(0, entry.room.messages.length - LOADED_MESSAGE_LIMIT);
       if (app.state.room?.id === roomId) app.renderMessages(true);
     }
     pending.set(roomId, (pending.get(roomId) || []).filter((item) => item.id !== (result.questionID || questionId)));

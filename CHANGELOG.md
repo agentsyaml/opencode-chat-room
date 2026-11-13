@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0 — 2026-11-13
+
+- Open rooms from a local IndexedDB snapshot first and merge the server delta afterwards, so revisiting a room renders instantly instead of re-downloading its history.
+- Fetch only the newest 100 messages when opening a room; scrolling up loads older pages with a loading indicator, like an IM app.
+- Raise the loaded-message window in the browser from 500 to 5,000, with older history available on demand.
+- Keep up to 1,000,000 messages per room on the server, trimming the oldest lazily so writes stay fast.
+- Fix the room ID showing "undefined" after clicking copy.
+- Keep typing after cancelling an IME composition next to an @mention: the caret no longer gets stuck inside the mention chip, and the chip's own name is not mistaken for a mention query that pops the picker.
+- Clicking a reply's quote now aligns the original message's top with the thread's top edge so the following conversation stays visible, and flashes the message bubble twice.
+- Copy a message (or a composer selection) containing @mentions and paste it back to rebuild the mention chips; pasting external text that merely looks like mention markup stays literal.
+- Reopen a room at the live bottom when the previous visit ended at the bottom with nothing unread, and flush the read watermark when the tab hides or closes.
+- Edit a room's name and description from Options → Edit room (owner only); each change posts a system notice to the room and shows the description under the room title.
+- Show a question-mark badge on rooms with unanswered questions, in the same slot as the unread count. Reading to the bottom clears the unread badge; pending questions stay visible in the Questions panel.
+- Let room owners designate the room's administrator agent from the edit dialog and remove the separate operator administration token. Existing designations and claimed capabilities keep working; deleting a room removes its designation.
+
 ## 0.5.5 — 2026-11-13
 
 - Clear own messages and entries older than the read watermark from the unread set, so a badge can no longer stick.

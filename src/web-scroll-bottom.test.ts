@@ -171,6 +171,12 @@ test.skipIf(!browserModule)("sending while reading history keeps the position an
     const room = await page.evaluate(async (url: string) => { const { app } = await import(url); return { id: app.state.room.id, sessionID: app.LS.sessionID }; }, "/assets/chat/state.js");
     for (let index = 0; index < 24; index++) await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: room.sessionID, text: `__Test_history ${index}\n${"Filler line for height.\n".repeat(3)}` });
     await page.reload(); await page.locator("#msgList .msg").nth(23).waitFor();
+    // Restore lands at the bottom and acknowledges the watermark asynchronously;
+    // wait for it to settle so the baseline is the post-restore read position.
+    await page.waitForFunction(async (url: string) => {
+      const { app } = await import(url), entry = app.state.rooms.get(app.state.room.id);
+      return entry.readTs >= entry.room.messages.at(-1).createdAt;
+    }, "/assets/chat/state.js");
     const before = await page.evaluate(async (url: string) => {
       const { app } = await import(url), thread = document.querySelector<HTMLElement>("#thread")!;
       thread.scrollTop = 0; await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -188,6 +194,40 @@ test.skipIf(!browserModule)("sending while reading history keeps the position an
     expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThan(60);
     expect(after.readTs).toBe(before.readTs);
     expect(after.unread).toBe(0);
+  } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
+}, 60000);
+
+test.skipIf(!browserModule)("reading to the bottom then reopening returns to the bottom", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-reopen-bottom-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_ReopenOwner");
+    await page.locator("#inRoomName").fill("__Test_ReopenBottom");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const room = await page.evaluate(async (url: string) => { const { app } = await import(url); return { id: app.state.room.id, sessionID: app.LS.sessionID }; }, "/assets/chat/state.js");
+    await api(origin, `/rooms/${room.id}/join`, "POST", { sessionID: "__Test_ReopenPeer", participantId: "__Test_ReopenPeer", participantName: "__Test_ReopenPeer" });
+    for (let index = 0; index < 24; index++) await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_ReopenPeer", text: `__Test_reopen ${index}\n${"Filler line for height.\n".repeat(3)}` });
+    await page.locator("#msgList .msg").nth(23).waitFor();
+    await page.evaluate(async (url: string) => { const { app } = await import(url); app.jumpToBottom(); await app.markActiveRoomRead(true); }, "/assets/chat/state.js");
+    await page.waitForFunction(async ({ url, id }: any) => { const { app } = await import(url); const e = app.state.rooms.get(id); const latest = e.room.messages.at(-1); return e.readTs >= latest.createdAt; }, { url: "/assets/chat/state.js", id: room.id });
+    const before = await page.evaluate(() => { const t = document.querySelector<HTMLElement>("#thread")!; return { gap: t.scrollHeight - t.scrollTop - t.clientHeight }; });
+    expect(before.gap).toBeLessThan(8);
+    await page.reload(); await page.locator("#msgList .msg").nth(23).waitFor();
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(async (url: string) => { const { app } = await import(url); const t = document.querySelector<HTMLElement>("#thread")!; const e = app.state.rooms.get(app.state.room.id); return { gap: t.scrollHeight - t.scrollTop - t.clientHeight, unread: e.unreadIds.size, readTs: e.readTs, latest: e.room.messages.at(-1).createdAt }; }, "/assets/chat/state.js");
+    expect(after.unread).toBe(0);
+    expect(after.readTs).toBeGreaterThanOrEqual(after.latest);
+    expect(after.gap).toBeLessThan(8);
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 60000);
 

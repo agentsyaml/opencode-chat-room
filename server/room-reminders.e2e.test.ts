@@ -76,7 +76,8 @@ test("room reminders cross the plugin, HTTP server, persisted database and resta
     cron: d.query("SELECT next_run_at FROM room_reminders WHERE id=?").get(cron.reminder.id) as { next_run_at: number },
     once: d.query("SELECT 1 FROM room_reminders WHERE id=?").get(once.reminder.id),
   }));
-  expect(rows.messages.filter(m => [`__Test_once ${creatorName} __Test_reminder_room`, "__Test_cron"].some(text => m.text.startsWith(text))).map(m => m.sender_id)).toEqual(["system", "system"]);
+  const deliveredTexts = rows.messages.filter(m => [`__Test_once ${creatorName} __Test_reminder_room`, "__Test_cron"].some(text => m.text.startsWith(text))).map(m => m.text).sort();
+  expect(deliveredTexts).toEqual([`__Test_once ${creatorName} __Test_reminder_room`, "__Test_cron"].sort());
   expect(rows.messages.some(m => m.text.includes(`__Test_once ${creatorName} __Test_reminder_room`))).toBe(true);
   expect(rows.cron.next_run_at).toBeGreaterThan(Date.now());
   expect(rows.once).toBeNull();

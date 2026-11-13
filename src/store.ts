@@ -4,7 +4,7 @@
 import path from "node:path";
 import os from "node:os";
 import RoomService, { type Message, type Room } from "./room-service";
-import { acknowledgeQueued as sqliteAcknowledgeQueued, acknowledgeRead as sqliteAcknowledgeRead, answerQuestion as sqliteAnswerQuestion, appendRoomMessage as sqliteAppendRoomMessage, sendReply as sqliteSendReply, readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestionExcerpt as sqliteQuestionExcerpt, readQuestions as sqliteReadQuestions, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state";
+import { acknowledgeQueued as sqliteAcknowledgeQueued, acknowledgeRead as sqliteAcknowledgeRead, answerQuestion as sqliteAnswerQuestion, appendRoomMessage as sqliteAppendRoomMessage, sendReply as sqliteSendReply, readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestionExcerpt as sqliteQuestionExcerpt, readQuestions as sqliteReadQuestions, countOpenQuestions as sqliteCountOpenQuestions, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state";
 
 export function statePath(): string {
   // JSON path remains the migration source; SQLite lives beside it.
@@ -35,6 +35,7 @@ export async function readHistory(roomID: string, beforeSeq?: number, limit = 10
   return readHistoryPage(databasePath(), roomID, beforeSeq, limit, exclude?.sessionID, exclude?.name);
 }
 export async function readQuestions(roomID: string): Promise<Message[]> { return sqliteReadQuestions(databasePath(), roomID); }
+export async function countOpenQuestions(roomID: string): Promise<number> { return sqliteCountOpenQuestions(databasePath(), roomID); }
 export function acknowledgeRead(roomID: string, sessionID: string, ts: number) { return sqliteAcknowledgeRead(databasePath(), roomID, sessionID, ts); }
 export function acknowledgeQueued(roomID: string, sessionID: string, ts: number) { return sqliteAcknowledgeQueued(databasePath(), roomID, sessionID, ts); }
 export async function answerQuestion(roomID: string, questionID: string, sessionID: string, text: string) { return sqliteAnswerQuestion(databasePath(), roomID, questionID, sessionID, text); }

@@ -41,6 +41,18 @@ test.skipIf(!browserModule)("restore blocks login, retries transient errors, and
       if (!attempt++) { requested(); await route.fulfill({ status: 503, body: "Temporary failure" }); }
       else { retryRequested(); await gate; await route.continue(); }
     });
+    // Exercise the no-cache restore-failure UI: empty the local history snapshot
+    // so a failing room list shows the blocking restore error instead of the cache.
+    await owner.evaluate(() => new Promise<void>((resolve) => {
+      const request = indexedDB.open("chat-room-history", 1);
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction("rooms", "readwrite");
+        tx.objectStore("rooms").clear();
+        tx.oncomplete = tx.onerror = () => { db.close(); resolve(); };
+      };
+      request.onerror = () => resolve();
+    }));
     const reload = owner.reload(); await firstRequest;
     expect(await owner.locator("#joinView").isVisible()).toBe(false);
     expect(await owner.locator("#btnJoin").isVisible()).toBe(false);
@@ -100,6 +112,17 @@ test.skipIf(!browserModule)("restore blocks login, retries transient errors, and
     let releaseUnauthorized!: () => void, unauthorizedRequested!: () => void;
     const unauthorizedGate = new Promise<void>((resolve) => { releaseUnauthorized = resolve; }), unauthorizedSeen = new Promise<void>((resolve) => { unauthorizedRequested = resolve; });
     await fresh.route("**/rooms?sessionID=*", async (route: BrowserRoute) => { unauthorizedRequested(); await unauthorizedGate; await route.fulfill({ status: 401, body: JSON.stringify({ error: "access token expired" }) }); });
+    // Empty the snapshot so the 401 prompts login instead of showing the cache.
+    await fresh.evaluate(() => new Promise<void>((resolve) => {
+      const request = indexedDB.open("chat-room-history", 1);
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction("rooms", "readwrite");
+        tx.objectStore("rooms").clear();
+        tx.oncomplete = tx.onerror = () => { db.close(); resolve(); };
+      };
+      request.onerror = () => resolve();
+    }));
     const unauthorizedReload = fresh.reload(); await unauthorizedSeen;
     expect(await fresh.locator("#joinView").isVisible()).toBe(false); releaseUnauthorized(); await unauthorizedReload;
     await fresh.locator("#joinView").waitFor({ state: "visible" });

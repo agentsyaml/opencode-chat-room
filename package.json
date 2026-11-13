@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "description": "A chat-room plugin and central server for OpenCode.",
   "repository": {
     "type": "git",
@@ -29,6 +29,7 @@
     "server/json-body.ts",
     "server/inbox.ts",
     "server/history-route.ts",
+    "server/room-payload.ts",
     "server/newrooms.ts",
     "server/member-routes.ts",
     "server/announcement-routes.ts",

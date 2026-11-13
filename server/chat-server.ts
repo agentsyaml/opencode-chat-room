@@ -17,6 +17,7 @@ import { readInbox } from "./inbox";
 import { isReceiverOwnerID } from "../src/receiver-owner";
 import { claimWake, touchActive, wakeMentionedSessions } from "./wake";
 import { historyRoute } from "./history-route";
+import { roomPayload } from "./room-payload";
 import { jsonObject } from "./json-body";
 import { roomManagement } from "./newrooms";
 import { memberRoutes } from "./member-routes";
@@ -60,17 +61,6 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" },
   });
-
-const serializeRoom = (r: Room) => ({
-  id: r.id,
-  name: r.name,
-  ownerId: r.ownerId,
-  createdAt: r.createdAt,
-  participants: [...r.participants.values()],
-  messages: r.messages,
-  kind: r.kind ?? "group",
-  ...(r.directSessionIDs ? { directSessionIDs: r.directSessionIDs } : {}),
-});
 
 function mutate<T>(fn: (svc: RoomService, registry: Registry) => T): Promise<T> {
   return writeState(fn);
@@ -160,13 +150,14 @@ async function handle(req: Request): Promise<Response> {
     }
     if (req.method === "GET" && p === "/rooms") {
       const caller = url.searchParams.get("sessionID");
-      const rooms = await readState((svc, registry) => svc.listRooms()
+      const rows = await readState((svc, registry) => svc.listRooms()
         .filter((room) => room.kind !== "direct" ? true : !!caller && room.directSessionIDs?.includes(caller))
-        .map((room) => {
-          const entry = caller ? registry[room.id]?.[caller] : undefined;
-          // The browser keeps its watermark per tab; a new tab starts from this one.
-          return { ...serializeRoom(room), joined: Boolean(entry), ...(entry?.lastReadTs ? { lastReadTs: entry.lastReadTs } : {}) };
-        }));
+        .map((room) => ({ room, entry: caller ? registry[room.id]?.[caller] : undefined })));
+      const rooms = [];
+      for (const { room, entry } of rows) {
+        // The browser keeps its watermark per tab; a new tab starts from this one.
+        rooms.push({ ...await roomPayload(room), joined: Boolean(entry), ...(entry?.lastReadTs ? { lastReadTs: entry.lastReadTs } : {}) });
+      }
       return json(rooms);
     }
     const members = await memberRoutes(req, url);
@@ -214,7 +205,7 @@ async function handle(req: Request): Promise<Response> {
         }
         return created;
       });
-      return json(serializeRoom(room), 201);
+      return json(await roomPayload(room), 201);
     }
     if (req.method === "GET" && p === "/inbox") {
       const sessionID = url.searchParams.get("sessionID") ?? "";
@@ -364,7 +355,7 @@ async function handle(req: Request): Promise<Response> {
           return svc.getRoom(roomId);
         });
         touchActive(sessionID); // join = active
-        return json(serializeRoom(room), 201);
+        return json(await roomPayload(room), 201);
       }
       if (req.method === "POST" && m[2] === "leave") {
         await mutate((svc, reg) => {
@@ -412,7 +403,7 @@ async function handle(req: Request): Promise<Response> {
           touchActive(sessionID);
           const room = await read((svc) => svc.getRoom(roomId));
           void wakeMentionedSessions(serveWakeUrl, roomId, room.name, text, sessionID, result.message);
-          return json(serializeRoom(room), 201);
+          return json(await roomPayload(room), 201);
         }
         const result = await appendRoomMessage(roomId, sessionID, text, isQuestion === true);
         if (result.status !== "ok") {
@@ -423,7 +414,7 @@ async function handle(req: Request): Promise<Response> {
         const room = await read((svc) => svc.getRoom(roomId));
         // ponytail: 即时唤起——仅 @ 点名成员时（核心需求）
         void wakeMentionedSessions(serveWakeUrl, roomId, room.name, text, sessionID, result.message);
-        return json(serializeRoom(room), 201);
+        return json(await roomPayload(room), 201);
       }
     }
     const questions = p.match(/^\/rooms\/([^/]+)\/questions$/);
@@ -457,7 +448,7 @@ async function handle(req: Request): Promise<Response> {
       const room = await read((svc) =>
         svc.getRoom(decodeURIComponent(g[1]!)),
       );
-      return json(serializeRoom(room));
+      return json(await roomPayload(room));
     }
     const r = p.match(/^\/rooms\/([^/]+)\/registry$/);
     if (r && req.method === "GET") {

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createV2Setup } from "./v2-plugin";
 
-test("V2 admin tool uses native session and verified owner context", async () => {
+test("V2 admin tool passes its native session and verified owner context", async () => {
   let registered: Array<Record<string, any>> = [];
   const hooks: Record<string, (input: any) => Promise<void>> = {};
   const setup = createV2Setup({

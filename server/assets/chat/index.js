@@ -10,6 +10,7 @@ import { initAnnouncements } from "./announcements.js";
 import { initAdmin } from "./admin.js";
 import { initAttachments } from "./attachments.js";
 import { initReplies } from "./replies.js";
+import { initHistoryLoader } from "./history-loader.js";
 import { initReminders } from "./reminders.js";
 
 initMentions(app);
@@ -18,6 +19,7 @@ initAttachments(app);
 initReceipts(app);
 initMembers(app);
 initRooms(app);
+initHistoryLoader(app);
 initQuestions(app);
 initReplies(app);
 initEvents(app);

@@ -57,7 +57,18 @@ export function editorSelectionOffsets(editor) {
   const selection = getSelection();
   if (!selection?.rangeCount || !editor.contains(selection.anchorNode)) return [editorText(editor).length, editorText(editor).length];
   const selected = selection.getRangeAt(0);
-  const offset = (node, position) => lengthBefore(editor, node, position);
+  const offset = (node, position) => {
+    const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    const chip = element?.closest(".editor-mention");
+    const raw = lengthBefore(editor, node, position);
+    if (chip && editor.contains(chip) && mentionName(chip) !== null) {
+      const start = lengthBefore(editor, chip, 0), end = start + `<at>@${mentionName(chip)}</at>`.length;
+      // A caret strictly inside a non-editable chip (e.g. left there by an
+      // ESC-cancelled IME composition) is not a text position; snap to the end.
+      if (raw > start && raw < end) return end;
+    }
+    return raw;
+  };
   return [offset(selected.startContainer, selected.startOffset), offset(selected.endContainer, selected.endOffset)];
 }
 
@@ -239,11 +250,25 @@ export function installEditor(editor) {
   editor.replaceTextRange = (start, end, value) => replaceEditorRange(editor, start, end, value);
   editor.addEventListener("input", pruneTrustedChipNames);
   editor.addEventListener("keydown", (event) => deleteMentionAtCaret(editor, event));
+  editor.addEventListener("copy", (event) => {
+    const [start, end] = editorSelectionOffsets(editor);
+    if (start === end) return;
+    const text = editorText(editor).slice(start, end);
+    if (!text) return;
+    // Copy mentions in their token form so a paste rebuilds the same chips.
+    event.preventDefault();
+    event.clipboardData?.setData("text/plain", text);
+    if (/<at>@[^<]+<\/at>/.test(text)) event.clipboardData?.setData("text/html", `<div data-chatroom-mentions>${escapeHTML(text)}</div>`);
+  });
   editor.addEventListener("paste", (event) => {
     if (event.defaultPrevented || event.clipboardData?.files.length) return;
     event.preventDefault();
     const [start, end] = editorSelectionOffsets(editor);
-    replaceEditorRange(editor, start, end, event.clipboardData?.getData("text/plain") || "", false);
+    const text = event.clipboardData?.getData("text/plain") || "";
+    // Rebuild chips only for copies this app marked; external text stays literal
+    // and keeps the native insert path, which handles newlines correctly.
+    const marked = (event.clipboardData?.getData("text/html") || "").includes("data-chatroom-mentions");
+    replaceEditorRange(editor, start, end, text, marked && /<at>@[^<]+<\/at>/.test(text));
     editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
   });
   editor.addEventListener("drop", (event) => {
@@ -255,7 +280,7 @@ export function installEditor(editor) {
     const range = document.caretRangeFromPoint?.(event.clientX, event.clientY), selection = getSelection();
     if (range && editor.contains(range.startContainer)) { selection.removeAllRanges(); selection.addRange(range); }
     const [start, end] = editorSelectionOffsets(editor);
-    replaceEditorRange(editor, start, end, text, false);
+    replaceEditorRange(editor, start, end, text, html.includes("data-chatroom-mentions") && /<at>@[^<]+<\/at>/.test(text));
     editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromDrop" }));
   });
 }

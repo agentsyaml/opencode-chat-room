@@ -1,4 +1,5 @@
 import { isUnreadMessage } from "./messages.js";
+import { LOADED_MESSAGE_LIMIT } from "./state.js";
 import { setRoomPreview } from "./system-messages.js";
 
 export async function watchRoom(roomId, app) {
@@ -13,6 +14,7 @@ export async function watchRoom(roomId, app) {
     if (result.member !== true || !Array.isArray(result.items) || app.state.room?.id === roomId) return;
     const previousReceivedTs = entry.receivedTs || 0;
     const sawSystem = result.items.some((message) => message.senderId === "system");
+    const sawQuestion = result.items.some((message) => message.isQuestion || message.answerToMessageID);
     const before = new Set(entry.room.messages.map((message) => message.id));
     for (const message of result.items) {
       if (message.createdAt > entry.readTs && isUnreadMessage(message, app, entry.room, entry.name) && !entry.unreadIds.has(message.id)) entry.unreadIds.set(message.id, message);
@@ -22,11 +24,12 @@ export async function watchRoom(roomId, app) {
     }
     entry.receivedTs = result.items.reduce((latest, message) => Number.isSafeInteger(message.createdAt) ? Math.max(latest, message.createdAt) : latest, previousReceivedTs);
     entry.unreadOverflow = Boolean(result.hasMore);
-    if (sawSystem || result.hasMore) {
+    if (sawSystem || sawQuestion || result.hasMore) {
       const latest = await app.api(`/rooms/${encodeURIComponent(roomId)}`);
       if (app.state.rooms.get(roomId) !== entry || app.state.room?.id === roomId) return;
       entry.room.participants = latest.participants;
-      entry.room.messages = [...new Map([...entry.room.messages, ...latest.messages].map((message) => [message.id, message])).values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500);
+      entry.room.openQuestions = latest.openQuestions;
+      entry.room.messages = [...new Map([...entry.room.messages, ...latest.messages].map((message) => [message.id, message])).values()].sort((a, b) => a.createdAt - b.createdAt).slice(-LOADED_MESSAGE_LIMIT);
       const newest = latest.messages.at(-1);
       if (newest && newest.createdAt >= entry.previewAt) setRoomPreview(entry, newest);
       // A full refresh pages past the inbox window; count what arrived since the last look.
@@ -36,7 +39,8 @@ export async function watchRoom(roomId, app) {
       }
       if (newest && Number.isSafeInteger(newest.createdAt)) entry.receivedTs = Math.max(entry.receivedTs, newest.createdAt);
     }
-    if (entry.room.messages.length > 500) entry.room.messages.splice(0, entry.room.messages.length - 500);
+    if (entry.room.messages.length > LOADED_MESSAGE_LIMIT) entry.room.messages.splice(0, entry.room.messages.length - LOADED_MESSAGE_LIMIT);
+    app.cacheRoomSoon?.(roomId);
     if (result.hasMore && entry.receivedTs > previousReceivedTs) await watchRoom(roomId, app);
   } catch (error) {
     if (error.status === 401) app.openChatSettings();

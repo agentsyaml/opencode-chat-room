@@ -236,15 +236,126 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
     await page.route("**/read", async (route: any) => { if (route.request().method() === "POST") readRequests++; return route.continue(); });
     await page.reload(); await page.locator("#chatView").waitFor({ state: "visible" });
     await page.locator(`#msgList [data-msg-id="${newerReplyId}"] [data-reply-target-id="${originalId}"]`).waitFor();
-    await page.locator(`#msgList [data-reply-target-id="${originalId}"]`).click();
+    await page.locator(`#msgList [data-msg-id="${newerReplyId}"] [data-reply-target-id="${originalId}"]`).click();
     await page.locator(`#msgList [data-msg-id="${originalId}"]`).waitFor();
-    expect(await page.evaluate(async (url: string) => (await import(url)).app.state.room.messages.length, "/assets/chat/state.js")).toBeGreaterThan(500);
+    // The jump lands the original's top on the thread's top edge and flashes it.
+    await page.waitForFunction((id: string) => document.querySelector(`#msgList [data-msg-id="${id}"]`)?.classList.contains("jump-flash"), originalId);
+    const jumpAlign = await page.evaluate((id: string) => {
+      const row = document.querySelector(`#msgList [data-msg-id="${id}"]`)!, thread = document.querySelector("#thread")!;
+      return row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop);
+    }, originalId);
+    expect(Math.abs(jumpAlign)).toBeLessThan(4);
+    // Local-first may already hold the original from the cache; the jump must
+    // still reach it (rendered above the newest tail) rather than stay at the bottom.
+    expect(await page.evaluate(async ({ url, id }: { url: string; id: string }) => (await import(url)).app.state.room.messages.some((message: any) => message.id === id), { url: "/assets/chat/state.js", id: originalId })).toBe(true);
     expect(await page.locator("#thread").evaluate((thread: HTMLElement) => thread.scrollHeight - thread.scrollTop - thread.clientHeight)).toBeGreaterThan(80);
     await page.waitForTimeout(300); const pollsBefore = inboxPolls, readsBefore = readRequests;
     await page.waitForTimeout(2600);
     expect(inboxPolls).toBeGreaterThan(pollsBefore);
     expect(readRequests).toBe(readsBefore);
+    expect(await page.locator(`#msgList [data-msg-id="${originalId}"]`).evaluate((row: Element) => row.classList.contains("jump-flash"))).toBe(false);
     await page.locator(`#msgList [data-msg-id="${originalId}"]`).waitFor();
+  } finally {
+    await browser?.close(); server.kill("SIGTERM");
+    await new Promise<void>((resolve) => server.once("exit", () => resolve()));
+    await rm(stateDir, { recursive: true, force: true });
+  }
+}, 90000);
+
+test.skipIf(!browserModule)("ESC-cancelled IME composition beside a mention chip keeps the picker closed and typing alive", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-ime-esc-")), port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_ImeOwner");
+    await page.locator("#inRoomName").fill("__Test_ImeEsc");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const roomId = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || "");
+    await api(origin, `/rooms/${roomId}/join`, "POST", { sessionID: "__Test_ImePeer", participantId: "Peer", participantName: "Peer" });
+    await page.evaluate(async (url: string) => { const { app } = await import(url); await app.loadManageableMembers(); }, "/assets/chat/state.js");
+    const editor = page.locator("#msgInput");
+    await editor.fill("@Pe"); await page.locator('#mentionPicker [data-name="Peer"]').waitFor(); await page.keyboard.press("Enter");
+    expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at>");
+    // Reproduce the post-ESC state: the caret is left inside the non-editable chip.
+    await editor.evaluate((node: any) => {
+      node.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      const text = node.querySelector(".editor-mention").firstChild;
+      const range = document.createRange(); range.setStart(text, text.length); range.collapse(true);
+      const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+      node.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    });
+    expect(await page.locator("#mentionPicker").isHidden()).toBe(true);
+    expect(await editor.evaluate((node: any) => node.selectionStart)).toBe("<at>@Peer</at>".length);
+    expect(await editor.evaluate((node: any) => {
+      const anchor = getSelection()!.anchorNode!;
+      const element = (anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor.parentElement) as HTMLElement;
+      return !element.closest(".editor-mention");
+    })).toBe(true);
+    await page.keyboard.insertText("ok");
+    expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at>ok");
+  } finally {
+    await browser?.close(); server.kill("SIGTERM");
+    await new Promise<void>((resolve) => server.once("exit", () => resolve()));
+    await rm(stateDir, { recursive: true, force: true });
+  }
+}, 90000);
+
+test.skipIf(!browserModule)("copying a mention and pasting it rebuilds the chip", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-mention-copy-")), port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_CopyOwner");
+    await page.locator("#inRoomName").fill("__Test_MentionCopy");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const roomId = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || "");
+    await api(origin, `/rooms/${roomId}/join`, "POST", { sessionID: "__Test_CopyPeer", participantId: "Peer", participantName: "Peer" });
+    await page.evaluate(async (url: string) => { const { app } = await import(url); await app.loadManageableMembers(); }, "/assets/chat/state.js");
+    const editor = page.locator("#msgInput");
+    await editor.click();
+    // Pasting an app copy (token text + trust marker) rebuilds the chip.
+    await editor.evaluate((node: any) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", "<at>@Peer</at> hi");
+      data.setData("text/html", "<div data-chatroom-mentions>&lt;at&gt;@Peer&lt;/at&gt; hi</div>");
+      node.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at> hi");
+    expect(await editor.locator("[data-mention]").count()).toBe(1);
+    // Copying the chip selection serializes it back to the token form, marked as an app copy.
+    const copied = await editor.evaluate((node: any) => {
+      node.setSelectionRange(0, "<at>@Peer</at>".length);
+      const data = new DataTransfer();
+      node.dispatchEvent(new ClipboardEvent("copy", { clipboardData: data, bubbles: true, cancelable: true }));
+      return { text: data.getData("text/plain"), html: data.getData("text/html") };
+    });
+    expect(copied.text).toBe("<at>@Peer</at>");
+    expect(copied.html).toContain("data-chatroom-mentions");
+    // Pasting that exact copy at the caret rebuilds the chip again.
+    await editor.evaluate((node: any, payload: { text: string; html: string }) => {
+      node.setCaret(node.value.length);
+      const data = new DataTransfer();
+      data.setData("text/plain", payload.text); data.setData("text/html", payload.html);
+      node.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, copied);
+    expect(await editor.evaluate((node: any) => node.value)).toBe("<at>@Peer</at> hi<at>@Peer</at>");
+    expect(await editor.locator("[data-mention]").count()).toBe(2);
   } finally {
     await browser?.close(); server.kill("SIGTERM");
     await new Promise<void>((resolve) => server.once("exit", () => resolve()));

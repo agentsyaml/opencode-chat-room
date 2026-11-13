@@ -125,6 +125,9 @@ async function jumpToOriginal(roomId, messageId, app) {
       original = (page.messages || []).find((item) => item.id === messageId);
       const merged = new Map([...room.messages, ...(page.messages || []).map((item) => ({ ...item, roomId }))].map((item) => [item.id, item]));
       room.messages = [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
+      // Keep the upward-pagination cursor aligned with what the jump loaded.
+      if (typeof room.messages[0]?.seq === "number") entry.historyBeforeSeq = room.messages[0].seq;
+      if (!page.hasMore) entry.historyComplete = true;
       if (original || !page.hasMore || !page.nextBeforeSeq || page.nextBeforeSeq === beforeSeq) break;
       beforeSeq = page.nextBeforeSeq;
     }
@@ -133,7 +136,13 @@ async function jumpToOriginal(roomId, messageId, app) {
   app.state.positions.set(roomId, { messageId, offset: 0, atBottom: false }); app.savePosition(roomId, { messageId, offset: 0, atBottom: false });
   if (app.state.room?.id === roomId && app.state.navigationGeneration === generation) {
     app.state.room = app.state.rooms.get(roomId)?.room || room; app.rerenderMessages();
-    document.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`)?.scrollIntoView({ block: "center" });
+    const row = document.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`), thread = app.$("#thread");
+    if (row && thread) {
+      // Land the message's top on the thread's top edge so the most context shows.
+      thread.scrollTop += row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop);
+      clearTimeout(row._jumpFlashTimer); row.classList.remove("jump-flash"); void row.offsetWidth; row.classList.add("jump-flash");
+      row._jumpFlashTimer = setTimeout(() => row.classList.remove("jump-flash"), 900);
+    }
   }
   const quote = document.querySelector(`[data-reply-target-id="${CSS.escape(messageId)}"]`);
   if (quote) quote.textContent = `${senderName(original, app)} · ${excerpt(original.text)}`;

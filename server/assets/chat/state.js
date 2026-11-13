@@ -1,3 +1,6 @@
+// Upper bound on messages kept in memory per open room; older pages load on scroll.
+export const LOADED_MESSAGE_LIMIT = 5000;
+
 export const app = {
   $: (selector) => document.querySelector(selector),
   state: {
@@ -132,7 +135,6 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
     get name() { return ensureIdentity().name; },
     set name(value) { ensureIdentity(); browserIdentity.name = String(value ?? "").slice(0, 64); writeSession("chat.name", browserIdentity.name || null); saveIdentity(); },
     get token() { return read("chat.token") || ""; }, set token(value) { write("chat.token", value || null); },
-    get adminToken() { return readSession("chat.adminToken") || ""; }, set adminToken(value) { writeSession("chat.adminToken", value || null); },
     get locale() { return read("chat.locale") || "en"; }, set locale(value) { write("chat.locale", value || null); },
     get joinedRoomIds() {
       try {
@@ -190,13 +192,7 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
     const response = await apiResponse(url, options), blob = await response.blob();
     assertIdentity(); return blob;
   };
-  const adminApi = async (url, options = {}) => {
-    if (!url.startsWith("/admin/") || !auth.adminToken) throw new Error("Administration token is required");
-    const response = await apiResponse(url, { ...options, headers: { ...options.headers, "X-Chat-Admin-Token": auth.adminToken } });
-    const data = await response.json().catch(() => ({}));
-    assertIdentity(); return data;
-  };
-  return { LS: auth, saveToken, api, apiBlob, adminApi };
+  return { LS: auth, saveToken, api, apiBlob };
 }
 
 const messages = {
@@ -211,7 +207,10 @@ const messages = {
     createRoom: "Create room", tokenOptional: "Access token (optional)", bearerToken: "Bearer token",
     tokenPlaceholder: "Enter if the server requires it", save: "Save",
     tokenHint: "If the server requires an access token (401), all requests will include it.",
-    existingRooms: "Rooms", noRooms: "No rooms yet. Create one.", copyRoomId: "Copy room ID",
+    existingRooms: "Rooms", noRooms: "No rooms yet. Create one.", copyRoomId: "Copy room ID", loadingHistory: "Loading earlier messages",
+    editRoom: "Edit room", roomNameLabel: "Room name", roomDescriptionLabel: "Description", adminAgentLabel: "Administrator agent",
+    adminAgentHint: "The designated agent can inspect all rooms and their history with the admin tool. Leave empty for none.",
+    noAdminAgent: "None", roomNameRequired: "Room name is required", openQuestions: ({ count }) => `${count} unanswered question${count === 1 ? "" : "s"}`,
     newRoom: "Create a room",
     copyRoomIdTitle: ({ id }) => `Click to copy the full room ID: ${id}`, copied: "Copied",
     members: "Members", membersCount: ({ count }) => `Members (${count})`, noMembers: "No members yet.", profileMenu: "Your profile and settings",
@@ -286,7 +285,10 @@ const messages = {
     newRoomNamePlaceholder: "例如：周末电影夜", createRoom: "创建新房间", tokenOptional: "访问令牌（可选）",
     bearerToken: "Bearer Token", tokenPlaceholder: "服务器要求时填写", save: "保存",
     tokenHint: "若服务器设置了访问令牌（401），所有请求都会带上它。", existingRooms: "房间",
-    noRooms: "还没有房间，创建一个吧。", copyRoomId: "复制房间 ID",
+    noRooms: "还没有房间，创建一个吧。", copyRoomId: "复制房间 ID", loadingHistory: "正在加载更早的消息",
+    editRoom: "编辑房间", roomNameLabel: "房间名称", roomDescriptionLabel: "描述", adminAgentLabel: "管理员 Agent",
+    adminAgentHint: "被指定的 Agent 可用 admin 工具查看所有房间及其历史。留空表示不指定。",
+    noAdminAgent: "不指定", roomNameRequired: "房间名称不能为空", openQuestions: ({ count }) => `${count} 个待回答的问题`,
     newRoom: "创建房间",
     copyRoomIdTitle: ({ id }) => `点击复制完整房间 ID：${id}`, copied: "已复制", members: "成员",
     membersCount: ({ count }) => `成员 ${count}`, noMembers: "暂无成员", settings: "设置", profileMenu: "个人资料和设置",
@@ -354,11 +356,10 @@ app.t = (key, values = {}) => {
   const text = typeof entry === "function" ? entry(values) : entry;
   return String(text).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? "");
 };
-export const { LS, saveToken, api, apiBlob, adminApi } = createAuth(undefined, undefined, (key, values) => app.t(key, values));
+export const { LS, saveToken, api, apiBlob } = createAuth(undefined, undefined, (key, values) => app.t(key, values));
 app.LS = LS;
 app.api = api;
 app.apiBlob = apiBlob;
-app.adminApi = adminApi;
 app.setToken = saveToken;
 app.locale = LS.locale === "zh-CN" ? "zh-CN" : "en";
 app.state.joinedIds = new Set(LS.joinedRoomIds);

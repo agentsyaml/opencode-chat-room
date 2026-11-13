@@ -10,7 +10,7 @@ import path from "node:path";
 const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
 const token = "chat-question-unread-test-token";
 
-test.skipIf(!browserModule)("an unanswered question stays unread until it is answered", async () => {
+test.skipIf(!browserModule)("reading clears the unread badge while the question stays pending in the Questions panel", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-question-unread-"));
   const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
@@ -32,29 +32,45 @@ test.skipIf(!browserModule)("an unanswered question stays unread until it is ans
       return { id: app.state.room.id, sessionID: app.LS.sessionID };
     }, "/assets/chat/state.js");
     await api(origin, `/rooms/${room.id}/join`, "POST", { sessionID: "__Test_QuestionPeer", participantId: "__Test_QuestionPeer", participantName: "__Test_QuestionPeer" });
-    await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_QuestionPeer", text: "__Test_open_question", isQuestion: true });
+    const sent = await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_QuestionPeer", text: "__Test_open_question", isQuestion: true });
+    const questionId = sent.messages.at(-1).id;
     await page.locator("#msgList").getByText("__Test_open_question").waitFor();
 
-    const read = () => page.evaluate(async (url: string) => {
-      const { app } = await import(url);
-      document.querySelector<HTMLElement>("#thread")!.scrollTop = 1e9;
-      await app.markActiveRoomRead(true);
-      const entry = app.state.rooms.get(app.state.room.id);
-      return { unread: app.state.unread, ids: [...entry.unreadIds.keys()] };
-    }, "/assets/chat/state.js");
+    // A read acknowledgement may already be in flight from the arrival render;
+    // retry until the watermark lands instead of asserting one instant.
+    const read = async () => {
+      let result = { unread: -1, ids: [] as string[] };
+      for (let attempt = 0; attempt < 50; attempt++) {
+        result = await page.evaluate(async (url: string) => {
+          const { app } = await import(url);
+          document.querySelector<HTMLElement>("#thread")!.scrollTop = 1e9;
+          await app.markActiveRoomRead(true);
+          const entry = app.state.rooms.get(app.state.room.id);
+          return { unread: app.state.unread, ids: [...entry.unreadIds.keys()] };
+        }, "/assets/chat/state.js");
+        if (result.unread === 0 && result.ids.length === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return result;
+    };
 
+    // Reading to the bottom clears the badge even though the question is unanswered.
     const openQuestion = await read();
-    expect(openQuestion.unread).toBe(1);
-    expect(openQuestion.ids).toHaveLength(1);
+    expect(openQuestion.unread).toBe(0);
+    expect(openQuestion.ids).toHaveLength(0);
+    // The pending question is still surfaced by the Questions panel.
+    await page.waitForFunction(async ({ url, qid }: any) => (await import(url)).app.unansweredQuestionIds()?.has(qid), { url: "/assets/chat/state.js", qid: questionId }, { timeout: 15000 });
+    await page.locator("#btnQuestions").click();
+    await page.locator(`#questionList [data-question-id="${questionId}"]`).waitFor({ timeout: 15000 });
+    await page.locator("#btnQuestions").click();
 
     await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_QuestionPeer", text: "__Test_plain_reply" });
     await page.locator("#msgList").getByText("__Test_plain_reply").waitFor();
-    expect((await read()).unread).toBe(1);
+    expect((await read()).unread).toBe(0);
 
-    const questionId = (await api(origin, `/rooms/${room.id}/questions`, "GET", undefined) as any).questions[0].id;
     await api(origin, `/rooms/${room.id}/questions/${questionId}/answers`, "POST", { sessionID: "__Test_QuestionPeer", text: "__Test_answer" });
-    // The answer alone clears the question, without scrolling or reloading.
-    await page.waitForFunction(async (url: string) => (await import(url)).app.state.unread === 0, "/assets/chat/state.js", { timeout: 15000 });
+    // Answering keeps the badge clear and empties the Questions panel.
+    await page.waitForFunction(async ({ url, qid }: any) => !(await import(url)).app.unansweredQuestionIds()?.has(qid), { url: "/assets/chat/state.js", qid: questionId }, { timeout: 15000 });
     await page.reload();
     await page.locator("#chatView").waitFor({ state: "visible" });
     await page.waitForFunction(async (url: string) => {
@@ -132,11 +148,6 @@ test.skipIf(!browserModule)("an answered question leaves the unread set while an
     const sent = await api(origin, `/rooms/${roomA.id}/messages`, "POST", { sessionID: peer, text: "__Test_away_question", isQuestion: true });
     const question = sent.messages.at(-1);
     await page.locator("#msgList").getByText("__Test_away_question").waitFor();
-    await page.evaluate(async (url: string) => {
-      const { app } = await import(url);
-      document.querySelector<HTMLElement>("#thread")!.scrollTop = 1e9;
-      await app.markActiveRoomRead(true);
-    }, "/assets/chat/state.js");
     await page.waitForFunction(async ({ url, id, qid }: any) => {
       const { app } = await import(url);
       return app.state.rooms.get(id)!.unreadIds.has(qid);
@@ -151,6 +162,39 @@ test.skipIf(!browserModule)("an answered question leaves the unread set while an
       const { app } = await import(url), entry = app.state.rooms.get(id);
       return Boolean(entry) && !entry.unreadIds.has(qid);
     }, { url: "/assets/chat/state.js", id: roomA.id, qid: question.id }, { timeout: 20000 });
+  } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
+}, 90000);
+
+test.skipIf(!browserModule)("a room with an unanswered question shows a question-mark badge in the sidebar", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-question-badge-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(20000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_BadgeOwner");
+    await page.locator("#inRoomName").fill("__Test_BadgeRoomA");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const roomA = await page.evaluate(async (url: string) => { const { app } = await import(url); return { id: app.state.room.id, sessionID: app.LS.sessionID }; }, "/assets/chat/state.js");
+    await api(origin, `/rooms/${roomA.id}/join`, "POST", { sessionID: "__Test_BadgePeer", participantId: "__Test_BadgePeer", participantName: "__Test_BadgePeer" });
+    // Switch to a second room so room A is watched from the sidebar.
+    const roomB = await api(origin, "/rooms", "POST", { name: "__Test_BadgeRoomB", ownerId: "__Test_BadgeOwner", sessionID: roomA.sessionID });
+    await page.evaluate(async ({ url, id }: any) => { const { app } = await import(url); await app.joinRoom(id, "__Test_BadgeOwner"); }, { url: "/assets/chat/state.js", id: roomB.id });
+    await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "__Test_BadgeRoomB");
+    // The pending question shows a "?" badge in the same slot as unread, not a count.
+    const sent = await api(origin, `/rooms/${roomA.id}/messages`, "POST", { sessionID: "__Test_BadgePeer", text: "__Test_badge_question", isQuestion: true });
+    const questionId = sent.messages.at(-1).id;
+    await page.waitForFunction((id: string) => document.querySelector(`#roomListChat [data-room-id="${id}"] .r-badge-question`)?.textContent === "?", roomA.id, { timeout: 20000 });
+    // Answering clears the question-mark badge.
+    await api(origin, `/rooms/${roomA.id}/questions/${questionId}/answers`, "POST", { sessionID: "__Test_BadgePeer", text: "__Test_badge_answer" });
+    await page.waitForFunction((id: string) => !document.querySelector(`#roomListChat [data-room-id="${id}"] .r-badge-question`), roomA.id, { timeout: 20000 });
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 

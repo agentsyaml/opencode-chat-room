@@ -147,6 +147,7 @@ async function ensureRoomColumns(db: Database): Promise<void> {
     if (!columns.some((column) => column.name === "kind")) db.exec("ALTER TABLE rooms ADD COLUMN kind TEXT NOT NULL DEFAULT 'group'");
     if (!columns.some((column) => column.name === "direct_sessions")) db.exec("ALTER TABLE rooms ADD COLUMN direct_sessions TEXT");
     if (!columns.some((column) => column.name === "direct_pair")) db.exec("ALTER TABLE rooms ADD COLUMN direct_pair TEXT");
+    if (!columns.some((column) => column.name === "description")) db.exec("ALTER TABLE rooms ADD COLUMN description TEXT");
     const registry = db.query("PRAGMA table_info(registry)").all() as Array<{ name: string }>;
     if (!registry.some((column) => column.name === "membership_id")) db.exec("ALTER TABLE registry ADD COLUMN membership_id TEXT");
     if (!registry.some((column) => column.name === "work_state")) db.exec("ALTER TABLE registry ADD COLUMN work_state TEXT");
@@ -261,7 +262,7 @@ function validateRegistry(value: unknown): Registry {
 }
 
 function insertRoom(db: Database, room: Room): void {
-  db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair) VALUES(?,?,?,?,?,?,?)").run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null);
+  db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair,description) VALUES(?,?,?,?,?,?,?,?)").run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null, room.description ?? null);
   const participant = db.query("INSERT INTO participants VALUES(?,?,?,?)");
   for (const p of room.participants.values()) participant.run(room.id, p.id, p.name, p.joinedAt);
   const message = db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by) VALUES(?,?,?,?,?,?,?,?,?)");
@@ -280,7 +281,7 @@ function replaceRegistry(db: Database, registry: Registry): void {
 }
 
 function persistState(db: Database, rooms: Room[], registry: Registry): void {
-  const roomRow = db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,owner_id=excluded.owner_id,created_at=excluded.created_at,kind=excluded.kind,direct_sessions=excluded.direct_sessions,direct_pair=excluded.direct_pair");
+  const roomRow = db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair,description) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,owner_id=excluded.owner_id,created_at=excluded.created_at,kind=excluded.kind,direct_sessions=excluded.direct_sessions,direct_pair=excluded.direct_pair,description=excluded.description");
   const participant = db.query("INSERT INTO participants VALUES(?,?,?,?)");
   const message = db.query("INSERT OR IGNORE INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by) VALUES(?,?,?,?,?,?,?,?,?)");
   const removeParticipants = db.query("DELETE FROM participants WHERE room_id=?");
@@ -289,7 +290,7 @@ function persistState(db: Database, rooms: Room[], registry: Registry): void {
   const deleteRoom = db.query("DELETE FROM rooms WHERE id=?");
   for (const row of existing) if (!keep.has(row.id)) deleteRoom.run(row.id);
   for (const room of rooms) {
-    roomRow.run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null);
+    roomRow.run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null, room.description ?? null);
     removeParticipants.run(room.id);
     for (const p of room.participants.values()) participant.run(room.id, p.id, p.name, p.joinedAt);
     for (const m of room.messages) message.run(m.id, room.id, m.senderId, m.senderSessionID ?? null, m.text, m.createdAt, m.isQuestion ? 1 : 0, m.answerToMessageID ?? null, m.answeredByMessageID ?? null);
@@ -298,14 +299,14 @@ function persistState(db: Database, rooms: Room[], registry: Registry): void {
 }
 
 function readState(db: Database): State {
-  const roomRows = db.query("SELECT id,name,owner_id,created_at,kind,direct_sessions,direct_pair FROM rooms ORDER BY created_at,id").all() as Array<Record<string, string | number | null>>;
+  const roomRows = db.query("SELECT id,name,owner_id,created_at,kind,direct_sessions,direct_pair,description FROM rooms ORDER BY created_at,id").all() as Array<Record<string, string | number | null>>;
   const rooms = roomRows.map((r): Room => {
     const participants = new Map<string, Participant>();
     for (const p of db.query("SELECT id,name,joined_at FROM participants WHERE room_id=?").all(String(r.id)) as Array<Record<string, string | number>>) {
       participants.set(String(p.id), { id: String(p.id), name: String(p.name), joinedAt: Number(p.joined_at) });
     }
     const messages = db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 500").all(String(r.id)) as Array<Record<string, string | number | null>>;
-    return { id: String(r.id), name: String(r.name), ownerId: String(r.owner_id), createdAt: Number(r.created_at), kind: r.kind === "direct" ? "direct" : "group", ...(r.direct_sessions ? { directSessionIDs: JSON.parse(String(r.direct_sessions)) as string[] } : {}), ...(r.direct_pair ? { directPair: String(r.direct_pair) } : {}), participants,
+    return { id: String(r.id), name: String(r.name), ownerId: String(r.owner_id), createdAt: Number(r.created_at), kind: r.kind === "direct" ? "direct" : "group", ...(r.description ? { description: String(r.description) } : {}), ...(r.direct_sessions ? { directSessionIDs: JSON.parse(String(r.direct_sessions)) as string[] } : {}), ...(r.direct_pair ? { directPair: String(r.direct_pair) } : {}), participants,
       messages: messages.reverse().map((m) => ({ id: String(m.id), roomId: String(m.room_id), senderId: String(m.sender_id),
          text: String(m.text), createdAt: Number(m.created_at), ...(m.sender_session_id ? { senderSessionID: String(m.sender_session_id) } : {}), ...(m.is_question ? { isQuestion: true } : {}), ...(m.answer_to ? { answerToMessageID: String(m.answer_to) } : {}), ...(m.answered_by ? { answeredByMessageID: String(m.answered_by) } : {}) })) };
   });
@@ -353,6 +354,12 @@ export async function readQuestions(file: string, roomID: string): Promise<Messa
   return (db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? AND is_question=1 AND answered_by IS NULL ORDER BY seq").all(roomID) as Array<Record<string, string | number | null>>).map(rowMessage);
 }
 
+export async function countOpenQuestions(file: string, roomID: string): Promise<number> {
+  const db = await openStateDatabase(file);
+  const row = db.query("SELECT COUNT(*) AS count FROM messages WHERE room_id=? AND is_question=1 AND answered_by IS NULL").get(roomID) as { count: number };
+  return Number(row.count);
+}
+
 export async function answerQuestion(file: string, roomID: string, questionID: string, sessionID: string, text: string): Promise<{ status: "ok"; answer: Message } | { status: "missing" | "member" | "question" | "answered" }> {
   const db = await openStateDatabase(file);
   return immediate(db, () => {
@@ -367,6 +374,7 @@ export async function answerQuestion(file: string, roomID: string, questionID: s
     db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to) VALUES(?,?,?,?,?,?,0,?)").run(answer.id, roomID, answer.senderId, sessionID, text, answer.createdAt, questionID);
     const update = db.query("UPDATE messages SET answered_by=? WHERE room_id=? AND id=? AND is_question=1 AND answered_by IS NULL").run(answer.id, roomID, questionID);
     if (update.changes !== 1) throw new Error("question answer race");
+    noteMessageInsert(db, roomID);
     return { status: "ok", answer };
   });
 }
@@ -385,6 +393,7 @@ export async function appendRoomMessage(file: string, roomID: string, sessionID:
     };
     db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question) VALUES(?,?,?,?,?,?,?)")
       .run(message.id, roomID, message.senderId, sessionID, text, message.createdAt, isQuestion ? 1 : 0);
+    noteMessageInsert(db, roomID);
     return { status: "ok", message };
   });
 }
@@ -401,8 +410,25 @@ export async function sendReply(file: string, roomID: string, targetID: string, 
     const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(roomID) as { created_at: number } | null;
     const message: Message = { id: randomUUID(), roomId: roomID, senderId: member.kind === "direct" ? sessionID : member.name, senderSessionID: sessionID, text, createdAt: Math.max(Date.now(), (tail?.created_at ?? 0) + 1), answerToMessageID: targetID };
     db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to) VALUES(?,?,?,?,?,?,0,?)").run(message.id, roomID, message.senderId, sessionID, text, message.createdAt, targetID);
+    noteMessageInsert(db, roomID);
     return { status: "ok", message };
   });
+}
+
+// Per-room retention bound. Trimming runs lazily (every 1024 inserts) so the
+// hot insert path stays a single statement.
+export const MAX_RETAINED_MESSAGES = 1_000_000;
+const retentionCounters = new Map<string, number>();
+
+export function enforceRetention(db: Database, roomID: string, limit = MAX_RETAINED_MESSAGES): void {
+  db.query("DELETE FROM messages WHERE room_id=? AND seq <= (SELECT seq FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1 OFFSET ?)").run(roomID, roomID, limit);
+}
+
+function noteMessageInsert(db: Database, roomID: string): void {
+  const count = (retentionCounters.get(roomID) ?? 0) + 1;
+  if (count < 1024) { retentionCounters.set(roomID, count); return; }
+  retentionCounters.set(roomID, 0);
+  enforceRetention(db, roomID);
 }
 
 function questionExcerpt(text: string): string {

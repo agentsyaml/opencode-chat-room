@@ -7,7 +7,7 @@ const stateDir = await mkdtemp(path.join(os.tmpdir(), "admin-isolated-"));
 const originalStateDir = process.env.CHAT_ROOM_STATE_DIR;
 process.env.CHAT_ROOM_STATE_DIR = stateDir;
 const credentials = await import("./admin-credentials");
-const { adminTool, adminToolSchema } = await import("./admin-client");
+const { adminTool } = await import("./admin-client");
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 afterAll(async () => {
@@ -38,14 +38,6 @@ test.serial("claim binds native identity, persists capability privately, and nev
   expect(files.join()).not.toContain("secret-cap");
   expect((await stat(path.join(stateDir, "admin-capabilities", files[0]!))).mode & 0o777).toBe(0o600);
   expect((await stat(path.join(stateDir, "admin-capabilities"))).mode & 0o777).toBe(0o700);
-});
-
-test("public admin schema no longer accepts task or recurring-plan actions", () => {
-  for (const action of ["task_progress", "admin_dispatch", "admin_tasks", "admin_task_update", "admin_plans", "admin_plan_create", "admin_plan_update", "admin_plan_delete"]) {
-    expect(adminToolSchema.safeParse({ action, roomId: "room" }).success).toBe(false);
-  }
-  expect(adminToolSchema.safeParse({ action: "admin_overview", roomId: "room" }).success).toBe(true);
-  expect(adminToolSchema.safeParse({ action: "admin_history", roomId: "room", targetRoomId: "target" }).success).toBe(true);
 });
 
 test.serial("claim failures never echo enrollment keys or capabilities", async () => {

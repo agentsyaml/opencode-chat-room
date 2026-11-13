@@ -18,6 +18,8 @@
     --accent-soft: #e1eee6;
     --danger: #a84437;
     --danger-soft: #f7e8e1;
+    --warning: #a9761c;
+    --warning-ink: #fffdf6;
     --mention-blue: #266c72;
     --shadow: 0 2px 5px rgb(34 53 47 / .05), 0 18px 44px rgb(34 53 47 / .09);
   }
@@ -36,6 +38,8 @@
       --accent-soft: #263d34;
       --danger: #ef9580;
       --danger-soft: #3a2924;
+      --warning: #d9a441;
+      --warning-ink: #241a09;
       --mention-blue: #8bc8c2;
       --shadow: 0 2px 6px rgb(0 0 0 / .22), 0 18px 44px rgb(0 0 0 / .32);
     }

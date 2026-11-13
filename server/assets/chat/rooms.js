@@ -1,13 +1,27 @@
-import { LS } from "./state.js";
+import { LS, LOADED_MESSAGE_LIMIT } from "./state.js";
 import { isUnreadMessage } from "./messages.js";
 import { formatRoomPreview, setRoomPreview } from "./system-messages.js";
 import { watchRoom } from "./room-watcher.js";
+import { cacheRoomSoon, deleteCachedRoom, loadCachedRooms } from "./message-cache.js";
 
 export function initRooms(app) {
   const $ = app.$;
   let roomListGeneration = 0;
   let autoRefresh;
   const invalidateRoomList = () => { autoRefresh = undefined; return ++roomListGeneration; };
+
+  app.cacheRoomSoon = (roomId) => cacheRoomSoon(app, roomId);
+  // Render joined rooms from the local snapshot before the network round trip;
+  // the normal restore then validates membership and merges the server delta.
+  app.seedFromCache = async () => {
+    for (const record of await loadCachedRooms()) {
+      const room = record?.room;
+      if (!room?.id || app.state.rooms.has(room.id)) continue;
+      if (!app.state.joinedIds.has(room.id) && room.id !== LS.roomId) continue;
+      app.ensureJoinedRoom(room, record.name || app.state.roomNames.get(room.id) || LS.name || app.t("guest"));
+    }
+    if (!app.state.room && LS.roomId && app.state.rooms.has(LS.roomId)) app.activateRoom(LS.roomId);
+  };
 
   app.showJoin = (refresh = true, preserveRoomListGeneration = false) => {
     if (!preserveRoomListGeneration) invalidateRoomList();
@@ -33,6 +47,10 @@ export function initRooms(app) {
     $("#btnCopyId").setAttribute("aria-label", app.t("copyRoomId"));
     $("#railIdentity").textContent = app.state.myName;
     $("#profileAvatar").textContent = Array.from(app.state.myName.trim())[0]?.toLocaleUpperCase() || "?";
+    const description = app.state.room.description || "";
+    $("#roomDescription").textContent = description;
+    $("#roomDescription").hidden = !description;
+    $("#btnEditRoom").hidden = app.state.myName !== app.state.room.ownerId;
     app.updateTitle();
   };
 
@@ -54,13 +72,24 @@ export function initRooms(app) {
     const latest = room.messages.at(-1), savedReadTs = app.state.lastReadTs.get(room.id) ?? (typeof room.lastReadTs === "number" ? room.lastReadTs : undefined);
     if (savedReadTs !== undefined && !app.state.lastReadTs.has(room.id)) app.saveReadTs(room.id, savedReadTs);
     entry.readTs ||= savedReadTs || 0;
+    // A server page only carries the newest window; keep older history already
+    // loaded or restored from the local cache instead of dropping it.
+    if (existing) {
+      const merged = new Map([...existing.room.messages, ...room.messages].map((message) => [message.id, message]));
+      room = { ...room, messages: [...merged.values()].sort((left, right) => left.createdAt - right.createdAt).slice(-LOADED_MESSAGE_LIMIT) };
+    }
+    entry.historyComplete = Boolean(existing?.historyComplete) || room.hasMore === false;
+    entry.historyBeforeSeq = entry.historyComplete ? null : existing?.historyBeforeSeq ?? (typeof room.messages[0]?.seq === "number" ? room.messages[0].seq : null);
     entry.room = room;
     entry.name = name;
     // Only rebuild unread history when this browser already has a read watermark;
     // a never-opened room is not a burst of unread messages.
-    if (!existing && savedReadTs !== undefined) for (const message of room.messages) {
-      const unread = message.createdAt > entry.readTs || (message.isQuestion && !message.answeredByMessageID);
-      if (unread && isUnreadMessage(message, app, room, name)) entry.unreadIds.set(message.id, message);
+    if (!existing && savedReadTs !== undefined) {
+      for (const message of room.messages) {
+        const unread = message.createdAt > entry.readTs;
+        if (unread && isUnreadMessage(message, app, room, name)) entry.unreadIds.set(message.id, message);
+      }
+      entry.unreadOverflow ||= Boolean(room.hasMore && entry.readTs < (room.messages[0]?.createdAt ?? Infinity));
     }
     entry.receivedTs ??= latest?.createdAt ?? 0;
     if (latest && (!existing || latest.createdAt >= entry.previewAt)) setRoomPreview(entry, latest);
@@ -70,6 +99,7 @@ export function initRooms(app) {
     app.saveJoinedIds();
     app.saveRoomNames();
     app.startRoomWatcher();
+    cacheRoomSoon(app, room.id);
   };
 
   app.activateRoom = (roomId, preserveRoomListGeneration = false) => {
@@ -207,6 +237,7 @@ export function initRooms(app) {
       $("#btnSend").disabled = true;
     }
     app.state.rooms.delete(roomId);
+    void deleteCachedRoom(roomId);
     app.state.memberSessions.delete(roomId);
     app.state.joinedIds.delete(roomId);
     app.state.roomNames.delete(roomId);
@@ -396,11 +427,15 @@ export function initRooms(app) {
       app.setText(status, entry ? "joined" : "joinAction");
       button.append(name, kind, meta, preview, status);
       const unread = entry && app.state.room?.id !== room.id ? (entry.unreadOverflow ? 100 : entry.unreadIds.size) : 0;
-      if (unread) {
+      const openQuestions = Number(shownRoom.openQuestions) || 0;
+      // Same badge slot as unread: a pending question shows "?" instead of a count.
+      if (unread || openQuestions) {
         const badge = document.createElement("span");
-        badge.className = "r-badge";
-        badge.textContent = unread > 99 ? "99+" : String(unread);
-        badge.setAttribute("aria-label", app.t("unreadMessages", { count: unread }));
+        badge.className = openQuestions ? "r-badge r-badge-question" : "r-badge";
+        badge.textContent = openQuestions ? "?" : (unread > 99 ? "99+" : String(unread));
+        const label = openQuestions ? app.t("openQuestions", { count: openQuestions }) : app.t("unreadMessages", { count: unread });
+        badge.title = label;
+        badge.setAttribute("aria-label", label);
         button.append(badge);
       }
       button.addEventListener("click", () => app.joinRoom(room.id, app.state.myName || $("#inName").value.trim() || app.t("guest")));
@@ -447,19 +482,23 @@ export function initRooms(app) {
     try {
       await app.api(`/rooms/${encodeURIComponent(room.id)}`, {
         method: "DELETE", body: JSON.stringify({ sessionID: LS.sessionID }),
-        headers: LS.adminToken ? { "X-Chat-Admin-Token": LS.adminToken } : {},
       });
       await app.removeJoinedRoom(room.id);
       app.clearDraft(room.id);
       app.clearPosition(room.id);
       app.saveFailedMessages(room.id, []);
-    } catch (error) { app.showSendError(error.status === 403 && error.message.includes("operator token required") ? "adminRoomDeleteDenied" : "sendFailed", { message: error.message }); }
+    } catch (error) { app.showSendError("sendFailed", { message: error.message }); }
   };
 
   app.copyRoomId = async () => {
+    const button = $("#btnCopyId");
     try {
       await navigator.clipboard.writeText(app.state.room.id);
-      app.flash($("#btnCopyId"), "copied");
+      // Swap a class so the ID span survives; flash() would overwrite the whole
+      // button and then restore it to "undefined" (the button has no data-i18n).
+      clearTimeout(button._copiedTimer);
+      button.classList.add("copied");
+      button._copiedTimer = setTimeout(() => button.classList.remove("copied"), 1200);
     } catch { app.showSendError("copyFailed", { id: app.state.room.id }); }
   };
 
@@ -489,7 +528,7 @@ function syncCachedRooms(rooms, app) {
     if (!fresh || fresh.joined === false) { void app.removeJoinedRoom(roomId, { reason: app.state.room?.id === roomId, reconcile: true }); continue; }
     if (app.state.room?.id === roomId) continue;
     const messages = new Map([...entry.room.messages, ...fresh.messages].map((message) => [message.id, message]));
-    entry.room = { ...fresh, messages: [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500) };
+    entry.room = { ...fresh, messages: [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-LOADED_MESSAGE_LIMIT) };
     const latest = entry.room.messages.at(-1);
     if (latest) setRoomPreview(entry, latest);
   }

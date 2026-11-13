@@ -1,4 +1,4 @@
-import { createRandomId, LS } from "./state.js";
+import { createRandomId, LS, LOADED_MESSAGE_LIMIT } from "./state.js";
 import { renderMarkdown } from "./markdown.js";
 import { hasMessageSelection, pruneMessageRows, trimMessages } from "./message-window.js";
 import { formatSystemMessage, setRoomPreview } from "./system-messages.js";
@@ -117,6 +117,26 @@ export function initMessages(app) {
     badge.hidden = app.state.unread === 0;
     app.updateTitle();
   };
+  // Stop at the first message that failed to render: a later readable message
+  // must not push the watermark past one we still cannot show.
+  const readTimestamp = (room, entry) => {
+    let timestamp = entry.readTs;
+    for (const message of room.messages) {
+      if (app.failedRenderIds.has(message.id)) break;
+      timestamp = Math.max(timestamp, message.createdAt);
+    }
+    return timestamp;
+  };
+  // Persist the watermark with a keepalive request so it survives the tab
+  // closing before the normal async read acknowledgement completes.
+  app.flushReadOnHide = () => {
+    const room = app.state.room, entry = room && app.state.rooms.get(room.id);
+    const thread = $("#thread");
+    if (!room || !entry || thread.scrollHeight - thread.scrollTop - thread.clientHeight >= 80) return;
+    const timestamp = readTimestamp(room, entry);
+    if (timestamp <= entry.readTs) return;
+    void app.api("/read", { method: "POST", keepalive: true, body: JSON.stringify({ roomId: room.id, sessionID: LS.sessionID, ts: timestamp }) }).catch(() => {});
+  };
   app.markActiveRoomRead = async (interactive = false) => {
     const room = app.state.room, entry = room && app.state.rooms.get(room.id);
     const generation = app.state.pollGeneration;
@@ -126,13 +146,7 @@ export function initMessages(app) {
     // Reaching this point means the room is within the read distance of the bottom,
     // so the restore guard has done its job even without a user scroll.
     if (app.state.readAnchorGuard?.roomId === room.id) app.state.readAnchorGuard = null;
-    // Stop at the first message that failed to render: a later readable message
-    // must not push the watermark past one we still cannot show.
-    let timestamp = entry.readTs;
-    for (const message of room.messages) {
-      if (app.failedRenderIds.has(message.id)) break;
-      timestamp = Math.max(timestamp, message.createdAt);
-    }
+    const timestamp = readTimestamp(room, entry);
     const unreadBefore = entry.unreadIds.size, overflowBefore = entry.unreadOverflow;
     let advanced = false;
     app.state.readRequests ||= new Set();
@@ -151,23 +165,14 @@ export function initMessages(app) {
       } catch { return; /* The next active poll will retry the read watermark. */ }
       finally { app.state.readRequests.delete(room.id); }
     }
-    // Unanswered questions stay unread until answered.
+    // Unread means "not seen": the read watermark clears everything it covers,
+    // including questions. Pending answers are surfaced by the Questions panel.
     const known = new Map(room.messages.map((message) => [message.id, message]));
-    const answered = new Set(room.messages.filter((message) => message.answerToMessageID).map((message) => message.answerToMessageID));
-    const listed = app.unansweredQuestionIds?.();
-    const open = (message) => {
-      if (!message.isQuestion || message.answeredByMessageID) return false;
-      // A question outside the message window is judged by the server list.
-      return known.has(message.id) ? !answered.has(message.id) : !listed || listed.has(message.id);
-    };
     for (const [id, message] of entry.unreadIds) {
       const current = known.get(id) || message;
       // Clear what the watermark covers, plus own messages the watcher misread.
-      if ((current.createdAt <= entry.readTs && !open(current)) || !isUnreadMessage(current, app, room)) entry.unreadIds.delete(id);
+      if (current.createdAt <= entry.readTs || !isUnreadMessage(current, app, room)) entry.unreadIds.delete(id);
       else if (known.has(id)) entry.unreadIds.set(id, current);
-    }
-    for (const message of room.messages) {
-      if (open(message) && !isOwnMessage(message, app, room)) entry.unreadIds.set(message.id, message);
     }
     app.state.unread = entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
     if (advanced || entry.unreadIds.size !== unreadBefore || entry.unreadOverflow !== overflowBefore) {
@@ -359,7 +364,8 @@ export function initMessages(app) {
       if (entry) {
         const merged = new Map([...entry.room.messages, ...updated.messages].map((item) => [item.id, { ...item, roomId: updated.id }]));
         const messages = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
-        if (messages.length > 500) messages.splice(0, messages.length - 500);
+        if (messages.length > LOADED_MESSAGE_LIMIT) messages.splice(0, messages.length - LOADED_MESSAGE_LIMIT);
+        app.cacheRoomSoon?.(room.id);
         current = { ...updated, messages };
       }
       app.state.room = current;
@@ -466,7 +472,8 @@ export function initMessages(app) {
        }
       if (entry) entry.receivedTs = items.reduce((latest, item) => Number.isSafeInteger(item.createdAt) ? Math.max(latest, item.createdAt) : latest, previousReceivedTs);
       if (entry) entry.unreadOverflow = Boolean(data.hasMore);
-       if (messages.length > 500) { const anchorId = app.state.positions.get(roomId)?.messageId, anchor = anchorId && messages.find((item) => item.id === anchorId); messages.splice(0, messages.length - 500); if (anchor && !messages.includes(anchor)) messages.unshift(anchor); }
+       if (messages.length > LOADED_MESSAGE_LIMIT) { const anchorId = app.state.positions.get(roomId)?.messageId, anchor = anchorId && messages.find((item) => item.id === anchorId); messages.splice(0, messages.length - LOADED_MESSAGE_LIMIT); if (anchor && !messages.includes(anchor)) messages.unshift(anchor); }
+       app.cacheRoomSoon?.(roomId);
       const rendered = app.renderMessages(true);
       if (sawSystem) {
         await app.refreshRoomMeta(roomId, generation);
@@ -523,7 +530,7 @@ export function initMessages(app) {
         const index = current.findIndex((item) => item.createdAt > message.createdAt);
         current.splice(index < 0 ? current.length : index, 0, message);
       }
-      if (current.length > 500) current.splice(0, current.length - 500);
+      if (current.length > LOADED_MESSAGE_LIMIT) current.splice(0, current.length - LOADED_MESSAGE_LIMIT);
       const result = app.rerenderMessages();
       if (result.skipped === 0) void app.markActiveRoomRead();
     } catch { /* Try again during the next reconciliation. */ }
@@ -542,7 +549,7 @@ export function initMessages(app) {
 
   function mergeRoom(current, updated) {
     const messages = new Map([...(current?.messages || []), ...updated.messages].map((message) => [message.id, message]));
-    return { ...updated, messages: [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-500) };
+    return { ...updated, messages: [...messages.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-LOADED_MESSAGE_LIMIT) };
   }
 
 }

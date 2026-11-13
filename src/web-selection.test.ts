@@ -181,8 +181,10 @@ async function repeatedShifts(page: any, origin: string, roomId: string, session
   expect(firstBurst.domChildCount).toBeGreaterThan(400);
   const after = firstBurst;
   expect(full.text).toContain("LIVE-OWN-KEEP-250");
-  expect(after.firstMessageId).not.toBe(before.firstMessageId);
-  expect(after.roomMessageCount).toBe(500);
+  // The loaded window is 5000 now, so a 100-message burst keeps all history
+  // instead of evicting the head; the held selection must still survive it.
+  expect(after.firstMessageId).toBe(before.firstMessageId);
+  expect(after.roomMessageCount).toBe(before.roomMessageCount + 100);
   expect(after.domChildCount).toBeGreaterThan(400);
   expect(after.targetExists).toBe(true);
   expect(after.sameTargetNode).toBe(true);

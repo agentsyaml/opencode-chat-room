@@ -72,6 +72,9 @@ export function initEvents(app) {
     // Leaving at the bottom and returning to new messages lands on the first unread;
     // a deliberate scroll position is restored exactly.
     if ((entry?.unreadIds.size || entry?.unreadOverflow) && saved?.atBottom !== false && boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };
+    // Left at the bottom with nothing unread: land on the live bottom, not the
+    // old anchor — late-loading cards can grow content below the saved row.
+    if (saved?.atBottom === true && !entry?.unreadIds.size && !entry?.unreadOverflow) { thread.scrollTop = thread.scrollHeight; captureReadingPosition(); return { messageId: readingPosition?.messageId, atBottom: atBottom() }; }
     if (saved?.messageId && align(saved.messageId, Number(saved.offset) || 0)) return { messageId: saved.messageId, atBottom: atBottom() };
     if (boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };
     if (!saved && !boundary) return false;
@@ -113,7 +116,8 @@ export function initEvents(app) {
   }
   syncRoomDrawer();
   window.addEventListener("resize", preserveReadingPosition);
-  window.addEventListener("pagehide", captureReadingPosition);
+  window.addEventListener("pagehide", () => { captureReadingPosition(); app.flushReadOnHide?.(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { captureReadingPosition(); app.flushReadOnHide?.(); } });
   drawerTrigger.addEventListener("click", () => {
     if (roomRail.classList.contains("drawer-open")) return closeRoomDrawer();
     app.closePanels(); roomRail.inert = false; roomRail.removeAttribute("aria-hidden"); roomRail.classList.add("drawer-open");
@@ -218,7 +222,14 @@ export function initEvents(app) {
     }
     if (!event.isComposing) app.recomputeMention();
   });
-  input.addEventListener("compositionend", () => app.recomputeMention(input));
+  input.addEventListener("compositionend", () => {
+    // An ESC-cancelled composition next to a chip can leave the caret inside the
+    // non-editable chip, which blocks typing; re-seat it in a real text node.
+    const anchor = getSelection()?.anchorNode;
+    const element = anchor?.nodeType === Node.ELEMENT_NODE ? anchor : anchor?.parentElement;
+    if (element?.closest(".editor-mention")) input.setCaret(input.selectionStart);
+    app.recomputeMention(input);
+  });
   input.addEventListener("keydown", (event) => handleMessageKey(event, app));
   input.addEventListener("keyup", (event) => {
     if (app.mentionActive && /^(ArrowLeft|ArrowRight|Home|End)$/.test(event.key)) app.recomputeMention();
@@ -255,6 +266,7 @@ export function initEvents(app) {
     app.queueReceiptRefresh();
     if (!adjusting) app.queueReceiptObservation();
     app.updateJump();
+    if (!adjusting && thread.scrollTop < 160) void app.loadOlderHistory?.();
   });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
@@ -268,7 +280,7 @@ export function initEvents(app) {
   });
   $("#msgList").addEventListener("click", (event) => {
     const messageButton = event.target.closest("[data-copy-message]");
-    if (messageButton) void copyTextToClipboard(messageButton._copyText).then((copied) => app.flash(messageButton, copied ? "copiedMessage" : "copyMessageFailed"));
+    if (messageButton) void copyTextToClipboard(messageButton._copyText, true).then((copied) => app.flash(messageButton, copied ? "copiedMessage" : "copyMessageFailed"));
   });
   ["#inRoomId", "#inName", "#inRoomName"].forEach((selector) => {
     $(selector).addEventListener("input", app.hideJoinError);
@@ -312,12 +324,12 @@ export function initEvents(app) {
   app.applyLocale();
   $("#inToken").value = LS.token;
   $("#inTokenChat").value = LS.token;
-  void app.refreshRoomList();
+  void app.seedFromCache?.().finally(() => app.refreshRoomList());
   if (!$("#joinView").hidden) $("#inRoomId").focus();
 }
 
 async function loadAnchorHistory(roomId, entry, messageId, app, readTs = 0, signal) {
-  let beforeSeq;
+  let beforeSeq, reachedStart = false;
   const messages = [];
   while (!signal?.aborted) {
     const query = new URLSearchParams({ limit: "100" });
@@ -327,12 +339,15 @@ async function loadAnchorHistory(roomId, entry, messageId, app, readTs = 0, sign
     messages.push(...(result.messages || []));
     const found = messageId ? messages.some((message) => message.id === messageId)
       : messages.some((message) => message.createdAt > readTs) && messages.some((message) => message.createdAt <= readTs);
-    if (found || !result.hasMore || !result.nextBeforeSeq || result.nextBeforeSeq === beforeSeq) break;
+    if (found || !result.hasMore || !result.nextBeforeSeq || result.nextBeforeSeq === beforeSeq) { reachedStart = !result.hasMore; break; }
     beforeSeq = result.nextBeforeSeq;
   }
   if (messageId ? !messages.some((message) => message.id === messageId) : !messages.some((message) => message.createdAt > readTs)) return;
   const merged = new Map([...entry.room.messages, ...messages].map((message) => [message.id, { ...message, roomId }]));
   entry.room.messages = [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
+  // Keep the upward-pagination cursor aligned with what the anchor load fetched.
+  if (typeof entry.room.messages[0]?.seq === "number") entry.historyBeforeSeq = entry.room.messages[0].seq;
+  if (reachedStart) entry.historyComplete = true;
 }
 
 function saveAccessToken(button, app) {
@@ -344,7 +359,6 @@ function saveAccessToken(button, app) {
   try { persistent = localStorage.getItem("chat.token") === LS.token; } catch { /* Memory fallback is tab-scoped. */ }
   app.flash(button, persistent ? "saved" : "savedMemory");
   void app.refreshRoomList();
-  void app.verifyAdminToken?.();
   app.retryPendingAction();
 }
 

@@ -21,6 +21,7 @@ export type Message = {
 export type Room = {
   id: string;
   name: string;
+  description?: string;
   ownerId: string;
   participants: Map<string, Participant>;
   messages: Message[];

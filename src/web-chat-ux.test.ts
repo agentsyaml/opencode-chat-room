@@ -40,12 +40,15 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
       const room = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID, text: `History ${index} ${"word ".repeat(18)}` });
       if (index === 0) unloadedHistoryID = room.messages.at(-1).id;
     }
-    expect((await api(origin, `/rooms/${roomId}`)).messages).toHaveLength(500);
+    const opened = await api(origin, `/rooms/${roomId}`);
+    expect(opened.messages).toHaveLength(100);
+    expect(opened.hasMore).toBe(true);
+    expect(typeof opened.nextBeforeSeq).toBe("number");
     await page.reload();
     await page.locator(`#roomListChat [data-room-id="${roomId}"]`).waitFor();
     await page.locator(`#roomListChat [data-room-id="${roomId}"]`).click();
     await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), roomId);
-    await page.waitForFunction(() => document.querySelectorAll("#msgList .msg").length >= 200);
+    await page.waitForFunction(() => document.querySelectorAll("#msgList .msg").length >= 100);
     const unloadedReceipts = await api(origin, `/rooms/${roomId}/receipts?messageIDs=${unloadedHistoryID}`);
     expect(unloadedReceipts.receipts[0].readers.some((reader: any) => reader.sessionID === sessionID)).toBe(false);
     await dragSelect(page, ".msg.own .msg-text");
@@ -128,7 +131,10 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     const metadataTailID = metadataTail.messages.at(-1).id, metadataBefore = await visibleAnchor(page);
     await page.evaluate(async ({ url, id }: { url: string; id: string }) => {
       const { app } = await import(url), updated = await app.api(`/rooms/${encodeURIComponent(id)}`);
-      app.state.room.messages = updated.messages;
+      // The real client merges a fetched window into loaded history by id; a
+      // wholesale replace would drop older rows the reader is anchored to.
+      const merged = new Map([...app.state.room.messages, ...updated.messages].map((message: any) => [message.id, message]));
+      app.state.room.messages = [...merged.values()].sort((a: any, b: any) => a.createdAt - b.createdAt);
       app.rerenderMessages();
     }, { url: "/assets/chat/state.js", id: roomId });
     await page.waitForTimeout(50);

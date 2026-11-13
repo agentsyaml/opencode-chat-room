@@ -22,6 +22,22 @@ function directory(name: string) {
 }
 
 describe("SQLite local state", () => {
+  test("retention trims oldest messages beyond the per-room bound", async () => {
+    const dir = directory("retention");
+    process.env.CHAT_ROOM_STATE_DIR = dir;
+    const { openStateDatabase, enforceRetention } = await import("./sqlite-state");
+    const roomID = await store.writeState((service) => {
+      const room = service.createRoom("retention", "owner");
+      for (let index = 0; index < 12; index++) service.sendMessage(room.id, "owner", `m${index}`);
+      return room.id;
+    });
+    const db = await openStateDatabase(store.databasePath());
+    enforceRetention(db, roomID, 5);
+    const page = await store.readHistory(roomID, undefined, 100);
+    expect(page.messages.map((message) => message.text)).toEqual(["m7", "m8", "m9", "m10", "m11"]);
+    expect(page.hasMore).toBe(false);
+  });
+
   test("inbox answer excerpts are Unicode-safe and scoped to the answered question room", async () => {
     const dir = await directory("answer-excerpt-inbox");
     process.env.CHAT_ROOM_STATE_DIR = dir;
