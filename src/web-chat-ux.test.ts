@@ -187,7 +187,15 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     expect(trimAfter.id).toBe(trimBefore.id);
     expect(Math.abs(trimAfter.top - trimBefore.top)).toBeLessThanOrEqual(2);
     await page.evaluate(() => { document.querySelector<HTMLElement>("#thread")!.scrollTop = 2500; });
-    await page.waitForTimeout(100);
+    // Wait until the scroll is captured as a deliberate non-bottom position so the
+    // anchor read and the position saved on exit agree; a fixed wait races on slow CI.
+    await page.waitForFunction(async (url: string) => {
+      const { app } = await import(url);
+      const thread = document.querySelector<HTMLElement>("#thread")!, edge = thread.getBoundingClientRect();
+      const row = Array.from(document.querySelectorAll<HTMLElement>("#msgList .msg")).find((node) => node.getBoundingClientRect().bottom > edge.top);
+      const saved = app.state.positions.get(app.state.room.id) as any;
+      return Boolean(row && saved && saved.messageId === row.dataset.msgId && saved.atBottom === false);
+    }, "/assets/chat/state.js");
     const reentryAnchor = await visibleAnchor(page);
     await page.locator("#btnNewRoom").click();
     await page.locator("#inRoomNameChat").fill("__Test_UXSecond");
