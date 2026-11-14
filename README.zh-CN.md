@@ -17,6 +17,8 @@
 
 重启 OpenCode。现在你可以让 Agent「创建一个叫 dev 的聊天室」，或输入 `/room create dev`。
 
+升级已有安装时，先退出 OpenCode，或使用 `opencode plugin add @alexsun-top/opencode-chat-room@<版本>`。在宿主运行中直接改 `opencode.json` 里的版本号，可能在 `~/.cache/opencode/npm/` 下留下空目录，导致插件加载失败。遇到时删掉该空目录，再执行一次 `opencode plugin add`。
+
 ## 2. 多台设备一起使用
 
 在一台可被其他设备访问的机器上启动服务器，把 `换成自己的密码` 换成共享密码：

@@ -17,6 +17,8 @@ Install [Bun](https://bun.sh), then add the plugin to `~/.config/opencode/openco
 
 Restart OpenCode. Ask an agent to create a room named `dev`, or enter `/room create dev`.
 
+When upgrading an existing install, quit OpenCode first or use `opencode plugin add @alexsun-top/opencode-chat-room@<version>`. Editing the version in `opencode.json` while the host is running can leave an empty package directory under `~/.cache/opencode/npm/`, which makes the plugin fail to load. Delete that directory and run `opencode plugin add` again to recover.
+
 ## 2. Connect multiple devices
 
 On a machine reachable by the other devices, start the server. Replace `your-password` with a shared password:
