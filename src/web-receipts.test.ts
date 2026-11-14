@@ -223,6 +223,65 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
   }
 }, 180000);
 
+test.skipIf(!browserModule)("a focused human reader produces a displayed receipt", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-receipt-ack-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const alice = await browser.newContext({ viewport: { width: 1280, height: 850 } });
+    const alicePage = await alice.newPage();
+    await alicePage.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await alicePage.goto(`${origin}/chat`);
+    await alicePage.locator("#inName").fill("Alice");
+    await alicePage.locator("#inRoomName").fill("__Test_ReceiptAck");
+    await alicePage.locator("#btnCreate").click();
+    await alicePage.locator("#chatView").waitFor({ state: "visible" });
+    const room = await alicePage.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      return { id: app.state.room.id, sessionID: app.LS.sessionID };
+    }, "/assets/chat/state.js");
+    const sent = await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: room.sessionID, text: "__Test_ack_target" });
+    const messageID = sent.messages.at(-1).id;
+    const bob = await browser.newContext({ viewport: { width: 1280, height: 850 } });
+    const bobPage = await bob.newPage();
+    await bobPage.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await bobPage.goto(`${origin}/chat`);
+    // Join through the UI so the membership belongs to this browser's session.
+    await bobPage.locator(`.room-row[data-room-id="${room.id}"]:visible`).first().click();
+    await bobPage.locator("#chatView").waitFor({ state: "visible" });
+    await bobPage.locator("#msgList").getByText("__Test_ack_target").waitFor();
+    await bobPage.bringToFront();
+    const ackRequests: string[] = [];
+    bobPage.on("request", (request: any) => { if (new URL(request.url()).pathname.endsWith("/receipts")) ackRequests.push(`${request.method()} ${request.postData() || ""}`); });
+    await bobPage.locator("#thread").evaluate((node: HTMLElement) => { node.scrollTop = node.scrollHeight; });
+    const bobSession = await bobPage.evaluate(async (url: string) => (await import(url)).app.LS.sessionID, "/assets/chat/state.js");
+    // The displayed receipt comes from Bob's own session, not a simulated POST.
+    let readers: any[] = [];
+    for (let attempt = 0; attempt < 60; attempt++) {
+      readers = (await api(origin, `/rooms/${room.id}/receipts?messageIDs=${messageID}`)).receipts[0]?.readers || [];
+      if (readers.some((reader: any) => reader.sessionID === bobSession && reader.evidence === "displayed")) break;
+      await bobPage.waitForTimeout(100);
+      await bobPage.locator("#thread").evaluate((node: HTMLElement) => { node.scrollTop = node.scrollHeight; node.dispatchEvent(new Event("scroll")); });
+    }
+    if (!readers.some((reader: any) => reader.sessionID === bobSession && reader.evidence === "displayed")) {
+      throw new Error(JSON.stringify({ readers, requests: ackRequests, state: await bobPage.evaluate(async (url: string) => { const { app } = await import(url); return { self: app.LS.sessionID, members: app.state.memberSessions.get(app.state.room.id), focus: document.hasFocus(), hidden: document.hidden, gap: (() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.scrollTop - node.clientHeight; })() }; }, "/assets/chat/state.js") }));
+    }
+    expect(readers.some((reader: any) => reader.sessionID === bobSession && reader.evidence === "displayed")).toBe(true);
+    await alicePage.evaluate(async ({ url, id }: any) => {
+      const { app } = await import(url); await app.loadVisibleReceipts(id, app.state.pollGeneration);
+    }, { url: "/assets/chat/state.js", id: room.id });
+    await alicePage.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-readers`)?.textContent === "1", messageID);
+  } finally {
+    await browser?.close(); server.kill("SIGTERM");
+    await new Promise((resolve) => server.once("exit", resolve));
+    await rm(stateDir, { recursive: true, force: true });
+  }
+}, 90000);
+
 async function openRoom(page: any, roomId: string) {
   await page.locator(`#roomListChat [data-room-id="${roomId}"]`).waitFor();
   await page.locator(`#roomListChat [data-room-id="${roomId}"]`).click();
