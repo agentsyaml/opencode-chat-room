@@ -314,6 +314,7 @@ export function initMessages(app) {
       if (img.complete && img.naturalWidth) continue;
       img.dataset.loadGuard = "1";
       img.addEventListener("load", () => {
+        if (!img.isConnected) return;
         const thread = $("#thread");
         if (thread.scrollHeight - thread.scrollTop - thread.clientHeight - img.getBoundingClientRect().height <= 80) thread.scrollTop = thread.scrollHeight;
       }, { once: true });
