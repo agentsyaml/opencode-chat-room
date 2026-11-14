@@ -229,6 +229,10 @@ test.skipIf(!browserModule)("answering the last open question closes the questio
     await page.locator("#questionPanel").waitFor({ state: "hidden" });
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("msgInput");
     await page.locator("#msgList").getByText("__Test_panel_answer").waitFor();
+    // With nothing pending, opening the panel shows the empty state instead of closing itself.
+    await page.locator("#btnQuestions").click();
+    await page.locator("#questionPanel").waitFor({ state: "visible" });
+    await page.locator("#questionStatus").getByText("No unanswered questions.").waitFor();
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 60000);
 

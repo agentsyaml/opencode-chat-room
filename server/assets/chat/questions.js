@@ -157,7 +157,8 @@ export function initQuestions(app) {
       if (id !== request || app.state.room?.id !== roomId || !Array.isArray(result.questions)) return;
       pending.set(roomId, result.questions);
       status.dataset.error = "false";
-      status.hidden = true;
+      // render() skips identical lists, so the empty state must survive that early return.
+      status.hidden = result.questions.length > 0;
       render(roomId);
     } catch (error) {
       if (id !== request || app.state.room?.id !== roomId) return;
