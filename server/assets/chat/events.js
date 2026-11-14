@@ -4,6 +4,15 @@ import { isUnreadMessage } from "./messages.js";
 
 export function initEvents(app) {
   const $ = app.$;
+  // Thread clicks land on non-focusable nodes, so the browser drops focus to BODY
+  // and the next keystroke is lost. Returning it to the composer matches chat UX.
+  app.focusComposer = () => {
+    if (matchMedia("(max-width: 760px)").matches || document.querySelector("dialog[open]")) return;
+    if ($("#chatView").hidden || $("#msgInput").contentEditable !== "true") return;
+    if (document.activeElement !== document.body || window.getSelection()?.toString()) return;
+    $("#msgInput").focus({ preventScroll: true });
+  };
+  document.addEventListener("click", () => requestAnimationFrame(() => app.focusComposer?.()));
   app.showRestoreFailure = (message) => {
     document.documentElement.classList.add("session-restore");
     $("#joinView").hidden = $("#chatView").hidden = true;

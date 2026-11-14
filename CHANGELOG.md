@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1 — 2026-11-14
+
+- Keep the thread pinned to the bottom when images finish loading after a room opens, without yanking a reader who scrolled up into history.
+- Keep the caret in the composer after clicking Send, switching rooms, clicking a message, jumping to the latest, or answering the last question in the Questions panel.
+- Close the Questions panel once its last open question is answered; opening it with nothing pending still shows the empty state.
+
 ## 0.6.0 — 2026-11-13
 
 - Open rooms from a local IndexedDB snapshot first and merge the server delta afterwards, so revisiting a room renders instantly instead of re-downloading its history.

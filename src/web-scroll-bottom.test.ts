@@ -48,7 +48,9 @@ test.skipIf(!browserModule)("physical scroll reaches a stable zero-gap thread bo
       }, "/assets/chat/state.js");
       expect(staleUnread).toEqual({ hidden: true, unread: 1, activeBadges: 0 });
       const thread = page.locator("#thread"), box = await thread.boundingBox();
-      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.wheel(0, -10000); await page.waitForTimeout(30);
+      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.wheel(0, -10000);
+      // Wheel scrolling lands on a compositor frame; a fixed sleep is a coin flip.
+      await page.waitForFunction(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollTop < node.scrollHeight - node.clientHeight; });
       const scrolledUp = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollTop < node.scrollHeight - node.clientHeight; });
       expect(scrolledUp).toBe(true);
       const wheelAwayFromEdge = await page.evaluate(() => {
@@ -230,6 +232,69 @@ test.skipIf(!browserModule)("reading to the bottom then reopening returns to the
     expect(after.gap).toBeLessThan(8);
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 60000);
+
+test.skipIf(!browserModule)("a late-loading image stays pinned to the bottom without yanking a reader in history", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const { createServer: createHttpServer } = await import("node:http");
+  const tall = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600"><rect width="600" height="600" fill="#cccccc"/></svg>');
+  const slow = createHttpServer((_req, res) => setTimeout(() => { res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "no-store" }); res.end(tall); }, 900));
+  await new Promise<void>((resolve) => slow.listen(0, "127.0.0.1", resolve));
+  const slowPort = (slow.address() as any).port;
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-scroll-image-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_ImageOwner");
+    await page.locator("#inRoomName").fill("__Test_ImageBottom");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const room = await page.evaluate(async (url: string) => { const { app } = await import(url); return { id: app.state.room.id, sessionID: app.LS.sessionID }; }, "/assets/chat/state.js");
+    await api(origin, `/rooms/${room.id}/join`, "POST", { sessionID: "__Test_ImagePeer", participantId: "__Test_ImagePeer", participantName: "__Test_ImagePeer" });
+    for (let index = 0; index < 30; index++) await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_ImagePeer", text: `__Test_image_filler ${index}\n${"Filler.\n".repeat(3)}` });
+    await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_ImagePeer", text: `__Test_late_image\n\n![slow](http://127.0.0.1:${slowPort}/slow.png)` });
+    await page.locator("#msgList img").waitFor();
+    await page.waitForFunction(() => { const img = document.querySelector<HTMLImageElement>("#msgList img"); return Boolean(img?.complete && img.naturalWidth); });
+    const thread = page.locator("#thread"), box = await thread.boundingBox();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.wheel(0, 30000);
+    await page.waitForFunction(async (url: string) => { const { app } = await import(url), entry = app.state.rooms.get(app.state.room.id); return entry.readTs >= entry.room.messages.at(-1)!.createdAt; }, "/assets/chat/state.js");
+    const atBottom = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.scrollTop - node.clientHeight; });
+    expect(Math.abs(atBottom)).toBeLessThan(8);
+    // Reopening while the tall image reloads must still land on the bottom.
+    await page.reload();
+    await page.locator("#msgList img").waitFor();
+    await page.waitForFunction(() => { const img = document.querySelector<HTMLImageElement>("#msgList img"); return Boolean(img?.complete && img.naturalWidth); });
+    await page.waitForTimeout(300);
+    const reopened = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.scrollTop - node.clientHeight; });
+    expect(Math.abs(reopened)).toBeLessThan(8);
+    // A reader who scrolled into history must not be yanked to the bottom.
+    await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight - 1200); });
+    await page.waitForTimeout(120);
+    const anchorBefore = await visibleAnchor(page);
+    await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_ImagePeer", text: `__Test_history_image\n\n![slow](http://127.0.0.1:${slowPort}/slow.png?second)` });
+    await page.locator("#msgList").getByText("__Test_history_image").waitFor();
+    await page.waitForTimeout(1400);
+    const afterHistoryImage = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.scrollTop - node.clientHeight; });
+    const anchorAfter = await visibleAnchor(page);
+    expect(anchorAfter.id).toBe(anchorBefore.id);
+    expect(afterHistoryImage).toBeGreaterThan(1000);
+  } finally { await browser?.close(); server.kill("SIGTERM"); slow.close(); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
+}, 90000);
+
+async function visibleAnchor(page: any) {
+  return page.evaluate(() => {
+    const thread = document.querySelector<HTMLElement>("#thread")!, edge = thread.getBoundingClientRect();
+    const row = Array.from(document.querySelectorAll<HTMLElement>("#msgList .msg")).find((node) => node.getBoundingClientRect().bottom > edge.top)!;
+    return { id: row.dataset.msgId, top: Math.round(row.getBoundingClientRect().top - edge.top) };
+  });
+}
 
 async function api(origin: string, route: string, method: string, body: unknown) {
   const response = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });

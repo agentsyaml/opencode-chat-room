@@ -307,6 +307,17 @@ export function initMessages(app) {
       if (anchor) thread.scrollTop += anchor.getBoundingClientRect().top - thread.getBoundingClientRect().top - anchorOffset;
       else thread.scrollTop = oldTop;
     }
+    // A late-loading image below the viewport grows the thread after the scroll
+    // settled. Re-pin only when the growth is exactly the gap the reader had, so
+    // someone reading history is never yanked to the bottom.
+    for (const img of list.querySelectorAll(".msg-text img:not([data-load-guard])")) {
+      if (img.complete && img.naturalWidth) continue;
+      img.dataset.loadGuard = "1";
+      img.addEventListener("load", () => {
+        const thread = $("#thread");
+        if (thread.scrollHeight - thread.scrollTop - thread.clientHeight - img.getBoundingClientRect().height <= 80) thread.scrollTop = thread.scrollHeight;
+      }, { once: true });
+    }
     app.queueReceiptRefresh?.();
     app.queueReceiptObservation?.();
     return { skipped };
@@ -337,6 +348,9 @@ export function initMessages(app) {
     if (!room || app.state.sendingRooms?.has(room.id)) return;
     const message = app.prepareMessage?.(room.id, input.value) || { text: input.value.trim(), ids: [], ready: Boolean(input.value.trim()) };
     if (!message.ready) return;
+    // Clicking Send focuses the button; it is disabled when the draft clears, so
+    // keep the caret in the composer or the next keystrokes go nowhere.
+    input.focus({ preventScroll: true });
     const text = message.text;
     const thread = $("#thread"), followedBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
     const revision = app.state.draftRevision.get(room.id) || 0;

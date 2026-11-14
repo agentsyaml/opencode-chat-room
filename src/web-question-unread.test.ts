@@ -198,6 +198,40 @@ test.skipIf(!browserModule)("a room with an unanswered question shows a question
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 
+test.skipIf(!browserModule)("answering the last open question closes the questions panel", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-question-panel-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_PanelOwner");
+    await page.locator("#inRoomName").fill("__Test_PanelClose");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const room = await page.evaluate(async (url: string) => { const { app } = await import(url); return { id: app.state.room.id, sessionID: app.LS.sessionID }; }, "/assets/chat/state.js");
+    await api(origin, `/rooms/${room.id}/join`, "POST", { sessionID: "__Test_PanelPeer", participantId: "__Test_PanelPeer", participantName: "__Test_PanelPeer" });
+    await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_PanelPeer", text: "__Test_panel_question", isQuestion: true });
+    await page.locator("#msgList").getByText("__Test_panel_question").waitFor();
+    await page.locator("#btnQuestions").click();
+    await page.locator(".question-item").getByText("__Test_panel_question").waitFor();
+    await page.locator(".question-item").first().click();
+    const reply = page.locator("#questionReply [contenteditable=true]");
+    await reply.waitFor({ state: "visible" });
+    await reply.fill("__Test_panel_answer");
+    await page.locator("#questionReply button[type=submit]").click();
+    await page.locator("#questionPanel").waitFor({ state: "hidden" });
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("msgInput");
+    await page.locator("#msgList").getByText("__Test_panel_answer").waitFor();
+  } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
+}, 60000);
+
 async function api(origin: string, route: string, method: string, body: unknown) {
   const response = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   if (!response.ok) throw new Error(`${method} ${route} failed (${response.status})`);

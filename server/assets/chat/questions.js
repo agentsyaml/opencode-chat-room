@@ -39,6 +39,7 @@ export function initQuestions(app) {
     if (active) {
       const signature = `${roomId}\0${app.locale}\0${selected.get(roomId) || ""}\0${items.map((question) => `${question.id}\0${question.text}`).join("\u0001")}`;
       if (list.dataset.signature === signature) { renderReply(roomId); return; }
+      const hadItems = Boolean(list.querySelector(".question-item"));
       list.dataset.signature = signature;
       $("#questionBadge").textContent = items.length > 99 ? "99+" : String(items.length);
       $("#questionBadge").hidden = !items.length;
@@ -58,6 +59,12 @@ export function initQuestions(app) {
       }
       status.hidden = items.length > 0 || status.dataset.error === "true";
       if (!items.length && status.dataset.error !== "true") app.setText(status, "questionsEmpty");
+      // The panel exists to work through open questions; close it once the last one is answered,
+      // and keep the caret in the composer where the answer button used to be.
+      if (!items.length && hadItems && !panel.hidden && app.state.room?.id === roomId) {
+        app.closePanels();
+        if (!matchMedia("(max-width: 760px)").matches && !document.querySelector("dialog[open]")) $("#msgInput").focus({ preventScroll: true });
+      }
       renderReply(roomId);
     }
   }

@@ -191,6 +191,8 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(await alice.locator("#btnSend").isDisabled()).toBe(false);
     await alice.locator("#btnSend").click();
     await alice.waitForTimeout(500);
+    // Clicking Send disables the focused button as the draft clears; the caret must return to the composer.
+    expect(await alice.evaluate(() => document.activeElement?.id)).toBe("msgInput");
     if (await alice.locator("#sendError").isVisible()) throw new Error(await alice.locator("#sendError").textContent() || "Send failed");
     const message = alice.locator(".msg-text").last();
     await message.locator("table").waitFor({ timeout: 3000 });
@@ -206,6 +208,10 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(await message.locator("[data-copy-code]").count()).toBe(0);
     expect(await message.locator("pre code").textContent()).toContain('const fake = "<at>@all</at>";');
     const copyButton = alice.locator(".msg").last().locator("[data-copy-message]");
+    // Clicking thread text is a common way to lose the caret; it must return to the composer.
+    await alice.locator(".msg-text").last().click();
+    await alice.waitForTimeout(100);
+    expect(await alice.evaluate(() => document.activeElement?.id)).toBe("msgInput");
     await copyButton.click();
     // The marked copy writes text/plain + text/html asynchronously; wait for it to land.
     await alice.waitForFunction(async () => (await navigator.clipboard.readText()).includes('const fake = "<at>@all</at>";'));
@@ -215,6 +221,8 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.waitForFunction(() => document.querySelector("#roomName")?.textContent === "Second room");
     await alice.locator(`#roomListChat [data-room-id="${sourceRoom}"]`).click();
     await alice.waitForFunction((id: string) => (document.querySelector("#btnCopyId") as HTMLButtonElement | null)?.title.endsWith(id), sourceRoom);
+    // Switching rooms replaces the clicked row; the caret belongs in the composer.
+    expect(await alice.evaluate(() => document.activeElement?.id)).toBe("msgInput");
     expect(await alice.locator("#thread").evaluate((thread: HTMLElement) => thread.scrollTop)).toBe(0);
     await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-light.png"), fullPage: true });
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");

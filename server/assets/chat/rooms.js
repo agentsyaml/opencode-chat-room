@@ -145,6 +145,8 @@ export function initRooms(app) {
     app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
     app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
     void app.refreshRoomList();
+    // Switching rooms replaces the clicked row; keep the composer ready to type.
+    app.focusComposer?.();
     document.dispatchEvent(new CustomEvent("chat-room-activated", { detail: roomId }));
   };
 
