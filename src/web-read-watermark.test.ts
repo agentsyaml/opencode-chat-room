@@ -45,18 +45,26 @@ test.skipIf(!browserModule)("a new tab starts from the server read watermark", a
     // This tab is the only holder of the local watermark; the next tab has none.
     await first.close();
     for (let index = 0; index < 3; index++) await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_WatermarkPeer", text: `__Test_unread ${index}\n${"Filler line for height.\n".repeat(12)}` });
+    let releaseRead!: () => void, startRead!: () => void, finishRead!: () => void;
+    const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const readStarted = new Promise<void>((resolve) => { startRead = resolve; });
+    const readDone = new Promise<void>((resolve) => { finishRead = resolve; });
     const second = await context.newPage();
     second.setDefaultTimeout(15000);
+    await second.route("**/read", async (route: any) => { startRead(); await readGate; await route.continue(); finishRead(); });
     await second.goto(`${origin}/chat`);
     await second.locator("#chatView").waitFor({ state: "visible" });
-    await second.waitForFunction(async (url: string) => (await import(url)).app.state.unread >= 3, "/assets/chat/state.js");
-    await second.waitForTimeout(500);
+    await second.bringToFront();
+    await readStarted;
     const state = await second.evaluate(async (url: string) => {
       const { app } = await import(url), entry = app.state.rooms.get(app.state.room.id);
       return { unread: app.state.unread, readTs: entry.readTs };
     }, "/assets/chat/state.js");
+    // The server watermark applies before the bottom landing acknowledges it.
     expect(state.unread).toBe(3);
     expect(state.readTs).toBeGreaterThan(0);
+    releaseRead(); await readDone;
+    await second.waitForFunction(async (url: string) => (await import(url)).app.state.unread === 0, "/assets/chat/state.js");
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 60000);
 
@@ -86,6 +94,12 @@ test.skipIf(!browserModule)("a render-failed message blocks the watermark even w
     for (let index = 0; index < 3; index++) await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_FailedPeer", text: `__Test_failed ${index}\n${"Filler line for height.\n".repeat(12)}` });
     await page.reload();
     await page.locator("#chatView").waitFor({ state: "visible" });
+    // Wait for the landing acknowledgement so the later manual jump is not skipped
+    // by an in-flight read request.
+    await page.waitForFunction(async (url: string) => {
+      const { app } = await import(url), id = app.state.room?.id;
+      return Boolean(id && app.state.rooms.get(id).readTs > 0 && !app.state.readRequests?.has(id));
+    }, "/assets/chat/state.js");
     // Fail the middle message's render; the third still renders, so the watermark must stop at the middle.
     const middle = await page.evaluate(async (url: string) => {
       const { app } = await import(url);

@@ -100,7 +100,7 @@ test.skipIf(!browserModule)("physical scroll reaches a stable zero-gap thread bo
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 
-test.skipIf(!browserModule)("reopening a room lands on the first unread message", async () => {
+test.skipIf(!browserModule)("reopening a room with unread messages lands on the live bottom", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-scroll-unread-"));
   const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
@@ -141,15 +141,13 @@ test.skipIf(!browserModule)("reopening a room lands on the first unread message"
       app.activateRoom(roomId);
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const thread = document.querySelector<HTMLElement>("#thread")!;
-      const top = thread.getBoundingClientRect().top + thread.clientTop;
-      const row = Array.from(document.querySelectorAll<HTMLElement>("#msgList [data-msg-id]")).find((item) => item.textContent?.includes("__Test_row 20"));
-      return { offset: row ? row.getBoundingClientRect().top - top : null, gap: thread.scrollHeight - thread.scrollTop - thread.clientHeight, unread: app.state.unread, active: app.state.room.id };
+      const rows = document.querySelectorAll<HTMLElement>("#msgList [data-msg-id]");
+      const last = rows[rows.length - 1];
+      return { lastVisible: last ? last.getBoundingClientRect().bottom <= thread.getBoundingClientRect().bottom + 1 : false, gap: thread.scrollHeight - thread.scrollTop - thread.clientHeight, active: app.state.room.id };
     }, { url: "/assets/chat/state.js", roomId: first.id });
     expect(measured.active).toBe(first.id);
-    expect(measured.offset).not.toBeNull();
-    expect(Math.abs(measured.offset!)).toBeLessThan(3);
-    expect(measured.gap).toBeGreaterThan(0);
-    expect(measured.unread).toBe(10);
+    expect(measured.lastVisible).toBe(true);
+    expect(measured.gap).toBeLessThanOrEqual(2);
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 60000);
 
@@ -286,6 +284,58 @@ test.skipIf(!browserModule)("a late-loading image stays pinned to the bottom wit
     expect(anchorAfter.id).toBe(anchorBefore.id);
     expect(afterHistoryImage).toBeGreaterThan(1000);
   } finally { await browser?.close(); server.kill("SIGTERM"); slow.close(); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
+}, 90000);
+
+test.skipIf(!browserModule)("reopening with nothing unread lands on the live bottom even from a near-bottom anchor", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-near-bottom-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_NearOwner");
+    await page.locator("#inRoomName").fill("__Test_NearBottom");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const room = await page.evaluate(async (url: string) => { const { app } = await import(url); return { id: app.state.room.id, sessionID: app.LS.sessionID }; }, "/assets/chat/state.js");
+    for (let index = 0; index < 19; index++) await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: room.sessionID, text: `__Test_near ${index}\n${"Filler.\n".repeat(3)}` });
+    await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: room.sessionID, text: `__Test_near_tall\n${"Tall closing line.\n".repeat(12)}` });
+    await page.locator("#msgList").getByText("__Test_near_tall").waitFor();
+    await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; node.scrollTop = node.scrollHeight; });
+    await page.waitForTimeout(120);
+    // A 60px gap counts as the bottom for read receipts and the jump button.
+    const captured = await page.evaluate(async (url: string) => {
+      const { app } = await import(url), node = document.querySelector<HTMLElement>("#thread")!;
+      node.scrollTop = node.scrollHeight - node.clientHeight - 60;
+      node.dispatchEvent(new Event("scroll"));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return app.state.positions.get(app.state.room.id);
+    }, "/assets/chat/state.js");
+    expect(captured?.atBottom).toBe(true);
+    const second = await page.evaluate(async ({ url, name }: any) => {
+      const { app } = await import(url);
+      const created = await app.api("/rooms", { method: "POST", body: JSON.stringify({ name, ownerId: app.state.myName, sessionID: app.LS.sessionID }) });
+      await app.joinRoom(created.id, app.state.myName);
+      return app.state.room.id;
+    }, { url: "/assets/chat/state.js", name: "__Test_NearBottomB" });
+    // Force a stale non-bottom anchor; with nothing unread the room must still open at the bottom.
+    await page.evaluate(async ({ url, id }: any) => {
+      const { app } = await import(url), entry = app.state.rooms.get(id), last = entry.room.messages.at(-1);
+      app.state.positions.set(id, { messageId: last.id, offset: -60, atBottom: false });
+    }, { url: "/assets/chat/state.js", id: room.id });
+    await page.evaluate(async ({ url, id }: any) => { const { app } = await import(url); app.activateRoom(id); }, { url: "/assets/chat/state.js", id: room.id });
+    await page.locator("#msgList").getByText("__Test_near_tall").waitFor();
+    await page.waitForTimeout(120);
+    const gap = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.scrollTop - node.clientHeight; });
+    expect(gap).toBeLessThanOrEqual(2);
+    void second;
+  } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 
 async function visibleAnchor(page: any) {

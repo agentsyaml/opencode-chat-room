@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Opening a room always lands on the live bottom, including when the previous visit ended mid-history. The saved-position and first-unread landing are gone; they reopened rooms above messages the reader had already seen.
+- Treat a thread within 80px of the bottom as the bottom when saving the position, following new messages, and restoring layout after an image expands, matching the read and jump-to-latest thresholds.
+
 ## 0.6.1 — 2026-11-14
 
 - Keep the thread pinned to the bottom when images finish loading after a room opens, without yanking a reader who scrolled up into history.

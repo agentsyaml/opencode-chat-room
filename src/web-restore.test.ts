@@ -62,25 +62,24 @@ test.skipIf(!browserModule)("restore blocks login, retries transient errors, and
     await owner.locator("#btnRestoreRetry").click(); await secondRequest; release(); await reload;
     await owner.locator("#chatView").waitFor({ state: "visible" });
     expect(await owner.locator("#msgInput").evaluate((node: any) => node.value)).toBe("Draft retained through retry");
-      await owner.waitForFunction((position: { messageId: string; offset: number }) => {
-        const thread = document.querySelector("#thread")!, row = Array.from(document.querySelectorAll<HTMLElement>("#msgList [data-msg-id]")).find((item) => item.dataset.msgId === position.messageId);
-      return row && Math.abs(row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop + position.offset)) < 2;
-    }, savedPosition);
+    await owner.waitForFunction(() => {
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      return thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
+    });
     await owner.unroute("**/rooms?sessionID=*");
-    const widths = [320, 375, 390, 768, 1440], anchorOffsets = new Map<string, number>();
+    const widths = [320, 375, 390, 768, 1440];
     const appearances = [["en", "light"], ["zh-CN", "light"], ["en", "dark"], ["zh-CN", "dark"], ["en", "light"]];
     for (const [round, [locale, scheme]] of appearances.entries()) for (const width of widths) {
       await owner.setViewportSize({ width, height: 850 });
       await owner.evaluate(async ({ locale, url }: { locale: string; url: string }) => (await import(url)).app.setLocale(locale), { locale, url: "/assets/chat/state.js" });
       await owner.emulateMedia({ colorScheme: scheme }); await owner.waitForTimeout(60);
-      const geometry = await owner.evaluate((position: { messageId: string; offset: number }) => {
-        const thread = document.querySelector<HTMLElement>("#thread")!, row = Array.from(document.querySelectorAll<HTMLElement>("#msgList [data-msg-id]")).find((item) => item.dataset.msgId === position.messageId);
+      const geometry = await owner.evaluate(() => {
+        const thread = document.querySelector<HTMLElement>("#thread")!;
         const buttons = Array.from(document.querySelectorAll<HTMLElement>(".chat-head .chip")).filter((button) => button.getClientRects().length);
-        return { pageX: document.documentElement.scrollWidth - innerWidth, threadX: thread.scrollWidth - thread.clientWidth, anchorOffset: row!.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop), buttons: buttons.map((button) => { const style = getComputedStyle(button); return { width: button.offsetWidth, height: button.offsetHeight, display: style.display, align: style.alignItems, justify: style.justifyItems }; }) };
-      }, savedPosition);
+        return { pageX: document.documentElement.scrollWidth - innerWidth, threadX: thread.scrollWidth - thread.clientWidth, gap: thread.scrollHeight - thread.scrollTop - thread.clientHeight, buttons: buttons.map((button) => { const style = getComputedStyle(button); return { width: button.offsetWidth, height: button.offsetHeight, display: style.display, align: style.alignItems, justify: style.justifyItems }; }) };
+      });
       expect(geometry.pageX).toBeLessThanOrEqual(1); expect(geometry.threadX).toBeLessThanOrEqual(1);
-      const key = `${width}-${locale}-${scheme}`, prior = anchorOffsets.get(key);
-      if (prior === undefined) anchorOffsets.set(key, geometry.anchorOffset); else expect(Math.abs(geometry.anchorOffset - prior)).toBeLessThan(2);
+      expect(geometry.gap).toBeLessThanOrEqual(80);
       if (width <= 760) for (const button of geometry.buttons) { expect(button.display).toBe("grid"); expect(button.width).toBe(button.height); expect(button.align).toBe("center"); expect(button.justify).toBe("center"); }
       if (width <= 760) await owner.locator("#btnRoomsDrawer").click();
       const profile = await owner.evaluate(() => {

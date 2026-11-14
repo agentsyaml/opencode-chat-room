@@ -244,7 +244,7 @@ export function initMessages(app) {
 
   app.renderMessages = (live = false) => {
     const thread = $("#thread"), list = $("#msgList"), messages = app.state.room.messages;
-    const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
+    const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 80;
     let skipped = 0;
     let anchorId = null, anchorOffset = 0, oldTop = thread.scrollTop;
     const viewport = thread.getBoundingClientRect();

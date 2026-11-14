@@ -126,23 +126,20 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     await input.fill("word ".repeat(100));
     expect(await measure(input)).toMatchObject({ overflow: "auto", fits: false, horizontal: true });
     const roomId = await page.evaluate(async (url: string) => (await import(url)).app.state.room.id, "/assets/chat/state.js");
-    await page.evaluate(() => { const thread = document.querySelector<HTMLElement>("#thread")!; thread.scrollTop = thread.scrollHeight / 2; });
-    await frame(page); const reentryAnchor = await readingAnchor(page);
     const otherRoomId = await switchRoom(page, "__Test_ComposerOther", roomId);
     expect(await input.evaluate((node: any) => node.value)).toBe("word ".repeat(100));
-    expect(await readingAnchor(page)).toMatchObject({ id: reentryAnchor.id });
-    expect(Math.abs((await readingAnchor(page)).offset - reentryAnchor.offset)).toBeLessThan(3);
+    // Switching back with nothing unread lands at the live bottom.
+    await selectRoom(page, roomId);
+    await frame(page);
+    expect(await page.locator("#thread").evaluate((node: HTMLElement) => node.scrollHeight - node.scrollTop - node.clientHeight)).toBeLessThanOrEqual(2);
+    // Post the away message from the other room so the reopened room learns it only through the poll.
     await selectRoom(page, otherRoomId);
     await page.evaluate(async (url: string) => {
       const { app } = await import(url);
       clearTimeout(app.state.watcherTimer); app.state.watcherTimer = 0;
       (window as any).__startRoomWatcher = app.startRoomWatcher; app.startRoomWatcher = () => {};
     }, "/assets/chat/state.js");
-    await page.evaluate(async ({ url, id, anchor }: { url: string; id: string; anchor: string }) => {
-      const { app } = await import(url), entry = app.state.rooms.get(id);
-      entry.room.messages = entry.room.messages.filter((message: any) => message.id !== anchor);
-    }, { url: "/assets/chat/state.js", id: roomId, anchor: reentryAnchor.id });
-    const awayMessage = await page.evaluate(async ({ url, id }: { url: string; id: string }) => {
+    const awayMessage = await page.evaluate(async ({ url, id }: any) => {
       const { app } = await import(url);
       await app.api(`/rooms/${encodeURIComponent(id)}/join`, { method: "POST", body: JSON.stringify({ sessionID: "resize-reader", participantId: "Resize reader", participantName: "Resize reader" }) });
       const result = await app.api(`/rooms/${encodeURIComponent(id)}/messages`, { method: "POST", body: JSON.stringify({ sessionID: "resize-reader", text: "Unread while away" }) });
@@ -161,16 +158,20 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     });
     await selectRoom(page, roomId);
     await inboxStarted;
-    const preInbox = await page.evaluate(async ({ url, id, messageId }: any) => {
-      const entry = (await import(url)).app.state.rooms.get(id);
-      return { knownFromHistory: entry.room.messages.some((message: any) => message.id === messageId), unreadBeforePoll: entry.unreadIds.has(messageId) };
-    }, { url: "/assets/chat/state.js", id: roomId, messageId: awayMessage.id });
-    expect(preInbox).toEqual({ knownFromHistory: true, unreadBeforePoll: false });
+    // The reopened room polls for the new message while the reader is in history.
+    // Scroll with a real wheel event so a pending layout restore cannot repin the view.
+    const threadBox = (await page.locator("#thread").boundingBox())!;
+    await page.mouse.move(threadBox.x + threadBox.width / 2, threadBox.y + threadBox.height / 2);
+    await page.mouse.wheel(0, -4000);
+    await page.waitForFunction(() => { const thread = document.querySelector<HTMLElement>("#thread")!; return thread.scrollHeight - thread.scrollTop - thread.clientHeight > 80; });
+    await frame(page);
+    const historyAnchor = await readingAnchor(page);
     releaseInbox(); await inboxDone; await page.unroute(inboxPattern);
     await page.waitForFunction(async ({ url, id, messageId }: any) => (await import(url)).app.state.rooms.get(id)?.unreadIds.has(messageId), { url: "/assets/chat/state.js", id: roomId, messageId: awayMessage.id }, { timeout: 10000 });
     await page.locator("#msgList").getByText("Unread while away").waitFor();
-    expect(await readingAnchor(page)).toMatchObject({ id: reentryAnchor.id });
-    expect(Math.abs((await readingAnchor(page)).offset - reentryAnchor.offset)).toBeLessThan(3);
+    // A new message must not yank a reader who is in history.
+    expect(await readingAnchor(page)).toMatchObject({ id: historyAnchor.id });
+    expect(Math.abs((await readingAnchor(page)).offset - historyAnchor.offset)).toBeLessThan(3);
     const unreadState = await page.evaluate(async ({ url, id }: any) => {
       const { app } = await import(url), registry = await app.api(`/rooms/${encodeURIComponent(id)}/registry`);
       return { unread: app.state.unread, readTs: registry[app.LS.sessionID]?.lastReadTs || 0 };
@@ -183,8 +184,8 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     await page.reload(); await page.locator("#chatView").waitFor({ state: "visible" });
     await page.waitForFunction((name: string) => document.querySelector("#roomName")?.textContent === name, "__Test_ComposerSizing");
     await frame(page);
-    expect(await readingAnchor(page)).toMatchObject({ id: reentryAnchor.id });
-    expect(Math.abs((await readingAnchor(page)).offset - reentryAnchor.offset)).toBeLessThan(3);
+    // Reopening always shows the newest messages.
+    expect(await page.locator("#thread").evaluate((node: HTMLElement) => node.scrollHeight - node.scrollTop - node.clientHeight)).toBeLessThanOrEqual(2);
     expect(await measure(input)).toMatchObject({ overflow: "auto", fits: false });
     const otherPosition = await page.evaluate(async ({ url, id }: { url: string; id: string }) => (await import(url)).app.state.positions.get(id), { url: "/assets/chat/state.js", id: otherRoomId });
     await page.setViewportSize({ width: 375, height: 700 }); await frame(page);
@@ -324,26 +325,10 @@ async function announcementRoomActivation(page: any) {
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), sourceID);
   await page.locator("#btnAnnouncements").click();
   await page.locator("#announcementList").getByText("__Test_FailedDraft").click();
-  const anchor = await page.evaluate(async ({ url, id }: any) => {
-    const { app } = await import(url), entry = app.state.rooms.get(id), message = entry.room.messages.at(-1);
-    app.state.positions.set(id, { messageId: message.id, offset: 0 }); entry.room.messages = [];
-    return message.id;
-  }, { url: "/assets/chat/state.js", id: targetID });
-  const pattern = `**/rooms/${targetID}/history*`;
-  let release!: () => void, start!: () => void, finish!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const started = new Promise<void>((resolve) => { start = resolve; });
-  const done = new Promise<void>((resolve) => { finish = resolve; });
-  await page.route(pattern, async (route: any) => {
-    start(); await gate;
-    const response = await route.fetch(); await route.fulfill({ response }); finish();
-  });
-  await page.locator(`#roomListChat [data-room-id="${targetID}"]`).click(); await started;
-  expect(await page.evaluate((url: string) => import(url).then(({ app }) => app.state.room.id), "/assets/chat/state.js")).toBe(sourceID);
-  expect(await page.locator("#announcementName").inputValue()).toBe("__Test_FailedDraft");
   expect(await page.locator("#announcementContent").inputValue()).toBe("Keep failed draft");
-  release(); await done; await page.unroute(pattern);
+  await page.locator(`#roomListChat [data-room-id="${targetID}"]`).click();
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), targetID);
+  await page.waitForFunction(() => document.querySelector("#msgList")?.textContent?.includes("Announcement history anchor"));
   if (!await page.locator("#announcementPanel").isVisible()) await page.locator("#btnAnnouncements").click();
   await page.locator("#announcementList").getByText("__Test_TargetAnnouncement").waitFor();
   await page.locator("#announcementList").getByText("__Test_TargetAnnouncement").click();
@@ -352,7 +337,8 @@ async function announcementRoomActivation(page: any) {
   await page.locator(`#roomListChat [data-room-id="${sourceID}"]`).click();
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), sourceID);
   if (!await page.locator("#announcementPanel").isVisible()) await page.locator("#btnAnnouncements").click();
-  await page.locator("#announcementList").getByText("__Test_FailedDraft").waitFor();
+  await page.locator("#announcementList").getByText("__Test_FailedDraft").click();
+  expect(await page.locator("#announcementContent").inputValue()).toBe("Keep failed draft");
 }
 async function seedMessages(page: any) {
   for (let i = 0; i < 12; i++) {

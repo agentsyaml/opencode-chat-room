@@ -1,6 +1,5 @@
 import { LS } from "./state.js";
 import { copyTextToClipboard } from "./markdown.js";
-import { isUnreadMessage } from "./messages.js";
 
 export function initEvents(app) {
   const $ = app.$;
@@ -28,7 +27,7 @@ export function initEvents(app) {
     const thread = $("#thread"), edge = thread.getBoundingClientRect(), top = edge.top + thread.clientTop;
     const anchor = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((row) => row.getBoundingClientRect().bottom > top);
     readingPosition = { roomId: app.state.room?.id, messageId: anchor?.dataset.msgId, offset: anchor ? anchor.getBoundingClientRect().top - top : 0,
-      atBottom: thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 4 };
+      atBottom: thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 80 };
     const guard = app.state.readAnchorGuard;
     let missing = guard?.roomId === readingPosition.roomId && guard.missing;
     // A failed restore keeps its anchor while the landing stays put; scrolling to a
@@ -65,29 +64,13 @@ export function initEvents(app) {
     layoutQueue = task.catch(() => {});
     return task;
   };
-  app.restoreReadingPosition = (roomId) => {
-    const thread = $("#thread"), saved = app.state.positions.get(roomId), entry = app.state.rooms.get(roomId);
-    const atBottom = () => thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 4;
-    const align = (messageId, offset) => {
-      const row = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((item) => item.dataset.msgId === messageId);
-      if (!row) return false;
-      thread.scrollTop += row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop + offset);
-      captureReadingPosition(); return true;
-    };
-    if (typeof saved === "number") { thread.scrollTop = saved; captureReadingPosition(); return { messageId: readingPosition?.messageId, atBottom: atBottom() }; }
-    const readTs = entry?.readTs || app.state.lastReadTs.get(roomId) || 0;
-    // Own messages never form an unread boundary; landing on them hides the newest activity.
-    const boundary = readTs && entry?.room.messages.find((message) => message.createdAt > readTs && isUnreadMessage(message, app, entry.room, entry.name));
-    // Leaving at the bottom and returning to new messages lands on the first unread;
-    // a deliberate scroll position is restored exactly.
-    if ((entry?.unreadIds.size || entry?.unreadOverflow) && saved?.atBottom !== false && boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };
-    // Left at the bottom with nothing unread: land on the live bottom, not the
-    // old anchor — late-loading cards can grow content below the saved row.
-    if (saved?.atBottom === true && !entry?.unreadIds.size && !entry?.unreadOverflow) { thread.scrollTop = thread.scrollHeight; captureReadingPosition(); return { messageId: readingPosition?.messageId, atBottom: atBottom() }; }
-    if (saved?.messageId && align(saved.messageId, Number(saved.offset) || 0)) return { messageId: saved.messageId, atBottom: atBottom() };
-    if (boundary && align(boundary.id, 0)) return { messageId: boundary.id, atBottom: atBottom() };
-    if (!saved && !boundary) return false;
-    return saved?.messageId || readTs ? { messageId: saved?.messageId || null, missing: true } : false;
+  app.restoreReadingPosition = () => {
+    const thread = $("#thread");
+    // Entering a room always shows the newest messages. Restoring an old anchor
+    // leaves the reader above messages that already arrived or grew afterwards.
+    thread.scrollTop = thread.scrollHeight;
+    captureReadingPosition();
+    return { messageId: readingPosition?.messageId, atBottom: true };
   };
   function closeRoomDrawer(restore = true) {
     roomRail.classList.remove("drawer-open"); roomRail.inert = true; roomRail.setAttribute("aria-hidden", "true");
@@ -136,38 +119,10 @@ export function initEvents(app) {
   backdrop.addEventListener("click", () => closeRoomDrawer());
   $("#roomListChat").addEventListener("click", (event) => { if (roomRail.classList.contains("drawer-open") && event.target.closest("[data-room-id]")) closeRoomDrawer(); });
   const activateRoom = app.activateRoom;
-  const pendingAnchorLoads = new Map();
-  function cancelAnchorLoads() {
-    for (const { controller } of pendingAnchorLoads.values()) controller.abort();
-    pendingAnchorLoads.clear();
-  }
-  const showJoin = app.showJoin;
-  app.showJoin = (...args) => { cancelAnchorLoads(); return showJoin(...args); };
-  const removeJoinedRoom = app.removeJoinedRoom;
-  app.removeJoinedRoom = (roomId, options) => {
-    if (app.state.room?.id === roomId) cancelAnchorLoads();
-    return removeJoinedRoom(roomId, options);
-  };
-  function activateNow(id, preserveRoomListGeneration = false) {
-    activateRoom(id, preserveRoomListGeneration); captureReadingPosition();
-    if (roomRail.classList.contains("drawer-open")) closeRoomDrawer();
-  }
   app.activateRoom = (id, preserveRoomListGeneration = false) => {
-    cancelAnchorLoads();
-    const entry = app.state.rooms.get(id), saved = app.state.positions.get(id);
-    const intent = ++app.state.navigationGeneration;
-    if (!entry) return activateNow(id, preserveRoomListGeneration);
-    const readTs = entry.readTs || app.state.lastReadTs.get(id) || 0;
-    const needAnchor = saved?.messageId && !entry.room.messages.some((message) => message.id === saved.messageId);
-    const latest = entry.room.messages.at(-1);
-    const needBoundary = !saved?.messageId && readTs && (!latest || latest.createdAt > readTs && !entry.room.messages.some((message) => message.createdAt <= readTs));
-    if (!needAnchor && !needBoundary) return activateNow(id, preserveRoomListGeneration);
-    const controller = new AbortController();
-    const task = loadAnchorHistory(id, entry, saved?.messageId, app, needBoundary ? readTs : 0, controller.signal).catch(() => {}).finally(() => {
-      if (pendingAnchorLoads.get(id)?.controller === controller) pendingAnchorLoads.delete(id);
-      if (intent === app.state.navigationGeneration) activateNow(id, preserveRoomListGeneration);
-    });
-    pendingAnchorLoads.set(id, { controller, task });
+    activateRoom(id, preserveRoomListGeneration);
+    captureReadingPosition();
+    if (roomRail.classList.contains("drawer-open")) closeRoomDrawer();
   };
   document.querySelectorAll(".locale-select").forEach((select) => {
     select.addEventListener("change", () => {
@@ -335,28 +290,6 @@ export function initEvents(app) {
   $("#inTokenChat").value = LS.token;
   void app.seedFromCache?.().finally(() => app.refreshRoomList());
   if (!$("#joinView").hidden) $("#inRoomId").focus();
-}
-
-async function loadAnchorHistory(roomId, entry, messageId, app, readTs = 0, signal) {
-  let beforeSeq, reachedStart = false;
-  const messages = [];
-  while (!signal?.aborted) {
-    const query = new URLSearchParams({ limit: "100" });
-    if (beforeSeq) query.set("beforeSeq", String(beforeSeq));
-    const result = await app.api(`/rooms/${encodeURIComponent(roomId)}/history?${query}`, { signal });
-    if (signal?.aborted) return;
-    messages.push(...(result.messages || []));
-    const found = messageId ? messages.some((message) => message.id === messageId)
-      : messages.some((message) => message.createdAt > readTs) && messages.some((message) => message.createdAt <= readTs);
-    if (found || !result.hasMore || !result.nextBeforeSeq || result.nextBeforeSeq === beforeSeq) { reachedStart = !result.hasMore; break; }
-    beforeSeq = result.nextBeforeSeq;
-  }
-  if (messageId ? !messages.some((message) => message.id === messageId) : !messages.some((message) => message.createdAt > readTs)) return;
-  const merged = new Map([...entry.room.messages, ...messages].map((message) => [message.id, { ...message, roomId }]));
-  entry.room.messages = [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
-  // Keep the upward-pagination cursor aligned with what the anchor load fetched.
-  if (typeof entry.room.messages[0]?.seq === "number") entry.historyBeforeSeq = entry.room.messages[0].seq;
-  if (reachedStart) entry.historyComplete = true;
 }
 
 function saveAccessToken(button, app) {

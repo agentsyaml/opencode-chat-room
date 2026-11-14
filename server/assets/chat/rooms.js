@@ -115,7 +115,6 @@ export function initRooms(app) {
     app.stopPolling();
     app.state.room = entry.room;
     app.state.myName = entry.name;
-    const savedPosition = app.state.positions.get(roomId);
     app.state.unread = entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
     app.rendered = 0;
     app.firstMessageId = null;
@@ -125,12 +124,10 @@ export function initRooms(app) {
     app.renderHead();
     $("#msgList").textContent = "";
     app.renderMessages(false);
-    const restoredPosition = app.restoreReadingPosition?.(roomId);
-    // A restore above the bottom needs a scroll before it counts as read.
-    app.state.readAnchorGuard = restoredPosition && !restoredPosition.atBottom ? { roomId, ...restoredPosition } : null;
+    app.restoreReadingPosition?.(roomId);
+    app.state.readAnchorGuard = null;
     app.startPolling();
     app.renderMembers();
-    if (!restoredPosition) $("#thread").scrollTop = typeof savedPosition === "number" ? savedPosition : entry.position || $("#thread").scrollHeight;
     $("#msgInput").contentEditable = "true";
     $("#msgInput").setAttribute("aria-disabled", "false"); $("#msgInput").tabIndex = 0;
     $("#msgInput").draftValue = app.state.drafts.get(roomId) || ""; app.renderReplyPreview?.();
@@ -141,7 +138,7 @@ export function initRooms(app) {
     app.hideSendError();
     app.updateBadge();
     app.updateJump();
-    if (!restoredPosition || restoredPosition.atBottom) app.markActiveRoomRead();
+    app.markActiveRoomRead();
     app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
     app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
     void app.refreshRoomList();

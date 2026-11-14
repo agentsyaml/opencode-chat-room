@@ -223,7 +223,9 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.waitForFunction((id: string) => (document.querySelector("#btnCopyId") as HTMLButtonElement | null)?.title.endsWith(id), sourceRoom);
     // Switching rooms replaces the clicked row; the caret belongs in the composer.
     expect(await alice.evaluate(() => document.activeElement?.id)).toBe("msgInput");
-    expect(await alice.locator("#thread").evaluate((thread: HTMLElement) => thread.scrollTop)).toBe(0);
+    // Nothing unread: reopening lands on the live bottom instead of the old scroll offset.
+    const reopenedGap = await alice.locator("#thread").evaluate((thread: HTMLElement) => thread.scrollHeight - thread.scrollTop - thread.clientHeight);
+    expect(reopenedGap).toBeLessThanOrEqual(2);
     await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-light.png"), fullPage: true });
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
     await alice.waitForTimeout(250);

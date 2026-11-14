@@ -10,7 +10,7 @@ import path from "node:path";
 const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
 const token = "chat-ux-local-token";
 
-test.skipIf(!browserModule)("chat messages remain selectable and keep reading position", async () => {
+test.skipIf(!browserModule)("chat messages remain selectable and reopening lands at the bottom", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-ux-"));
   const artifactDir = process.env.CHAT_UI_SCREENSHOT_DIR || stateDir;
@@ -187,16 +187,7 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     expect(trimAfter.id).toBe(trimBefore.id);
     expect(Math.abs(trimAfter.top - trimBefore.top)).toBeLessThanOrEqual(2);
     await page.evaluate(() => { document.querySelector<HTMLElement>("#thread")!.scrollTop = 2500; });
-    // Wait until the scroll is captured as a deliberate non-bottom position so the
-    // anchor read and the position saved on exit agree; a fixed wait races on slow CI.
-    await page.waitForFunction(async (url: string) => {
-      const { app } = await import(url);
-      const thread = document.querySelector<HTMLElement>("#thread")!, edge = thread.getBoundingClientRect();
-      const row = Array.from(document.querySelectorAll<HTMLElement>("#msgList .msg")).find((node) => node.getBoundingClientRect().bottom > edge.top);
-      const saved = app.state.positions.get(app.state.room.id) as any;
-      return Boolean(row && saved && saved.messageId === row.dataset.msgId && saved.atBottom === false);
-    }, "/assets/chat/state.js");
-    const reentryAnchor = await visibleAnchor(page);
+    await page.waitForTimeout(120);
     await page.locator("#btnNewRoom").click();
     await page.locator("#inRoomNameChat").fill("__Test_UXSecond");
     await page.locator("#btnCreateChatRoom").click();
@@ -205,9 +196,10 @@ test.skipIf(!browserModule)("chat messages remain selectable and keep reading po
     await page.locator(`#roomListChat [data-room-id="${roomId}"]`).click();
     await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), roomId);
     await page.locator("#msgList").getByText("Arrived while away").waitFor();
-    const reentryRestored = await visibleAnchor(page);
-    expect(reentryRestored.id).toBe(reentryAnchor.id);
-    expect(Math.abs(reentryRestored.top - reentryAnchor.top)).toBeLessThanOrEqual(5);
+    // Reopening always shows the newest messages, even after a deliberate scroll up.
+    const reentryGap = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.scrollTop - node.clientHeight; });
+    expect(reentryGap).toBeLessThanOrEqual(2);
+    expect(await page.locator("#msgList").getByText("Arrived while away").isVisible()).toBe(true);
     const alignment = await page.evaluate(() => {
       const messages = document.querySelector("#msgList")!.getBoundingClientRect();
       const composer = document.querySelector(".composer-row")!.getBoundingClientRect();
