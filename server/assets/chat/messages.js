@@ -307,18 +307,8 @@ export function initMessages(app) {
       if (anchor) thread.scrollTop += anchor.getBoundingClientRect().top - thread.getBoundingClientRect().top - anchorOffset;
       else thread.scrollTop = oldTop;
     }
-    // A late-loading image below the viewport grows the thread after the scroll
-    // settled. Re-pin only when the growth is exactly the gap the reader had, so
-    // someone reading history is never yanked to the bottom.
-    for (const img of list.querySelectorAll(".msg-text img:not([data-load-guard])")) {
-      if (img.complete && img.naturalWidth) continue;
-      img.dataset.loadGuard = "1";
-      img.addEventListener("load", () => {
-        if (!img.isConnected) return;
-        const thread = $("#thread");
-        if (thread.scrollHeight - thread.scrollTop - thread.clientHeight - img.getBoundingClientRect().height <= 80) thread.scrollTop = thread.scrollHeight;
-      }, { once: true });
-    }
+    // Late growth (images, diagrams, attachments) is handled by the list ResizeObserver:
+    // it re-pins the thread while the reader is following the newest message.
     app.queueReceiptRefresh?.();
     app.queueReceiptObservation?.();
     return { skipped };

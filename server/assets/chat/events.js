@@ -19,6 +19,22 @@ export function initEvents(app) {
     new ResizeObserver(syncHeadBottom).observe(chatHead);
     syncHeadBottom();
   }
+  // Images, diagrams and attachments grow the list after the first paint and the browser
+  // answers with a scroll that looks like the reader moving. Subtract the growth: only a
+  // reader who was already at the bottom gets pinned back.
+  const messageList = $("#msgList");
+  const rememberListMetrics = () => {
+    const thread = $("#thread");
+    app.state.listMetrics = { height: messageList.offsetHeight, top: thread.scrollTop, client: thread.clientHeight };
+  };
+  new ResizeObserver(() => {
+    const thread = $("#thread"), previous = app.state.listMetrics, growth = messageList.offsetHeight - previous.height;
+    // Judge the position before this growth: a reader who was at the bottom stays there,
+    // a reader in history is left alone, and a viewport resize keeps following the anchor.
+    const wasAtBottom = previous.height - previous.top - previous.client <= 80;
+    if (growth > 0 && wasAtBottom) thread.scrollTop = thread.scrollHeight;
+    rememberListMetrics();
+  }).observe(messageList);
   app.showRestoreFailure = (message) => {
     document.documentElement.classList.add("session-restore");
     $("#joinView").hidden = $("#chatView").hidden = true;
@@ -232,6 +248,7 @@ export function initEvents(app) {
   thread.addEventListener("scroll", () => {
     const adjusting = (app.state.resizeScrollAdjusting || app.state.layoutScrollAdjusting)
       && performance.now() > app.state.userScrollIntentUntil;
+    if (!adjusting) rememberListMetrics();
     if (!adjusting || performance.now() <= app.state.userScrollIntentUntil) captureReadingPosition();
     if (!adjusting && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80) void app.markActiveRoomRead(performance.now() <= app.state.userScrollIntentUntil);
     app.queueReceiptRefresh();

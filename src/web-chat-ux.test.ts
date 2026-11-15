@@ -105,11 +105,11 @@ test.skipIf(!browserModule)("chat messages remain selectable and reopening lands
     expect(await page.locator("#msgList .msg [data-copy-message]").count()).toBeGreaterThan(0);
     await checkSelection(page, ".msg-text table");
     await checkSelection(page, ".msg-text pre code");
-    // Align a specific row below the header: a fixed or proportional offset can map to the bottom on short rows.
-    await page.evaluate(() => {
-      const thread = document.querySelector<HTMLElement>("#thread")!, row = document.querySelectorAll<HTMLElement>("#msgList .msg")[10]!;
-      thread.scrollTop += row.getBoundingClientRect().top - thread.getBoundingClientRect().top - 120;
-    });
+    // Scroll with real input: the app only ends "following the tail" for user-driven scrolls.
+    const threadBox = await page.locator("#thread").boundingBox();
+    await page.mouse.move(threadBox!.x + threadBox!.width / 2, threadBox!.y + threadBox!.height / 2);
+    await page.mouse.wheel(0, -3000);
+    await page.waitForFunction(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.clientHeight - node.scrollTop > 400; });
     await page.waitForTimeout(250);
     const before = await visibleAnchor(page);
     await page.screenshot({ path: path.join(artifactDir, "chat-ux-history-before-incoming.png") });

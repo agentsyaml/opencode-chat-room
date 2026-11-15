@@ -123,6 +123,7 @@ export function initRooms(app) {
     app.showChat();
     app.renderHead();
     $("#msgList").textContent = "";
+    app.state.listMetrics = { height: 0, top: 0, client: 0 };
     app.renderMessages(false);
     app.restoreReadingPosition?.(roomId);
     app.state.readAnchorGuard = null;

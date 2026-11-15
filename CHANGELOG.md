@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3 — 2026-11-15
+
+- Keep a room pinned to the live bottom while images, diagrams and attachments finish loading. Late rows used to push the thread down by their full height, so a room opened at the bottom could end up above the newest message; a growth-triggered scroll also counted as the reader scrolling away, which stopped the pin for good. Only real user scrolling ends the pin now.
+
 ## 0.6.2 — 2026-11-15
 
 - Opening a room always lands on the live bottom, including when the previous visit ended mid-history. The saved-position and first-unread landing are gone; they reopened rooms above messages the reader had already seen.

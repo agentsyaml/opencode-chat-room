@@ -338,6 +338,76 @@ test.skipIf(!browserModule)("reopening with nothing unread lands on the live bot
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 
+// Images carry their size inside the bytes, so the row only becomes tall once they arrive.
+test.skipIf(!browserModule)("late-loading images keep a followed thread at the bottom", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-late-images-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="700" height="1200"><rect width="700" height="1200" fill="#ccd"/></svg>');
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.route(`${origin}/late-*.svg`, async (route: any) => {
+      await new Promise((resolve) => setTimeout(resolve, 250 + Math.random() * 500));
+      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: svg });
+    });
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_LateImage");
+    await page.locator("#inRoomName").fill("__Test_LateImages");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    const room = await page.evaluate(async (url: string) => { const { app } = await import(url); return { id: app.state.room.id, sessionID: app.LS.sessionID }; }, "/assets/chat/state.js");
+    for (let index = 0; index < 36; index++) {
+      const image = index % 7 === 5 ? `\n\n<img src="${origin}/late-${index}.svg">` : "";
+      await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: room.sessionID, text: `__Test_late ${index}\n${"Filler line.\n".repeat(3)}${image}` });
+    }
+    await page.locator("#msgList .msg").last().waitFor();
+    await page.waitForTimeout(2000);
+    await page.reload();
+    // Sample once per painted frame: timers can observe a growth that the ResizeObserver
+    // is about to correct before the browser paints, which the reader never sees.
+    await page.evaluate(() => {
+      const samples: number[] = []; (window as any).__gapSamples = samples;
+      // ResizeObserver corrections land in the same frame as the growth, so read the
+      // value after paint: anything else reports a frame the reader never saw.
+      const tick = () => requestAnimationFrame(() => setTimeout(() => {
+        const node = document.querySelector<HTMLElement>("#thread");
+        if (node) samples.push(Math.round(node.scrollHeight - node.clientHeight - node.scrollTop));
+        if (!(window as any).__stopGaps) tick();
+      }, 0));
+      tick();
+    });
+    await page.locator(`#roomListChat [data-room-id="${room.id}"]`).click();
+    await page.locator("#msgList .msg").last().waitFor();
+    await page.waitForTimeout(3000);
+    const gaps: number[] = await page.evaluate(() => { (window as any).__stopGaps = true; return (window as any).__gapSamples; });
+    const images = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLImageElement>("#msgList .msg-text img")).filter((img) => img.complete && img.naturalHeight > 100).length);
+    expect(images).toBeGreaterThan(2);
+    const probe = await page.evaluate(async (url: string) => { const { app } = await import(url); const node = document.querySelector<HTMLElement>("#thread")!; return { follow: app.state.followBottom, gap: Math.round(node.scrollHeight - node.clientHeight - node.scrollTop), jump: !(document.querySelector<HTMLElement>("#btnJump")!).hidden }; }, "/assets/chat/state.js");
+    if (gaps.some((gap) => gap > 2)) console.log("OFF-BOTTOM", JSON.stringify({ gaps, probe }));
+    // One frame can land between the growth and the observer's correction. The stranded
+    // room this test guards against keeps every later frame off the bottom.
+    expect(gaps.filter((gap) => gap > 2).length).toBeLessThanOrEqual(1);
+    expect(gaps.at(-1)).toBeLessThanOrEqual(2);
+    // A resize re-applies the saved position; a capture taken mid-growth must not strand the room.
+    const gap = () => page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return Math.round(node.scrollHeight - node.clientHeight - node.scrollTop); });
+    for (const width of [1180, 1280, 1100]) {
+      await page.setViewportSize({ width, height: 850 });
+      await page.waitForTimeout(300);
+      expect(await gap()).toBeLessThanOrEqual(2);
+    }
+    // A full re-render restores an anchor row; a follower must end up at the bottom anyway.
+    await page.evaluate(async (url: string) => { const { app } = await import(url); app.rerenderMessages(); }, "/assets/chat/state.js");
+    await page.waitForTimeout(200);
+    expect(await gap()).toBeLessThanOrEqual(2);
+  } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
+}, 90000);
+
 async function visibleAnchor(page: any) {
   return page.evaluate(() => {
     const thread = document.querySelector<HTMLElement>("#thread")!, edge = thread.getBoundingClientRect();

@@ -11,7 +11,7 @@ export const app = {
     memberApiUnavailable: new Set(), receiptApiUnavailable: new Set(),
     receipts: new Map(), acknowledgedMessages: new Map(), pendingAcknowledgements: new Map(),
     pendingAction: null, watcherTimer: 0, restored: false, resizeScrollAdjusting: false, layoutScrollAdjusting: false,
-    readAnchorGuard: null, userScrollIntentUntil: 0,
+    readAnchorGuard: null, userScrollIntentUntil: 0, listMetrics: { height: 0, top: 0, client: 0 },
   },
   rendered: 0,
   firstMessageId: null,

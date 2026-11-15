@@ -170,8 +170,10 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-unread.png"), fullPage: true });
     await sourceCard.click();
     await alice.locator(".msg-text").getByText("A background update").waitFor();
-    await alice.locator("#thread").evaluate((thread: HTMLElement) => { thread.scrollTop = 0; });
-    await alice.waitForTimeout(300);
+    const threadBox = await alice.locator("#thread").boundingBox();
+    await alice.mouse.move(threadBox!.x + threadBox!.width / 2, threadBox!.y + threadBox!.height / 2);
+    await alice.mouse.wheel(0, -4000);
+    await alice.waitForFunction(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.clientHeight - node.scrollTop > 80; });
     await alice.locator("#btnJump").waitFor({ state: "visible" });
     await alice.locator("#btnJump").click();
     await sourceCard.locator(".r-badge").waitFor({ state: "detached", timeout: 5000 });
