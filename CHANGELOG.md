@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.5 — 2026-11-15
+
+- Decide whether to follow a growing list by measuring instead of replaying events: subtract the growth in list height from the current distance to the bottom. A reader who was at the bottom stays at the bottom no matter how the browser adjusted the scroll position for the new rows, and a reader in history is never pulled down. A changed viewport height keeps following the saved anchor.
+
 ## 0.6.4 — 2026-11-15
 
 - Forbid the host's built-in question, confirmation, and approval dialogs for any agent that belongs to a room: every question and every manual step goes into the room, even when the person who must answer is the operator of the current session. Native dialogs leave no room record and only reach one human.

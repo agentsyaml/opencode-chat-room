@@ -27,15 +27,15 @@ export function initEvents(app) {
     const thread = $("#thread");
     app.state.listMetrics = { height: messageList.offsetHeight, top: thread.scrollTop, client: thread.clientHeight };
   };
-  const wasAtBottom = () => {
-    const previous = app.state.listMetrics;
-    return previous.height - previous.top - previous.client <= 80;
-  };
   new ResizeObserver(() => {
-    const thread = $("#thread"), growth = messageList.offsetHeight - app.state.listMetrics.height;
-    // Judge the position before this growth: a reader who was at the bottom stays there,
-    // a reader in history is left alone, and a viewport resize keeps following the anchor.
-    if (growth > 0 && wasAtBottom()) thread.scrollTop = thread.scrollHeight;
+    const thread = $("#thread"), previous = app.state.listMetrics;
+    const growth = messageList.offsetHeight - previous.height, gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+    // Whatever the browser did to scrollTop while the list grew, subtracting the growth
+    // recovers the position the reader had before it: at the bottom stays at the bottom,
+    // history stays in history. A changed viewport (composer, window) is not a growth in
+    // this sense, so it keeps following the saved anchor instead.
+    const sameBox = thread.clientHeight === previous.client;
+    if (growth > 0 && sameBox && gap > 1 && gap - growth <= 80) thread.scrollTop = thread.scrollHeight;
     rememberListMetrics();
   }).observe(messageList);
   app.showRestoreFailure = (message) => {
