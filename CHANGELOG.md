@@ -3,6 +3,7 @@
 ## 0.6.5 — 2026-11-15
 
 - Keep a room at the bottom while the reader is following it: any growth of the message list pins the view, instead of deciding from scroll events that arrive in an unpredictable order. Only the reader's own wheel, touch, key, or scrollbar drag ends following, and the view stays still while a pointer gesture or a text selection is in progress. Opening a room, jumping to the latest message, and landing after a resize still end at the bottom.
+  Known issue: the render window sometimes trims while a room is open, which opens a one-frame gap of a few hundred pixels before the next growth pins the view back. Measured once in 26 entries; the jump button never appears and the view recovers on the next frame.
 
 ## 0.6.4 — 2026-11-15
 
