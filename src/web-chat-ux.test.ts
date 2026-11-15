@@ -105,8 +105,11 @@ test.skipIf(!browserModule)("chat messages remain selectable and reopening lands
     expect(await page.locator("#msgList .msg [data-copy-message]").count()).toBeGreaterThan(0);
     await checkSelection(page, ".msg-text table");
     await checkSelection(page, ".msg-text pre code");
-    // Scroll a fraction of the history: a fixed pixel offset clamps to the bottom when rows are short.
-    await page.evaluate(() => { const thread = document.querySelector<HTMLElement>("#thread")!; thread.scrollTop = Math.round((thread.scrollHeight - thread.clientHeight) * 0.4); });
+    // Align a specific row below the header: a fixed or proportional offset can map to the bottom on short rows.
+    await page.evaluate(() => {
+      const thread = document.querySelector<HTMLElement>("#thread")!, row = document.querySelectorAll<HTMLElement>("#msgList .msg")[10]!;
+      thread.scrollTop += row.getBoundingClientRect().top - thread.getBoundingClientRect().top - 120;
+    });
     await page.waitForTimeout(250);
     const before = await visibleAnchor(page);
     await page.screenshot({ path: path.join(artifactDir, "chat-ux-history-before-incoming.png") });
