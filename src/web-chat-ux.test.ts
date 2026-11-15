@@ -53,12 +53,8 @@ test.skipIf(!browserModule)("chat messages remain selectable and reopening lands
     expect(unloadedReceipts.receipts[0].readers.some((reader: any) => reader.sessionID === sessionID)).toBe(false);
     // A poll re-render keeps the row moving, which times out Playwright's "wait for element to be stable".
     await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.stopPolling(), "/assets/chat/state.js");
-    // Dragging the first row used to page older history in by accident, and the arriving page
-    // moved the row mid-gesture. Ask for that page first, then drag a settled recent row.
-    const pageUpBox = await page.locator("#thread").boundingBox();
-    await page.mouse.move(pageUpBox!.x + pageUpBox!.width / 2, pageUpBox!.y + pageUpBox!.height / 2);
-    await page.mouse.wheel(0, -100000);
-    await page.waitForFunction(() => document.querySelectorAll("#msgList [data-msg-id]").length > 100);
+    // Drag a row that is already on screen. Reaching an older row scrolls to the top, which
+    // pages history in, and the arriving page moves the row out from under the pointer.
     await dragSelect(page, `#msgList [data-msg-id]:has(.msg-text:has-text("History 509")) .msg-text`);
     await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.startPolling(), "/assets/chat/state.js");
     await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID, text: "| Left | Right |\n| --- | --- |\n| One | Two |\n\n```js\nconst value = 42;\n```" });
@@ -186,7 +182,7 @@ test.skipIf(!browserModule)("chat messages remain selectable and reopening lands
     if (bottomGap > 2) throw new Error(`New incoming message did not stay at bottom: ${JSON.stringify({ beforeTallGap, bottomGap, scrollMetrics })}`);
     expect(newestVisible).toBe(true);
     await page.evaluate(() => {
-      const thread = document.querySelector<HTMLElement>("#thread")!, row = document.querySelectorAll<HTMLElement>("#msgList .msg")[200]!;
+      const thread = document.querySelector<HTMLElement>("#thread")!, rows = Array.from(document.querySelectorAll<HTMLElement>("#msgList .msg")), row = rows[Math.floor(rows.length / 2)]!;
       thread.scrollTop += row.getBoundingClientRect().top - thread.getBoundingClientRect().top - 8;
     });
     const trimBefore = await visibleAnchor(page);
