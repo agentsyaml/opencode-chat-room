@@ -43,6 +43,17 @@ test.skipIf(!browserModule)("browser selects own and peer message text", async (
     const leftEdgeSelection = await dragSelect(page, `[data-msg-id]:has(.msg-text:has-text("OWN-LINE-0")) .msg-text`, 0, 60);
     const rightEdgeSelection = await dragSelect(page, `[data-msg-id]:has(.msg-text:has-text("OWN-LINE-0")) .msg-text`, 64, 124);
     const reverseSelection = await dragSelect(page, `[data-msg-id]:has(.msg-text:has-text("OWN-LINE-0")) .msg-text`, 300, 60);
+    // A pointer held over the list is a gesture in progress. Growing the list under it
+    // would move the row a drag or a click depends on, so the view must stay put.
+    const gestureBox = await page.locator("#thread").boundingBox();
+    await page.mouse.move(gestureBox!.x + 12, gestureBox!.y + 12);
+    await page.mouse.down();
+    const heldTop = await page.locator("#thread").evaluate((node: HTMLElement) => node.scrollTop);
+    await page.evaluate(() => { const row = document.createElement("div"); row.className = "msg"; row.style.height = "300px"; row.dataset.msgId = "gesture-probe"; document.querySelector("#msgList")!.append(row); });
+    await page.waitForTimeout(150);
+    expect(await page.locator("#thread").evaluate((node: HTMLElement) => node.scrollTop)).toBe(heldTop);
+    await page.evaluate(() => document.querySelector('[data-msg-id="gesture-probe"]')!.remove());
+    await page.mouse.up();
     const codeSelection = await dragSelect(page, ".msg.own .msg-text pre code", 3, 35);
     const selectedBeforePoll = await dragSelect(page, `[data-msg-id]:has(.msg-text:has-text("OWN-LINE-0")) .msg-text`, 90, 220);
     const peerSession = `selection-peer-${Date.now()}`;

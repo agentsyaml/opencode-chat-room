@@ -2,7 +2,7 @@
 
 ## 0.6.5 — 2026-11-15
 
-- Decide whether to follow a growing list by measuring instead of replaying events: subtract the growth in list height from the current distance to the bottom. A reader who was at the bottom stays at the bottom no matter how the browser adjusted the scroll position for the new rows, and a reader in history is never pulled down. A changed viewport height keeps following the saved anchor.
+- Keep a room at the bottom while the reader is following it: any growth of the message list pins the view, instead of deciding from scroll events that arrive in an unpredictable order. Only the reader's own wheel, touch, key, or scrollbar drag ends following, and the view stays still while a pointer gesture or a text selection is in progress. Opening a room, jumping to the latest message, and landing after a resize still end at the bottom.
 
 ## 0.6.4 — 2026-11-15
 

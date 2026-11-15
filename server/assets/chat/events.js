@@ -34,7 +34,10 @@ export function initEvents(app) {
     // first one. Follow while the reader has not scrolled away: then every growth pins.
     // A changed viewport height (composer, window) is not list growth and keeps its anchor.
     const selection = getSelection(), selecting = Boolean(selection && !selection.isCollapsed && messageList.contains(selection.anchorNode));
-    if (grew && sameBox && app.state.followBottom && !selecting && thread.scrollHeight - thread.scrollTop - thread.clientHeight > 1) {
+    // A pointer held over the list is mid-gesture: dragging a selection or a click that
+    // must land where it started. Moving the content under it loses both.
+    if (grew && sameBox && app.state.followBottom && !selecting && !app.state.threadPointerDown
+        && thread.scrollHeight - thread.scrollTop - thread.clientHeight > 1) {
       thread.scrollTop = thread.scrollHeight;
     }
     rememberListMetrics();
@@ -249,13 +252,20 @@ export function initEvents(app) {
   });
   thread.addEventListener("pointerdown", (event) => {
     if (event.clientX >= thread.getBoundingClientRect().right - 18) markScrollIntent();
+    app.state.threadPointerDown = true;
   });
+  const releasePointer = () => { app.state.threadPointerDown = false; };
+  window.addEventListener("pointerup", releasePointer);
+  window.addEventListener("pointercancel", releasePointer);
+  window.addEventListener("blur", releasePointer);
   thread.addEventListener("scroll", () => {
     const adjusting = (app.state.resizeScrollAdjusting || app.state.layoutScrollAdjusting)
       && performance.now() > app.state.userScrollIntentUntil;
     if (!adjusting) {
-      rememberListMetrics();
-      // Only a scroll the reader started ends following; growth and layout shifts do not.
+      // The growth baseline belongs to the observer alone. A scroll caused by the growth
+      // itself arrives before the observer sees the new height, and refreshing the
+      // baseline here would make that growth look like no growth at all.
+      // Only a scroll the reader started ends following; layout shifts do not.
       const gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
       if (gap <= 80) app.state.followBottom = true;
       else if (performance.now() <= app.state.userScrollIntentUntil) app.state.followBottom = false;

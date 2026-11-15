@@ -400,12 +400,22 @@ test.skipIf(!browserModule)("late-loading images keep a followed thread at the b
     const gaps = samples.slice(lastGrowth).map((sample) => sample.gap);
     const images = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLImageElement>("#msgList .msg-text img")).filter((img) => img.complete && img.naturalHeight > 100).length);
     expect(images).toBeGreaterThan(2);
-    const probe = await page.evaluate(async (url: string) => { const { app } = await import(url); const node = document.querySelector<HTMLElement>("#thread")!; return { follow: app.state.followBottom, gap: Math.round(node.scrollHeight - node.clientHeight - node.scrollTop), jump: !(document.querySelector<HTMLElement>("#btnJump")!).hidden }; }, "/assets/chat/state.js");
+    const probe = await page.evaluate(async (url: string) => { const { app } = await import(url); const node = document.querySelector<HTMLElement>("#thread")!; const selection = getSelection(); return { follow: app.state.followBottom, pointer: app.state.threadPointerDown, sel: selection ? `${selection.isCollapsed}:${selection.toString().length}` : "none", gap: Math.round(node.scrollHeight - node.clientHeight - node.scrollTop), jump: !(document.querySelector<HTMLElement>("#btnJump")!).hidden }; }, "/assets/chat/state.js");
     if (gaps.some((gap) => gap > 2)) console.log("OFF-BOTTOM", JSON.stringify({ gaps, probe }));
     // One frame can land between the growth and the observer's correction. The stranded
     // room this test guards against keeps every later frame off the bottom.
     expect(gaps.filter((gap) => gap > 2).length).toBeLessThanOrEqual(1);
     expect(gaps.at(-1)).toBeLessThanOrEqual(2);
+    // The browser can fire the growth's own scroll event before the observer sees the new
+    // height. That event must not erase the baseline the observer compares against.
+    await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>("#msgList")!, thread = document.querySelector<HTMLElement>("#thread")!;
+      const row = document.createElement("div"); row.className = "msg"; row.id = "growth-probe"; row.style.height = "400px"; list.append(row);
+      thread.dispatchEvent(new Event("scroll"));
+    });
+    await page.waitForTimeout(150);
+    expect(await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return Math.round(node.scrollHeight - node.clientHeight - node.scrollTop); })).toBeLessThanOrEqual(2);
+    await page.evaluate(() => document.querySelector("#growth-probe")!.remove());
     // A resize re-applies the saved position; a capture taken mid-growth must not strand the room.
     const gap = () => page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return Math.round(node.scrollHeight - node.clientHeight - node.scrollTop); });
     for (const width of [1180, 1280, 1100]) {
