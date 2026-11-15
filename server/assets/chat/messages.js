@@ -98,6 +98,7 @@ export function initMessages(app) {
   };
   app.jumpToBottom = () => {
     app.state.readAnchorGuard = null;
+    app.state.followBottom = true;
     $("#thread").scrollTop = $("#thread").scrollHeight;
     const entry = app.state.room && app.state.rooms.get(app.state.room.id);
     app.state.unread = entry ? entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0) : 0;

@@ -34,8 +34,12 @@ test.skipIf(!browserModule)("own poll messages never become unread while peer me
       const newest = entry?.room.messages.at(-1)?.createdAt || 0;
       return Boolean(entry && newest > 0 && entry.readTs >= newest);
     }, "/assets/chat/state.js");
-    await page.locator("#thread").evaluate((thread: HTMLElement) => { thread.scrollTop = 0; });
-    await page.waitForTimeout(100);
+    // A reader reaches history with real input; a programmatic write is not a scroll the
+    // product can tell apart from its own layout adjustments.
+    const threadBox = await page.locator("#thread").boundingBox();
+    await page.mouse.move(threadBox!.x + threadBox!.width / 2, threadBox!.y + threadBox!.height / 2);
+    await page.mouse.wheel(0, -20000);
+    await page.waitForFunction(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollTop < 2; });
     const own = await api(origin, `/rooms/${ids.roomId}/messages`, "POST", { sessionID: ids.sessionID, text: "__Test_own_new" });
     const ownID = own.messages.at(-1).id;
     await page.waitForFunction((id: string) => Boolean(document.querySelector(`[data-msg-id="${id}"]`)), ownID);

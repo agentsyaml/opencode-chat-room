@@ -134,6 +134,8 @@ async function jumpToOriginal(roomId, messageId, app) {
   } catch { return; }
   if (!original) return markUnavailable(messageId, roomId, app);
   app.state.positions.set(roomId, { messageId, offset: 0, atBottom: false }); app.savePosition(roomId, { messageId, offset: 0, atBottom: false });
+  // Jumping to an older message is the reader choosing history.
+  app.state.followBottom = false;
   if (app.state.room?.id === roomId && app.state.navigationGeneration === generation) {
     app.state.room = app.state.rooms.get(roomId)?.room || room; app.rerenderMessages();
     const row = document.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`), thread = app.$("#thread");

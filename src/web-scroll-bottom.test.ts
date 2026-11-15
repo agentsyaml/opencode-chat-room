@@ -276,9 +276,12 @@ test.skipIf(!browserModule)("a late-loading image stays pinned to the bottom wit
     await page.waitForTimeout(300);
     const reopened = await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.scrollTop - node.clientHeight; });
     expect(Math.abs(reopened)).toBeLessThan(8);
-    // A reader who scrolled into history must not be yanked to the bottom.
-    await page.evaluate(() => { const node = document.querySelector<HTMLElement>("#thread")!; node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight - 1200); });
-    await page.waitForTimeout(120);
+    // A reader who scrolled into history must not be yanked to the bottom. Real input is
+    // what a reader uses, and it is what ends following.
+    const historyBox = await thread.boundingBox();
+    await page.mouse.move(historyBox!.x + historyBox!.width / 2, historyBox!.y + historyBox!.height / 2);
+    await page.mouse.wheel(0, -4000);
+    await page.waitForFunction(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.clientHeight - node.scrollTop > 1000; });
     const anchorBefore = await visibleAnchor(page);
     await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_ImagePeer", text: `__Test_history_image\n\n![slow](http://127.0.0.1:${slowPort}/slow.png?second)` });
     await page.locator("#msgList").getByText("__Test_history_image").waitFor();

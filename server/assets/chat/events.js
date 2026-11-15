@@ -29,13 +29,14 @@ export function initEvents(app) {
   };
   new ResizeObserver(() => {
     const thread = $("#thread"), previous = app.state.listMetrics;
-    const growth = messageList.offsetHeight - previous.height, gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
-    // Whatever the browser did to scrollTop while the list grew, subtracting the growth
-    // recovers the position the reader had before it: at the bottom stays at the bottom,
-    // history stays in history. A changed viewport (composer, window) is not a growth in
-    // this sense, so it keeps following the saved anchor instead.
-    const sameBox = thread.clientHeight === previous.client;
-    if (growth > 0 && sameBox && gap > 1 && gap - growth <= 80) thread.scrollTop = thread.scrollHeight;
+    const grew = messageList.offsetHeight > previous.height, sameBox = thread.clientHeight === previous.client;
+    // Rows arrive in bursts, so judging each burst on its own loses the reader after the
+    // first one. Follow while the reader has not scrolled away: then every growth pins.
+    // A changed viewport height (composer, window) is not list growth and keeps its anchor.
+    const selection = getSelection(), selecting = Boolean(selection && !selection.isCollapsed && messageList.contains(selection.anchorNode));
+    if (grew && sameBox && app.state.followBottom && !selecting && thread.scrollHeight - thread.scrollTop - thread.clientHeight > 1) {
+      thread.scrollTop = thread.scrollHeight;
+    }
     rememberListMetrics();
   }).observe(messageList);
   app.showRestoreFailure = (message) => {
@@ -95,6 +96,7 @@ export function initEvents(app) {
     // Entering a room always shows the newest messages. Restoring an old anchor
     // leaves the reader above messages that already arrived or grew afterwards.
     thread.scrollTop = thread.scrollHeight;
+    app.state.followBottom = true;
     captureReadingPosition();
     return { messageId: readingPosition?.messageId, atBottom: true };
   };
@@ -251,7 +253,13 @@ export function initEvents(app) {
   thread.addEventListener("scroll", () => {
     const adjusting = (app.state.resizeScrollAdjusting || app.state.layoutScrollAdjusting)
       && performance.now() > app.state.userScrollIntentUntil;
-    if (!adjusting) rememberListMetrics();
+    if (!adjusting) {
+      rememberListMetrics();
+      // Only a scroll the reader started ends following; growth and layout shifts do not.
+      const gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+      if (gap <= 80) app.state.followBottom = true;
+      else if (performance.now() <= app.state.userScrollIntentUntil) app.state.followBottom = false;
+    }
     if (!adjusting || performance.now() <= app.state.userScrollIntentUntil) captureReadingPosition();
     if (!adjusting && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80) void app.markActiveRoomRead(performance.now() <= app.state.userScrollIntentUntil);
     app.queueReceiptRefresh();

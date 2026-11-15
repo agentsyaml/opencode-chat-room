@@ -52,9 +52,12 @@ test.skipIf(!browserModule)("windowed history paginates upward, caches locally, 
     await page.locator("#btnCopyId").click();
     await page.waitForTimeout(1400);
     expect(await page.locator("#roomIdShort").textContent()).toBe(room.id.slice(0, 8));
-    // Scrolling to the top pages older history in without teleporting the viewport.
-    await page.evaluate(() => { const t = document.querySelector<HTMLElement>("#thread")!; t.scrollTop = 0; });
-    await page.waitForFunction(async (url: string) => (await import(url)).app.state.room.messages.length > 100, "/assets/chat/state.js");
+    // Scrolling to the top pages older history in without teleporting the viewport. The
+    // reader reaches the top with real input, which is what ends following the bottom.
+    const threadBox = await page.locator("#thread").boundingBox();
+    await page.mouse.move(threadBox!.x + threadBox!.width / 2, threadBox!.y + threadBox!.height / 2);
+    await page.mouse.wheel(0, -20000);
+    await page.waitForFunction(() => document.querySelectorAll("#msgList [data-msg-id]").length > 100);
     const after = await page.evaluate(() => { const t = document.querySelector<HTMLElement>("#thread")!; return { scrollTop: t.scrollTop, rows: document.querySelectorAll("#msgList [data-msg-id]").length }; });
     expect(after.scrollTop).toBeGreaterThan(0);
     expect(after.rows).toBeGreaterThan(100);
