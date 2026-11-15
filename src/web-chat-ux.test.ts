@@ -51,7 +51,10 @@ test.skipIf(!browserModule)("chat messages remain selectable and reopening lands
     await page.waitForFunction(() => document.querySelectorAll("#msgList .msg").length >= 100);
     const unloadedReceipts = await api(origin, `/rooms/${roomId}/receipts?messageIDs=${unloadedHistoryID}`);
     expect(unloadedReceipts.receipts[0].readers.some((reader: any) => reader.sessionID === sessionID)).toBe(false);
+    // A poll re-render keeps the row moving, which times out Playwright's "wait for element to be stable".
+    await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.stopPolling(), "/assets/chat/state.js");
     await dragSelect(page, ".msg.own .msg-text");
+    await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.startPolling(), "/assets/chat/state.js");
     await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID, text: "| Left | Right |\n| --- | --- |\n| One | Two |\n\n```js\nconst value = 42;\n```" });
     await page.locator(".msg-text table").waitFor();
     await page.locator(".msg-text pre code").waitFor();
