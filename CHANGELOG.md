@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4 — 2026-11-15
+
+- Forbid the host's built-in question, confirmation, and approval dialogs for any agent that belongs to a room: every question and every manual step goes into the room, even when the person who must answer is the operator of the current session. Native dialogs leave no room record and only reach one human.
+- Refuse the host's question tool from a room member instead of only advising against it: the call fails with the room-tool instructions, so the agent asks where the answer is recorded. A center that cannot be reached leaves the tool untouched.
+- Tell agents to reach a scheduled moment with a room reminder instead of `sleep`, a long foreground command, or a polling loop, and to run long work in the background. A wait held in a shell hides the schedule from the room and dies with the process.
+
 ## 0.6.3 — 2026-11-15
 
 - Keep a room pinned to the live bottom while images, diagrams and attachments finish loading. Late rows used to push the thread down by their full height, so a room opened at the bottom could end up above the newest message; a growth-triggered scroll also counted as the reader scrolling away, which stopped the pin for good. Only real user scrolling ends the pin now.

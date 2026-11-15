@@ -27,12 +27,15 @@ export function initEvents(app) {
     const thread = $("#thread");
     app.state.listMetrics = { height: messageList.offsetHeight, top: thread.scrollTop, client: thread.clientHeight };
   };
+  const wasAtBottom = () => {
+    const previous = app.state.listMetrics;
+    return previous.height - previous.top - previous.client <= 80;
+  };
   new ResizeObserver(() => {
-    const thread = $("#thread"), previous = app.state.listMetrics, growth = messageList.offsetHeight - previous.height;
+    const thread = $("#thread"), growth = messageList.offsetHeight - app.state.listMetrics.height;
     // Judge the position before this growth: a reader who was at the bottom stays there,
     // a reader in history is left alone, and a viewport resize keeps following the anchor.
-    const wasAtBottom = previous.height - previous.top - previous.client <= 80;
-    if (growth > 0 && wasAtBottom) thread.scrollTop = thread.scrollHeight;
+    if (growth > 0 && wasAtBottom()) thread.scrollTop = thread.scrollHeight;
     rememberListMetrics();
   }).observe(messageList);
   app.showRestoreFailure = (message) => {

@@ -2,6 +2,7 @@ import type { Config, Plugin, PluginInput, ToolDefinition } from "@opencode-ai/p
 import type { V2Runtime } from "./v2-plugin";
 import type { QueueTransport } from "./queue-transport";
 import { fileURLToPath } from "node:url";
+import { request } from "./center-client";
 
 const bundledSkillsPath = fileURLToPath(new URL("../skills", import.meta.url));
 
@@ -14,6 +15,7 @@ export function createV1Server(deps: {
   checkInbox(runtime: V2Runtime, sessionID: string): Promise<void>;
   wake(runtime: V2Runtime, sessions: ReadonlySet<string>): Promise<void>;
   central: boolean;
+  hasRooms?(runtime: V2Runtime, sessionID: string): Promise<boolean>;
 }) : Plugin {
   return async (input) => {
     const sessions = new Set<string>();
@@ -24,6 +26,10 @@ export function createV1Server(deps: {
     };
     const runtime = deps.runtime(input, transport);
     const adminTool = deps.admin;
+    const hasRooms = deps.hasRooms ?? (async (runtime: V2Runtime, sessionID: string) => {
+      const rooms = await request(runtime.center, `/rooms?sessionID=${encodeURIComponent(sessionID)}`, "GET");
+      return Array.isArray(rooms) && rooms.length > 0;
+    });
     let timer: ReturnType<typeof setInterval> | undefined;
     if (deps.central) {
       const sweep = (pollInbox: boolean) => void deps.run(runtime, async () => {
@@ -58,6 +64,18 @@ export function createV1Server(deps: {
         };
       },
       dispose: async () => { if (timer) clearInterval(timer); },
+      // A session that belongs to a room must ask there, where the question is recorded
+      // and every member sees it. Questions asked through the host dialog reach one person.
+      "tool.execute.before": async (hook: { tool: string; sessionID: string }) => {
+        if (hook.tool !== "question") return;
+        let member = false;
+        try {
+          member = await deps.run(runtime, () => hasRooms(runtime, hook.sessionID));
+        } catch {
+          return; // A center that cannot answer must not block the agent's tooling.
+        }
+        if (member) throw new Error("Do not ask through the host dialog while this session belongs to a room. Send the question in the room instead: room tool, action send, isQuestion true, with the room ID and enough context for the human to answer.");
+      },
       "chat.message": async (event: { sessionID: string }) => {
         sessions.add(event.sessionID);
         await deps.run(runtime, async () => {

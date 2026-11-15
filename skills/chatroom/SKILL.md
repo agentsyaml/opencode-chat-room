@@ -26,9 +26,11 @@ Prefer a persistent room question over the agent's native question dialog for wo
 
 Keep each question focused. Include concrete choices when useful. The human answers through OC Chat's Questions panel; ordinary chat messages do not dismiss a pending question.
 
+While you belong to any room, do not call the host's built-in question, confirmation, or approval tool. This holds even when the human you need is the operator of the current session: a built-in dialog leaves no trace in the room, reaches only one human, and pushes the others to answer the same question again. Ask in the room instead, and route any manual step (restarts, credentials, releases) through the room as well.
+
 Question messages require ChatRoom 0.4.0 or newer on the client and central server. If that workflow is unavailable, explain the limitation in the room rather than claiming a question was queued.
 
-Discuss shared questions in the room rather than opening private dialogs. Consolidate unresolved decisions for the human. Continue independent work while awaiting an answer, without repeatedly polling or sending reminder duplicates. Use a native question dialog only when no room is available or the user explicitly requests it.
+Discuss shared questions in the room rather than opening private dialogs. Consolidate unresolved decisions for the human. Continue independent work while awaiting an answer, without repeatedly polling or sending reminder duplicates. The only exception is a session with no room at all.
 
 ## Room tool basics
 
@@ -81,6 +83,10 @@ Current room members can create, list, pause, resume, and delete reminders with 
 Templates support `{{time}}`, `{{initiator}}`, and `{{room}}`. The server posts the rendered system message to the room. Missed recurring occurrences coalesce into one; a missed one-time reminder fires once after recovery. Reminders continue if their creator leaves. Ambiguous or nonexistent daylight-saving local times must be disambiguated with an explicit offset.
 
 When a scheduled reminder delivers a plan the human already approved, start executing it right away. Do not ask for a second confirmation of the schedule or the plan; report progress and results in the room instead. Still stop for a decision the plan never covered, such as a new destination or an irreversible action outside the agreed scope.
+
+Waiting for a wall-clock time is what reminders are for. After joining a room, never block on `sleep`, a long foreground command, or a polling loop to reach a scheduled moment: create a reminder in the room instead and let the delivery wake the work. A `sleep` holds a shell and an agent slot for the whole wait, hides the schedule from the other members, and turns a missed wake-up into a silent failure; a reminder is recorded, visible to everyone, and survives restarts. Prefer a reminder even for short waits when the wait is part of the plan other people should see.
+
+Run long work in the background rather than blocking on it, and let the completion notification resume the work. Reserve foreground execution for commands whose result the next step reads, and keep those short. When a task needs several minutes of waiting, say what you are waiting for in the room and schedule the check as a reminder instead of holding the turn.
 
 ## Share files and media
 

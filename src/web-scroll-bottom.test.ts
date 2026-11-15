@@ -177,9 +177,13 @@ test.skipIf(!browserModule)("sending while reading history keeps the position an
       const { app } = await import(url), entry = app.state.rooms.get(app.state.room.id);
       return entry.readTs >= entry.room.messages.at(-1).createdAt;
     }, "/assets/chat/state.js");
+    // Scroll with real input: a reader's own scrolling is what the position must follow.
+    const historyBox = await page.locator("#thread").boundingBox();
+    await page.mouse.move(historyBox!.x + historyBox!.width / 2, historyBox!.y + historyBox!.height / 2);
+    await page.mouse.wheel(0, -10000);
+    await page.waitForFunction(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollHeight - node.clientHeight - node.scrollTop > 200; });
     const before = await page.evaluate(async (url: string) => {
       const { app } = await import(url), thread = document.querySelector<HTMLElement>("#thread")!;
-      thread.scrollTop = 0; await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       app.captureReadingPosition();
       return { scrollTop: thread.scrollTop, readTs: app.state.rooms.get(app.state.room.id).readTs, rows: document.querySelectorAll("#msgList [data-msg-id]").length };
     }, "/assets/chat/state.js");
@@ -372,12 +376,13 @@ test.skipIf(!browserModule)("late-loading images keep a followed thread at the b
     // Sample once per painted frame: timers can observe a growth that the ResizeObserver
     // is about to correct before the browser paints, which the reader never sees.
     await page.evaluate(() => {
-      const samples: number[] = []; (window as any).__gapSamples = samples;
+      const samples: Array<{ gap: number; height: number }> = []; (window as any).__gapSamples = samples;
       // ResizeObserver corrections land in the same frame as the growth, so read the
-      // value after paint: anything else reports a frame the reader never saw.
+      // value after paint: anything else reports a frame the reader never saw. Each
+      // sample keeps the list height so a still-growing layout can be told apart.
       const tick = () => requestAnimationFrame(() => setTimeout(() => {
-        const node = document.querySelector<HTMLElement>("#thread");
-        if (node) samples.push(Math.round(node.scrollHeight - node.clientHeight - node.scrollTop));
+        const node = document.querySelector<HTMLElement>("#thread"), list = document.querySelector<HTMLElement>("#msgList");
+        if (node && list) samples.push({ gap: Math.round(node.scrollHeight - node.clientHeight - node.scrollTop), height: list.offsetHeight });
         if (!(window as any).__stopGaps) tick();
       }, 0));
       tick();
@@ -385,7 +390,11 @@ test.skipIf(!browserModule)("late-loading images keep a followed thread at the b
     await page.locator(`#roomListChat [data-room-id="${room.id}"]`).click();
     await page.locator("#msgList .msg").last().waitFor();
     await page.waitForTimeout(3000);
-    const gaps: number[] = await page.evaluate(() => { (window as any).__stopGaps = true; return (window as any).__gapSamples; });
+    const samples: Array<{ gap: number; height: number }> = await page.evaluate(() => { (window as any).__stopGaps = true; return (window as any).__gapSamples; });
+    // While the list is still growing the intermediate position is not what the reader
+    // acts on; once the last row settles the thread must be at the bottom and stay there.
+    const lastGrowth = samples.reduce((last, sample, index) => index > 0 && sample.height !== samples[index - 1]!.height ? index : last, 0);
+    const gaps = samples.slice(lastGrowth).map((sample) => sample.gap);
     const images = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLImageElement>("#msgList .msg-text img")).filter((img) => img.complete && img.naturalHeight > 100).length);
     expect(images).toBeGreaterThan(2);
     const probe = await page.evaluate(async (url: string) => { const { app } = await import(url); const node = document.querySelector<HTMLElement>("#thread")!; return { follow: app.state.followBottom, gap: Math.round(node.scrollHeight - node.clientHeight - node.scrollTop), jump: !(document.querySelector<HTMLElement>("#btnJump")!).hidden }; }, "/assets/chat/state.js");

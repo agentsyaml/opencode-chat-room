@@ -240,7 +240,12 @@ async function reconciliationWaitsForVisibleBottom(page: any, origin: string, ar
   const id = await createRoom(page, "Reconcile room"), sid = await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.LS.sessionID, "/assets/chat/state.js");
   for (let i = 0; i < 8; i++) await api(origin, `/rooms/${id}/messages`, "POST", { sessionID: sid, text: `History ${i} ${"word ".repeat(80)}` });
   await page.reload(); await switchTo(page, id);
-  const thread = page.locator("#thread"); await thread.evaluate((node: HTMLElement) => { node.scrollTop = 0; });
+  const thread = page.locator("#thread");
+  // A reader reaching the top does it with real input, which is what stops the landing pin.
+  const threadBox = await thread.boundingBox();
+  await page.mouse.move(threadBox!.x + threadBox!.width / 2, threadBox!.y + threadBox!.height / 2);
+  await page.mouse.wheel(0, -10000);
+  await page.waitForFunction(() => { const node = document.querySelector<HTMLElement>("#thread")!; return node.scrollTop < 2; });
   const reads: string[] = [];
   page.on("request", (request: any) => {
     if (request.method() === "POST" && new URL(request.url()).pathname === "/read") reads.push(request.postDataJSON().roomId);
