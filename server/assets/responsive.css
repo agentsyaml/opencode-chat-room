@@ -145,20 +145,20 @@
     #roomListChat .room-row { height: auto; padding: 10px 12px; }
     #roomListChat .r-meta { font-size: 12px; }
     #roomListChat .r-preview { display: block; }
-    #chatView > .chat-head { grid-column: 1; grid-row: 1; flex-wrap: nowrap; align-items: center; padding: 9px 12px; gap: 8px; }
+    #chatView > .chat-head { grid-column: 1; grid-row: 1; flex-wrap: wrap; align-items: center; padding: 9px 12px; gap: 6px; }
     #chatView > .conn-bar { grid-column: 1; grid-row: 2; }
     #chatView > .msg-scroll { grid-column: 1; grid-row: 3; }
     #chatView > .composer { grid-column: 1; grid-row: 4; }
-    .chat-head-actions { flex: none; flex-wrap: nowrap; gap: 4px; }
+    .chat-head-actions { flex: 1 1 100%; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; }
     .chat-head-actions > .locale-control { display: none; }
-    .chat-head-main { flex: 1; min-width: 0; }
+    .chat-head-main { flex: 1 1 100%; min-width: 0; }
     .room-title-row { gap: 6px; }
     .chat-head-main h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
     .chat-head .chip { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; font-size: 0; }
     #chatView > .chat-head .action-icon { display: block; }
     .rooms-drawer-trigger { display: grid; flex: none; }
     #btnQuestions .question-badge { position: absolute; top: -5px; right: -5px; margin: 0; font-size: 10px; }
-    #questionPanel, #announcementPanel { position: fixed; top: 70px; left: 12px; right: 12px; width: auto; max-height: calc(100dvh - 92px); }
+    #questionPanel, #announcementPanel, #reminderPanel, #memberPanel, #roomOptions { position: fixed; top: var(--chat-head-bottom, 116px); left: 12px; right: 12px; width: auto; max-height: calc(100dvh - 132px); overflow: auto; }
     .room-options-panel { right: 0; left: auto; }
     .thread { padding: 14px 12px 6px; }
     .msg-text { max-width: 92%; font-size: 15px; }

@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.6.2 — 2026-11-15
 
 - Opening a room always lands on the live bottom, including when the previous visit ended mid-history. The saved-position and first-unread landing are gone; they reopened rooms above messages the reader had already seen.
 - Treat a thread within 80px of the bottom as the bottom when saving the position, following new messages, and restoring layout after an image expands, matching the read and jump-to-latest thresholds.
+- On phones, put the room name and the action buttons on separate header rows so a long title is no longer squeezed to a few characters.
+- Give the Reminders button its bell icon on phones instead of an empty circle, and open every header panel below the header with 12px side margins so no panel runs off screen.
 
 ## 0.6.1 — 2026-11-14
 

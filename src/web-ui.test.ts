@@ -242,6 +242,28 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.setViewportSize({ width: 768, height: 900 }); const tabletHeader = await alice.evaluate(() => { const actions = document.querySelector<HTMLElement>(".chat-head-actions")!, options = document.querySelector<HTMLElement>("#btnRoomOptions")!; return { rail: getComputedStyle(document.querySelector(".room-rail")!).display, drawerTrigger: getComputedStyle(document.querySelector("#btnRoomsDrawer")!).display, header: actions.getBoundingClientRect().top, options: options.getBoundingClientRect().top, overflow: document.documentElement.scrollWidth > innerWidth }; });
     expect(tabletHeader.rail).toBe("flex"); expect(tabletHeader.drawerTrigger).toBe("none"); expect(tabletHeader.options).toBe(tabletHeader.header); expect(tabletHeader.overflow).toBe(false); await alice.screenshot({ path: path.join(screenshotDir, "chat-tablet-768.png"), fullPage: true });
     await alice.setViewportSize({ width: 375, height: 812 }); expect(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true); const enMobileGeometry = await localeGeometry(alice);
+    const mobileHead = await alice.evaluate(() => {
+      const head = document.querySelector<HTMLElement>("#chatView > .chat-head")!, main = document.querySelector<HTMLElement>(".chat-head-main")!, actions = document.querySelector<HTMLElement>(".chat-head-actions")!;
+      const chips = Array.from(document.querySelectorAll<HTMLElement>(".chat-head-actions .chip"));
+      return { headBottom: head.getBoundingClientRect().bottom, mainBottom: main.getBoundingClientRect().bottom, actionsTop: actions.getBoundingClientRect().top, missingIcons: chips.filter((chip) => !chip.querySelector("svg")).map((chip) => chip.id) };
+    });
+    expect(mobileHead.missingIcons).toEqual([]);
+    expect(mobileHead.actionsTop).toBeGreaterThanOrEqual(mobileHead.mainBottom - 1);
+    for (const [trigger, panel] of [["#btnQuestions", "#questionPanel"], ["#btnReminders", "#reminderPanel"], ["#btnAnnouncements", "#announcementPanel"], ["#btnMembers", "#memberPanel"], ["#btnRoomOptions", "#roomOptions"]]) {
+      await alice.locator(trigger).click();
+      const panelBox = await alice.locator(panel).boundingBox();
+      expect(panelBox).not.toBeNull();
+      expect(panelBox!.x).toBeGreaterThanOrEqual(0);
+      expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(376);
+      expect(panelBox!.y).toBeGreaterThanOrEqual(mobileHead.headBottom);
+      await alice.locator(trigger).click();
+      await alice.locator(panel).waitFor({ state: "hidden" });
+    }
+    await alice.setViewportSize({ width: 320, height: 700 });
+    const narrow = await alice.evaluate(() => ({ pageX: document.documentElement.scrollWidth - innerWidth, title: document.querySelector<HTMLElement>("#roomName")!.getBoundingClientRect().width }));
+    expect(narrow.pageX).toBeLessThanOrEqual(1);
+    expect(narrow.title).toBeGreaterThan(100);
+    await alice.setViewportSize({ width: 375, height: 812 });
     await alice.screenshot({ path: path.join(screenshotDir, "chat-mobile.png"), fullPage: true });
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
     const zhMobileGeometry = await localeGeometry(alice);

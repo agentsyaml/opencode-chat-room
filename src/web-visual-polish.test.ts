@@ -61,7 +61,7 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
             });
             return {
               viewport: [innerWidth, innerHeight], page: [root.scrollWidth - root.clientWidth, root.scrollHeight - root.clientHeight], chat: rect("#chatView"),
-              header: rect(".chat-head"), headerParts: Array.from(document.querySelectorAll(".chat-head-main, .chat-head-actions")).map((node) => { const box = node.getBoundingClientRect(); return { left: box.left, right: box.right }; }),
+              header: rect(".chat-head"), headerParts: Array.from(document.querySelectorAll(".chat-head-main, .chat-head-actions")).map((node) => { const box = node.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom }; }),
               headerControls, thread: rect("#thread"), threadBottomGap: thread.scrollHeight - thread.clientHeight - thread.scrollTop,
               composer: rect(".composer"), attachmentTray: rect("#attachmentTray"), rail: getComputedStyle(document.querySelector(".room-rail")!).display,
               attachmentActions: Array.from(document.querySelectorAll("#attachmentList button")).map((button) => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height, label: button.textContent?.trim() })),
@@ -73,8 +73,13 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
           expect(metrics.chat.width).toBeLessThanOrEqual(width);
           expect(metrics.headerParts[1].right).toBeLessThanOrEqual(metrics.header.x + metrics.header.width);
           expect(metrics.headerParts[0].left).toBeGreaterThanOrEqual(metrics.header.x);
-          expect(metrics.headerParts[0].right).toBeLessThanOrEqual(metrics.headerParts[1].left);
-          if (width <= 760) expect(metrics.headerControls[0].right).toBeLessThanOrEqual(metrics.headerParts[1].left);
+          if (width <= 760) {
+            expect(metrics.headerParts[0].bottom).toBeLessThanOrEqual(metrics.headerParts[1].top + 1);
+            expect(metrics.headerControls[0].right).toBeLessThanOrEqual(metrics.header.x + metrics.header.width);
+          } else {
+            expect(metrics.headerParts[0].right).toBeLessThanOrEqual(metrics.headerParts[1].left);
+            expect(metrics.headerControls[0].right).toBeLessThanOrEqual(metrics.headerParts[1].left);
+          }
           expect(metrics.headerControls.every((control: any) => control.icons === 1)).toBe(true);
           expect(metrics.headerControls.every((control: any) => control.fill === "none" && control.stroke !== "none")).toBe(true);
           expect(metrics.headerControls.every((control: any) => control.iconDisplay === (width <= 900 ? "block" : "none"))).toBe(true);

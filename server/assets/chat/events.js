@@ -12,6 +12,13 @@ export function initEvents(app) {
     $("#msgInput").focus({ preventScroll: true });
   };
   document.addEventListener("click", () => requestAnimationFrame(() => app.focusComposer?.()));
+  // Mobile panels sit below the header, whose height depends on the title and locale.
+  const chatHead = document.querySelector("#chatView > .chat-head");
+  if (chatHead) {
+    const syncHeadBottom = () => document.documentElement.style.setProperty("--chat-head-bottom", `${Math.round(chatHead.getBoundingClientRect().bottom + 8)}px`);
+    new ResizeObserver(syncHeadBottom).observe(chatHead);
+    syncHeadBottom();
+  }
   app.showRestoreFailure = (message) => {
     document.documentElement.classList.add("session-restore");
     $("#joinView").hidden = $("#chatView").hidden = true;
