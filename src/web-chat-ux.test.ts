@@ -245,32 +245,45 @@ async function selectedPalette(page: any, selector: string) {
 }
 
 async function dragSelect(page: any, selector: string) {
-  const bubble = page.locator(selector).first();
+  // Pin the node: an older page can prepend while we drag, and a re-resolved ".first()" would then be off-screen.
+  let bubble = (await page.locator(selector).first().elementHandle())!;
   await bubble.scrollIntoViewIfNeeded();
-  const points = await bubble.evaluate((element: HTMLElement) => {
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), nodes: Text[] = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode as Text);
-    const text = nodes.map((node) => node.data).join(""), start = Math.min(8, Math.floor(text.length / 4)), end = Math.min(text.length - 1, start + 80);
-    const at = (offset: number, trailing: boolean) => {
-      let base = 0;
-      for (const node of nodes) {
-        if (offset < base + node.length) {
-          const range = document.createRange(), index = offset - base;
-          range.setStart(node, index); range.setEnd(node, Math.min(index + 1, node.length));
-          const rect = range.getBoundingClientRect();
-          return { x: trailing ? rect.right - .5 : rect.left + .5, y: rect.top + rect.height / 2 };
-        }
-        base += node.length;
-      }
-      throw new Error("Message text is too short to select");
-    };
-    return { start: at(start, false), end: at(end, true) };
-  });
-  await page.mouse.move(points.start.x, points.start.y);
-  await page.mouse.down();
-  await page.mouse.move(points.end.x, points.end.y, { steps: 18 });
-  await page.mouse.up();
-  const text = await page.evaluate(() => getSelection()?.toString() || "");
+  let text = "";
+  for (let attempt = 0; attempt < 3 && text.length <= 2; attempt++) {
+    let points;
+    try {
+      points = await bubble.evaluate((element: HTMLElement) => {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), nodes: Text[] = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+        const text = nodes.map((node) => node.data).join(""), start = Math.min(8, Math.floor(text.length / 4)), end = Math.min(text.length - 1, start + 80);
+        const at = (offset: number, trailing: boolean) => {
+          let base = 0;
+          for (const node of nodes) {
+            if (offset < base + node.length) {
+              const range = document.createRange(), index = offset - base;
+              range.setStart(node, index); range.setEnd(node, Math.min(index + 1, node.length));
+              const rect = range.getBoundingClientRect();
+              return { x: trailing ? rect.right - .5 : rect.left + .5, y: rect.top + rect.height / 2 };
+            }
+            base += node.length;
+          }
+          throw new Error("Message text is too short to select");
+        };
+        return { start: at(start, false), end: at(end, true) };
+      });
+    } catch {
+      // The pinned row was pruned by a re-render; pick a fresh one.
+      bubble = (await page.locator(selector).first().elementHandle())!;
+      await bubble.scrollIntoViewIfNeeded();
+      continue;
+    }
+    await page.mouse.move(points.start.x, points.start.y);
+    await page.mouse.down();
+    await page.mouse.move(points.end.x, points.end.y, { steps: 18 });
+    await page.mouse.up();
+    text = await page.evaluate(() => getSelection()?.toString() || "");
+    if (text.length <= 2) await page.waitForTimeout(150);
+  }
   expect(text.length).toBeGreaterThan(2);
   return text;
 }
