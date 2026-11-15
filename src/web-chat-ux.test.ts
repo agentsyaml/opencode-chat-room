@@ -253,7 +253,9 @@ async function selectedPalette(page: any, selector: string) {
 async function dragSelect(page: any, selector: string) {
   // Pin the node: an older page can prepend while we drag, and a re-resolved ".first()" would then be off-screen.
   let bubble = (await page.locator(selector).first().elementHandle())!;
-  await bubble.scrollIntoViewIfNeeded();
+  // Centre the row: "if needed" can leave a tall bubble straddling the top edge, and the
+  // computed drag points then sit outside the scroller.
+  await bubble.evaluate((element: HTMLElement) => element.scrollIntoView({ block: "center" }));
   let text = "";
   for (let attempt = 0; attempt < 3 && text.length <= 2; attempt++) {
     let points;
@@ -280,7 +282,7 @@ async function dragSelect(page: any, selector: string) {
     } catch {
       // The pinned row was pruned by a re-render; pick a fresh one.
       bubble = (await page.locator(selector).first().elementHandle())!;
-      await bubble.scrollIntoViewIfNeeded();
+      await bubble.evaluate((element: HTMLElement) => element.scrollIntoView({ block: "center" }));
       continue;
     }
     await page.mouse.move(points.start.x, points.start.y);
