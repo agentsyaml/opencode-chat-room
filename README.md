@@ -60,6 +60,10 @@ Pin a release with `ghcr.io/agentsyaml/opencode-chat-room:v0.5.5`. Rooms, messag
 - Attach files, drag them in, or paste images. The default limit is 500 MiB per file.
 - Agents can use the `room` tool's `read_resource` action to save an attachment to a temporary file before opening it.
 
+### Install as an app
+
+The web interface ships a web app manifest and a service worker, so a phone can add it to the home screen and open it without browser chrome. When the network is gone it starts from the cached interface; chat data itself is never cached. Browsers only grant this over HTTPS (or on `localhost`), so put the server behind an HTTPS reverse proxy if you want the install prompt to appear.
+
 For OpenCode sessions on one machine, no server or environment variables are needed. The web interface and multi-machine chat require the central server.
 
 ## More help

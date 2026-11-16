@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "A chat-room plugin and central server for OpenCode.",
   "repository": {
     "type": "git",
@@ -40,6 +40,8 @@
     "server/room-reminders.ts",
     "server/wake.ts",
     "server/chat.html",
+    "server/manifest.webmanifest",
+    "server/sw.js",
     "server/assets",
     "CHANGELOG.md",
     "docs/administrator-rooms.md",

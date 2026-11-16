@@ -95,13 +95,15 @@ test.skipIf(!browserModule)("restore blocks login, retries transient errors, and
       }
       if (process.env.CHAT_UI_SCREENSHOT_DIR && round < 4) await owner.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, `restore-${width}-${locale}-${scheme}.png`), fullPage: true });
     }
-    const fresh = await context.newPage(); let releaseFresh!: () => void, freshRequested!: () => void, initialHtml = "";
+    const fresh = await context.newPage(); let releaseFresh!: () => void, freshRequested!: () => void;
     const freshGate = new Promise<void>((resolve) => { releaseFresh = resolve; }), freshSeen = new Promise<void>((resolve) => { freshRequested = resolve; });
-    await fresh.route("**/chat", async (route: BrowserRoute) => { const response = await route.fetch(); initialHtml = await response.text(); await route.fulfill({ response, body: initialHtml }); });
     await fresh.route("**/rooms?sessionID=*", async (route: BrowserRoute) => { freshRequested(); await freshGate; await route.continue(); });
     let joins = 0; fresh.on("request", (request: BrowserRequest) => { if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/join")) joins++; });
+    // The shell is read from the navigation response: the service worker serves it, so a
+    // route on the same URL never fires.
+    const shellResponse = fresh.waitForResponse((response: any) => new URL(response.url()).pathname === "/chat");
     const freshLoad = fresh.goto(`${origin}/chat`); await freshSeen;
-    expect(initialHtml).toContain('<html lang="en" class="session-restore">');
+    expect(await (await shellResponse).text()).toContain('<html lang="en" class="session-restore">');
     expect(await fresh.locator("#joinView").isVisible()).toBe(false);
     expect(await fresh.evaluate(() => localStorage.getItem("chat.browserIdentity"))).not.toBeNull();
     expect(await fresh.evaluate(() => [sessionStorage.getItem("chat.roomId"), sessionStorage.getItem("chat.joinedRoomIds")])).toEqual([null, null]);

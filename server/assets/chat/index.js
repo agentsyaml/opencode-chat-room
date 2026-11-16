@@ -12,6 +12,7 @@ import { initAttachments } from "./attachments.js";
 import { initReplies } from "./replies.js";
 import { initHistoryLoader } from "./history-loader.js";
 import { initReminders } from "./reminders.js";
+import { initPwa } from "./pwa.js";
 
 initMentions(app);
 initMessages(app);
@@ -26,3 +27,4 @@ initEvents(app);
 initAnnouncements(app);
 initReminders(app);
 initAdmin(app);
+initPwa();

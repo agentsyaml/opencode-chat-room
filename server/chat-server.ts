@@ -94,6 +94,26 @@ async function handle(req: Request): Promise<Response> {
       },
     });
   }
+  // The install surface lives at the origin root so the worker controls /chat, not /assets.
+  if (req.method === "GET" && p === "/manifest.webmanifest") {
+    const body = await fs.readFile(path.join(import.meta.dir, "manifest.webmanifest"), "utf8").catch(() => null);
+    if (body === null) return json({ error: "manifest not found" }, 404);
+    return new Response(body, {
+      headers: { "Content-Type": "application/manifest+json; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }
+  if (req.method === "GET" && p === "/sw.js") {
+    const body = await fs.readFile(path.join(import.meta.dir, "sw.js"), "utf8").catch(() => null);
+    if (body === null) return json({ error: "service worker not found" }, 404);
+    const version = (await chatVersionTag()) || "dev";
+    return new Response(body.replaceAll("{{version}}", version), {
+      headers: {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Service-Worker-Allowed": "/",
+      },
+    });
+  }
   if (req.method === "GET" && p.startsWith("/assets/")) {
     let relative: string;
     try { relative = decodeURIComponent(p.slice("/assets/".length)); }

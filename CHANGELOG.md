@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.6 — 2026-11-16
+
+- Install the chat as an app: `/manifest.webmanifest` carries the name, icons, theme colour and `standalone` display, so a phone can add it to the home screen and open it without browser chrome.
+- Start from the cached shell when the network is gone. A service worker precaches `/chat`, its styles, icons and the module graph it imports. Chat data is never cached: a room cannot show a deleted message or a stale unread count.
+- Replace the worker on release: `/sw.js` carries the package version, so an upgrade installs a fresh cache, drops the old one, and the page reloads once into it.
+
 ## 0.6.5 — 2026-11-15
 
 - Keep a room at the bottom while the reader is following it: any growth of the message list pins the view, instead of deciding from scroll events that arrive in an unpredictable order. Only the reader's own wheel, touch, key, or scrollbar drag ends following, and the view stays still while a pointer gesture or a text selection is in progress. Opening a room, jumping to the latest message, and landing after a resize still end at the bottom.
