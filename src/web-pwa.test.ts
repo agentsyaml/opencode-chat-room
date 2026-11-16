@@ -22,6 +22,8 @@ test.skipIf(!browserModule)("installs as an app and starts from the shell while 
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await context.newPage();
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    // The app keeps a worker out of automated browsers; this is the one test that wants it.
+    await page.addInitScript(() => Object.defineProperty(navigator, "webdriver", { get: () => false }));
     await page.goto(`${origin}/chat`);
     await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>("#joinView, #restoreView, #chatView")).some((node) => !node.hidden));
     const manifest = await page.evaluate(async () => (await fetch("/manifest.webmanifest")).json());
