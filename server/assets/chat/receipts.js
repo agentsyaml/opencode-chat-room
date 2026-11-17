@@ -1,3 +1,5 @@
+import { pointerOrSelectionActive } from "./message-window.js";
+
 export function initReceipts(app) {
   const $ = app.$, panel = $("#readerPanel");
   let selectedID = "", trigger = null;
@@ -14,7 +16,7 @@ export function initReceipts(app) {
   };
   app.renderReceiptData = (roomId, receipts) => {
     const thread = $("#thread"), edge = thread.getBoundingClientRect();
-    const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
+    const atBottom = !pointerOrSelectionActive(app) && thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
     const anchor = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((node) => node.getBoundingClientRect().bottom > edge.top);
     const anchorId = anchor?.dataset.msgId, anchorTop = anchor ? anchor.getBoundingClientRect().top - edge.top : 0;
     for (const receipt of receipts) app.state.receipts.set(`${roomId}\0${receipt.messageID}`, receipt.readers);

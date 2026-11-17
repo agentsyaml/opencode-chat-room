@@ -1,4 +1,5 @@
 import { LS } from "./state.js";
+import { followsBottom } from "./message-window.js";
 
 const MAX_PARALLEL_UPLOADS = 2;
 const MAX_BUFFERED_BYTES = 32 * 1024 * 1024; // Pasted files are small; larger ones stream to keep the heap bounded.
@@ -34,7 +35,9 @@ export function initAttachments(app) {
     return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[index]}`;
   }
   function preserveLayout(change) {
-    const thread = $("#thread"), atBottom = Boolean(roomId() && Math.abs(thread.scrollHeight - thread.clientHeight - thread.scrollTop) < 1);
+    const thread = $("#thread");
+    // A follower can sit a few lines above the edge while a restored draft grows the composer.
+    const atBottom = Boolean(roomId() && followsBottom(app, 0));
     if (atBottom) { change(); thread.scrollTop = thread.scrollHeight; }
     else if (roomId() && app.preserveReadingLayout) void app.preserveReadingLayout(change).catch(() => {});
     else change();

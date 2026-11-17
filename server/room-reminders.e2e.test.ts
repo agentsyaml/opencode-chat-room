@@ -34,9 +34,12 @@ test("room reminders cross the plugin, HTTP server, persisted database and resta
   await api(`/rooms/${room.id}/join`, "POST", { sessionID: member, participantId: "__Test_member", participantName: "__Test_member", host: os.hostname() });
   expect((await api(`/rooms/${room.id}/members`)).map((item: any) => item.sessionID)).toEqual(expect.arrayContaining([creator, member]));
 
+  // Leap-day cron: the next real occurrence is years away, so this short test
+// cannot race a legitimate follow-up tick near a minute boundary.
+  const cronExpression = "0 0 29 2 *";
   const once = toolJson(await runReminderTool(plugin, { action: "reminder_create", roomId: room.id, text: "__Test_once {{initiator}} {{room}}", schedule: { type: "once", at: new Date(Date.now() + 3600_000).toISOString() } }, creator));
-  const cron = toolJson(await runReminderTool(plugin, { action: "reminder_create", roomId: room.id, text: "__Test_cron", schedule: { type: "cron", expression: "*/2 * * * *", timezone: "Pacific/Auckland" } }, creator));
-  const defaultZone = toolJson(await runReminderTool(plugin, { action: "reminder_create", roomId: room.id, text: "__Test_default_zone", schedule: { type: "cron", expression: "*/2 * * * *" } }, member));
+  const cron = toolJson(await runReminderTool(plugin, { action: "reminder_create", roomId: room.id, text: "__Test_cron", schedule: { type: "cron", expression: cronExpression, timezone: "Pacific/Auckland" } }, creator));
+  const defaultZone = toolJson(await runReminderTool(plugin, { action: "reminder_create", roomId: room.id, text: "__Test_default_zone", schedule: { type: "cron", expression: cronExpression } }, member));
   const unaddressed = toolJson(await runReminderTool(plugin, { action: "reminder_create", roomId: room.id, text: "__Test_unaddressed", schedule: { type: "once", at: new Date(Date.now() + 3600_000).toISOString() } }, creator));
   const addressed = toolJson(await runReminderTool(plugin, { action: "reminder_create", roomId: room.id, text: "@__Test_member __Test_addressed", schedule: { type: "once", at: new Date(Date.now() + 3600_000).toISOString() } }, creator));
   expect(cron.reminder.schedule.timezone).toBe("Pacific/Auckland");

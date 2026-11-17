@@ -14,10 +14,23 @@ if (!childMode) {
         XDG_CONFIG_HOME: path.join(dir, "config"), CHAT_ROOM_SERVER_TOKEN: "management-test-token",
         CHAT_ROOM_SERVER_URL: "", CHAT_ROOM_WAKE_SERVE_URL: "" }, stdout: "pipe", stderr: "pipe",
     });
-    const code = await child.exited;
-    if (code !== 0) throw new Error(`${await new Response(child.stdout).text()}${await new Response(child.stderr).text()}`);
-    await fs.rm(dir, { recursive: true, force: true });
-  });
+    try {
+      // Drain both pipes while the child runs; waiting on exit first deadlocks once
+      // the child fills a pipe buffer, because it cannot finish writing.
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      if (code !== 0) throw new Error(`${stdout}${stderr}`);
+    } finally {
+      if (child.exitCode === null) {
+        child.kill();
+        await child.exited.catch(() => {});
+      }
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 } else {
 const keys = ["CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL", "CHAT_ROOM_STATE_DIR", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "HOME"] as const;
 const old = Object.fromEntries(keys.map((key) => [key, process.env[key]]));

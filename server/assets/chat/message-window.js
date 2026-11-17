@@ -12,6 +12,20 @@ export function hasMessageSelection(list) {
     && (list.contains(selection.anchorNode) || list.contains(selection.focusNode)));
 }
 
+// A held pointer or a live selection owns the viewport. Layout writes may only
+// follow the bottom when neither gesture is active.
+export function pointerOrSelectionActive(app) {
+  if (app.state.threadPointerDown) return true;
+  const list = document.querySelector("#msgList");
+  return Boolean(list && hasMessageSelection(list));
+}
+
+export function followsBottom(app, threshold = -1) {
+  if (pointerOrSelectionActive(app)) return false;
+  const thread = document.querySelector("#thread");
+  return Boolean(app.state.followBottom || (thread && thread.scrollHeight - thread.scrollTop - thread.clientHeight <= threshold));
+}
+
 export function trimMessages(list, app) {
   if (list.children.length <= 400 || hasMessageSelection(list)) return;
   const saved = app.state.positions.get(app.state.room?.id), rows = [...list.querySelectorAll("[data-msg-id]")];

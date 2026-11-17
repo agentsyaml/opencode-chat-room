@@ -1,5 +1,6 @@
 import { LS } from "./state.js";
 import { copyTextToClipboard } from "./markdown.js";
+import { followsBottom, pointerOrSelectionActive } from "./message-window.js";
 
 export function initEvents(app) {
   const $ = app.$;
@@ -41,10 +42,9 @@ export function initEvents(app) {
     // Rows arrive in bursts, so judging each burst on its own loses the reader after the
     // first one. Follow while the reader has not scrolled away: then every growth pins.
     // A changed viewport height (composer, window) is not list growth and keeps its anchor.
-    const selection = getSelection(), selecting = Boolean(selection && !selection.isCollapsed && messageList.contains(selection.anchorNode));
-    // A pointer held over the list is mid-gesture: dragging a selection or a click that
-    // must land where it started. Moving the content under it loses both.
-    if (grew && sameBox && app.state.followBottom && !selecting && !app.state.threadPointerDown
+    // A pointer or selection is mid-gesture: moving the content under it loses a drag,
+    // a click, or the reader's own position.
+    if (grew && sameBox && followsBottom(app)
         && thread.scrollHeight - thread.scrollTop - thread.clientHeight > 1) {
       thread.scrollTop = thread.scrollHeight;
     }
@@ -90,7 +90,7 @@ export function initEvents(app) {
         await new Promise((resolve) => requestAnimationFrame(resolve));
         if (roomId && app.state.room?.id === roomId && generation === scrollGeneration) {
           const thread = $("#thread");
-          if (saved.atBottom) thread.scrollTop = thread.scrollHeight;
+          if (saved.atBottom && followsBottom(app)) thread.scrollTop = thread.scrollHeight;
           else if (saved.messageId) {
             const row = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((item) => item.dataset.msgId === saved.messageId);
             if (row) thread.scrollTop += row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop + saved.offset);
@@ -137,7 +137,7 @@ export function initEvents(app) {
       resizeFrame = 0;
       const position = readingPosition, thread = $("#thread");
       if (!position?.roomId || position.roomId !== app.state.room?.id) return captureReadingPosition();
-      if (position.atBottom) thread.scrollTop = thread.scrollHeight;
+      if (position.atBottom && !pointerOrSelectionActive(app)) thread.scrollTop = thread.scrollHeight;
       else if (position.messageId) {
         const row = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((item) => item.dataset.msgId === position.messageId);
         if (row) thread.scrollTop += row.getBoundingClientRect().top - (thread.getBoundingClientRect().top + thread.clientTop + position.offset);
