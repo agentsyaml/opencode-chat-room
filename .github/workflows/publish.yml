@@ -34,7 +34,7 @@ jobs:
           CHAT_UI_BROWSER_MODULE: ${{ github.workspace }}/node_modules/playwright/index.mjs
         run: |
           test -f "$CHAT_UI_BROWSER_MODULE"
-          for file in src/web-*.test.ts; do bun test "$file" || exit; done
+          for file in src/tests/web-*.test.ts; do bun test "$file" || exit; done
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -62,7 +62,7 @@ jobs:
             const files = JSON.parse(fs.readFileSync("npm-pack.json", "utf8"))[0].files.map(file => file.path);
             const required = ["skills/chatroom/SKILL.md", "server/json-body.ts", "server/newrooms.ts", "server/member-routes.ts", "server/announcement-routes.ts", "server/assets/NOTICE.txt", "server/assets/MARKED-LICENSE", "server/assets/DOMPURIFY-LICENSE", "server/assets/MERMAID-LICENSE", "server/assets/marked-18.0.4.js", "server/assets/dompurify-3.4.7.js", "server/assets/mermaid-11.12.2.min.js"];
             const missing = required.filter(file => !files.includes(file));
-            for (const file of ["server/resource-routes.ts", "src/resources.ts", "src/resource-upload.ts"]) if (!files.includes(file)) missing.push(file);
+            for (const file of ["server/resource-routes.ts", "src/rooms/resources.ts", "src/rooms/resource-upload.ts"]) if (!files.includes(file)) missing.push(file);
             const leaked = files.filter(file => /(?:\.test\.[cm]?[jt]sx?$|\.fixture(?:\.|\/)|(?:^|\/)fixtures?\/)/i.test(file));
             if (missing.length || leaked.length) { console.error({ missing, leaked }); process.exit(1); }
           '

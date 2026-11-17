@@ -3,9 +3,12 @@ import { isUnreadMessage } from "./messages.js";
 import { formatRoomPreview, setRoomPreview } from "./system-messages.js";
 import { watchRoom } from "./room-watcher.js";
 import { cacheRoomSoon, deleteCachedRoom, loadCachedRooms } from "./message-cache.js";
+import { renderRoomOptions } from "./room-list.js";
+import { initPanels } from "./panels.js";
 
 export function initRooms(app) {
   const $ = app.$;
+  initPanels(app);
   let roomListGeneration = 0;
   let autoRefresh;
   const invalidateRoomList = () => { autoRefresh = undefined; return ++roomListGeneration; };
@@ -32,7 +35,11 @@ export function initRooms(app) {
     $("#joinView").hidden = false;
     app.updateTitle();
     if (refresh) void app.refreshRoomList();
-    $("#inRoomId").focus();
+    // A late restore must not steal the caret from someone already typing in the join form.
+    const active = document.activeElement;
+    if (!active || active === document.body || !active.closest?.("#joinView, dialog")) $("#inRoomId").focus();
+    // First visit without a stored key: prompt once per tab instead of a dead page.
+    if (!LS.token && !keyPromptDismissed()) app.openTokenBox();
   };
   app.showChat = () => {
     document.documentElement.classList.remove("session-restore");
@@ -50,7 +57,12 @@ export function initRooms(app) {
     const description = app.state.room.description || "";
     $("#roomDescription").textContent = description;
     $("#roomDescription").hidden = !description;
-    $("#btnEditRoom").hidden = app.state.myName !== app.state.room.ownerId;
+    // Everyone sees the settings entry; people who cannot manage the room get a
+    // secondary style and an explanation. Dissolving the room stays the owner's call.
+    const owner = app.state.myName === app.state.room.ownerId;
+    const admin = owner || (app.state.room.adminIds ?? []).includes(app.state.myName);
+    $("#btnEditRoom").classList.toggle("menu-secondary", !admin);
+    $("#btnDeleteRoom").hidden = !owner;
     app.updateTitle();
   };
 
@@ -397,84 +409,7 @@ export function initRooms(app) {
     if (app.state.restorePending?.size) app.startRoomWatcher();
   };
 
-  app.renderRoomOptions = (list, rooms) => {
-    if (!list) return;
-    list.textContent = "";
-    const ordered = [...rooms].sort((left, right) => Number(app.state.rooms.has(right.id)) - Number(app.state.rooms.has(left.id)));
-    for (const room of ordered) {
-      const row = document.createElement("li"), button = document.createElement("button");
-      button.type = "button";
-      button.dataset.roomId = room.id;
-      const entry = app.state.rooms.get(room.id);
-      button.className = `room-row${app.state.room?.id === room.id ? " selected" : ""}${entry ? " joined" : ""}`;
-      if (app.state.room?.id === room.id) button.setAttribute("aria-current", "page");
-      button.title = app.t(entry ? "joined" : "joinAction");
-      const name = document.createElement("span");
-      name.className = "r-name";
-      name.textContent = room.name;
-      const kind = document.createElement("span");
-      kind.className = "r-kind";
-      if (room.kind === "direct") app.setText(kind, "direct");
-      const meta = document.createElement("span");
-      meta.className = "r-meta";
-      const shownRoom = entry?.room || room;
-      meta.textContent = app.t("roomMeta", { members: shownRoom.participants.length, count: shownRoom.messages.length });
-      const preview = document.createElement("span");
-      preview.className = "r-preview";
-      preview.textContent = entry ? formatRoomPreview(entry, room.messages.at(-1), app) : "";
-      const status = document.createElement("span");
-      status.className = "r-status";
-      app.setText(status, entry ? "joined" : "joinAction");
-      button.append(name, kind, meta, preview, status);
-      const unread = entry && app.state.room?.id !== room.id ? (entry.unreadOverflow ? 100 : entry.unreadIds.size) : 0;
-      const openQuestions = Number(shownRoom.openQuestions) || 0;
-      // Same badge slot as unread: a pending question shows "?" instead of a count.
-      if (unread || openQuestions) {
-        const badge = document.createElement("span");
-        badge.className = openQuestions ? "r-badge r-badge-question" : "r-badge";
-        badge.textContent = openQuestions ? "?" : (unread > 99 ? "99+" : String(unread));
-        const label = openQuestions ? app.t("openQuestions", { count: openQuestions }) : app.t("unreadMessages", { count: unread });
-        badge.title = label;
-        badge.setAttribute("aria-label", label);
-        button.append(badge);
-      }
-      button.addEventListener("click", () => app.joinRoom(room.id, app.state.myName || $("#inName").value.trim() || app.t("guest")));
-      row.append(button);
-      list.append(row);
-    }
-    // Other rooms' unread changes only reach the title through this rerender.
-    app.updateTitle();
-  };
-
-  app.closePanels = () => {
-    document.querySelectorAll(".panel").forEach((panel) => { panel.hidden = true; });
-    $("#btnMembers").setAttribute("aria-expanded", "false");
-    $("#btnSettings").setAttribute("aria-expanded", "false");
-    $("#btnRoomOptions").setAttribute("aria-expanded", "false");
-  };
-  app.togglePanel = (selector) => {
-    const panel = $(selector), wasHidden = panel.hidden;
-    app.closePanels();
-    panel.hidden = !wasHidden;
-    const trigger = $(selector === "#memberPanel" ? "#btnMembers" : "#btnSettings");
-    trigger.setAttribute("aria-expanded", String(wasHidden));
-    if (wasHidden) {
-      app.lastFocus = trigger;
-      if (selector === "#memberPanel") void app.loadManageableMembers();
-      const heading = panel.querySelector("h3");
-      heading.tabIndex = -1;
-      heading.focus();
-    }
-  };
-  app.openTokenBox = () => { $("#tokenBox").open = true; };
-  app.openChatSettings = () => {
-    app.closePanels();
-    app.lastFocus = $("#btnSettings");
-    $("#chatSettings").hidden = false;
-    $("#btnSettings").setAttribute("aria-expanded", "true");
-    $("#tokenHint").hidden = false;
-    $("#inTokenChat").focus();
-  };
+  app.renderRoomOptions = (list, rooms) => renderRoomOptions(app, list, rooms);
 
   app.deleteRoom = async () => {
     const room = app.state.room;
@@ -519,6 +454,11 @@ async function bounded(items, limit, action) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (cursor < items.length) await action(items[cursor++]);
   }));
+}
+
+// A closed key prompt stays closed for this tab; a server refusal reopens it anyway.
+function keyPromptDismissed() {
+  try { return sessionStorage.getItem("chat.keyPromptDismissed") === "1"; } catch { return false; }
 }
 
 function syncCachedRooms(rooms, app) {

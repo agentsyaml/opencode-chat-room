@@ -7,8 +7,8 @@ import { randomUUID } from "node:crypto";
 const dir = mkdtempSync(path.join(os.tmpdir(), "room-reminders-"));
 process.env.CHAT_ROOM_STATE_DIR = dir;
 const { roomReminderRoutes, tickRoomReminders } = await import("./room-reminders");
-const { writeState, readInboxMessages } = await import("../src/store");
-const { withStateTransaction } = await import("../src/sqlite-state");
+const { writeState, readInboxMessages } = await import("../src/state/store.ts");
+const { withStateTransaction } = await import("../src/state/sqlite-state.ts");
 let roomId = "", directRoomId = "";
 beforeAll(async () => {
   [roomId, directRoomId] = await writeState((svc, registry) => {

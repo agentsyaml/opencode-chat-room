@@ -1,0 +1,12 @@
+{
+  "name": "codex-chat-room",
+  "plugins": [
+    {
+      "name": "chat-room",
+      "source": {
+        "source": "local",
+        "path": "./plugin"
+      }
+    }
+  ]
+}

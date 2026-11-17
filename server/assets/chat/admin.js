@@ -1,28 +1,40 @@
 import { LS } from "./state.js";
+import { isRoomAdmin } from "./admin-badge.js";
 
-// Admin badges come from the room payload (adminSessionID); room owners manage
-// the designation through the edit-room dialog instead of an operator token.
+// Owners and delegated humans manage settings; the agent designation comes from
+// the room payload and room owners manage it here instead of an operator token.
 export function initAdmin(app) {
   const $ = app.$, dialog = $("#editRoomDialog");
-  let agents = [], generation = 0, agentsReady = false;
+  let agents = [], people = [], generation = 0, agentsReady = false, rosterReady = false;
 
-  const renderRoomOptions = app.renderRoomOptions;
-  app.renderRoomOptions = (list, available) => {
-    renderRoomOptions(list, available);
-    const byId = new Map((available || []).map((room) => [room.id, room]));
-    for (const button of list?.querySelectorAll(".room-row[data-room-id]") || []) {
-      const room = app.state.rooms.get(button.dataset.roomId)?.room || byId.get(button.dataset.roomId);
-      if (!room?.adminSessionID) continue;
-      const badge = document.createElement("span"); badge.className = "room-admin-badge"; badge.textContent = app.t("adminRoomBadge");
-      button.querySelector(".r-name")?.after(badge);
+  // Only people can own a room: agents carry a protocol, a host, or a receiver binding.
+  const isPerson = (entry) => Boolean(entry?.name) && !entry.protocol && !entry.host && !entry.receiverOwnerID;
+  function renderOwnerOptions(room) {
+    const select = $("#editRoomOwner");
+    const names = [...new Set(people.map((person) => person.name))];
+    if (room.ownerId && !names.includes(room.ownerId)) names.unshift(room.ownerId);
+    select.replaceChildren(...names.map((name) => new Option(name, name)));
+    select.value = room.ownerId || names[0] || "";
+  }
+
+  function renderAdminIds(room) {
+    const list = $("#editRoomAdminIds"), chosen = new Set(room.adminIds ?? []);
+    const names = [...new Set(people.map((person) => person.name))].filter((name) => name !== room.ownerId);
+    list.replaceChildren();
+    for (const name of names) {
+      const label = document.createElement("label"), input = document.createElement("input"), text = document.createElement("span");
+      label.className = "admin-check"; input.type = "checkbox"; input.value = name; input.checked = chosen.has(name); text.textContent = name;
+      label.append(input, text); list.append(label);
     }
-  };
-  const renderHead = app.renderHead;
-  app.renderHead = () => {
-    renderHead();
-    const badge = $("#activeAdminBadge");
-    if (badge) badge.hidden = !app.state.room?.adminSessionID;
-  };
+    $("#editRoomAdminIdsEmpty").hidden = names.length > 0;
+  }
+
+  function renderSuccessorOptions(room) {
+    const select = $("#editRoomSuccessor");
+    const names = [...new Set(people.map((person) => person.name))].filter((name) => name !== room.ownerId);
+    select.replaceChildren(new Option(app.t("successorNone"), ""), ...names.map((name) => new Option(name, name)));
+    select.value = names.includes(room.successorId) ? room.successorId : "";
+  }
 
   async function loadAgents(gen) {
     const room = app.state.room; if (!room) return;
@@ -36,7 +48,11 @@ export function initAdmin(app) {
         .filter((agent) => agent.membershipID && (agent.protocol === "v1" || agent.protocol === "v2" || agent.receiverOwnerID || agent.host));
       for (const agent of agents) select.append(new Option(agent.name, agent.sessionID));
       select.value = agents.some((agent) => agent.sessionID === room.adminSessionID) ? room.adminSessionID : "";
-      agentsReady = true;
+      people = Object.values(registry).filter(isPerson);
+      renderOwnerOptions(room);
+      renderAdminIds(room);
+      renderSuccessorOptions(room);
+      agentsReady = true; rosterReady = true;
     } catch (error) { if (gen === generation) $("#editRoomStatus").textContent = error.message; }
   }
 
@@ -45,11 +61,33 @@ export function initAdmin(app) {
     $("#editRoomName").value = room.name;
     $("#editRoomDescription").value = room.description || "";
     $("#editRoomStatus").textContent = "";
+    people = []; agentsReady = false; rosterReady = false;
+    renderOwnerOptions(room);
+    renderAdminIds(room);
+    $("#editRoomAdminIdsEmpty").hidden = true;
+    renderSuccessorOptions(room);
+    $("#editRoomOwnerOnly").hidden = !isOwner();
+    $("#editRoomOwnerOnlyNote").hidden = isOwner();
     dialog.showModal();
     void loadAgents(++generation);
   }
 
-  $("#btnEditRoom").addEventListener("click", () => { app.closePanels(); open(); });
+  const isOwner = () => Boolean(app.state.room) && app.state.myName === app.state.room.ownerId;
+
+  const ownerDialog = $("#ownerOnlyDialog");
+  // The entry never disappears: a member who is neither owner nor admin gets a plain explanation.
+  function showOwnerOnly() {
+    app.setText($("#ownerOnlyNote"), "roomOwnerOnlyNote", { owner: app.state.room?.ownerId || "" });
+    ownerDialog.showModal();
+  }
+  $("#btnEditRoom").addEventListener("click", () => {
+    app.closePanels();
+    if (isRoomAdmin(app)) open();
+    else showOwnerOnly();
+  });
+  $("#btnCloseOwnerOnly").addEventListener("click", () => ownerDialog.close());
+  $("#btnOwnerOnlyOk").addEventListener("click", () => ownerDialog.close());
+  ownerDialog.addEventListener("click", (event) => { if (event.target === ownerDialog) ownerDialog.close(); });
   $("#btnCloseEditRoom").addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   $("#editRoomForm").addEventListener("submit", async (event) => {
@@ -57,17 +95,26 @@ export function initAdmin(app) {
     const room = app.state.room; if (!room) return;
     const name = $("#editRoomName").value.trim();
     if (!name) { $("#editRoomStatus").textContent = app.t("roomNameRequired"); return; }
-    // Until the agent list loads, "None" is a placeholder, not a revocation.
-    const body = { sessionID: LS.sessionID, name, description: $("#editRoomDescription").value.trim(), ...(agentsReady ? { adminSessionID: $("#editRoomAdmin").value || null } : {}) };
+    // Until the registry loads, empty rosters are placeholders, not revocations.
+    const owner = isOwner(), nextOwner = $("#editRoomOwner").value;
+    const checkedAdmins = [...$("#editRoomAdminIds").querySelectorAll("input:checked")].map((input) => input.value);
+    const body = {
+      sessionID: LS.sessionID, name, description: $("#editRoomDescription").value.trim(),
+      ...(owner && agentsReady ? { adminSessionID: $("#editRoomAdmin").value || null } : {}),
+      ...(owner && nextOwner && nextOwner !== room.ownerId ? { ownerId: nextOwner } : {}),
+      ...(rosterReady ? { adminIds: checkedAdmins, successorId: $("#editRoomSuccessor").value || null } : {}),
+    };
     const button = event.submitter; if (button) button.disabled = true;
     try {
       const updated = await app.api(`/rooms/${encodeURIComponent(room.id)}`, { method: "PATCH", body: JSON.stringify(body) });
-      const meta = { name: updated.name, description: updated.description, adminSessionID: updated.adminSessionID, openQuestions: updated.openQuestions };
+      const meta = { name: updated.name, description: updated.description, adminSessionID: updated.adminSessionID, ownerId: updated.ownerId, adminIds: updated.adminIds ?? [], successorId: updated.successorId ?? null, openQuestions: updated.openQuestions };
       const entry = app.state.rooms.get(room.id);
       if (entry) { Object.assign(entry.room, meta); app.state.room = entry.room; }
       const listed = app.state.availableRooms?.find((item) => item.id === room.id);
       if (listed) Object.assign(listed, meta);
       app.renderHead();
+      app.renderMembers();
+      app.rerenderMessages();
       app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
       app.cacheRoomSoon?.(room.id);

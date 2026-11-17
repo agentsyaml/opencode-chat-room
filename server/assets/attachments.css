@@ -1,0 +1,25 @@
+/* Composer attachment tray: kept apart from the conversation layout. */
+  .attachment-button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 24px; cursor: pointer; }
+  .attachment-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+  .attachment-button:hover { color: var(--accent); border-color: var(--accent); }
+  .attachment-button:disabled { opacity: .5; cursor: default; }
+  .attachment-tray { width: min(940px, 100%); margin: 0 auto; }
+  .attachment-volatile { margin: 0 0 3px; color: var(--ink-3); font-size: 10.5px; }
+  .attachment-status { display: inline-flex; width: fit-content; margin: 5px 0 0; padding: 3px 8px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 10.5px; }
+  .attachment-status.danger-text { color: var(--danger); background: var(--danger-soft); }
+  .attachment-status:empty { display: none; }
+  .attachment-list { display: grid; gap: 6px; max-height: 132px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+  .attachment-item { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); box-shadow: 0 1px 2px rgb(20 40 32 / .035); }
+  .attachment-preview { display: grid; place-items: center; width: 38px; height: 38px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--ink) 5%, transparent); border-radius: 8px; background: var(--surface-2); color: var(--ink-3); font-size: 11px; font-weight: 700; }
+  .attachment-preview img { width: 100%; height: 100%; object-fit: cover; }
+  .attachment-file { min-width: 0; }
+  .attachment-name { overflow: hidden; margin: 0; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  .attachment-detail { margin: 0; color: var(--ink-3); font-size: 10px; }
+  .attachment-item progress { display: block; width: 100%; height: 5px; accent-color: var(--accent); }
+  .attachment-actions { display: flex; gap: 4px; }
+  .attachment-actions button { min-width: 44px; min-height: 44px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 11px; cursor: pointer; }
+  .attachment-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .attachment-over-limit { color: var(--danger); }
+  #draftCount.over-limit { color: var(--danger); font-weight: 700; }
+  .attachment-drop-overlay { position: fixed; inset: 12px; z-index: 100; place-items: center; border: 2px dashed var(--accent); border-radius: 18px; color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 88%, transparent); font-size: clamp(18px, 4vw, 28px); font-weight: 700; pointer-events: none; }
+  #chatView.drag-over .attachment-drop-overlay { display: grid; }

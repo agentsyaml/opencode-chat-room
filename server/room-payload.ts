@@ -1,5 +1,5 @@
-import { countOpenQuestions, readHistory } from "../src/store";
-import type { Room } from "../src/room-service";
+import { countOpenQuestions, readHistory } from "../src/state/store.ts";
+import type { Room } from "../src/rooms/room-service.ts";
 import { binding, tx } from "./admin-state";
 
 // Initial page of history sent when a room is opened; older pages load on scroll.
@@ -16,6 +16,8 @@ export async function roomPayload(room: Room, limit = ROOM_WINDOW) {
     name: room.name,
     description: room.description ?? "",
     ownerId: room.ownerId,
+    adminIds: room.adminIds ?? [],
+    successorId: room.successorId ?? null,
     createdAt: room.createdAt,
     participants: [...room.participants.values()],
     messages: page.messages,

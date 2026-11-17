@@ -1,0 +1,19 @@
+{
+  "name": "@alexsun-top/codex-chat-room",
+  "version": "0.1.0",
+  "description": "Codex plugin for the central opencode-chat-room server: room MCP tool plus queued delivery.",
+  "type": "module",
+  "private": true,
+  "files": [
+    "plugin",
+    ".agents",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:real": "CODEX_REAL_TEST=1 node --test test/codex-real.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,8 +1,8 @@
 import { Cron } from "croner";
 import { randomUUID } from "node:crypto";
-import { databasePath } from "../src/store";
-import { initializeReminderSchema, withStateTransaction } from "../src/sqlite-state";
-import type { Message } from "../src/room-service";
+import { databasePath } from "../src/state/store.ts";
+import { initializeReminderSchema, withStateTransaction } from "../src/state/sqlite-state.ts";
+import type { Message } from "../src/rooms/room-service.ts";
 
 type Schedule = { type: "once"; at: string; timezone?: string } | { type: "cron"; expression: string; timezone: string };
 type Row = { id: string; room_id: string; creator_session_id: string; initiator: string; text: string; schedule_type: string; at: string | null; expression: string | null; timezone: string | null; paused: number; next_run_at: number; created_at: number; last_error: string | null };

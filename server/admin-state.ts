@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Database, SQLQueryBindings } from "bun:sqlite";
-import { databasePath } from "../src/store";
-import { initializeAdminSchema, withStateTransaction } from "../src/sqlite-state";
+import { databasePath } from "../src/state/store.ts";
+import { initializeAdminSchema, withStateTransaction } from "../src/state/sqlite-state.ts";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const secret = () => randomBytes(32).toString("base64url");

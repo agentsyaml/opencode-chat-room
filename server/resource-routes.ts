@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
-import { findResource, maxResourceBytes, resourcePath, uploadResource, type Resource } from "../src/resources";
-import { readState } from "../src/store";
+import { deleteResource, findResource, maxResourceBytes, resourcePath, uploadResource, type Resource } from "../src/rooms/resources.ts";
+import { readState } from "../src/state/store.ts";
+import { isRoomAdmin, isUser } from "./room-owner";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -17,24 +18,37 @@ export async function resourceRoutes(req: Request, url: URL): Promise<Response |
   }
   const upload = url.pathname.match(/^\/rooms\/([^/]+)\/resources$/);
   const item = url.pathname.match(/^\/rooms\/([^/]+)\/resources\/([^/]+)(\/content)?$/);
-  if ((!upload || req.method !== "POST") && (!item || req.method !== "GET")) return undefined;
+  if ((!upload || req.method !== "POST") && (!item || (req.method !== "GET" && !(req.method === "DELETE" && !item[3])))) return undefined;
   try {
     const roomID = decodeURIComponent((upload ?? item)![1]!);
     if (upload) {
       const sessionID = req.headers.get("x-session-id") ?? "";
-      if (!sessionID || !await readState((_svc, registry) => Boolean(registry[roomID]?.[sessionID]))) return json({ error: "forbidden" }, 403);
+      const entry = await readState((_svc, registry) => registry[roomID]?.[sessionID]);
+      if (!entry) return json({ error: "forbidden" }, 403);
       const encoded = req.headers.get("x-file-name");
       if (!encoded) return json({ error: "invalid filename" }, 400);
       let filename: string;
       try { filename = decodeURIComponent(encoded); } catch { return json({ error: "invalid filename" }, 400); }
       if (!filename || filename.length > 255 || /[\\/\r\n\0]/.test(filename) || filename === "." || filename === "..") return json({ error: "invalid filename" }, 400);
-      const resource = await uploadResource(roomID, filename, req.body ?? new Blob([]).stream(), maxResourceBytes());
+      const requestedID = req.headers.get("x-resource-id");
+      if (requestedID !== null && !uuid.test(requestedID)) return json({ error: "invalid resource id" }, 400);
+      const resource = await uploadResource(roomID, filename, req.body ?? new Blob([]).stream(), maxResourceBytes(), { sessionID, name: entry.name }, requestedID ?? undefined);
       return json({ resource }, 201);
     }
     const id = decodeURIComponent(item![2]!);
     if (!uuid.test(id)) return json({ error: "resource not found" }, 404);
     const resource = await findResource(roomID, id);
     if (!resource) return json({ error: "resource not found" }, 404);
+    if (req.method === "DELETE") {
+      const sessionID = req.headers.get("x-session-id") ?? "";
+      const context = await readState((svc, registry) => ({ room: svc.getRoom(roomID), entry: registry[roomID]?.[sessionID] }));
+      if (!context.entry) return json({ error: "forbidden" }, 403);
+      // Human admins delete anything; an agent may delete only the file it uploaded.
+      const ownAgentUpload = !isUser(context.entry) && resource.uploaderSessionID === sessionID;
+      if (!isRoomAdmin(context.room, context.entry) && !ownAgentUpload) return json({ error: "forbidden" }, 403);
+      await deleteResource(roomID, id);
+      return json({ ok: true });
+    }
     if (!item![3]) return json({ resource });
     return await content(req, resource);
   } catch (error) {

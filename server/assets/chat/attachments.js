@@ -1,6 +1,7 @@
 import { LS } from "./state.js";
 
 const MAX_PARALLEL_UPLOADS = 2;
+const MAX_BUFFERED_BYTES = 32 * 1024 * 1024; // Pasted files are small; larger ones stream to keep the heap bounded.
 const TEXT_LIMIT = 2000;
 const previewTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp"]);
 
@@ -13,6 +14,14 @@ export function initAttachments(app) {
   const roomId = () => app.state.room?.id || "";
   const filesFor = (id) => drafts.get(id) || [];
   const markers = (items) => items.filter((item) => item.resource).map((item) => `[[resource:${item.resource.id}]]`);
+  const validResource = (resource, id) => /^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(resource?.id) && resource.roomID === id;
+  // crypto.randomUUID needs a secure context; the chat also runs on plain-HTTP LANs.
+  function newUploadID() {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
   const textFor = (id, caption) => {
     const parts = [String(caption || "").trim(), ...markers(filesFor(id))].filter(Boolean);
     return { text: parts.join("\n\n"), ids: filesFor(id).filter((item) => item.resource).map((item) => item.resource.id) };
@@ -152,14 +161,16 @@ export function initAttachments(app) {
       item.refreshLimit = false;
       if (item.cancelled) return;
       if (max !== null && item.file.size > max) { item.errorKey = "fileTooLarge"; item.status = "failed"; if (roomId() === id) setStatus(item.errorKey, true, id); return; }
-      item.resource = await upload(id, item);
+      if (item.pasted && item.buffer === undefined && item.file.size <= MAX_BUFFERED_BYTES) item.buffer = await item.file.arrayBuffer().catch(() => null);
       if (item.cancelled) return;
-      item.status = "uploaded"; item.loaded = item.file.size; item.percent = 100;
+      item.resource = await sendUpload(id, item);
+      if (item.cancelled) return;
+      item.status = "uploaded"; item.loaded = item.file.size; item.percent = 100; item.buffer = null;
       if (roomId() === id && filesFor(id).every((entry) => entry.status === "uploaded")) setStatus("uploadReady");
     } catch (error) {
       if (item.cancelled) return;
       if (error.status === 413) { limit = null; item.errorKey = "fileTooLarge"; }
-      else item.errorKey = "uploadFailed";
+      else { item.errorKey = "uploadFailed"; item.errorValues = { reason: error.status ? `HTTP ${error.status}` : error.timeout ? "timeout" : error.network ? "network" : error.message }; }
       item.status = "failed";
       if (roomId() === id) setStatus(item.errorKey, true, id, item.errorValues || {});
     } finally {
@@ -168,6 +179,29 @@ export function initAttachments(app) {
       pump();
     }
   }
+  // One fallback after a network failure: a lost response is recovered by ID, and a
+  // file the XHR could not send is retried once from bytes read into memory.
+  async function sendUpload(id, item) {
+    try { return await upload(id, item); }
+    catch (error) {
+      if (!error.network || item.cancelled || item.retried) throw error;
+      item.retried = true; item.loaded = 0; item.percent = 0;
+      const existing = await findUploaded(id, item);
+      if (item.cancelled) throw error;
+      if (existing) return existing;
+      if (item.buffer === undefined && item.file.size <= MAX_BUFFERED_BYTES) item.buffer = await item.file.arrayBuffer().catch(() => null);
+      if (item.cancelled || !item.buffer) throw error;
+      return upload(id, item);
+    }
+  }
+  async function findUploaded(id, item) {
+    try {
+      const response = await fetch(`/rooms/${encodeURIComponent(id)}/resources/${item.uploadID}`, { headers: LS.token ? { Authorization: `Bearer ${LS.token}` } : {} });
+      if (!response.ok) return undefined;
+      const resource = (await response.json()).resource;
+      return validResource(resource, id) && resource.name === item.file.name && resource.uploaderSessionID === LS.sessionID ? resource : undefined;
+    } catch { return undefined; }
+  }
   function upload(id, item) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest(); item.xhr = xhr;
@@ -175,6 +209,7 @@ export function initAttachments(app) {
       xhr.setRequestHeader("Content-Type", "application/octet-stream");
       xhr.setRequestHeader("X-Session-ID", LS.sessionID);
       xhr.setRequestHeader("X-File-Name", encodeURIComponent(item.file.name));
+      xhr.setRequestHeader("X-Resource-ID", item.uploadID);
       if (LS.token) xhr.setRequestHeader("Authorization", `Bearer ${LS.token}`);
       xhr.timeout = 1800000;
       xhr.upload.onprogress = (event) => {
@@ -189,27 +224,29 @@ export function initAttachments(app) {
         if (xhr.status !== 201) return reject(Object.assign(new Error("Upload failed"), { status: xhr.status }));
         try {
           const resource = JSON.parse(xhr.responseText).resource;
-          if (!/^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(resource?.id) || resource.roomID !== id) throw new Error("Invalid resource response");
+          if (!validResource(resource, id)) throw new Error("Invalid resource response");
           resolve(resource);
         } catch { reject(new Error("Invalid resource response")); }
       };
+      // A browser can surface a file handle it cannot read (cloud placeholder, network
+      // drive, cleaned temp file) as a bare network error; XHR exposes no finer cause.
       xhr.onerror = () => { item.xhr = null; reject(Object.assign(new Error("Upload failed"), { network: true })); };
       xhr.ontimeout = () => { item.xhr = null; reject(Object.assign(new Error("Upload timed out"), { timeout: true })); };
       xhr.onabort = () => { item.xhr = null; reject(Object.assign(new Error("Upload cancelled"), { aborted: true })); };
-      xhr.send(item.file);
+      xhr.send(item.buffer ?? item.file);
     });
   }
-  function addFiles(files) {
+  function addFiles(files, pasted = false) {
     const id = roomId(); if (!id) return;
     const accepted = [...files].filter((file) => file instanceof File);
     if (!accepted.length) return;
     const items = filesFor(id);
-    for (const file of accepted) items.push({ file, status: "queued", loaded: 0, percent: 0, cancelled: false });
+    for (const file of accepted) items.push({ file, uploadID: newUploadID(), pasted, buffer: undefined, retried: false, status: "queued", loaded: 0, percent: 0, cancelled: false });
     drafts.set(id, items); setStatus(""); render(); pump();
   }
   function retryItem(item) {
     if (item.status !== "failed") return;
-    item.refreshLimit = item.errorKey === "fileTooLarge"; item.status = "queued"; item.errorKey = ""; item.errorValues = null; item.loaded = 0; item.percent = 0;
+    item.refreshLimit = item.errorKey === "fileTooLarge"; item.status = "queued"; item.errorKey = ""; item.errorValues = null; item.loaded = 0; item.percent = 0; item.retried = false;
     if (roomId()) setStatus(""); render(); pump();
   }
   $("#btnAddAttachments").addEventListener("click", () => picker.click());
@@ -233,7 +270,7 @@ export function initAttachments(app) {
     const images = Array.from(event.clipboardData?.items || []).filter((item) => item.kind === "file" && item.type.startsWith("image/")).map((item) => item.getAsFile()).filter(Boolean);
     if (!images.length) return;
     if (!event.clipboardData.getData("text/plain")) event.preventDefault();
-    addFiles(images);
+    addFiles(images, true);
   });
   document.addEventListener("chat-room-activated", (event) => {
     render(); const id = event.detail; $("#btnAddAttachments").disabled = !id;

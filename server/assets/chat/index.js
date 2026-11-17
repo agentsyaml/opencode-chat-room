@@ -11,6 +11,7 @@ import { initAdmin } from "./admin.js";
 import { initAttachments } from "./attachments.js";
 import { initReplies } from "./replies.js";
 import { initHistoryLoader } from "./history-loader.js";
+import { initImageZoom } from "./image-zoom.js";
 import { initReminders } from "./reminders.js";
 import { initPwa } from "./pwa.js";
 
@@ -27,4 +28,5 @@ initEvents(app);
 initAnnouncements(app);
 initReminders(app);
 initAdmin(app);
+initImageZoom(app);
 initPwa();

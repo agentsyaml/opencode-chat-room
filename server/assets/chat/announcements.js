@@ -3,6 +3,7 @@ import { LS } from "./state.js";
 export function initAnnouncements(app) {
   const $ = app.$, drafts = new Map();
   const panel = $("#announcementPanel"), trigger = $("#btnAnnouncements"), list = $("#announcementList");
+  const dialog = $("#announcementDialog"), heading = $("#announcementDialogHeading");
   let items = [], selected = "", generation = 0, roomGeneration = 0, editorRevision = 0, saveToken = 0;
   const key = (id, name = selected) => `${id}\0${name ? `item\0${name}` : "new"}`;
   const roomId = () => app.state.room?.id;
@@ -20,14 +21,15 @@ export function initAnnouncements(app) {
     if (saved?.name === snapshot.name && saved.content === snapshot.content) drafts.delete(key(id, name));
   }
   function status(text) { $("#announcementStatus").textContent = text; }
+  function formStatus(text) { $("#announcementDialogStatus").textContent = text; }
   function count() { $("#announcementCount").textContent = app.t("announcementCount", { count: Array.from($("#announcementContent").value).length }); }
   function render() {
     list.textContent = "";
     for (const entry of items) {
       const li = document.createElement("li"), button = document.createElement("button");
-      button.type = "button"; button.textContent = entry.name;
+      button.type = "button"; button.textContent = entry.name; button.setAttribute("aria-haspopup", "dialog");
       if (entry.name === selected) button.setAttribute("aria-current", "true");
-      button.addEventListener("click", (event) => { event.stopPropagation(); select(entry); });
+      button.addEventListener("click", (event) => { event.stopPropagation(); openEditor(entry); });
       li.append(button); list.append(li);
     }
     if (!items.length) status(app.t("announcementEmpty"));
@@ -44,6 +46,14 @@ export function initAnnouncements(app) {
     content.value = saved?.content ?? entry?.content ?? "";
     $("#btnDeleteAnnouncement").hidden = !selected;
     render(); count();
+  }
+  function openEditor(entry) {
+    select(entry);
+    if (entry) { delete heading.dataset.i18n; heading.textContent = entry.name; }
+    else { heading.dataset.i18n = "announcementNew"; heading.textContent = app.t("announcementNew"); }
+    formStatus("");
+    if (!dialog.open) dialog.showModal();
+    $(entry ? "#announcementContent" : "#announcementName").focus();
   }
   async function load(id = roomId()) {
     if (!id) return;
@@ -78,8 +88,8 @@ export function initAnnouncements(app) {
   $("#announcementForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const id = roomId(), name = $("#announcementName").value.trim(), content = $("#announcementContent").value;
-    if (!id || !name || Array.from(name).length > 64 || Array.from(content).length > 5000) return status(app.t("announcementInvalid"));
-    if (!selected && items.some((item) => item.name === name)) return status(app.t("announcementDuplicate"));
+    if (!id || !name || Array.from(name).length > 64 || Array.from(content).length > 5000) return formStatus(app.t("announcementInvalid"));
+    if (!selected && items.some((item) => item.name === name)) return formStatus(app.t("announcementDuplicate"));
     const context = roomGeneration, captured = editorSnapshot(), draftName = selected, button = $("#btnSaveAnnouncement"), token = ++saveToken;
     storeDraft(id, draftName); button.disabled = true;
     try {
@@ -89,11 +99,12 @@ export function initAnnouncements(app) {
       if (currentRoom(id, context)) {
         generation++; items = [...items.filter((item) => item.name !== name), result.announcement]; render();
         clearDraftIfUnchanged(id, draftName, captured);
-        if (editorMatches(captured)) { select(result.announcement); status(app.t("announcementSaved")); }
+        if (editorMatches(captured)) { select(result.announcement); status(app.t("announcementSaved")); formStatus(""); dialog.close(); }
         else if (!selected) {
           // Keep editing the newer draft under the name the create just reserved.
           drafts.delete(key(id, draftName));
           selected = result.announcement.name;
+          heading.textContent = selected; delete heading.dataset.i18n;
           $("#announcementName").value = selected; $("#announcementName").readOnly = true;
           $("#btnDeleteAnnouncement").hidden = false;
           drafts.set(key(id, selected), { name: selected, content: $("#announcementContent").value });
@@ -101,11 +112,11 @@ export function initAnnouncements(app) {
         }
       }
     } catch (error) {
-      if (currentRoom(id, context) && editorMatches(captured)) status(error.status === 403 ? error.message : app.t("announcementLoadFailed"));
+      if (currentRoom(id, context) && editorMatches(captured)) formStatus(error.status === 403 ? error.message : app.t("announcementLoadFailed"));
     }
     finally { if (token === saveToken) button.disabled = false; }
   });
-  $("#btnNewAnnouncement").addEventListener("click", () => { select(null); $("#announcementName").focus(); });
+  $("#btnNewAnnouncement").addEventListener("click", () => openEditor(null));
   $("#btnDeleteAnnouncement").addEventListener("click", async () => {
     const id = roomId(), name = selected;
     if (!id || !name || !confirm(app.t("announcementDeleteConfirm", { name }))) return;
@@ -115,20 +126,25 @@ export function initAnnouncements(app) {
       if (currentRoom(id, context)) {
         generation++; items = items.filter((item) => item.name !== name); render();
         clearDraftIfUnchanged(id, name, captured);
-        if (editorMatches(captured)) { select(null); status(app.t("announcementDeleted")); }
+        if (editorMatches(captured)) { select(null); status(app.t("announcementDeleted")); formStatus(""); dialog.close(); }
       }
-    } catch (error) { if (currentRoom(id, context) && editorMatches(captured)) status(error.message); }
+    } catch (error) { if (currentRoom(id, context) && editorMatches(captured)) formStatus(error.message); }
   });
   $("#btnRefreshAnnouncements").addEventListener("click", () => void load());
+  $("#btnCloseAnnouncement").addEventListener("click", () => dialog.close());
+  $("#btnCancelAnnouncement").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   trigger.addEventListener("click", () => {
     const open = panel.hidden; app.closePanels(); panel.hidden = !open;
     trigger.setAttribute("aria-expanded", String(open)); if (open) { void load(); $("#announcementHeading").focus(); }
   });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !panel.hidden) { app.closePanels(); trigger.focus(); } });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !dialog.open && !panel.hidden) { app.closePanels(); trigger.focus(); } });
   const close = app.closePanels;
-  app.closePanels = () => { close(); panel.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
+  app.closePanels = () => { close(); panel.hidden = true; trigger.setAttribute("aria-expanded", "false"); if (dialog.open) dialog.close(); };
   document.addEventListener("chat-room-activated", (event) => {
     const id = event.detail;
+    if (dialog.open) dialog.close();
+    formStatus("");
     roomGeneration++; generation++; saveToken++; $("#btnSaveAnnouncement").disabled = false;
     selected = ""; items = []; select(null); void load(id);
   });

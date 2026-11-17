@@ -3,26 +3,28 @@
 // via CHAT_ROOM_SERVER_URL. Optional bearer token (CHAT_ROOM_SERVER_TOKEN).
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import RoomService, {
   RoomError,
   type Message,
   type Room,
-} from "../src/room-service";
-import { acknowledgeQueued, answerQuestion, appendRoomMessage, sendReply, readQuestions, readState, writeState, type Registry, type RegistryEntry } from "../src/store";
+} from "../src/rooms/room-service.ts";
+import { acknowledgeQueued, answerQuestion, appendRoomMessage, sendReply, readQuestions, readState, writeState, type Registry, type RegistryEntry } from "../src/state/store.ts";
 import {
   admissionMatches,
   clearPendingAdmission,
-} from "../src/queue";
+} from "../src/center/queue.ts";
 import { readInbox } from "./inbox";
-import { isReceiverOwnerID } from "../src/receiver-owner";
+import { isReceiverOwnerID } from "../src/state/receiver-owner.ts";
 import { claimWake, touchActive, wakeMentionedSessions } from "./wake";
 import { historyRoute } from "./history-route";
 import { roomPayload } from "./room-payload";
+import { bindOwner, isUser, settleAdmins, settleOwner } from "./room-owner";
 import { jsonObject } from "./json-body";
 import { roomManagement } from "./newrooms";
 import { memberRoutes } from "./member-routes";
 import { resourceRoutes } from "./resource-routes";
-import { maxResourceBytes } from "../src/resources";
+import { maxResourceBytes } from "../src/rooms/resources.ts";
 import { adminRoutes } from "./admin-routes";
 import { roomReminderRoutes, startRoomReminderScheduler } from "./room-reminders";
 
@@ -210,6 +212,7 @@ async function handle(req: Request): Promise<Response> {
             // ponytail: central mode self-pulls the inbox; no cross-host URL
             serverUrl: "",
             apiPrefix: "/api",
+            membershipID: randomUUID(),
             ...(body.protocol === "v2" ? { protocol: "v2" as const } : {}),
             ...(body.protocol === "v2" && isReceiverOwnerID(body.receiverOwnerID) ? { receiverOwnerID: body.receiverOwnerID } : {}),
             name: owner,
@@ -222,6 +225,7 @@ async function handle(req: Request): Promise<Response> {
             ),
             lastQueuedTs: 0,
           };
+          created.ownerMembershipID = regRoom[body.sessionID]!.membershipID;
         }
         return created;
       });
@@ -352,6 +356,7 @@ async function handle(req: Request): Promise<Response> {
           if (!already) {
             svc.addEvent(roomId, `${name} joined the room`);
           }
+
           const latestMessageTs =
             svc.getMessages(roomId).at(-1)?.createdAt ?? 0;
           regRoom[sessionID] = {
@@ -363,7 +368,7 @@ async function handle(req: Request): Promise<Response> {
             ...(body.protocol === "v2" ? { protocol: "v2" as const } : {}),
             ...(body.protocol === "v2" && isReceiverOwnerID(body.receiverOwnerID) ? { receiverOwnerID: body.receiverOwnerID } : {}),
             name,
-            ...(prevEntry?.membershipID ? { membershipID: prevEntry.membershipID } : {}),
+            membershipID: prevEntry?.membershipID ?? randomUUID(),
             directory: body.directory || undefined,
             // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行
             host: body.host ?? "",
@@ -372,6 +377,14 @@ async function handle(req: Request): Promise<Response> {
               regRoom[sessionID]?.lastReadTs ??
               Math.max(Date.now(), latestMessageTs),
           };
+          // An ownerless room is claimed by the first person who arrives; agents never are.
+          const joinedRoom = svc.getRoom(roomId);
+          if (!joinedRoom.ownerId && isUser(regRoom[sessionID])) {
+            joinedRoom.ownerId = name;
+            joinedRoom.ownerMembershipID = regRoom[sessionID]!.membershipID;
+          } else {
+            bindOwner(joinedRoom, regRoom);
+          }
           return svc.getRoom(roomId);
         });
         touchActive(sessionID); // join = active
@@ -379,8 +392,9 @@ async function handle(req: Request): Promise<Response> {
       }
       if (req.method === "POST" && m[2] === "leave") {
         await mutate((svc, reg) => {
+          const room = svc.getRoom(roomId);
           const entry = reg[roomId]?.[sessionID];
-          const participantId = svc.getRoom(roomId).kind === "direct" ? sessionID : entry?.name ?? sessionID;
+          const participantId = room.kind === "direct" ? sessionID : entry?.name ?? sessionID;
           // ponytail: orc-2 #2——共享名守卫：还有别的 session 持有同名时，
           // 只移除本 entry，不移除参与者（否则兄弟 tab 发送会 NOT_JOINED）
           const shared = Object.entries(reg[roomId] ?? {}).some(
@@ -396,6 +410,22 @@ async function handle(req: Request): Promise<Response> {
               delete reg[roomId];
             }
           }
+          // A departing delegated admin passes the role to the room's explicit successor.
+          if (entry?.name && room.ownerId && (room.adminIds ?? []).includes(entry.name)) {
+            const successor = Object.values(reg[roomId] ?? {}).find((candidate) =>
+              isUser(candidate) && (room.successorMembershipID ? candidate.membershipID === room.successorMembershipID : candidate.name === room.successorId));
+            if (successor?.name && successor.name !== room.ownerId) {
+              room.adminIds = [...new Set([...(room.adminIds ?? []).filter((name) => name !== successor.name), successor.name])];
+              if (successor.membershipID) room.adminMembershipIDs = [...new Set([...(room.adminMembershipIDs ?? []).filter((id) => id !== successor.membershipID), successor.membershipID])];
+            }
+          }
+          if (entry && (room.successorMembershipID ? entry.membershipID === room.successorMembershipID : entry.name === room.successorId)) {
+            delete room.successorId;
+            delete room.successorMembershipID;
+          }
+          // A departing owner hands the room to the next person; the last one leaves it open.
+          settleAdmins(svc.getRoom(roomId), reg[roomId] ?? {});
+          settleOwner(svc.getRoom(roomId), reg[roomId] ?? {});
         });
         return json({ ok: true });
       }
@@ -503,7 +533,7 @@ async function handle(req: Request): Promise<Response> {
     if (err instanceof RoomError) {
       return json(
         { error: err.message },
-        err.code === "ROOM_NOT_FOUND" ? 404 : 409,
+        err.code === "ROOM_NOT_FOUND" ? 404 : err.code === "NOT_OWNER" ? 403 : 409,
       );
     }
     return json({ error: err instanceof Error ? err.message : String(err) }, 500);

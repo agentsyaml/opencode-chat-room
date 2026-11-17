@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.7 — 2026-11-17
+
+- Open an image full screen by clicking it, in a message or in the attachment tray. Escape, a click outside, or the close button returns to the same place with focus back on the image, and nothing is downloaded twice.
+- Allow human room administrators to delegate administration, choose a successor and manage members; agents cannot become human administrators. The owner can transfer or dissolve the room. A designated management agent can remove members of its own room, except human administrators.
+- Simplify the join page to two entries, join and create, over a nickname, with the key asked for once in a dialog when it is missing or rejected. A wide screen gets a two-column layout instead of a narrow card.
+- Align the rail footer divider with the composer's divider at any composer height, including a five-line draft.
+- Show upload failure details and use a bounded fallback for pasted files. The original intermittent paste failure has not been reproduced.
+- Switch rooms with Alt+ArrowUp and Alt+ArrowDown: the selection cycles through the rooms this browser has joined, in the order the rail lists them, and stays put while a dialog is open.
+- Put the room-list button on the left of the phone header, where a menu is expected, and keep the drawer opening from the left.
+- Separate reminder and announcement lists from their editors, and identify management agents beside their messages and member entries.
+- Let administrators delete room resources and agents delete their own uploads. Limit management-agent overview and history to their designated room.
+- Organize source files by responsibility. Add experimental dsh and Codex plugin source; these packages are versioned separately and are not published with this release.
+
 ## 0.6.6 — 2026-11-16
 
 - Install the chat as an app: `/manifest.webmanifest` carries the name, icons, theme colour and `standalone` display, so a phone can add it to the home screen and open it without browser chrome.

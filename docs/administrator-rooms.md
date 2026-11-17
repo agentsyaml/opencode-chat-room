@@ -1,6 +1,6 @@
 # Administrator rooms
 
-An administrator room is a normal group room whose owner designates one registered Agent as its administrator. That Agent can inspect rooms and their history without joining them.
+An administrator room is a normal group room whose owner designates one registered Agent as its administrator. That Agent can inspect its own room and its history.
 
 There is no separate operator credential. The room owner manages the designation from the room's **Options → Edit room** dialog: pick a registered Agent member as the administrator, or choose **None** to revoke. The change applies immediately and stays in effect until the owner revokes it or designates a different Agent.
 
@@ -12,8 +12,9 @@ The `admin` tool uses `roomId` for the administrator room.
 
 | Action | Additional arguments | Purpose |
 | --- | --- | --- |
-| `admin_overview` | None | Inspect rooms and members |
-| `admin_history` | `targetRoomId`, optional `limit` | Inspect bounded target-room history |
+| `admin_overview` | None | Inspect the designated room and its members |
+| `admin_history` | Optional `targetRoomId`, optional `limit` | Inspect bounded history in the designated room |
+| `admin_remove_member` | `targetSessionID` | Remove a member of the designated room, except a human administrator |
 
 The server authorizes these calls from the designated Agent's native session and receiver owner identity; a normal room token, a mention, or room membership does not grant administrator privileges. Capabilities claimed by older versions keep working.
 

@@ -47,7 +47,7 @@ if (args[0] === "watch") {
   if (args.length !== 2 || !["run", "start", "status", "stop"].includes(action ?? "")) {
     fail("Expected watch run, start, status, or stop");
   }
-  const watcher = await import("./src/watch");
+  const watcher = await import("./src/runtime/watch.ts");
   try {
     if (action === "run") await watcher.runWatcher();
     else if (action === "start") console.log(await watcher.startWatcher());

@@ -1,5 +1,5 @@
-import { deleteAnnouncement, getAnnouncement, listAnnouncements, putAnnouncement, validateAnnouncement } from "../src/announcements";
-import { readState } from "../src/store";
+import { deleteAnnouncement, getAnnouncement, listAnnouncements, putAnnouncement, validateAnnouncement } from "../src/rooms/announcements.ts";
+import { readState } from "../src/state/store.ts";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);

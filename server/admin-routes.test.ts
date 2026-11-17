@@ -16,14 +16,14 @@ const stateDir = mkdtempSync(path.join(tmpdir(), "chat-room-admin-routes-"));
 process.env.CHAT_ROOM_STATE_DIR = stateDir;
 process.env.CHAT_ROOM_SERVER_TOKEN = "trusted-shared-secret";
 let file: string;
-let dbState: typeof import("../src/sqlite-state");
-let store: typeof import("../src/store");
+let dbState: typeof import("../src/state/sqlite-state.ts");
+let store: typeof import("../src/state/store.ts");
 let routes: typeof import("./admin-routes").adminRoutes;
 let server: typeof import("./chat-server").default;
 
 beforeAll(async () => {
-  dbState = await import("../src/sqlite-state");
-  store = await import("../src/store");
+  dbState = await import("../src/state/sqlite-state.ts");
+  store = await import("../src/state/store.ts");
   file = store.databasePath();
   await dbState.openStateDatabase(file);
   await dbState.withStateTransaction(file, db => {
@@ -75,6 +75,30 @@ test("owner designation authorizes only the bound agent identity and can be revo
   const revoke = await server.fetch(new Request("http://localhost/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { method: "PATCH", headers: { Authorization: "Bearer trusted-shared-secret", "Content-Type": "application/json" }, body: JSON.stringify({ sessionID: "__Test_supervisor-session", adminSessionID: null }) }));
   expect(revoke.status).toBe(200);
   expect((await call("GET", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/overview", undefined, headers)).status).toBe(404);
+});
+
+test("administrator sees only its own room and cannot read another room", async () => {
+  expect((await designate("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "__Test_supervisor-session")).status).toBe(200);
+  const headers = { "x-chat-agent-session": "__Test_supervisor-session", "x-chat-agent-owner": "owner-s" };
+  const overview = await call("GET", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/overview", undefined, headers);
+  expect(overview.status).toBe(200);
+  const body = await overview.json() as { rooms: Array<{ id: string }> };
+  expect(body.rooms.map(room => room.id)).toEqual(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
+  expect((await call("GET", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/history?targetRoomId=dddddddd-dddd-4ddd-8ddd-dddddddddddd", undefined, headers)).status).toBe(403);
+  expect((await call("GET", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/history?targetRoomId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", undefined, headers)).status).toBe(200);
+});
+
+test("legacy binding targeting another room is rejected in both routes", async () => {
+  const { digest } = await import("./admin-state");
+  await dbState.withStateTransaction(file, db => {
+    db.query("DELETE FROM admin_rooms WHERE room_id=?").run("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    db.query("INSERT INTO admin_rooms(room_id,target_room_id,session_id,receiver_owner_id,membership_id,generation,enrollment_hash,enrollment_expires,capability_hash,created_at) VALUES(?,?,?,?,?,?,?,?,NULL,?)")
+      .run("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "worker-session", "owner-w", "member-w", 1, digest("legacy-key"), Date.now() + 60_000, Date.now());
+  });
+  const headers = { "x-chat-agent-session": "worker-session", "x-chat-agent-owner": "owner-w" };
+  expect((await call("GET", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/overview", undefined, headers)).status).toBe(409);
+  expect((await call("GET", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/history?targetRoomId=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", undefined, headers)).status).toBe(409);
+  expect((await call("GET", "/admin/rooms/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/history?targetRoomId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", undefined, headers)).status).toBe(409);
 });
 
 test("legacy claim still accepts the issued enrollment key", async () => {

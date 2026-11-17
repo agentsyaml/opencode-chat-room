@@ -19,6 +19,14 @@ export function initEvents(app) {
     new ResizeObserver(syncHeadBottom).observe(chatHead);
     syncHeadBottom();
   }
+  // The rail footer divider sits above the identity row, so it has to land on the
+  // composer's divider at any composer height, including five wrapped lines.
+  const composer = document.querySelector("#chatView > .composer");
+  if (composer) {
+    const syncComposerBlock = () => document.documentElement.style.setProperty("--composer-block", `${Math.round(composer.getBoundingClientRect().height)}px`);
+    new ResizeObserver(syncComposerBlock).observe(composer);
+    syncComposerBlock();
+  }
   // Images, diagrams and attachments grow the list after the first paint and the browser
   // answers with a scroll that looks like the reader moving. Subtract the growth: only a
   // reader who was already at the bottom gets pinned back.
@@ -188,6 +196,11 @@ export function initEvents(app) {
     $("#restoreError").hidden = true;
     void app.refreshRoomList();
   });
+  $("#btnCancelToken").addEventListener("click", () => $("#tokenBox").close());
+  $("#tokenBox").addEventListener("close", () => {
+    if (LS.token) return;
+    try { sessionStorage.setItem("chat.keyPromptDismissed", "1"); } catch { /* Storage may be blocked. */ }
+  });
   $("#btnRefreshRooms").addEventListener("click", () => void app.refreshRoomList());
   $("#btnNewRoom").addEventListener("click", () => {
     const form = $("#railRoomForm");
@@ -310,7 +323,7 @@ export function initEvents(app) {
       return;
     }
     if (app.mentionActive && !event.target.closest("#mentionPicker")) app.closeMention();
-    if (!event.target.closest(".anchor")) app.closePanels();
+    if (!event.target.closest(".anchor, dialog")) app.closePanels();
     if (!event.target.closest("#railRoomForm, #btnNewRoom")) $("#railRoomForm").hidden = true;
   });
   document.addEventListener("keydown", (event) => {
@@ -327,6 +340,15 @@ export function initEvents(app) {
     if (event.key === "Escape" && (!$("#memberPanel").hidden || !$("#chatSettings").hidden)) {
       app.closePanels();
       app.lastFocus?.focus();
+    }
+    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+      // Same switch as a rail row click on a joined room, in the order the rail renders.
+      const joined = (app.state.availableRooms || []).filter((room) => app.state.rooms.has(room.id));
+      const index = joined.findIndex((room) => room.id === app.state.room?.id);
+      if (event.defaultPrevented || joined.length < 2 || index < 0 || document.querySelector("dialog[open]")) return;
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      app.activateRoom(joined[(index + step + joined.length) % joined.length].id);
     }
   });
 
@@ -345,6 +367,8 @@ function saveAccessToken(button, app) {
   let persistent = false;
   try { persistent = localStorage.getItem("chat.token") === LS.token; } catch { /* Memory fallback is tab-scoped. */ }
   app.flash(button, persistent ? "saved" : "savedMemory");
+  // The key prompt is a one-time visit: a stored key gets out of the way again.
+  if (LS.token) document.getElementById("tokenBox")?.close();
   void app.refreshRoomList();
   app.retryPendingAction();
 }

@@ -105,6 +105,8 @@
     font-size: 14px;
   }
   #memberList li > span:first-child { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
+  #memberList .member-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
+  #memberList .member-identity > span:first-child { min-width: 0; overflow-wrap: anywhere; }
   #memberList .member-actions { grid-column: 1 / -1; justify-content: flex-end; flex-wrap: wrap; }
   #memberList .member-activity + .member-actions { grid-column: 2; grid-row: 2; }
   #memberList .member-action { white-space: normal; }
@@ -200,11 +202,12 @@
   .msg.in, .sys.in, .day-sep.in { animation: msg-in .25s ease both; }
   .msg.own { align-items: flex-end; }
   .msg.repeat { margin-bottom: 8px; }
-  .msg-meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+  .msg-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 3px; }
   .msg-name { font-size: 13px; font-weight: 650; color: var(--ink-2); }
   .msg.own .msg-name { color: var(--accent); }
   .question-mark { padding: 1px 6px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 10px; line-height: 1.5; }
   .msg.repeat .msg-name { display: none; }
+  .msg.repeat .admin-agent-badge { display: none; }
   .msg-time { font-size: 12px; color: var(--ink-2); }
   .msg-text {
     display: inline-block;
@@ -281,8 +284,19 @@
   .reader-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
   .reader-panel-head h2 { margin: 0; font-family: var(--font-sans); font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
   .reader-panel-head .hint { margin: 0 0 4px; }
-  .reader-close { flex: none; width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 21px; cursor: pointer; }
+  .reader-close { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid transparent; border-radius: 10px; color: var(--ink-2); background: transparent; font: inherit; cursor: pointer; transition: background .14s, border-color .14s, color .14s; }
+  .reader-close:hover { border-color: var(--line); color: var(--ink); background: var(--surface-2); }
+  .close-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }
   .reader-panel .receipt-reader-list li { display: grid; gap: 3px; padding: 10px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+  .image-dialog { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 20px; border: 0; background: transparent; }
+  .image-dialog[open] { display: grid; place-items: center; }
+  .image-dialog::backdrop { background: rgb(9 16 22 / .84); backdrop-filter: blur(3px); }
+  .image-dialog img { display: block; max-width: 100%; max-height: calc(100dvh - 40px); width: auto; height: auto; object-fit: contain; border-radius: 8px; animation: image-zoom-in .16s ease both; }
+  @keyframes image-zoom-in { from { opacity: 0; transform: scale(.97); } }
+  .image-dialog-close { position: fixed; top: 14px; right: 14px; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid rgb(255 255 255 / .34); border-radius: 50%; color: #fff; background: rgb(9 16 22 / .58); font: inherit; line-height: 1; cursor: pointer; }
+  .image-dialog-close .close-icon { width: 22px; height: 22px; }
+  .image-dialog-close:hover, .image-dialog-close:focus-visible { background: rgb(9 16 22 / .82); outline: 2px solid #fff; outline-offset: 2px; }
+  .msg-text img, .chat-resource img, .attachment-preview img { cursor: zoom-in; }
   .chat-resource { display: grid; gap: 9px; min-width: 0; margin: 10px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-2) 76%, var(--surface)); }
   .resource-info, .resource-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .resource-name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
@@ -333,6 +347,8 @@
     text-underline-offset: 2px;
   }
   .msg-text a:hover { text-decoration: none; }
+  /* Inline images stay inside the bubble; the overlay is where they get big. */
+  .msg-text img { display: block; max-width: 100%; height: auto; border-radius: 7px; }
 
   /* Mention picker */
   /* Inactive names stay quiet; current members use the accent color. */
@@ -481,27 +497,3 @@
   .failed-reply-context { flex: 0 0 100%; overflow: hidden; color: var(--accent); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .failed-message button { flex: none; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; }
   .failed-message button:disabled { opacity: .5; cursor: default; }
-  .attachment-button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 24px; cursor: pointer; }
-  .attachment-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
-  .attachment-button:hover { color: var(--accent); border-color: var(--accent); }
-  .attachment-button:disabled { opacity: .5; cursor: default; }
-  .attachment-tray { width: min(940px, 100%); margin: 0 auto; }
-  .attachment-volatile { margin: 0 0 3px; color: var(--ink-3); font-size: 10.5px; }
-  .attachment-status { display: inline-flex; width: fit-content; margin: 5px 0 0; padding: 3px 8px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 10.5px; }
-  .attachment-status.danger-text { color: var(--danger); background: var(--danger-soft); }
-  .attachment-status:empty { display: none; }
-  .attachment-list { display: grid; gap: 6px; max-height: 132px; overflow: auto; margin: 0; padding: 0; list-style: none; }
-  .attachment-item { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); box-shadow: 0 1px 2px rgb(20 40 32 / .035); }
-  .attachment-preview { display: grid; place-items: center; width: 38px; height: 38px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--ink) 5%, transparent); border-radius: 8px; background: var(--surface-2); color: var(--ink-3); font-size: 11px; font-weight: 700; }
-  .attachment-preview img { width: 100%; height: 100%; object-fit: cover; }
-  .attachment-file { min-width: 0; }
-  .attachment-name { overflow: hidden; margin: 0; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-  .attachment-detail { margin: 0; color: var(--ink-3); font-size: 10px; }
-  .attachment-item progress { display: block; width: 100%; height: 5px; accent-color: var(--accent); }
-  .attachment-actions { display: flex; gap: 4px; }
-  .attachment-actions button { min-width: 44px; min-height: 44px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 11px; cursor: pointer; }
-  .attachment-actions button:hover { border-color: var(--accent); color: var(--accent); }
-  .attachment-over-limit { color: var(--danger); }
-  #draftCount.over-limit { color: var(--danger); font-weight: 700; }
-  .attachment-drop-overlay { position: fixed; inset: 12px; z-index: 100; place-items: center; border: 2px dashed var(--accent); border-radius: 18px; color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 88%, transparent); font-size: clamp(18px, 4vw, 28px); font-weight: 700; pointer-events: none; }
-  #chatView.drag-over .attachment-drop-overlay { display: grid; }

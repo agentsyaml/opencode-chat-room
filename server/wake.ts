@@ -1,10 +1,10 @@
 import os from "node:os";
-import type { Message } from "../src/room-service";
-import { formatNotificationLines, formatServeWakePrompt, readQuestionExcerpt, readState, writeState, type RegistryEntry } from "../src/store";
-import { clearPendingAdmission, getOrCreatePendingAdmission, markPendingAdmissionAdmitted, pendingAdmission, rejectPendingAdmission, type QueueItem } from "../src/queue";
-import { sendAsyncNotification } from "../src/queue-transport";
+import type { Message } from "../src/rooms/room-service.ts";
+import { formatNotificationLines, formatServeWakePrompt, readQuestionExcerpt, readState, writeState, type RegistryEntry } from "../src/state/store.ts";
+import { clearPendingAdmission, getOrCreatePendingAdmission, markPendingAdmissionAdmitted, pendingAdmission, rejectPendingAdmission, type QueueItem } from "../src/center/queue.ts";
+import { sendAsyncNotification } from "../src/center/queue-transport.ts";
 import { readInbox, type InboxItem } from "./inbox";
-import { explicitlyAddresses } from "../src/mentions";
+import { explicitlyAddresses } from "../src/center/mentions.ts";
 
 const wakeClaims = new Map<string, number>();
 const activeSessions = new Map<string, number>();

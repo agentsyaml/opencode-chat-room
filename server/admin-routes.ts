@@ -1,7 +1,7 @@
-import { databasePath } from "../src/store";
-import { readHistoryPage } from "../src/sqlite-state";
+import { databasePath } from "../src/state/store.ts";
+import { readHistoryPage } from "../src/state/sqlite-state.ts";
 import { hasAdminCapability } from "./admin-auth";
-import { binding, digest, ensureAdminSchema, exec, isAgentMember, many, matchesHash, newSecret, one, publicRoom, tx, validCurrent } from "./admin-state";
+import { binding, digest, ensureAdminSchema, exec, isAgentMember, many, matchesHash, newSecret, publicRoom, tx, validCurrent } from "./admin-state";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -59,8 +59,12 @@ async function overview(request: Request, roomID: string): Promise<Response> {
     const b = binding(db, roomID);
     if (!b) return { status: 404 as const };
     if (!hasAdminCapability(request, b)) return { status: 401 as const };
+    // A binding may only administer the room it points at; legacy rows targeting
+    // another room are stale and must not borrow that room's membership.
+    if (b.target_room_id !== roomID) return { status: 409 as const };
     if (!validCurrent(db, b)) return { status: 409 as const };
-    const rooms = many<{ id: string; name: string; createdAt: number }>(db, "SELECT id,name,created_at AS createdAt FROM rooms ORDER BY created_at DESC LIMIT 200")
+    // The designation grants insight into its own room only.
+    const rooms = many<{ id: string; name: string; createdAt: number }>(db, "SELECT id,name,created_at AS createdAt FROM rooms WHERE id=?", roomID)
       .map(room => ({ ...room, members: many(db, "SELECT g.session_id AS sessionID,g.name,g.protocol,g.receiver_owner_id AS receiverOwnerID,g.work_state AS workState,g.last_seen_at AS lastSeenAt FROM registry g WHERE g.room_id=? ORDER BY g.name", room.id) }));
     return { rooms };
   });
@@ -69,16 +73,20 @@ async function overview(request: Request, roomID: string): Promise<Response> {
 
 async function history(request: Request, url: URL, roomID: string): Promise<Response> {
   const targetRoomID = url.searchParams.get("targetRoomId") ?? "";
+  if (!bounded(targetRoomID, 128)) return json({ error: "invalid history request" }, 400);
   const rawLimit = url.searchParams.get("limit");
   const limit = rawLimit === null ? 20 : Number(rawLimit);
-  if (!bounded(targetRoomID, 128) || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) return json({ error: "invalid history request" }, 400);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) return json({ error: "invalid history request" }, 400);
   const allowed = await tx(db => {
     const b = binding(db, roomID);
     if (!b) return 404;
     if (!hasAdminCapability(request, b)) return 401;
+    if (b.target_room_id !== roomID) return 409;
     if (!validCurrent(db, b)) return 409;
-    return one(db, "SELECT 1 FROM rooms WHERE id=?", targetRoomID) ? 200 : 404;
+    return 200;
   });
   if (allowed !== 200) return json({ error: allowed === 401 ? "unauthorized" : allowed === 404 ? "room not found" : "binding is no longer active" }, allowed);
-  return json(await readHistoryPage(databasePath(), targetRoomID, undefined, limit));
+  // The path room is the only scope; another target is never readable.
+  if (targetRoomID !== roomID) return json({ error: "room is outside this administrator's scope" }, 403);
+  return json(await readHistoryPage(databasePath(), roomID, undefined, limit));
 }

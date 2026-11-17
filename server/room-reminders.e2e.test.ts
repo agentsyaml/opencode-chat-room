@@ -5,9 +5,9 @@ import { createServer } from "node:net";
 import { createServer as createHttpServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { centerAction } from "../src/center-client";
-import { runReminderTool } from "../src/reminder-client";
-import { withStateTransaction } from "../src/sqlite-state";
+import { centerAction } from "../src/center/center-client.ts";
+import { runReminderTool } from "../src/center/reminder-client.ts";
+import { withStateTransaction } from "../src/state/sqlite-state.ts";
 
 const token = "__Test_room_reminders_e2e_token";
 const root = await mkdtemp(path.join(os.tmpdir(), "room-reminders-e2e-"));
@@ -25,11 +25,10 @@ const env = { ...process.env, HOME: path.join(root, "home"), XDG_STATE_HOME: pat
 
 test("room reminders cross the plugin, HTTP server, persisted database and restart tick", async () => {
   await start();
-  const creator = "__Test_agent_creator", member = "__Test_room_member", outsider = "__Test_nonmember";
+  const creator = "__Test_agent_creator", member = "__Test_room_member", outsider = "__Test_nonmember", humanAdmin = "__Test_human_admin";
   const plugin = { center: origin, token };
-  const created = await centerAction(plugin, { action: "create", name: "__Test_reminder_room", protocol: "v2" }, creator);
-  const room = (await api(`/rooms?sessionID=${creator}`)).find((item: any) => item.name === "__Test_reminder_room");
-  expect(created).toContain(room.id);
+  const room = await api("/rooms", "POST", { name: "__Test_reminder_room", ownerId: humanAdmin, sessionID: humanAdmin });
+  await api(`/rooms/${room.id}/join`, "POST", { sessionID: creator, participantId: creator, participantName: creator, protocol: "v2", host: os.hostname() });
   expect(await centerAction(plugin, { action: "list" }, creator)).toContain(room.id);
   const creatorName = (await api(`/rooms/${room.id}/members`)).find((item: any) => item.sessionID === creator).name;
   await api(`/rooms/${room.id}/join`, "POST", { sessionID: member, participantId: "__Test_member", participantName: "__Test_member", host: os.hostname() });
@@ -45,7 +44,9 @@ test("room reminders cross the plugin, HTTP server, persisted database and resta
   expect(JSON.parse(await runReminderTool(plugin, { action: "reminder_list", roomId: room.id }, creator)).reminders).toHaveLength(5);
   expect(await runReminderTool(plugin, { action: "reminder_list", roomId: room.id }, outsider)).toContain("not a current member");
 
-  await api(`/rooms/${room.id}/kick`, "POST", { sessionID: creator, targetSessionID: member });
+  const denied = await fetch(`${origin}/rooms/${room.id}/kick`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ sessionID: creator, targetSessionID: member }) });
+  expect(denied.status).toBe(403);
+  await api(`/rooms/${room.id}/kick`, "POST", { sessionID: humanAdmin, targetSessionID: member });
   expect((await api(`/rooms/${room.id}/members`)).some((item: any) => item.sessionID === member)).toBe(false);
   await api(`/rooms/${room.id}/join`, "POST", { sessionID: member, participantId: "__Test_member", participantName: "__Test_member", host: os.hostname() });
   await api(`/rooms/${room.id}/leave`, "POST", { sessionID: member });

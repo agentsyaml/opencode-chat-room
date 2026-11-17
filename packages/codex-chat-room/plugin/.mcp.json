@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "chat_room": {
+      "command": "node",
+      "args": ["mcp-server.mjs"],
+      "cwd": ".",
+      "env_vars": [
+        "CHAT_ROOM_SERVER_URL",
+        "CHAT_ROOM_SERVER_TOKEN",
+        "CHAT_ROOM_DELIVERY",
+        "CHAT_ROOM_CODEX_BIN"
+      ],
+      "required": true
+    }
+  }
+}

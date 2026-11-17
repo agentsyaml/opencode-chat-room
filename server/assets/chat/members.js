@@ -1,4 +1,5 @@
 import { LS } from "./state.js";
+import { adminAgentBadge, canRemoveMember, isAdminAgent } from "./admin-badge.js";
 
 export function initMembers(app) {
   const $ = app.$;
@@ -44,17 +45,24 @@ export function initMembers(app) {
       if (changed && room.kind !== "direct" && room.messages.some((message) => !message.senderSessionID && message.senderId === app.state.myName)) app.rerenderMessages();
       const list = $("#memberList");
       const rows = Array.from(list.querySelectorAll("li[data-member-session-id]"));
-      if (signature(rows.map((row) => ({ sessionID: row.dataset.memberSessionId, name: row.dataset.memberName, type: row.dataset.memberType }))) !== signature(members)) {
+      const actionKey = `${room.ownerId}\u0000${(room.adminIds ?? []).join("\u0000")}`;
+      const actionsChanged = list.dataset.actionKey !== actionKey;
+      list.dataset.actionKey = actionKey;
+      if (actionsChanged || signature(rows.map((row) => ({ sessionID: row.dataset.memberSessionId, name: row.dataset.memberName, type: row.dataset.memberType }))) !== signature(members)) {
         list.textContent = "";
+        const selfIsAgent = members.find((member) => member.sessionID === LS.sessionID)?.type === "agent";
         for (const member of members) {
-          const row = document.createElement("li"), name = document.createElement("span"), actions = document.createElement("span");
+          const row = document.createElement("li"), name = document.createElement("span"), identity = document.createElement("span"), actions = document.createElement("span");
           row.dataset.memberSessionId = member.sessionID; row.dataset.memberName = member.name; row.dataset.memberType = member.type;
-          name.textContent = member.name; row.append(name);
+          name.textContent = member.name; identity.className = "member-identity"; identity.append(name);
+          if (isAdminAgent(app, member.sessionID)) identity.append(adminAgentBadge(app));
+          row.append(identity);
           if (member.type === "agent") row.append(activityBadge(member, app));
           actions.className = "member-actions";
           if (member.sessionID !== LS.sessionID) {
             actions.append(actionButton(member, "messagePrivately", app.startDirect));
-            if (room.kind !== "direct") actions.append(actionButton(member, "removeMember", app.kickMember));
+            // The backend binds the real membership; the UI only hides impossible actions.
+            if (canRemoveMember(app, member, selfIsAgent, LS.sessionID)) actions.append(actionButton(member, "removeMember", app.kickMember));
           }
           row.append(actions); list.append(row);
         }
@@ -139,8 +147,7 @@ export function initMembers(app) {
   };
 
   app.kickMember = async (member) => {
-    const id = member.sessionID.slice(0, 8);
-    if (!confirm(app.t("kickConfirm", { name: member.name, id }))) return;
+    if (!confirm(app.t("kickConfirm", { name: member.name }))) return;
     try {
       await app.api(`/rooms/${encodeURIComponent(app.state.room.id)}/kick`, {
         method: "POST",
@@ -155,6 +162,7 @@ export function initMembers(app) {
     button.type = "button";
     button.className = "member-action";
     button.textContent = app.t(label);
+    button.title = `${button.textContent}: ${member.name}`;
     button.addEventListener("click", () => action(member));
     return button;
   }

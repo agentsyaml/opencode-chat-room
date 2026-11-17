@@ -1,7 +1,7 @@
-import { memberActivity, type WorkState } from "../src/member-state";
-import { acknowledgeRead, acknowledgeReadWithReceipts, readReceipts, readState, recordMessageReceipts, reportPresence, type ReceiptEvidence, type ReceiptIdentity } from "../src/store";
-import { isReceiverOwnerID } from "../src/receiver-owner";
-import { clearPendingAdmission } from "../src/queue";
+import { memberActivity, type WorkState } from "../src/state/member-state.ts";
+import { acknowledgeRead, acknowledgeReadWithReceipts, readReceipts, readState, recordMessageReceipts, reportPresence, type ReceiptEvidence, type ReceiptIdentity } from "../src/state/store.ts";
+import { isReceiverOwnerID } from "../src/state/receiver-owner.ts";
+import { clearPendingAdmission } from "../src/center/queue.ts";
 import { touchActive } from "./wake";
 import { announcementRoutes } from "./announcement-routes";
 import { jsonObject } from "./json-body";

@@ -49,6 +49,17 @@ test("resource API keeps uploads member-gated and serves safe ranged content", a
     if (oversized.status !== 413) throw new Error("configured upload limit was not enforced");
     const wrongRoom = await req("/rooms/missing/resources/"+resource.id);
     if (wrongRoom.status !== 404) throw new Error("wrong-room resource did not return not found");
+    const retryID = crypto.randomUUID(), retryHeaders = {"X-Session-ID":"member","X-File-Name":"retry.bin","Content-Type":"application/octet-stream","X-Resource-ID":retryID};
+    const firstRetry = await req("/rooms/"+room.id+"/resources","POST",retryHeaders,new Uint8Array([1,2,3]));
+    const replay = await req("/rooms/"+room.id+"/resources","POST",retryHeaders,new Uint8Array([1,2,3]));
+    const firstRetryBody = await firstRetry.json(), replayBody = await replay.json();
+    if (firstRetry.status !== 201 || replay.status !== 201 || firstRetryBody.resource.id !== retryID || replayBody.resource.id !== retryID) throw new Error("replayed upload was not idempotent: "+firstRetry.status+" "+replay.status);
+    const stored = await (await import("node:fs/promises")).readdir(${JSON.stringify(dir)}+"/resources/"+room.id);
+    if (stored.filter((entry) => entry === retryID).length !== 1) throw new Error("replayed upload stored duplicate resources");
+    const conflict = await req("/rooms/"+room.id+"/resources","POST",{...retryHeaders,"X-File-Name":"other.bin"},new Uint8Array([9]));
+    if (conflict.status !== 409) throw new Error("reused resource ID with another filename was accepted");
+    const badKey = await req("/rooms/"+room.id+"/resources","POST",{"X-Session-ID":"member","X-File-Name":"x.bin","X-Resource-ID":"not-a-uuid"},new Uint8Array([1]));
+    if (badKey.status !== 400) throw new Error("invalid resource ID was accepted");
   `], { env: process.env, stdout: "pipe", stderr: "pipe" });
   try {
     const code = await child.exited;

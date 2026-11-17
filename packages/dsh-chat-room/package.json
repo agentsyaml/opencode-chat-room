@@ -1,0 +1,35 @@
+{
+  "name": "@alexsun-top/dsh-chat-room",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DeepSeek Harness plugin for a central chat-room server: the room tool plus context delivery.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/fix-dts.mjs",
+    "verify": "bun run build && node scripts/verify-package.mjs",
+    "test": "bun test tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=20.3.0"
+  },
+  "license": "MIT"
+}

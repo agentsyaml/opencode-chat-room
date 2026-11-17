@@ -1,0 +1,153 @@
+import { authHeader } from "../state/store.ts";
+import { admissionMatches, type QueueBody } from "./queue.ts";
+import { assertDeliveryLease } from "./session-delivery.ts";
+
+export type PushResult = "delivered" | "unreachable" | "rejected";
+export type BackgroundResult = { status: "done" | "failed" | "skip"; reason?: string };
+export type QueueTransport = {
+  promptQueue?: (sessionID: string, id: string, text: string, delivery: "queue" | "steer") => Promise<unknown>;
+  backgroundSession?: (sessionID: string) => Promise<boolean | BackgroundResult>;
+  receiverOwnerID?: string;
+  verifySession?: (sessionID: string) => Promise<string | undefined>;
+  mentionOnlySessions?: ReadonlySet<string>;
+  serverUrl?: string;
+  directory?: string;
+  protocol?: "v1" | "v2";
+};
+
+export function backgroundResult(value: boolean | BackgroundResult): BackgroundResult {
+  return typeof value === "boolean" ? value ? { status: "done" } : { status: "failed", reason: "unclassified-failure" } : value;
+}
+
+export function backgroundServiceKey(transport: QueueTransport, serviceURL = transport.serverUrl ?? ""): string {
+  let origin = serviceURL;
+  try {
+    if (serviceURL) {
+      const url = new URL(serviceURL);
+      origin = `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+    }
+  } catch { /* Keep non-URL identifiers distinct. */ }
+  return JSON.stringify([transport.receiverOwnerID ?? "", origin]);
+}
+
+export function createQueueTransport(input: { directory?: string; serverUrl?: URL | string } = {}): QueueTransport {
+  const serverUrl = String(input.serverUrl ?? "").trim();
+  return { serverUrl: serverUrl || undefined, protocol: "v1", directory: input.directory };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function statusOf(value: unknown): number | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.status === "number") return value.status;
+  if (isRecord(value.response) && typeof value.response.status === "number") return value.response.status;
+  if (isRecord(value.cause) && typeof value.cause.status === "number") return value.cause.status;
+  return undefined;
+}
+
+function headers(transport: QueueTransport): Record<string, string> {
+  const auth = authHeader();
+  return {
+    "Content-Type": "application/json",
+    ...(auth ? { Authorization: auth } : {}),
+    ...(transport.directory ? { "x-opencode-directory": encodeURIComponent(transport.directory) } : {}),
+  };
+}
+
+async function sendQueueInProcess(
+  transport: QueueTransport,
+  sessionID: string,
+  body: QueueBody,
+): Promise<PushResult> {
+  let result: unknown;
+  try {
+    result = await transport.promptQueue!(sessionID, body.id, body.prompt.text, body.delivery);
+  } catch (error) {
+    const status = statusOf(error);
+    return status === undefined || status === 404 ? "unreachable" : "rejected";
+  }
+  if (!isRecord(result)) return "unreachable";
+  if (!isRecord(result.response)) return admissionMatches(result, body, sessionID) ? "delivered" : "rejected";
+  const status = result.response.status;
+  if (typeof status !== "number" || status === 404) return "unreachable";
+  if (status < 200 || status >= 300) return "rejected";
+  return admissionMatches(result.data, body, sessionID) ? "delivered" : "rejected";
+}
+
+async function sendQueueHttp(
+  transport: QueueTransport,
+  sessionID: string,
+  body: QueueBody,
+): Promise<PushResult> {
+  if (!transport.serverUrl) return "unreachable";
+  let response: Response;
+  try {
+    response = await fetch(`${transport.serverUrl.replace(/\/+$/, "")}/api/session/${encodeURIComponent(sessionID)}/prompt`, {
+      method: "POST",
+      headers: headers(transport),
+      body: JSON.stringify({
+        id: body.id,
+        text: body.prompt.text,
+        delivery: body.delivery,
+        resume: body.resume,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return "unreachable";
+  }
+  const data = await response.json().catch(() => undefined);
+  if (response.status === 404) return "unreachable";
+  if (!response.ok) return "rejected";
+  return admissionMatches(data, body, sessionID) ? "delivered" : "rejected";
+}
+
+export async function sendAsyncNotification(
+  transport: QueueTransport,
+  sessionID: string,
+  text: string,
+): Promise<PushResult> {
+  if (!transport.serverUrl) return "unreachable";
+  let response: Response;
+  let base: string;
+  try {
+    base = new URL(transport.serverUrl).origin;
+  } catch {
+    return "unreachable";
+  }
+  try {
+    response = await fetch(`${base}/session/${encodeURIComponent(sessionID)}/prompt_async`, {
+      method: "POST",
+      headers: headers(transport),
+      body: JSON.stringify({ parts: [{ type: "text", text }] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return "unreachable";
+  }
+  return response.status === 204 ? "delivered" : response.status === 404 ? "unreachable" : "rejected";
+}
+
+export async function sendQueue(
+  transport: QueueTransport,
+  sessionID: string,
+  text: string,
+  admissionID: string,
+  delivery: "queue" | "steer" = "steer",
+): Promise<PushResult> {
+  const body: QueueBody = {
+    id: admissionID,
+    prompt: { text },
+    delivery,
+    resume: true,
+  };
+  assertDeliveryLease();
+  if (transport.promptQueue) {
+    const result = await sendQueueInProcess(transport, sessionID, body);
+    if (result !== "unreachable") return result;
+    assertDeliveryLease();
+  }
+  return sendQueueHttp(transport, sessionID, body);
+}

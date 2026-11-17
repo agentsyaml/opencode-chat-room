@@ -1,12 +1,18 @@
 import { LS } from "./state.js";
 
 export function initReminders(app) {
-  const $ = app.$, panel = $("#reminderPanel"), trigger = $("#btnReminders"), list = $("#reminderList");
+  const $ = app.$, panel = $("#reminderPanel"), trigger = $("#btnReminders"), list = $("#reminderList"), dialog = $("#reminderDialog"), newButton = $("#btnNewReminder");
   app.setText($("#reminderTemplateHint"), "reminderTemplateHint", { time: "{time}", initiator: "{initiator}", room: "{room}" });
   let reminders = [], generation = 0, roomGeneration = 0, activeRoomId;
   const drafts = new Map();
   const roomId = () => app.state.room?.id;
   const status = (text) => { $("#reminderStatus").textContent = text; };
+  const formStatus = (text) => { $("#reminderDialogStatus").textContent = text; };
+  function openDialog() {
+    formStatus("");
+    if (!dialog.open) dialog.showModal();
+    $("#reminderText").focus();
+  }
   const current = (id, context) => roomId() === id && roomGeneration === context;
   const invalidateLoads = () => { generation++; };
   const errorText = (error) => error?.message || app.t("requestFailed", { status: error?.status || "?" });
@@ -35,8 +41,10 @@ export function initReminders(app) {
       const next = reminder.schedule.type === "cron" && reminder.nextRunAt ? ` · ${app.t("reminderNext", { time: formatTime(reminder.nextRunAt, timezone) })}` : "";
       detail.textContent = `${schedule}${reminder.paused ? ` · ${app.t("reminderPaused")}` : next}`;
       const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "btn ghost small"; toggle.textContent = app.t(reminder.paused ? "reminderResume" : "reminderPause");
+      toggle.setAttribute("aria-label", `${toggle.textContent}: ${text.textContent.slice(0, 80)}`);
       toggle.addEventListener("click", () => void update(reminder, !reminder.paused));
       const remove = document.createElement("button"); remove.type = "button"; remove.className = "btn ghost small danger-text"; remove.textContent = app.t("reminderDelete");
+      remove.setAttribute("aria-label", `${remove.textContent}: ${text.textContent.slice(0, 80)}`);
       remove.addEventListener("click", () => { if (confirm(app.t("reminderDeleteConfirm"))) void erase(reminder); });
       row.append(text, detail, toggle, remove); list.append(row);
     }
@@ -80,21 +88,27 @@ export function initReminders(app) {
     const schedule = type.value === "once"
       ? { type: "once", at: `${date.value}:00`, ...(zone ? { timezone: zone } : {}) }
       : { type: "cron", expression: cron.value.trim(), ...(zone ? { timezone: zone } : {}) };
-    if (!id || !text || text.length > 1000 || type.value === "once" && !date.value || type.value === "cron" && !validCron(schedule.expression)) return status(app.t("reminderInvalid"));
+    if (!id || !text || text.length > 1000 || type.value === "once" && !date.value || type.value === "cron" && !validCron(schedule.expression)) return formStatus(app.t("reminderInvalid"));
     try {
       const result = await app.api(`/rooms/${encodeURIComponent(id)}/reminders`, { method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, schedule, text }) });
-      if (current(id, context)) { invalidateLoads(); reminders = [...reminders.filter((item) => item.id !== result.reminder.id), result.reminder]; render(); status(app.t("reminderCreated")); }
-    } catch (error) { if (current(id, context)) { invalidateLoads(); status(errorText(error)); } }
+      if (current(id, context)) { invalidateLoads(); reminders = [...reminders.filter((item) => item.id !== result.reminder.id), result.reminder]; render(); status(app.t("reminderCreated")); dialog.close(); }
+    } catch (error) { if (current(id, context)) { invalidateLoads(); formStatus(errorText(error)); } }
   });
   $("#btnRefreshReminders").addEventListener("click", () => void load());
+  newButton.addEventListener("click", openDialog);
+  $("#btnCloseReminder").addEventListener("click", () => dialog.close());
+  $("#btnCancelReminder").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   trigger.addEventListener("click", () => {
     const open = panel.hidden; app.closePanels(); panel.hidden = !open; trigger.setAttribute("aria-expanded", String(open));
     if (open) { void load(); $("#reminderHeading").focus(); }
   });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !panel.hidden) { app.closePanels(); trigger.focus(); } });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !dialog.open && !panel.hidden) { app.closePanels(); trigger.focus(); } });
   const close = app.closePanels;
   app.closePanels = () => { close(); panel.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
   document.addEventListener("chat-room-activated", (event) => {
+    if (dialog.open) dialog.close();
+    formStatus("");
     if (activeRoomId) drafts.set(activeRoomId, formDraft());
     activeRoomId = event.detail; restoreDraft(drafts.get(activeRoomId));
     roomGeneration++; generation++; reminders = []; render(); void load(activeRoomId);

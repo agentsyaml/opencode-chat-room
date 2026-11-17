@@ -1,4 +1,4 @@
-import { readHistory, readState } from "../src/store";
+import { readHistory, readState } from "../src/state/store.ts";
 
 export async function historyRoute(url: URL): Promise<Response | undefined> {
   const match = url.pathname.match(/^\/rooms\/([^/]+)\/history$/);

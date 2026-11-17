@@ -1,5 +1,5 @@
-import { readInboxMessages } from "../src/store";
-import type { Message } from "../src/room-service";
+import { readInboxMessages } from "../src/state/store.ts";
+import type { Message } from "../src/rooms/room-service.ts";
 
 export type InboxItem = Pick<Message, "id" | "roomId" | "senderId" | "senderSessionID" | "text" | "createdAt"> & {
   roomName: string;

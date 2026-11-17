@@ -2,7 +2,7 @@ import { tool } from "@opencode-ai/plugin";
 import type { ToolContext as V1ToolContext } from "@opencode-ai/plugin";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
-import RoomService, { RoomError, type Message } from "./src/room-service";
+import RoomService, { RoomError, type Message } from "./src/rooms/room-service.ts";
 import {
   formatRoom,
   acknowledgeReadWithReceipts,
@@ -16,23 +16,23 @@ import {
   timeOf,
   type Registry,
   type RegistryEntry,
-} from "./src/store";
-import { flushReceiptCandidates, receiptDestination } from "./src/agent-receipts";
-import { centerAction } from "./src/center-client";
-import { createQueueTransport, type QueueTransport } from "./src/queue-transport";
-import { checkCenterInbox } from "./src/center-inbox";
-import { assertDeliveryLease } from "./src/session-delivery";
-import { wakeSessions } from "./src/center-wake";
-import { clearPendingAdmission } from "./src/queue";
-import { createNotifier } from "./src/plugin-notifications";
-import { explicitlyAddresses } from "./src/mentions";
-import { createV2Setup, type V2Runtime } from "./src/v2-plugin";
-import { createV1Server } from "./src/v1-plugin";
-import { runAnnouncementTool } from "./src/announcement-tool";
-import { uploadAgentResource } from "./src/resource-upload";
-import { readAgentResource, resourceReadFailure } from "./src/resource-read";
-import { adminTool, adminToolDescription, adminToolSchema } from "./src/admin-client";
-import { runReminderTool } from "./src/reminder-client";
+} from "./src/state/store.ts";
+import { flushReceiptCandidates, receiptDestination } from "./src/agent/agent-receipts.ts";
+import { centerAction, deleteAgentResource } from "./src/center/center-client.ts";
+import { createQueueTransport, type QueueTransport } from "./src/center/queue-transport.ts";
+import { checkCenterInbox } from "./src/center/center-inbox.ts";
+import { assertDeliveryLease } from "./src/center/session-delivery.ts";
+import { wakeSessions } from "./src/center/center-wake.ts";
+import { clearPendingAdmission } from "./src/center/queue.ts";
+import { createNotifier } from "./src/runtime/plugin-notifications.ts";
+import { explicitlyAddresses } from "./src/center/mentions.ts";
+import { createV2Setup, type V2Runtime } from "./src/runtime/v2-plugin.ts";
+import { createV1Server } from "./src/runtime/v1-plugin.ts";
+import { runAnnouncementTool } from "./src/agent/announcement-tool.ts";
+import { uploadAgentResource } from "./src/rooms/resource-upload.ts";
+import { readAgentResource, resourceReadFailure } from "./src/rooms/resource-read.ts";
+import { adminTool, adminToolDescription, adminToolSchema } from "./src/agent/admin-client.ts";
+import { runReminderTool } from "./src/center/reminder-client.ts";
 // ponytail: CHAT_ROOM_SERVER_URL switches to central mode (all state on a
 // central server); unset = standalone local-file mode
 const centerUrl = process.env.CHAT_ROOM_SERVER_URL ?? "";
@@ -246,7 +246,7 @@ export async function pollKnownSessions(
 const READ_ONLY_ACTIONS = new Set(["list", "members", "poll", "announcement_list", "announcement_read"]);
 
 export const roomArgs = z.object({
-  action: z.enum(["create", "join", "leave", "list", "send", "poll", "members", "upload_resource", "read_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete"]),
+  action: z.enum(["create", "join", "leave", "list", "send", "poll", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete"]),
   name: z.string().max(64).optional().describe("For join: your own participant display name, NOT the room name (required). For create: the new room name."),
   roomId: z.string().optional(),
   resourceId: z.string().optional(),
@@ -275,6 +275,7 @@ const roomExecute = async (
       return await runReminderTool(runtime.center, args, context.sessionID);
     }
     if (args.action === "upload_resource") return uploadAgentResource(runtime.center, args.roomId ?? "", args.filePath ?? "", context.sessionID, context);
+    if (args.action === "delete_resource") return deleteAgentResource(runtime.center, args.roomId ?? "", args.resourceId ?? "", context.sessionID);
     if (args.action === "read_resource") {
       try {
         if (!context.ask) return "error: host webfetch permission is unavailable";
@@ -469,7 +470,7 @@ const roomExecute = async (
     }
 };
 const room = tool({
-  description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; manage reminders. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup.",
+  description: "Chat room operations: create, join, leave and list rooms; send and poll messages; list members and announcements; manage reminders. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads.",
   args: roomArgs.shape,
   execute: roomExecute,
 });

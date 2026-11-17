@@ -19,7 +19,7 @@ const previousDirectory = process.env.CHAT_ROOM_STATE_DIR;
 const previousToken = process.env.CHAT_ROOM_SERVER_TOKEN;
 process.env.CHAT_ROOM_STATE_DIR = directory;
 process.env.CHAT_ROOM_SERVER_TOKEN = "__Test_token";
-const store = await import("../src/store");
+const store = await import("../src/state/store.ts");
 const { announcementRoutes } = await import("./announcement-routes");
 const server = (await import("./chat-server")).default;
 const roomID = await store.writeState((service, registry) => {

@@ -2,10 +2,10 @@
 // file persistence stay internal
 export { default } from "./plugin";
 export { id, server, setup } from "./plugin";
-export { default as RoomService, RoomError } from "./src/room-service";
+export { default as RoomService, RoomError } from "./src/rooms/room-service.ts";
 export type {
   Message,
   Participant,
   Room,
   RoomErrorCode,
-} from "./src/room-service";
+} from "./src/rooms/room-service.ts";

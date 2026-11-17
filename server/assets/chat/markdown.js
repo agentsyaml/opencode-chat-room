@@ -1,4 +1,5 @@
-import { createRandomId } from "./state.js";
+import { createRandomId, LS } from "./state.js";
+import { isRoomAdmin } from "./admin-badge.js";
 
 const mentionPattern = /<at>@([^<]+)<\/at>/g;
 const resourcePattern = /\[\[resource:([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})\]\]/gi;
@@ -135,7 +136,12 @@ async function loadResourceCard(card, roomId, app) {
       // Media you sent yourself is shown inline; other people's media stays collapsed.
       if (card.closest(".msg.own")) void previewResource(card, roomId, id, resource, type, preview, app, status);
     }
-  } catch { if (card.isConnected) setResourceError(card, app); }
+    if (isRoomAdmin(app)) {
+      const remove = resourceButton("resourceDelete", resource.name, () => deleteResource(card, roomId, id, resource, app, status, remove), app);
+      remove.classList.add("danger-text");
+      actions.append(remove);
+    }
+  } catch (error) { if (card.isConnected) setResourceError(card, app, error?.status === 404 ? "resourceDeleted" : "resourceFailed"); }
 }
 function setResourceButton(button, key, name, app) {
   button.dataset.i18n = key; button.textContent = app.t(key);
@@ -146,6 +152,29 @@ function resourceButton(key, name, action, app) {
   button.type = "button"; button.className = "btn ghost small resource-button";
   setResourceButton(button, key, name, app);
   button.addEventListener("click", action); return button;
+}
+async function deleteResource(card, roomId, id, resource, app, status, button) {
+  if (!confirm(app.t("resourceDeleteConfirm", { name: resource.name }))) return;
+  button.disabled = true;
+  status.textContent = app.t("resourceDeleting");
+  try {
+    await app.api(`/rooms/${encodeURIComponent(roomId)}/resources/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-session-id": LS.sessionID }, body: "{}" });
+    if (!card.isConnected) return;
+    card._previewElement?.remove();
+    if (card._resourceUrl) URL.revokeObjectURL(card._resourceUrl);
+    previewUrls.delete(card); delete card._resourceUrl; delete card._previewElement;
+    card.querySelector(".resource-actions")?.remove();
+    status.textContent = app.t("resourceDeleted");
+    // The same file can appear in quoted or repeated messages; mark those copies too.
+    for (const other of document.querySelectorAll(".chat-resource")) {
+      if (other === card || other.dataset.resourceId !== id) continue;
+      other.querySelector(".resource-actions")?.remove();
+      const otherStatus = other.querySelector(".resource-status");
+      if (otherStatus) otherStatus.textContent = app.t("resourceDeleted");
+    }
+  } catch {
+    if (card.isConnected) { status.textContent = app.t("resourceDeleteFailed"); button.disabled = false; }
+  }
 }
 async function downloadResource(card, roomId, id, resource, app, status, button) {
   if (!card.isConnected || button.disabled) return;
@@ -227,10 +256,10 @@ function formatBytes(value) {
   if (bytes < 1024) return `${bytes} B`;
   return bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
 }
-function setResourceError(card, app) {
+function setResourceError(card, app, key = "resourceFailed") {
   card.textContent = "";
   const status = document.createElement("span"); status.className = "resource-status";
-  status.setAttribute("role", "status"); status.textContent = app.t("resourceFailed"); card.append(status);
+  status.setAttribute("role", "status"); status.textContent = app.t(key); card.append(status);
 }
 function watchPreviewRemoval() {
   const list = document.querySelector("#msgList");
