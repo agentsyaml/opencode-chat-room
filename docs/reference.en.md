@@ -82,17 +82,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.6.8 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.6.9 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.6.8 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.6.8 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.6.8 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.6.9 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.6.9 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.6.9 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.6.8
+  bunx @alexsun-top/opencode-chat-room@0.6.9
 
 # Local checkout:
 bun install
@@ -111,7 +111,7 @@ Switching the sidebar does not leave a room. Direct conversations are created wi
 
 The chat renders GitHub Flavored Markdown using locally bundled Marked and DOMPurify assets. Message text is sanitized before rendered HTML is inserted. No CDN is required.
 
-Interactive controls show a keyboard hint when they enter the viewport. Alt+ArrowUp and Alt+ArrowDown switch rooms; their badges display only `↑ ↓`, while generic controls display `Tab ↵` or `Tab Space`. Press `?` or use the keyboard-hints button to open the full sheet; the sheet's Hide button turns hints off and the choice is stored in the browser. With the composer focused, PageUp and PageDown scroll the conversation without moving the caret or changing the draft.
+Press Alt+/ or use the Shortcuts button to open the shortcut sheet. It lists only shortcuts that exist: Enter sends, Shift+Enter starts a new line, the arrows and Enter pick a mention, Alt+ArrowUp and Alt+ArrowDown switch rooms, Alt+Home and Alt+End jump to the oldest or latest loaded message, Esc closes the open menu, panel, or dialog, and PageUp and PageDown scroll the conversation while the composer is focused without moving the caret or changing the draft.
 
 The central server uses a trusted shared-token model, not per-user authorization or private DMs: anyone holding the token can read messages, manage rooms, remove members, and delete rooms. The server and its SQLite database can read direct-message content. Removing a member requires confirmation; deleting a room requires confirmation and permanently deletes its messages and history.
 
@@ -145,7 +145,7 @@ Reading announcements does not require joining the room. Creating, replacing, an
 
 ### Message recall
 
-`room` with `action: "recall"`, `roomId`, and `messageId` soft-hides a message. The authoring session can recall its own message; a human room administrator can recall any message in a room they administer. The web interface offers administrator recall in group rooms; in a direct conversation it offers only your own messages, and a recalled message shows View original. Room notices are authored by the server, so only a human administrator can recall them.
+`room` with `action: "recall"`, `roomId`, and `messageId` soft-hides a message. The authoring session can recall its own message; a human room administrator can recall any message in a room they administer. The web interface offers administrator recall in group rooms; in a direct conversation it offers only your own messages, and a recalled message shows View original. Room notices are authored by the server and cannot be recalled.
 
 Recall hides the message from normal history, unread delivery, replies, and the pending-question list. Recalling an already recalled message is idempotent. The row, author, and original text are retained: any current member can reveal the text with `GET /rooms/:roomId/messages/:messageId/content?sessionID=…`, and `POST /rooms/:roomId/messages/:messageId/recall` accepts `{ sessionID }`. Recall is therefore not confidential erasure. Copies already delivered to an Agent's context, a notification, or a downloaded attachment cannot be retracted.
 
@@ -238,7 +238,7 @@ Administrator-room setup and Agent designation are described in [Administrator r
 | `list` | — | All rooms with member counts |
 | `send` | `roomId`, `text` (required, ≤5000), optional `isQuestion` | Stores the message and pushes it to other members |
 | `poll` | `roomId` (required) | Only unread messages (skips already-pushed ones) |
-| `recall` | `roomId`, `messageId` (required) | Soft-hides a message; your own messages, or any message in a room you administer as a human administrator. The original remains available to current members |
+| `recall` | `roomId`, `messageId` (required) | Soft-hides a message; your own messages, or any message in a room you administer as a human administrator. Room notices cannot be recalled. The original remains available to current members |
 | `members` | `roomId` (required) | Member names |
 | `upload_resource` | `roomId`, `filePath` | Uploads a local file in central mode and returns its resource marker; requires membership and file-read permission |
 | `read_resource` | `roomId`, `resourceId` | Saves an attachment to a private temporary file and returns its path; requires membership |

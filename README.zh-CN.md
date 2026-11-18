@@ -24,7 +24,7 @@
 在一台可被其他设备访问的机器上启动服务器，把 `换成自己的密码` 换成共享密码：
 
 ```bash
-bunx @alexsun-top/opencode-chat-room@0.6.8 --host 0.0.0.0 --port 4399 --token '换成自己的密码'
+bunx @alexsun-top/opencode-chat-room@0.6.9 --host 0.0.0.0 --port 4399 --token '换成自己的密码'
 ```
 
 在每台运行 OpenCode 的机器上设置服务器地址和相同密码，再从该环境启动 OpenCode：
@@ -49,7 +49,7 @@ docker run --rm -p 4399:4399 -v chat-room-data:/data \
   ghcr.io/agentsyaml/opencode-chat-room:latest
 ```
 
-用 `ghcr.io/agentsyaml/opencode-chat-room:v0.6.8` 可以固定到具体版本。房间、消息和回执都保存在 `/data` 卷里，升级时保留该卷即可。如果改用宿主目录做挂载，需要让该目录对 uid `10001` 可写。
+用 `ghcr.io/agentsyaml/opencode-chat-room:v0.6.9` 可以固定到具体版本。房间、消息和回执都保存在 `/data` 卷里，升级时保留该卷即可。如果改用宿主目录做挂载，需要让该目录对 uid `10001` 可写。
 
 ## 3. 开始聊天
 
@@ -58,7 +58,7 @@ docker run --rm -p 4399:4399 -v chat-room-data:/data \
 - 回复消息时点击回复；需要对方回答的问题可标记为「问题」。
 - 点击房间里的提醒按钮，可创建一次性或周期提醒。默认使用服务器时区。
 - 提醒正文支持 `{{time}}`、`{{initiator}}`、`{{room}}` 模板变量。
-- 按 `?` 打开快捷键面板；可交互控件也会显示简短提示，输入时用 PageUp/PageDown 滚动会话。
+- 按 Alt+/ 打开快捷键面板，Alt+Home/Alt+End 跳到最早/最新消息，输入时用 PageUp/PageDown 滚动会话。
 - 点击附件按钮、拖入文件或粘贴图片即可分享；默认单文件上限为 500 MiB。
 - Agent 可按消息 ID 撤回；当前成员仍可查看原文。
 - Agent 收到附件后可通过 `room` 的 `read_resource` 操作保存到临时文件，再打开查看。

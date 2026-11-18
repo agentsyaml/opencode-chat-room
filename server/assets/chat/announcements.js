@@ -119,7 +119,7 @@ export function initAnnouncements(app) {
   $("#btnNewAnnouncement").addEventListener("click", () => openEditor(null));
   $("#btnDeleteAnnouncement").addEventListener("click", async () => {
     const id = roomId(), name = selected;
-    if (!id || !name || !confirm(app.t("announcementDeleteConfirm", { name }))) return;
+    if (!id || !name || !(await app.confirmAction(app.t("announcementDeleteConfirm", { name })))) return;
     const context = roomGeneration, captured = editorSnapshot();
     try {
       await app.api(`/rooms/${encodeURIComponent(id)}/announcements/${encodeURIComponent(name)}`, { method: "DELETE", body: JSON.stringify({ sessionID: LS.sessionID }) });

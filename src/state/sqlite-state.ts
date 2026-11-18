@@ -532,9 +532,10 @@ export async function recallMessage(file: string, roomID: string, messageID: str
     const member = db.query("SELECT name,protocol,host,receiver_owner_id,membership_id FROM registry WHERE room_id=? AND session_id=?")
       .get(roomID, sessionID) as RecallMemberRow | null;
     if (!member) return { status: "member" };
-    const message = db.query("SELECT sender_session_id,recalled_at,recalled_by FROM messages WHERE room_id=? AND id=?")
-      .get(roomID, messageID) as { sender_session_id: string | null; recalled_at: number | null; recalled_by: string | null } | null;
+    const message = db.query("SELECT sender_id,sender_session_id,recalled_at,recalled_by FROM messages WHERE room_id=? AND id=?")
+      .get(roomID, messageID) as { sender_id: string; sender_session_id: string | null; recalled_at: number | null; recalled_by: string | null } | null;
     if (!message) return { status: "missing" };
+    if (message.sender_id === "system") return { status: "forbidden" };
     const room = {
       ownerId: roomRow.owner_id,
       ...(roomRow.owner_membership_id ? { ownerMembershipID: roomRow.owner_membership_id } : {}),

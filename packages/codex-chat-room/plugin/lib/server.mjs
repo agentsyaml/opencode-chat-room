@@ -83,7 +83,7 @@ export function startServer(options = {}) {
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
           capabilities: { tools: {} },
-          serverInfo: { name: "chat_room", version: "0.1.0" },
+          serverInfo: { name: "chat_room", version: "0.1.1" },
           instructions: INSTRUCTIONS,
         },
       });

@@ -16,8 +16,7 @@ export function initRecall(app) {
     const self = app.state.memberSessions.get(app.state.room?.id)?.find((member) => member.sessionID === LS.sessionID);
     // Member data may not have loaded yet; the server re-checks the real membership.
     const humanAdmin = (!self || self.type === "human") && isRoomAdmin(app);
-    // Room notices have no author: only a human administrator may recall one.
-    if (message.senderId === "system") return app.state.room?.kind !== "direct" && humanAdmin;
+    if (message.senderId === "system") return false;
     if (isOwnMessage(message, app)) return true;
     if (app.state.room?.kind === "direct") return false;
     return humanAdmin;
@@ -27,10 +26,7 @@ export function initRecall(app) {
     const row = base(message, live);
     if (message.recalledAt) return renderTombstone(row, message, app, false);
     if (!app.canRecallMessage(message)) return row;
-    if (message.senderId === "system") {
-      row.classList.add("has-recall");
-      row.append(systemRecallButton(message, app));
-    } else row.querySelector(".message-actions")?.append(recallButton(message, app));
+    row.querySelector(".message-actions")?.append(recallButton(message, app));
     return row;
   };
 
@@ -141,22 +137,14 @@ function recallButton(message, app) {
   return button;
 }
 
-function systemRecallButton(message, app) {
-  const button = recallButton(message, app);
-  button.classList.add("sys-recall");
-  button.title = app.t("recallSystemMessage");
-  button.setAttribute("aria-label", app.t("recallSystemMessage"));
-  button.dataset.i18nAriaLabel = "recallSystemMessage";
-  return button;
-}
+
 
 async function recall(message, button, app) {
   const roomId = app.state.room?.id;
   if (!roomId || button.disabled) return;
   const own = isOwnMessage(message, app);
-  const prompt = message.senderId === "system" ? app.t("recallSystemConfirm")
-    : own ? app.t("recallConfirm") : app.t("recallAdminConfirm", { name: message.senderId });
-  if (!confirm(prompt)) return;
+  const prompt = own ? app.t("recallConfirm") : app.t("recallAdminConfirm", { name: message.senderId });
+  if (!(await app.confirmAction(prompt))) return;
   button.disabled = true;
   try {
     const result = await app.api(`/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(message.id)}/recall`, {

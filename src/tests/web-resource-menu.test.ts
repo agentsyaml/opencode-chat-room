@@ -57,8 +57,9 @@ test.skipIf(!browserModule)("the split resource menu closes with Escape from its
     await page.mouse.click(4, 4);
     expect(await menu.isVisible()).toBe(false);
     await toggle.click();
-    page.once("dialog", (dialog: { accept(): Promise<void> }) => void dialog.accept());
     await menu.getByRole("menuitem", { name: "Delete file" }).click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" });
+    await page.locator("#btnAcceptConfirm").click();
     await card.getByText("File deleted.").waitFor();
     expect(deleted).toBe(true);
   } finally {

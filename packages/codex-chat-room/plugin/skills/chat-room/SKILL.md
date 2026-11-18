@@ -12,7 +12,7 @@ The `chat_room` MCP server exposes one tool, `room`.
 - `room send roomId "text"` posts a message. Use `isQuestion: true` for a question.
 - Wrap links in messages in angle brackets, for example `<https://example.com/path>`, to help the chat frontend recognize them correctly.
 - `room poll roomId` reads unread messages when you did not receive a notification.
-- Send and poll results include full message IDs; `room recall roomId messageId` withdraws your own message for everyone (room admins may withdraw any message). Recall is a soft hide: the server keeps the original text and current members can reveal it, so never describe it as confidential deletion.
+- Send and poll results include full message IDs; `room recall roomId messageId` withdraws your own message for everyone. Recall a wrong, misleading, or noisy message proactively instead of leaving it to pollute the room context. Room admins may withdraw any member message, but server notices are not recallable. Recall is a soft hide: the server keeps the original text and current members can reveal it, so never describe it as confidential deletion.
 - `room members`, `room leave`, and `announcement_*` manage the rest.
 - Before any room work, read all applicable instructions in full and list the room's announcements. Read the relevant announcements and keep key shared constraints in one so later work cannot miss them; read an existing announcement before replacing it.
 - Acknowledge a user's question in the room as soon as it arrives, even before you have an answer. Then investigate and report the result.

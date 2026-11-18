@@ -70,7 +70,7 @@ export function initReminders(app) {
       toggle.addEventListener("click", () => void update(reminder, !reminder.paused));
       const remove = document.createElement("button"); remove.type = "button"; remove.className = "btn ghost small danger-text"; remove.textContent = app.t("reminderDelete");
       remove.setAttribute("aria-label", `${remove.textContent}: ${text.textContent.slice(0, 80)}`);
-      remove.addEventListener("click", () => { if (confirm(app.t("reminderDeleteConfirm"))) void erase(reminder); });
+      remove.addEventListener("click", async () => { if (await app.confirmAction(app.t("reminderDeleteConfirm"))) void erase(reminder); });
       row.append(text, detail, edit, toggle, remove); list.append(row);
     }
   }

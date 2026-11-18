@@ -393,8 +393,9 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     const aliceRow = bob.locator("#memberList li").filter({ hasText: "Alice" });
     expect(await aliceRow.getByRole("button", { name: "Remove" }).count()).toBe(0);
     const carolRow = bob.locator("#memberList li").filter({ hasText: "Carol" });
-    bob.once("dialog", (dialog: { accept(): Promise<void> }) => void dialog.accept());
     await carolRow.getByRole("button", { name: "Remove" }).click();
+    await bob.locator("#confirmDialog").waitFor();
+    await bob.locator("#btnAcceptConfirm").click();
     await bob.locator("#msgList").getByText("Carol was removed from the room").waitFor();
     const membersAfterKick = await (await fetch(`${origin}/rooms/${sourceRoom}/members`, { headers: { Authorization: "Bearer ui-test-token" } })).json() as Array<{ name: string }>;
     expect(membersAfterKick.some((member) => member.name === "Carol")).toBe(false);
@@ -422,11 +423,13 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await bob.locator("#roomOptions").waitFor({ state: "visible" });
     await bob.waitForTimeout(200);
     await bob.screenshot({ path: path.join(screenshotDir, "chat-room-options-desktop.png"), fullPage: true });
-    bob.once("dialog", (dialog: { dismiss(): Promise<void> }) => void dialog.dismiss());
     await bob.locator("#btnDeleteRoom").click();
+    await bob.locator("#confirmDialog").waitFor({ state: "visible" });
+    await bob.locator("#btnCancelConfirm").click();
     expect(await currentRoomId(bob)).toBe(secondRoom);
-    bob.once("dialog", (dialog: { accept(): Promise<void> }) => void dialog.accept());
     await bob.locator("#btnDeleteRoom").click();
+    await bob.locator("#confirmDialog").waitFor({ state: "visible" });
+    await bob.locator("#btnAcceptConfirm").click();
     await bob.waitForFunction((id: string) => (document.querySelector("#btnCopyId") as HTMLButtonElement | null)?.title.endsWith(id), sourceRoom);
     await bob.locator(`#roomListChat [data-room-id="${secondRoom}"]`).waitFor({ state: "detached" });
     expect(await bob.evaluate(() => JSON.parse(sessionStorage.getItem("chat.joinedRoomIds") || "[]"))).toContain(directRoomId);

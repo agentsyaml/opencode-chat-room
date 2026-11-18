@@ -149,7 +149,7 @@ export function initMembers(app) {
   };
 
   app.kickMember = async (member) => {
-    if (!confirm(app.t("kickConfirm", { name: member.name }))) return;
+    if (!(await app.confirmAction(app.t("kickConfirm", { name: member.name })))) return;
     try {
       await app.api(`/rooms/${encodeURIComponent(app.state.room.id)}/kick`, {
         method: "POST",

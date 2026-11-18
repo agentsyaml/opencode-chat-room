@@ -142,8 +142,9 @@ test.skipIf(!browserModule)("agent uploads render and download real browser medi
     expect(await menu.isVisible()).toBe(false);
     expect(await menuToggle.evaluate((node: HTMLElement) => document.activeElement === node)).toBe(true);
     await menuToggle.click();
-    page.once("dialog", (dialog: { accept(): Promise<void> }) => void dialog.accept());
     await menu.getByRole("menuitem", { name: "Delete file" }).click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" });
+    await page.locator("#btnAcceptConfirm").click();
     await removedCard.getByText("File deleted.").waitFor();
     expect((await fetch(`${origin}/rooms/${roomID}/resources/${removedResource.id}`, { headers: { Authorization: `Bearer ${token}` } })).status).toBe(404);
     expect(resourceQueries.length).toBeGreaterThan(0);

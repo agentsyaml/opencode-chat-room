@@ -117,13 +117,13 @@ test("recalled questions leave the open-question surface and reject answers", as
   expect(ok(await store.answerQuestion(roomID, next.id, "session-carol", "yes")).answer.text).toBe("yes");
 });
 
-test("system messages are recallable by a human admin only", async () => {
+test("system messages cannot be recalled even by a human admin", async () => {
   const roomID = await makeRoom("system");
   const event = await store.writeState((service) => service.addEvent(roomID, "Alice joined the room"));
   expect(await store.recallMessage(roomID, event.id, "session-carol")).toEqual({ status: "forbidden" });
-  expect(ok(await store.recallMessage(roomID, event.id, "session-alice")).recalledBy).toBe("Alice");
+  expect(await store.recallMessage(roomID, event.id, "session-alice")).toEqual({ status: "forbidden" });
   const history = await store.readHistory(roomID);
-  expect(history.messages.find((message) => message.id === event.id)).toMatchObject({ senderId: "system", text: "" });
+  expect(history.messages.find((message) => message.id === event.id)).toMatchObject({ senderId: "system", text: "Alice joined the room" });
 });
 
 test("recall routes expose the HTTP contract", async () => {

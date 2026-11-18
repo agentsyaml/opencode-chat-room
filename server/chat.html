@@ -12,7 +12,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="stylesheet" href="/assets/base.css">
-<link rel="stylesheet" href="/assets/keyboard-hints.css">
+
 <link rel="stylesheet" href="/assets/conversation.css">
 <link rel="stylesheet" href="/assets/recall.css">
 <link rel="stylesheet" href="/assets/attachments.css">
@@ -38,7 +38,7 @@
             <option value="en">English</option>
             <option value="zh-CN">中文</option>
           </select>
-          <button id="btnKeysJoin" class="keys-hint" type="button" data-shortcuts aria-haspopup="dialog" aria-controls="shortcutsDialog" aria-label="Keyboard hints" data-i18n-aria-label="keyboardHints" title="Keyboard hints" data-i18n-title="keyboardHints" aria-keyshortcuts="?"><kbd class="keys-key" aria-hidden="true">?</kbd><span class="keys-label" data-i18n="shortcutsLabel">Key hints</span></button>
+          <button id="btnKeysJoin" class="keys-hint" type="button" data-shortcuts aria-haspopup="dialog" aria-controls="shortcutsDialog" aria-label="Keyboard hints" data-i18n-aria-label="keyboardHints" title="Keyboard hints" data-i18n-title="keyboardHints" aria-keyshortcuts="Alt+/"><span class="keys-label" data-i18n="shortcutsLabel">Shortcuts</span></button>
         </div>
         <p class="tagline" data-i18n="tagline">A lightweight chat room. Enter a room ID to join, or create a new one.</p>
       </header>
@@ -137,7 +137,7 @@
       </form>
       <ul id="roomListChat" class="rail-rooms"></ul>
       <p id="roomListChatEmpty" class="hint" data-i18n="noRooms" hidden></p>
-      <p id="railKeyHint" class="rail-key-hint" hidden><span class="keys-combo"><kbd class="keys-key">↑</kbd><kbd class="keys-key">↓</kbd></span><span data-i18n="switchRoomsHint">Switch rooms</span></p>
+
       <div id="railInstall" class="rail-install" hidden>
         <button id="btnRailInstall" class="btn ghost small rail-install-btn" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4v10M8 10l4 4 4-4M5 19h14"/></svg><span data-i18n="installAction">Install</span></button>
         <p id="railInstallGuide" class="hint" data-i18n="installIosGuide" hidden>Tap Share, then Add to Home Screen.</p>
@@ -322,7 +322,7 @@
         <button class="btn primary" type="button" id="btnSend" data-i18n="send" disabled>Send</button>
       </div>
       <div class="composer-meta">
-        <button id="btnKeysChat" class="keys-hint composer-keys" type="button" data-shortcuts aria-haspopup="dialog" aria-controls="shortcutsDialog" aria-label="Keyboard hints" data-i18n-aria-label="keyboardHints" title="Keyboard hints" data-i18n-title="keyboardHints" aria-keyshortcuts="?"><kbd class="keys-key" aria-hidden="true">?</kbd><span class="keys-label" data-i18n="shortcutsLabel">Key hints</span></button>
+        <button id="btnKeysChat" class="keys-hint composer-keys" type="button" data-shortcuts aria-haspopup="dialog" aria-controls="shortcutsDialog" aria-label="Keyboard hints" data-i18n-aria-label="keyboardHints" title="Keyboard hints" data-i18n-title="keyboardHints" aria-keyshortcuts="Alt+/"><span class="keys-label" data-i18n="shortcutsLabel">Shortcuts</span></button>
         <p id="draftCount" class="draft-count">0 / 5000</p>
       </div>
     </footer>
@@ -347,6 +347,15 @@
     <button id="btnOwnerOnlyOk" class="btn ghost small" type="button" data-i18n="close">Close</button>
   </dialog>
 
+  <dialog id="confirmDialog" class="admin-dialog confirm-dialog" aria-labelledby="confirmHeading">
+    <header class="admin-dialog-head"><h2 id="confirmHeading" data-i18n="confirmTitle">Please confirm</h2></header>
+    <p id="confirmMessage" class="hint"></p>
+    <div class="confirm-actions">
+      <button id="btnCancelConfirm" class="btn ghost small" type="button" data-i18n="cancel">Cancel</button>
+      <button id="btnAcceptConfirm" class="btn primary small" type="button" data-i18n="confirmAction">Confirm</button>
+    </div>
+  </dialog>
+
    <!-- The visible contract that every control works from the keyboard. -->
   <dialog id="shortcutsDialog" class="keys-dialog" aria-labelledby="shortcutsHeading">
     <header class="keys-dialog-head">
@@ -354,7 +363,7 @@
       <button id="btnCloseShortcuts" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="close-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </header>
     <p class="keys-lead" data-i18n="shortcutsLead">Every control works from the keyboard. Tags show the keys that work.</p>
-    <div class="keys-sheet-actions"><button id="btnToggleHints" class="btn ghost small" type="button" data-i18n="hintsHide">Hide tags on controls</button></div>
+
     <section class="keys-section">
       <h3 data-i18n="shortcutsWriting">Writing</h3>
       <ul class="keys-list">
@@ -373,6 +382,7 @@
       <h3 data-i18n="shortcutsReading">Reading</h3>
       <ul class="keys-list">
         <li><span class="keys-combo"><kbd class="keys-key">PageUp</kbd><span class="keys-sep">/</span><kbd class="keys-key">PageDown</kbd></span><span data-i18n="shortcutsScroll">Scroll messages while typing</span></li>
+        <li><span class="keys-combo"><kbd class="keys-key">Alt</kbd><span class="keys-sep">+</span><kbd class="keys-key">Home</kbd><span class="keys-sep">/</span><kbd class="keys-key">End</kbd></span><span data-i18n="shortcutsJump">Jump to the start or end of the conversation</span></li>
       </ul>
     </section>
     <section class="keys-section">
@@ -381,27 +391,10 @@
         <li><span class="keys-combo"><kbd class="keys-key">Esc</kbd></span><span data-i18n="shortcutsClose">Close the open menu, panel, or dialog</span></li>
       </ul>
     </section>
-    <section class="keys-section">
-      <h3 data-i18n="shortcutsEverywhere">Everywhere</h3>
-      <ul class="keys-list">
-        <li><span class="keys-combo"><kbd class="keys-key">Tab</kbd><span class="keys-sep">/</span><kbd class="keys-key">Shift</kbd><span class="keys-sep">+</span><kbd class="keys-key">Tab</kbd></span><span data-i18n="shortcutsTab">Move between controls</span></li>
-        <li><span class="keys-combo"><kbd class="keys-key">Enter</kbd><span class="keys-sep">/</span><kbd class="keys-key">Space</kbd></span><span data-i18n="shortcutsActivate">Use the focused control</span></li>
-        <li><span class="keys-combo"><kbd class="keys-key">?</kbd></span><span data-i18n="shortcutsOpen">Open this shortcut list</span></li>
-      </ul>
-    </section>
+
   </dialog>
 
-   <!-- Badges over every visible control; the legend can hide them. -->
-  <div id="keyboardHints" class="keys-overlay" hidden>
-    <div id="keyboardHintMarks" class="keys-marks" aria-hidden="true"></div>
-    <div class="keys-legend">
-      <p class="keys-legend-text" data-i18n="hintsLegend">Tab reaches · Enter / Space activates</p>
-      <div class="keys-legend-actions">
-        <button id="btnAllShortcuts" class="keys-legend-btn" type="button" data-i18n="allShortcuts">All shortcuts</button>
-        <button id="btnCloseHints" class="keys-legend-close" type="button" aria-label="Hide tags on controls" data-i18n-aria-label="hintsHide"><svg class="close-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-      </div>
-    </div>
-  </div>
+
 
 </main>
 

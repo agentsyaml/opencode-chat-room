@@ -97,8 +97,9 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
     expect(calls.findLast((call) => call.method === "PATCH")).toMatchObject({ body: { sessionID: expect.any(String), paused: true } });
     const deleteRace = holdNextGet(), staleReminder = page.waitForResponse((response: any) => response.request().method() === "GET" && response.url().includes("/reminders?"), { timeout: 60000 });
     await page.locator("#btnRefreshReminders").click(); await deleteRace.startedPromise;
-    page.once("dialog", (dialog: any) => dialog.accept());
     await page.locator(".reminder-list li button").filter({ hasText: "Delete" }).click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" });
+    await page.locator("#btnAcceptConfirm").click();
     await page.locator(".reminder-list li").waitFor({ state: "detached" });
     expect(calls.at(-1)).toMatchObject({ method: "DELETE", body: { sessionID: expect.any(String) } });
     deleteRace.release(); await staleReminder;

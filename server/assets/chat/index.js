@@ -1,4 +1,5 @@
 import { app } from "./state.js";
+import { initConfirmDialog } from "./confirm-dialog.js";
 import { initMentions } from "./mentions.js";
 import { initMessages } from "./messages.js";
 import { initMembers } from "./members.js";
@@ -19,6 +20,7 @@ import { initPwa } from "./pwa.js";
 import { initInstallPrompt } from "./install-prompt.js";
 import { initShortcuts } from "./shortcuts.js";
 
+initConfirmDialog(app);
 initMentions(app);
 initMessages(app);
 initAttachments(app);

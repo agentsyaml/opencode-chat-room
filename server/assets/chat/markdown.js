@@ -202,7 +202,7 @@ function resourceSplit(app, resource, download, item) {
   return group;
 }
 async function deleteResource(card, roomId, id, resource, app, status, button) {
-  if (!confirm(app.t("resourceDeleteConfirm", { name: resource.name }))) return;
+  if (!(await app.confirmAction(app.t("resourceDeleteConfirm", { name: resource.name })))) return;
   button.disabled = true;
   status.textContent = app.t("resourceDeleting");
   try {

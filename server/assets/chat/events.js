@@ -308,7 +308,7 @@ export function initEvents(app) {
     app.queueReceiptRefresh();
     if (!adjusting) app.queueReceiptObservation();
     app.updateJump();
-    if (!adjusting && thread.scrollTop < 160) void app.loadOlderHistory?.();
+    if (!adjusting && !app.state.jumpToLoadedTop && thread.scrollTop < 160) void app.loadOlderHistory?.();
   });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
@@ -333,6 +333,10 @@ export function initEvents(app) {
         event.preventDefault();
         document.querySelector(`[data-token-save="${selector.slice(1)}"]`).click();
       }
+    });
+    $(selector).addEventListener("input", () => {
+      app.hideJoinError();
+      app.hideSendError();
     });
   });
 
@@ -387,6 +391,10 @@ function saveAccessToken(button, app) {
   let persistent = false;
   try { persistent = localStorage.getItem("chat.token") === LS.token; } catch { /* Memory fallback is tab-scoped. */ }
   app.flash(button, persistent ? "saved" : "savedMemory");
+  if (LS.token) {
+    app.hideJoinError();
+    app.hideSendError();
+  }
   // The key prompt is a one-time visit: a stored key gets out of the way again.
   if (LS.token) document.getElementById("tokenBox")?.close();
   void app.refreshRoomList();

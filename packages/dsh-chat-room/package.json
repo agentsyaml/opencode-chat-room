@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/dsh-chat-room",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DeepSeek Harness plugin for a central chat-room server: the room tool plus context delivery.",
   "type": "module",
   "repository": {

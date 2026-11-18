@@ -100,7 +100,7 @@ export function initAdmin(app) {
     const owner = isOwner(), nextOwner = $("#editRoomOwner").value;
     const checkedAdmins = [...$("#editRoomAdminIds").querySelectorAll("input:checked")].map((input) => input.value);
     const joinPolicy = $("#editRoomJoinPolicy").checked ? "approval" : "open";
-    if (joinPolicy !== (room.joinPolicy ?? "open") && joinPolicy === "open" && !confirm(app.t("joinPolicyOpenConfirm"))) return;
+    if (joinPolicy !== (room.joinPolicy ?? "open") && joinPolicy === "open" && !(await app.confirmAction(app.t("joinPolicyOpenConfirm")))) return;
     const body = {
       sessionID: LS.sessionID, name, description: $("#editRoomDescription").value.trim(),
       ...(joinPolicy !== (room.joinPolicy ?? "open") ? { joinPolicy } : {}),

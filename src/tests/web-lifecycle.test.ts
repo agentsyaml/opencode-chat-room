@@ -230,8 +230,10 @@ async function deleteOnlyRequestedRoom(page: any, roomA: string, roomB: string) 
   });
   await switchTo(page, roomA);
   await page.locator("#btnRoomOptions").click();
-  page.once("dialog", (dialog: any) => void dialog.accept());
-  await page.locator("#btnDeleteRoom").click(); await requested;
+  await page.locator("#btnDeleteRoom").click();
+  await page.locator("#confirmDialog").waitFor({ state: "visible" });
+  await page.locator("#btnAcceptConfirm").click();
+  await requested;
   await switchTo(page, roomB);
   release(); await completed;
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), roomB);

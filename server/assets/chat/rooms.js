@@ -425,7 +425,7 @@ export function initRooms(app) {
 
   app.deleteRoom = async () => {
     const room = app.state.room;
-    if (!room || !confirm(app.t("deleteConfirm", { name: room.name }))) return;
+    if (!room || !(await app.confirmAction(app.t("deleteConfirm", { name: room.name })))) return;
     try {
       await app.api(`/rooms/${encodeURIComponent(room.id)}`, {
         method: "DELETE", body: JSON.stringify({ sessionID: LS.sessionID }),

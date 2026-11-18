@@ -48,7 +48,7 @@ test.skipIf(!browserModule)("the join masthead stays above the balanced content 
       expect(metrics.cards).toBe(3);
       expect(metrics.rooms).toBe(true);
       expect(metrics.overflow).toBe(true);
-      if (width > 860) { expect(metrics.columns).toBe(3); expect(metrics.widths.length).toBe(1); }
+      if (width > 860) expect(metrics.columns).toBe(2);
       else expect(metrics.columns).toBe(1);
     }
     // Resizing while the restore view is up (no active room) used to throw in captureReadingPosition.

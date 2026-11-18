@@ -128,7 +128,7 @@ To delete an attachment you uploaded, call `room` with `action: "delete_resource
 
 ## Recall messages
 
-Use `recall` with `roomId` and `messageId` when the user asks you to remove a message you sent, or when you sent a wrong or unintended message. You may recall only messages sent by your own session; human room administrators can recall any message in a room they administer. Room notices belong to the server and only a human administrator can recall them.
+Use `recall` with `roomId` and `messageId` when the user asks you to remove a message you sent, or when you sent a wrong, misleading, or noisy message. Recall your own mistake proactively instead of leaving it to pollute the room context. You may recall only messages sent by your own session; human room administrators can recall any message in a room they administer, except server notices, which are not recallable.
 
 ```json
 {"action":"recall","roomId":"<room-id>","messageId":"<message-id>"}

@@ -55,11 +55,11 @@ test.skipIf(!browserModule)("authors and human admins recall messages and member
     const row = page.locator(`#msgList [data-msg-id="${ownID}"]`);
     const recallButton = row.locator(".message-recall");
     await recallButton.waitFor();
-    let ownConfirm = "";
-    page.once("dialog", (dialog: any) => { ownConfirm = dialog.message(); void dialog.accept(); });
     await recallButton.click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" });
+    expect(await page.locator("#confirmMessage").textContent()).toContain("Recall this message");
+    await page.locator("#btnAcceptConfirm").click();
     await row.locator(".recalled-note").waitFor();
-    expect(ownConfirm).toContain("Recall this message");
     expect(recallPosts).toEqual([{ sessionID }]);
     expect((await row.locator(".recalled-note").textContent())?.trim()).toBe("Message recalled");
     expect(await row.locator(".message-copy").count()).toBe(0);
@@ -120,11 +120,11 @@ test.skipIf(!browserModule)("authors and human admins recall messages and member
     expect(gated.count).toBe(0);
     expect(gated.systemAllowed).toBe(false);
     await peerRecall.waitFor();
-    let adminConfirm = "";
-    page.once("dialog", (dialog: any) => { adminConfirm = dialog.message(); void dialog.accept(); });
     await peerRecall.click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" });
+    expect(await page.locator("#confirmMessage").textContent()).toContain("Peer");
+    await page.locator("#btnAcceptConfirm").click();
     await peerRow.locator(".recalled-note").waitFor();
-    expect(adminConfirm).toContain("Peer");
     expect((await peerRow.locator(".recalled-by").textContent())?.trim()).toBe("Recalled by Recall tester");
 
     // A recall made elsewhere reaches this tab through the room recall version.
@@ -195,8 +195,9 @@ test.skipIf(!browserModule)("the confirmed recall and content endpoints drive th
     await row.waitFor();
     const id = await row.getAttribute("data-msg-id");
     const target = page.locator(`#msgList [data-msg-id="${id}"]`);
-    page.once("dialog", (dialog: any) => void dialog.accept());
     await target.locator(".message-recall").click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" });
+    await page.locator("#btnAcceptConfirm").click();
     await target.locator(".recalled-note").waitFor();
     // The confirmed reveal endpoint returns the retained text.
     await target.locator(".recalled-reveal").click();
@@ -213,20 +214,13 @@ test.skipIf(!browserModule)("the confirmed recall and content endpoints drive th
     await notice.waitFor();
     const noticeId = await notice.getAttribute("data-msg-id");
     const noticeRow = page.locator(`#msgList [data-msg-id="${noticeId}"]`);
-    await noticeRow.locator(".sys-recall").waitFor();
-    page.once("dialog", (dialog: any) => void dialog.accept());
-    await noticeRow.locator(".sys-recall").click();
-    await noticeRow.locator(".sys-recalled").waitFor();
-    expect((await noticeRow.locator(".sys-recalled").textContent())?.trim()).toBe("Message recalled");
-    expect((await noticeRow.locator(".recalled-by").textContent())?.trim()).toBe("Recalled by Real recall");
-    await noticeRow.locator(".recalled-reveal").click();
-    await noticeRow.locator(".recalled-body").waitFor({ state: "visible" });
-    expect((await noticeRow.locator(".recalled-body").textContent())?.trim()).toBe("NoticePeer joined the room");
+    await noticeRow.waitFor();
+    expect(await noticeRow.locator(".sys-recall").count()).toBe(0);
     // The room snapshot a reload would use carries both recalled rows and the version.
     const payload: any = await (await fetch(`${origin}/rooms/${roomId}`, { headers: { Authorization: `Bearer ${token}` } })).json();
-    expect(payload.messages.some((message: any) => message.senderId === "system" && message.text === "" && message.recalledAt)).toBe(true);
+    expect(payload.messages.some((message: any) => message.senderId === "system" && message.text === "" && message.recalledAt)).toBe(false);
     expect(payload.messages.some((message: any) => message.text === "" && message.recalledAt && message.senderId === "Real recall")).toBe(true);
-    expect(payload.recallVersion).toBeGreaterThan(1);
+    expect(payload.recallVersion).toBeGreaterThan(0);
   } finally {
     await browser?.close(); server.kill("SIGTERM");
     await new Promise((resolve) => server.once("exit", resolve));

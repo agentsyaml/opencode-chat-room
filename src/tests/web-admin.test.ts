@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import type { Dialog as BrowserDialog, Route as BrowserRoute } from "playwright";
+import type { Route as BrowserRoute } from "playwright";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { Database } from "bun:sqlite";
@@ -132,8 +132,9 @@ test.skipIf(!browserModule)("owner designates an administrator agent; access is 
     await page.unroute(`**/rooms/${roomId}/registry`);
     expect((await overview(agentSession, ownerID)).status).toBe(200);
     await page.waitForFunction(async ({ url, id }: { url: string; id: string }) => (await import(url)).app.state.room?.adminSessionID === id, { url: "/assets/chat/state.js", id: agentSession });
-    page.once("dialog", (dialog: BrowserDialog) => void dialog.accept());
     await page.locator("#btnRoomOptions").click(); await page.locator("#btnDeleteRoom").click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" });
+    await page.locator("#btnAcceptConfirm").click();
     await page.waitForFunction((id: string) => sessionStorage.getItem("chat.roomId") !== id, roomId);
     const db2 = new Database(path.join(stateDir, "chat-room.sqlite"));
     expect(db2.query("SELECT 1 FROM admin_rooms WHERE room_id=?").get(roomId)).toBeNull();

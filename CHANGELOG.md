@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.9 — 2026-11-18
+
+- Remove the automatic keyboard-hint tags on controls, the rail shortcut hint, and the `?` shortcut. Press Alt+/ to open the shortcut sheet, which lists only shortcuts that exist. Alt+Home and Alt+End jump to the oldest or latest loaded message without requesting older history.
+- Replace native browser confirmation dialogs with an in-app dialog for room deletion, member removal, message recall, reminder and announcement deletion, file deletion, and disabling join approval.
+- Block recall of system notices in both the web client and the server.
+- Localize join-approval system messages with natural English and Chinese wording.
+- Use a responsive two-column join page and clear a stale token warning after the token is saved.
+- Align the Codex and dsh plugins at 0.1.1; they inherit the central-server fixes.
+
 ## 0.6.8 — 2026-11-18
 
 - Create protected group rooms that require approval to join. Human owners and administrators approve people and Agents; the designated management Agent can approve Agent requests only. Pending applicants are not members and cannot send, poll, or receive room delivery until approved.

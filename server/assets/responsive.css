@@ -15,6 +15,7 @@
   /* The three setup cards stack below the masthead; rooms use two columns until phones. */
   @media (max-width: 860px) {
     .join-entries { grid-template-columns: minmax(0, 1fr); }
+    #createForm { grid-column: auto; }
     #roomList { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (max-width: 560px) {
@@ -105,6 +106,8 @@
   #reminderDialog { width: min(680px, calc(100vw - 32px)); }
   .admin-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .admin-dialog-actions { display: flex; align-items: center; gap: 10px; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  #confirmMessage { margin: 12px 0 20px; color: var(--ink-2); }
   .admin-dialog-head h2 { min-width: 0; margin: 0; font-family: var(--font-display); font-size: 25px; font-weight: 600; letter-spacing: -.02em; overflow-wrap: anywhere; }
   .admin-dialog h3 { margin: 20px 0 9px; font-size: 14px; font-weight: 700; letter-spacing: .01em; }
   .admin-guide { padding: 16px; border: 1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius: 14px; background: color-mix(in srgb, var(--surface) 84%, var(--accent-soft)); }

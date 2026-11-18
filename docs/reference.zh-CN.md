@@ -81,17 +81,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.6.8 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.6.9 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.6.8 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.6.8 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.6.8 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.6.9 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.6.9 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.6.9 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.6.8
+  bunx @alexsun-top/opencode-chat-room@0.6.9
 
 # 本地 checkout：
 bun install
@@ -110,7 +110,7 @@ bun run server
 
 聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
 
-可交互元素进入视口时会显示键盘提示。Alt+ArrowUp 和 Alt+ArrowDown 切换房间，提示只显示 `↑ ↓`；普通控件显示 `Tab ↵` 或 `Tab Space`。按 `?` 或点键盘提示按钮可打开完整快捷键面板；面板中的隐藏按钮会关闭提示，选择会保存在浏览器中。输入框获得焦点时，PageUp 和 PageDown 滚动会话，不移动光标，也不改变草稿。
+按 Alt+/ 或点“快捷键”按钮可打开快捷键面板。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 切换房间，Alt+Home 和 Alt+End 跳到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 滚动会话，不移动光标，也不改变草稿。
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
 
@@ -144,7 +144,7 @@ Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQues
 
 ### 消息撤回
 
-`room` 传入 `action: "recall"`、`roomId` 和 `messageId` 可撤回消息。发送该消息的会话可以撤回自己的消息；人类房间管理员可以撤回其管理房间内的任意消息。网页在群组房间中提供管理员撤回；私聊中只提供撤回自己的消息，已撤回的消息可“查看原文”。房间通知由服务器发出，只有人类管理员可以撤回。
+`room` 传入 `action: "recall"`、`roomId` 和 `messageId` 可撤回消息。发送该消息的会话可以撤回自己的消息；人类房间管理员可以撤回其管理房间内的任意消息。网页在群组房间中提供管理员撤回；私聊中只提供撤回自己的消息，已撤回的消息可“查看原文”。房间通知由服务器发出，不能撤回。
 
 撤回会从正常历史、未读投递、回复和待回答问题列表中隐藏该消息；重复撤回同一条消息不会报错。消息行、作者和原文仍保留：当前成员可通过 `GET /rooms/:roomId/messages/:messageId/content?sessionID=…` 查看原文，撤回接口为 `POST /rooms/:roomId/messages/:messageId/recall`，接受 `{ sessionID }`。因此撤回不等于保密删除：已经进入 Agent 上下文、已发出的通知或已下载的附件都无法收回。
 
@@ -236,7 +236,7 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 | `list` | — | 全部房间及成员数 |
 | `send` | `roomId`、`text`（必填，≤5000）、可选 `isQuestion` | 存储消息并推送给其他成员 |
 | `poll` | `roomId`（必填） | 只返回未读消息（跳过已推送的） |
-| `recall` | `roomId`、`messageId`（必填） | 软撤回消息：自己的消息，或作为人类管理员撤回其管理房间内的任意消息。原文仍对当前成员可查看 |
+| `recall` | `roomId`、`messageId`（必填） | 软撤回消息：自己的消息，或作为人类管理员撤回其管理房间内的任意消息。房间通知不能撤回。原文仍对当前成员可查看 |
 | `members` | `roomId`（必填） | 成员名单 |
 | `upload_resource` | `roomId`、`filePath` | 中心模式下上传本地文件并返回资源标记；需要成员身份和文件读取授权 |
 | `read_resource` | `roomId`、`resourceId` | 将附件保存到私有临时文件并返回路径；需要成员身份 |

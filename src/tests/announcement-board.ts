@@ -61,7 +61,6 @@ async function announcementRaces(page: any, first: string) {
   await page.locator("#btnSaveAnnouncement").click();
   await page.waitForFunction(() => document.querySelector("#announcementStatus")?.textContent === "Announcement saved.");
   await page.locator("#announcementDialog").waitFor({ state: "hidden" });
-  page.on("dialog", (dialog: any) => dialog.accept());
   await openAnnouncement(page, first);
   const roomId = await page.evaluate((url: string) => import(url).then(({ app }) => app.state.room.id), "/assets/chat/state.js");
   const update = async (value: string) => page.evaluate(async ({ url, id, name, content }: any) => {
@@ -98,7 +97,8 @@ async function announcementRaces(page: any, first: string) {
   await page.unroute(putB.pattern);
   const del = await holdMutation(page, first, "DELETE");
   await closeAnnouncement(page);
-  await openAnnouncement(page, first); await page.locator("#btnDeleteAnnouncement").click(); await del.started;
+  await openAnnouncement(page, first); await page.locator("#btnDeleteAnnouncement").click();
+  await page.locator("#confirmDialog").waitFor({ state: "visible" }); await page.locator("#btnAcceptConfirm").click(); await del.started;
   await closeAnnouncement(page);
   await openAnnouncement(page, second); await page.locator(content).fill("B survives delete");
   del.release(); await del.done;
@@ -122,6 +122,7 @@ async function announcementRaces(page: any, first: string) {
   await page.unroute(`**/rooms/*/announcements/__Test_FailedDraft`);
   await closeAnnouncement(page);
   await openAnnouncement(page, second); await page.locator("#btnDeleteAnnouncement").click();
+  await page.locator("#confirmDialog").waitFor({ state: "visible" }); await page.locator("#btnAcceptConfirm").click();
   await page.waitForFunction(() => document.querySelector("#announcementStatus")?.textContent === "Announcement deleted.");
   await page.locator("#announcementDialog").waitFor({ state: "hidden" });
   expect(await page.locator("#announcementList button").count()).toBe(0);

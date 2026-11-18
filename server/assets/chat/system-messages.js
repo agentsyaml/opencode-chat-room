@@ -9,6 +9,7 @@ const patterns = [
   [/^(.*?) revoked the administrator designation$/, "systemRevoked", (m) => ({ actor: m[1] })],
   [/^(.*?) renamed the room from "(.*)" to "(.*)"$/, "systemRenamed", (m) => ({ actor: m[1], from: m[2], to: m[3] })],
   [/^(.*?) updated the room description$/, "systemDescribed", (m) => ({ actor: m[1] })],
+  [/^(.*?) set join approval to (open|approval)$/, "systemJoinPolicy", (m) => ({ actor: m[1], policy: m[2] })],
   [/^(.*?) handed the room to (.*)$/, "systemHanded", (m) => ({ actor: m[1], name: m[2] })],
 ];
 
