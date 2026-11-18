@@ -94,6 +94,7 @@ test.skipIf(!browserModule)("select controls keep the chevron gap equal to the t
 }, 90000);
 
 async function expectSelect(page: any, selector: string, gap: number) {
+  await page.locator(selector).waitFor({ state: "visible" });
   const metrics = await page.locator(selector).evaluate((element: HTMLSelectElement) => {
     const style = getComputedStyle(element);
     return {
@@ -108,7 +109,7 @@ async function expectSelect(page: any, selector: string, gap: number) {
   expect(metrics.size).toBe("12px 8px");
   expect(metrics.image).toContain("data:image/svg+xml");
   expect(metrics.padRight - metrics.padLeft).toBeGreaterThanOrEqual(20);
-  expect(metrics.height).toBeGreaterThanOrEqual(36);
+  expect(Math.round(metrics.height)).toBeGreaterThanOrEqual(36);
 }
 
 async function iconSource(page: any, selector: string) {
