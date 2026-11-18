@@ -95,6 +95,7 @@ test.skipIf(!browserModule)("authors and human admins recall messages and member
     // A human room administrator recalls someone else's message. The peer row is
     // inserted directly so this UI test does not depend on the join endpoint.
     const database = new Database(path.join(stateDir, "chat-room.sqlite"));
+    database.exec("PRAGMA busy_timeout=5000");
     const peerID = randomUUID();
     const latest = database.query("SELECT max(created_at) AS ts FROM messages WHERE room_id=?").get(roomId) as { ts: number | null };
     database.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question) VALUES(?,?,?,?,?,?,0)")
@@ -128,6 +129,7 @@ test.skipIf(!browserModule)("authors and human admins recall messages and member
 
     // A recall made elsewhere reaches this tab through the room recall version.
     const second = new Database(path.join(stateDir, "chat-room.sqlite"));
+    second.exec("PRAGMA busy_timeout=5000");
     const secondID = randomUUID();
     const tail = second.query("SELECT max(created_at) AS ts FROM messages WHERE room_id=?").get(roomId) as { ts: number | null };
     second.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question) VALUES(?,?,?,?,?,?,0)")
