@@ -21,28 +21,34 @@ test.skipIf(!browserModule)("tags are automatic, omit Alt, and stay off once dis
   try {
     await waitForServer(origin);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
-    const page = await browser.newPage({ viewport: { width: 1280, height: 220 } });
+    const page = await browser.newPage({ viewport: { width: 390, height: 600 } });
     const pageErrors: string[] = [];
     page.on("pageerror", (error: Error) => pageErrors.push(error.message));
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
     await page.goto(`${origin}/chat`);
 
-    // Tags are on with no interaction, and controls below the fold wait for their tag.
+    // Tags are on with no interaction; off-screen controls hide theirs and regain them on scroll.
     await page.locator("#keyboardHints").waitFor({ state: "visible" });
     await page.locator("#joinView").waitFor({ state: "visible" });
-    await page.waitForFunction(() => document.querySelector('[data-hint-target="inName"]'));
-    expect(await page.locator("#keyboardHints .keys-legend-text").textContent()).toContain("Tab reaches");
-    expect(await page.locator('[data-hint-target="inName"]').count()).toBe(1);
-    const below = page.locator('[data-hint-target="btnCreate"]');
-    expect(await below.count()).toBe(1);
-    expect(await page.locator("#btnCreate").evaluate((node: Element) => node.getBoundingClientRect().top >= innerHeight)).toBe(true);
-    expect(await below.evaluate((node: Element) => (node as HTMLElement).hidden)).toBe(true);
-    await page.locator("#btnCreate").evaluate((node: Element) => node.scrollIntoView({ block: "center" }));
+    await page.locator("#joinView").evaluate((node: Element) => { (node as HTMLElement).scrollTop = 0; });
     await page.waitForFunction(() => {
-      const badge = document.querySelector<HTMLElement>('[data-hint-target="btnCreate"]');
+      const badge = document.querySelector<HTMLElement>('[data-hint-target="inName"]');
       return Boolean(badge && !badge.hidden);
     });
-    expect(await below.isVisible()).toBe(true);
+    expect(await page.locator("#keyboardHints .keys-legend-text").textContent()).toContain("Tab reaches");
+    expect(await page.locator('[data-hint-target="inName"]').count()).toBe(1);
+    expect(await page.locator('[data-hint-target="btnCreate"]').count()).toBe(1);
+    await page.locator("#joinView").evaluate((node: Element) => { (node as HTMLElement).scrollTop = (node as HTMLElement).scrollHeight; });
+    await page.waitForFunction(() => {
+      const input = document.querySelector("#inName");
+      const badge = document.querySelector<HTMLElement>('[data-hint-target="inName"]');
+      return Boolean(input && input.getBoundingClientRect().bottom <= 0 && badge?.hidden);
+    });
+    await page.locator("#joinView").evaluate((node: Element) => { (node as HTMLElement).scrollTop = 0; });
+    await page.waitForFunction(() => {
+      const badge = document.querySelector<HTMLElement>('[data-hint-target="inName"]');
+      return Boolean(badge && !badge.hidden);
+    });
     expect(await page.locator("#keyboardHintMarks").textContent()).not.toContain("Alt");
 
     await page.setViewportSize({ width: 1280, height: 860 });
