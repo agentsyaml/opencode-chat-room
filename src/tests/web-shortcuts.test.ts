@@ -21,7 +21,7 @@ test.skipIf(!browserModule)("tags are automatic, omit Alt, and stay off once dis
   try {
     await waitForServer(origin);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
-    const page = await browser.newPage({ viewport: { width: 1280, height: 360 } });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 220 } });
     const pageErrors: string[] = [];
     page.on("pageerror", (error: Error) => pageErrors.push(error.message));
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
@@ -35,6 +35,7 @@ test.skipIf(!browserModule)("tags are automatic, omit Alt, and stay off once dis
     expect(await page.locator('[data-hint-target="inName"]').count()).toBe(1);
     const below = page.locator('[data-hint-target="btnCreate"]');
     expect(await below.count()).toBe(1);
+    expect(await page.locator("#btnCreate").evaluate((node: Element) => node.getBoundingClientRect().top >= innerHeight)).toBe(true);
     expect(await below.evaluate((node: Element) => (node as HTMLElement).hidden)).toBe(true);
     await page.locator("#btnCreate").evaluate((node: Element) => node.scrollIntoView({ block: "center" }));
     await page.waitForFunction(() => {
