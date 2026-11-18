@@ -1,12 +1,9 @@
 import type { Participant, Room } from "../src/rooms/room-service.ts";
+import { isUser } from "../src/state/roles.ts";
+
+export { isOwnerEntry, isRoomAdmin, isUser } from "../src/state/roles.ts";
 
 export type OwnerEntry = { name?: string | null; protocol?: string | null; host?: string | null; receiverOwnerID?: string | null; membershipID?: string | null };
-
-// Agents carry a protocol (v1/v2), a host, or a receiver binding; only a person may
-// own a room, so any of those fields marks an entry that must never be promoted.
-export function isUser(entry: OwnerEntry | undefined | null): boolean {
-  return Boolean(entry?.name) && !entry!.protocol && !entry!.host && !entry!.receiverOwnerID;
-}
 
 function humans(room: Room, registry: Record<string, OwnerEntry>): OwnerEntry[] {
   const joined = new Map([...room.participants.values()].map((member) => [member.name, member]));
@@ -14,20 +11,6 @@ function humans(room: Room, registry: Record<string, OwnerEntry>): OwnerEntry[] 
     .filter(isUser)
     .filter((entry) => joined.has(entry.name!))
     .sort((left, right) => joined.get(left.name!)!.joinedAt - joined.get(right.name!)!.joinedAt) as OwnerEntry[];
-}
-
-// The owner is a person bound to a server-issued membership. The display name is
-// only for presentation: a new session that reuses the name must not inherit the room.
-export function isOwnerEntry(room: Room, entry: OwnerEntry | null | undefined): boolean {
-  return isUser(entry) && entry!.name === room.ownerId &&
-    (!room.ownerMembershipID || entry!.membershipID === room.ownerMembershipID);
-}
-
-export function isRoomAdmin(room: Room, entry: OwnerEntry | null | undefined): boolean {
-  if (isOwnerEntry(room, entry)) return true;
-  if (!isUser(entry) || !(room.adminIds ?? []).includes(entry!.name!)) return false;
-  if (!room.adminMembershipIDs?.length) return true;
-  return !entry!.membershipID || room.adminMembershipIDs.includes(entry!.membershipID);
 }
 
 // A room whose owner entry vanished follows the explicit successor first, then the

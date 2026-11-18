@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const pkgDir = fileURLToPath(new URL("..", import.meta.url));
 const manifest = JSON.parse(await readFile(path.join(pkgDir, "package.json"), "utf8"));
-if (manifest.private !== true) throw new Error("package must stay private");
+if (manifest.private === true) throw new Error("package must be publishable");
 if (manifest.main !== "./dist/index.js") throw new Error(`unexpected main: ${manifest.main}`);
 if (manifest.exports?.["."]?.default !== "./dist/index.js") throw new Error("exports must point at dist/index.js");
 

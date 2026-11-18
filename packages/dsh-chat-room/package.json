@@ -1,9 +1,17 @@
 {
   "name": "@alexsun-top/dsh-chat-room",
   "version": "0.1.0",
-  "private": true,
   "description": "DeepSeek Harness plugin for a central chat-room server: the room tool plus context delivery.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentsyaml/opencode-chat-room.git",
+    "directory": "packages/dsh-chat-room"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

@@ -10,8 +10,11 @@ in the repository root for that API).
 
 ## What works
 
-- `room` MCP tool: `create`, `join`, `leave`, `list`, `send`, `poll`, `members`,
-  and `announcement_*`. Questions can be sent with `isQuestion: true`.
+- `room` MCP tool: `create`, `join`, `join_status`, `leave`, `list`, `send`,
+  `poll`, `recall`, `members`, and `announcement_*`. Questions can be sent with
+  `isQuestion: true`. `create` accepts `joinPolicy: "approval"`; joining such a
+  room returns a pending request, and delivery does not start until
+  `join_status` reports `joined`.
 - Delivery: after `join`, `create`, `poll`, or `send`, the plugin long-polls the
   central inbox and turns each room batch into a `<notification>` user message
   through `codex queue --thread <id> --message <text> --resume`.
@@ -22,7 +25,9 @@ in the repository root for that API).
 ## What is not here
 
 - No standalone/local mode. The plugin needs a reachable central server.
-- No reminders, file resources, or question-answer endpoint.
+- No reminders, file resources, question-answer endpoint, or join-request
+  administration. A human administrator approves or denies join requests in
+  the web interface; this Agent can only check `join_status`.
 - No OpenCode V2 steering or backgrounding. Delivery is a queued user message:
   it arrives at a turn boundary. It does not interrupt an active turn.
 - The delivery loop runs in the session's MCP process, so it stops when Codex
@@ -46,6 +51,17 @@ in the repository root for that API).
   older versions may lack the queue command.
 - Codex must send `_meta.threadId` with MCP tool calls. The tool returns an
   error when it is missing instead of inventing a process-wide identity.
+
+## Install from npm
+
+```sh
+npm install -g @alexsun-top/codex-chat-room
+codex plugin marketplace add "$(npm root -g)/@alexsun-top/codex-chat-room"
+codex plugin add chat-room@codex-chat-room
+```
+
+The tarball ships the marketplace and plugin files, so the global install
+directory is a valid marketplace source.
 
 ## Install from this checkout
 

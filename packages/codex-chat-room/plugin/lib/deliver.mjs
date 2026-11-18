@@ -20,7 +20,7 @@ export function formatPrompt(room, items) {
     const text = visibleText(item.text);
     const body = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\u2026` : text;
     if (item.answerQuestionExcerpt) lines.push(`  \u21b3 Answer to: \u201c${visibleText(item.answerQuestionExcerpt)}\u201d`);
-    lines.push(`- [${timeOf(item.createdAt)}] ${item.senderId}: ${body}`);
+    lines.push(`- [${timeOf(item.createdAt)}] ${item.senderId}: (id: ${item.id}) ${body}`);
   }
   return `<notification>\n${context}:\n${lines.join("\n")}\n</notification>`;
 }
@@ -63,7 +63,7 @@ export async function deliverOnce(cfg, threadID, options = {}) {
   const queuedTs = result.queuedTs ?? {};
   const rooms = new Map();
   for (const item of result.items || []) {
-    if (item.createdAt <= (queuedTs[item.roomId] ?? 0)) continue;
+    if (item.recalledAt || item.createdAt <= (queuedTs[item.roomId] ?? 0)) continue;
     const group = rooms.get(item.roomId) ?? { roomId: item.roomId, roomName: item.roomName, roomKind: item.roomKind, items: [] };
     if (group.items.length < MAX_MESSAGES) group.items.push(item);
     rooms.set(item.roomId, group);

@@ -23,13 +23,17 @@ export async function watchRoom(roomId, app) {
       if (message.createdAt >= entry.previewAt) setRoomPreview(entry, message);
     }
     entry.receivedTs = result.items.reduce((latest, message) => Number.isSafeInteger(message.createdAt) ? Math.max(latest, message.createdAt) : latest, previousReceivedTs);
+    const recallVersion = Number(result.recallVersion);
+    const recallVersionChanged = Number.isFinite(recallVersion) && recallVersion !== (entry.recallVersion ?? 0);
     entry.unreadOverflow = Boolean(result.hasMore);
-    if (sawSystem || sawQuestion || result.hasMore) {
+    if (sawSystem || sawQuestion || result.hasMore || recallVersionChanged) {
       const latest = await app.api(`/rooms/${encodeURIComponent(roomId)}`);
       if (app.state.rooms.get(roomId) !== entry || app.state.room?.id === roomId) return;
+      if (Number.isFinite(Number(latest.recallVersion))) entry.recallVersion = Number(latest.recallVersion);
       entry.room.participants = latest.participants;
       entry.room.openQuestions = latest.openQuestions;
       entry.room.messages = [...new Map([...entry.room.messages, ...latest.messages].map((message) => [message.id, message])).values()].sort((a, b) => a.createdAt - b.createdAt).slice(-LOADED_MESSAGE_LIMIT);
+      for (const message of latest.messages) if (message.recalledAt) app.applyRecall?.(roomId, { messageID: message.id, recalledAt: message.recalledAt, recalledBy: message.recalledBy });
       const newest = latest.messages.at(-1);
       if (newest && newest.createdAt >= entry.previewAt) setRoomPreview(entry, newest);
       // A full refresh pages past the inbox window; count what arrived since the last look.

@@ -219,6 +219,37 @@ describe.serial("notification membership races", () => {
     expect(receiverState.claimBackgroundAttempt(sessionID, roomID, backgroundServiceKey({ protocol: "v2", receiverOwnerID: ownerID }, "http://center.invalid"), triggerTs)).toBe(true);
   });
 
+  test("a truncated central page does not drop an older unrecalled pending message", async () => {
+    const opts = { center: "http://center.invalid", token: "test" };
+    const roomID = `center-page-${crypto.randomUUID()}`;
+    const oldFetch = globalThis.fetch;
+    const prompts: string[] = [];
+    let attempts = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/registry")) return Response.json({ [sessionID]: { name: "agent", protocol: "v1", roomKind: "group", lastReadTs: 0 } });
+      if (url.includes("serve.invalid")) {
+        attempts++;
+        if (attempts === 1) return new Response(null, { status: 404 });
+        prompts.push(JSON.parse(String(init?.body)).parts[0].text);
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    const older = { id: "older-pending", roomId: roomID, roomName: "center", senderId: "alice", text: "older unread", createdAt: 100 };
+    const newer = { ...older, id: "newer-trigger", text: "newer trigger", createdAt: 200 };
+    const transport = { protocol: "v1" as const, serverUrl: "http://serve.invalid" };
+    try {
+      await inbox.pushItemsToSession(opts, sessionID, [older], transport);
+      await inbox.pushItemsToSession(opts, sessionID, [newer], transport, {}, new Set(), false);
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).toContain("older unread");
+      await inbox.pushItemsToSession(opts, sessionID, [newer], transport, {}, new Set(), false);
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1]).toContain("newer trigger");
+    } finally { globalThis.fetch = oldFetch; }
+  });
+
   test("center pushes reject a kicked legacy member but still deliver to a current protocol-less member", async () => {
     const opts = { center: "http://center.invalid", token: "test" };
     const roomID = `legacy-${crypto.randomUUID()}`;

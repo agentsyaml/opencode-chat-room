@@ -305,9 +305,9 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     }
     await alice.setViewportSize({ width: 375, height: 812 });
     const mobileInput = alice.locator("#msgInput");
-    await mobileInput.fill("x".repeat(2005));
-    expect(await mobileInput.evaluate((node: any) => node.value.length)).toBe(2005);
-    expect(await alice.locator("#btnSend").isDisabled()).toBe(true);
+    await mobileInput.fill("x".repeat(5005));
+    expect(await mobileInput.evaluate((node: any) => node.value.length)).toBe(5005);
+    expect(await alice.locator("#btnSend").isDisabled()).toBe(false);
     expect(await alice.locator("#draftCount").getAttribute("class")).toContain("over-limit");
     await mobileInput.fill(Array.from({ length: 8 }, (_, index) => `Line ${index + 1}`).join("\n"));
     const composerGeometry = await mobileInput.evaluate((input: HTMLElement) => ({
@@ -370,6 +370,17 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
       const room = (await import(url)).app.state.room;
       return room?.adminIds?.includes("Bob") && room?.successorId === "Bob";
     }, { url: "/assets/chat/state.js" });
+    // The members panel names the owner and delegated human administrators once each.
+    await alice.locator("#btnMembers").click();
+    const aliceMember = alice.locator("#memberList li").filter({ hasText: "Alice" });
+    await aliceMember.locator(".owner-badge").waitFor();
+    expect(await aliceMember.locator(".owner-badge").textContent()).toBe("Owner");
+    expect(await aliceMember.locator(".admin-badge:not(.owner-badge), .admin-agent-badge").count()).toBe(0);
+    const bobMember = alice.locator("#memberList li").filter({ hasText: "Bob" });
+    await bobMember.locator(".admin-badge").waitFor();
+    expect(await bobMember.locator(".admin-badge").textContent()).toBe("Admin");
+    expect(await bobMember.locator(".admin-agent-badge").count()).toBe(0);
+    await alice.locator("#btnMembers").click();
     await bob.locator("#btnMembers").click();
     await bob.locator("#memberList").getByRole("button", { name: "Remove" }).waitFor();
     await bob.locator("#btnMembers").click();
@@ -400,6 +411,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.locator("#editRoomForm button[type=submit]").click();
     await alice.locator("#editRoomDialog").waitFor({ state: "hidden" });
     await bob.waitForFunction(async ({ url }: { url: string }) => !(await import(url)).app.state.room?.adminIds?.includes("Bob"), { url: "/assets/chat/state.js" });
+    await bob.waitForFunction(() => !document.querySelector("#memberList .admin-badge:not(.owner-badge)") && document.querySelector("#memberList .owner-badge")?.textContent === "Owner", undefined, { timeout: 20000 });
     await bob.waitForFunction(() => !Array.from(document.querySelectorAll("#memberList button")).some((button) => button.textContent === "Remove"), undefined, { timeout: 20000 });
     await alice.waitForTimeout(500);
     expect(await alice.locator("#chatView").isVisible()).toBe(true);

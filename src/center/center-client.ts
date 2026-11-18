@@ -51,6 +51,58 @@ function svcOf(room: Json): RoomService {
 
 export type CenterOpts = { center: string; token: string; directory?: string };
 
+export type JoinRequestStatus = "pending" | "joined" | "none";
+export type JoinRequest = {
+  sessionID: string;
+  participantId: string;
+  name: string;
+  isAgent: boolean;
+  createdAt: number;
+};
+
+async function reviewRequest<T>(run: Promise<T>, verb: string): Promise<T> {
+  try {
+    return await run;
+  } catch (error) {
+    const status = (error as { status?: number }).status;
+    if (status === 403) throw new Error(`not allowed: only a human administrator or the designated management agent can ${verb} join requests`);
+    if (status === 404) throw new Error("join request already handled or gone; list the pending requests again");
+    if (status === 409) throw new Error("join request is stale: the requester identity or name collides; deny it and ask them to join again");
+    throw error;
+  }
+}
+
+export async function joinStatus(opts: CenterOpts, roomId: string, sessionID: string): Promise<JoinRequestStatus> {
+  const data = await request(opts, `/rooms/${encodeURIComponent(roomId)}/join-requests/status?sessionID=${encodeURIComponent(sessionID)}`, "GET");
+  return data.status === "pending" || data.status === "joined" ? data.status : "none";
+}
+
+export async function listJoinRequests(opts: CenterOpts, roomId: string, reviewerSessionID: string,
+  extraHeaders?: Record<string, string>): Promise<JoinRequest[]> {
+  const data = await reviewRequest(
+    request(opts, `/rooms/${encodeURIComponent(roomId)}/join-requests?sessionID=${encodeURIComponent(reviewerSessionID)}`, "GET", undefined, extraHeaders),
+    "list",
+  );
+  const rows = Array.isArray(data) ? data : [];
+  return rows
+    .filter((row) => row && typeof row.sessionID === "string" && typeof row.name === "string")
+    .map((row) => ({
+      sessionID: String(row.sessionID),
+      participantId: String(row.participantId ?? row.name),
+      name: String(row.name),
+      isAgent: row.isAgent === true,
+      createdAt: Number(row.createdAt ?? 0),
+    }));
+}
+
+export async function decideJoinRequest(opts: CenterOpts, roomId: string, requestSessionID: string,
+  approve: boolean, reviewerSessionID: string, extraHeaders?: Record<string, string>): Promise<void> {
+  await reviewRequest(
+    request(opts, `/rooms/${encodeURIComponent(roomId)}/join-requests/${encodeURIComponent(requestSessionID)}/${approve ? "approve" : "deny"}`, "POST", { sessionID: reviewerSessionID }, extraHeaders),
+    approve ? "approve" : "deny",
+  );
+}
+
 export async function request(
   opts: CenterOpts,
   path: string,
@@ -109,12 +161,14 @@ export async function centerAction(
     action: string;
     name?: string;
     roomId?: string;
+    messageId?: string;
     text?: string;
     announcementName?: string;
     content?: string;
     isQuestion?: boolean;
     receiverOwnerID?: string;
     protocol?: "v1" | "v2";
+    joinPolicy?: "open" | "approval";
   },
   sessionID: string,
 ): Promise<string> {
@@ -145,6 +199,7 @@ export async function centerAction(
         // Record the owning host so only that host wakes this session.
         host: os.hostname(),
         directory: opts.directory,
+        ...(args.joinPolicy ? { joinPolicy: args.joinPolicy } : {}),
         ...(args.protocol === "v2" ? { protocol: "v2", receiverOwnerID: args.receiverOwnerID } : {}),
       });
       return formatRoom(svcOf(room), toRoom(room));
@@ -171,7 +226,19 @@ export async function centerAction(
           ...(args.protocol === "v2" ? { protocol: "v2", receiverOwnerID: args.receiverOwnerID } : {}),
         },
       );
+      if (room.status === "pending") {
+        return `pending: join request sent to room ${args.roomId}; a human administrator must approve it. You are NOT a member yet: do not claim you joined, and do not send or poll until join_status reports joined.`;
+      }
       return formatRoom(svcOf(room), toRoom(room));
+    }
+    case "join_status": {
+      if (!args.roomId) return "error: roomId is required";
+      const status = await joinStatus(opts, args.roomId, sessionID);
+      if (status === "joined") return `joined room ${args.roomId}`;
+      if (status === "pending") {
+        return `pending: join request for room ${args.roomId} is waiting for a human administrator; you are NOT a member yet`;
+      }
+      return `none: no join request for room ${args.roomId}; run join with your name to request access`;
     }
     case "leave": {
       if (!args.roomId) {
@@ -237,8 +304,17 @@ export async function centerAction(
         "POST",
         { sessionID, text: args.text.trim(), ...(args.isQuestion ? { isQuestion: true } : {}) },
       );
-      const svc = svcOf(room);
-      return `sent: ${args.text.trim()}\n${formatRoom(svc, toRoom(room))}`;
+      const parsed = toRoom(room);
+      const sentID = [...parsed.messages].reverse()
+        .find((message) => message.senderSessionID === sessionID && message.text === args.text!.trim())?.id
+        ?? parsed.messages.at(-1)?.id;
+      return `sent: ${args.text.trim()}\n${sentID ? `message id: ${sentID}\n` : ""}${formatRoom(svcOf(room), parsed)}`;
+    }
+    case "recall": {
+      if (!args.roomId) return "error: roomId is required";
+      if (!args.messageId) return "error: messageId is required";
+      await request(opts, `/rooms/${encodeURIComponent(args.roomId)}/messages/${encodeURIComponent(args.messageId)}/recall`, "POST", { sessionID });
+      return `recalled message ${args.messageId}`;
     }
     case "poll": {
       if (!args.roomId) {
@@ -260,12 +336,13 @@ export async function centerAction(
       if (!result.member) {
         return "error: not joined";
       }
-      const items = (Array.isArray(result.items) ? result.items : []).filter((item) => item.senderSessionID !== sessionID);
+      const items = (Array.isArray(result.items) ? result.items : [])
+        .filter((item) => item.senderSessionID !== sessionID && !item.recalledAt);
       if (items.length === 0) {
         return "no new messages";
       }
       const lines = items.map(
-        (it) => `[${timeOf(it.createdAt)}] ${it.senderId}: ${it.text}`,
+        (it) => `[${timeOf(it.createdAt)}] ${it.senderId}: ${it.text} (id: ${it.id})`,
       );
       // ponytail: F7 — serialize the acknowledgment before returning so a
       // following action cannot race the read watermark update. A failure only

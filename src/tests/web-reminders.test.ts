@@ -44,7 +44,11 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
         const reminder = { id: `r${entries.length + 1}`, ...body, schedule, paused: false, createdBy: "tester", nextRunAt: "2027-12-01T00:00:00.000Z" };
         reminders.set(room, [...entries, reminder]); return route.fulfill({ json: { reminder } });
       }
-      const updated = method === "DELETE" ? entries.filter((entry) => entry.id !== id) : entries.map((entry) => entry.id === id ? { ...entry, paused: request.postDataJSON().paused } : entry);
+      const updated = method === "DELETE" ? entries.filter((entry) => entry.id !== id) : entries.map((entry) => {
+        if (entry.id !== id) return entry;
+        const body = request.postDataJSON();
+        return { ...entry, ...(body.text !== undefined ? { text: body.text } : {}), ...(body.schedule !== undefined ? { schedule: body.schedule } : {}), ...(body.paused !== undefined ? { paused: body.paused } : {}) };
+      });
       reminders.set(room, updated); return route.fulfill({ json: { reminder: updated[0] } });
     });
     await page.goto(`${origin}/chat`);
@@ -52,6 +56,13 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
     await page.locator("#chatView").waitFor({ state: "visible" });
     await page.locator("#btnReminders").click();
     await page.locator("#btnNewReminder").click();
+    const form = await page.locator("#reminderDialog").evaluate((node: HTMLElement) => {
+      const box = node.getBoundingClientRect(), area = document.querySelector<HTMLElement>("#reminderText")!.getBoundingClientRect();
+      return { width: box.width, areaHeight: area.height, areaWidth: area.width };
+    });
+    expect(form.width).toBeGreaterThan(600);
+    expect(form.areaHeight).toBeGreaterThan(110);
+    expect(form.areaWidth).toBeGreaterThan(500);
     await page.locator("#reminderText").fill("Standup for {room} at {time}");
     await page.locator("#reminderType").selectOption("cron"); await page.locator("#reminderCron").fill("0 9 * * 1-5");
     await page.locator("#reminderForm button[type=submit]").click();
@@ -71,13 +82,23 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
     const roomId = await page.evaluate(async (url: string) => (await import(url)).app.state.room.id, "/assets/chat/state.js");
     expect(reminders.get(roomId)?.[0]).toMatchObject({ schedule: { type: "cron", expression: "0 9 * * 1-5", timezone: "Asia/Tokyo" }, text: "Standup for {room} at {time}" });
     expect(calls.find((call) => call.method === "GET")?.url).toContain("sessionID=");
-    await page.locator(".reminder-list li button").nth(0).click();
+    await page.locator(".reminder-list li button").filter({ hasText: "Edit" }).click();
+    await page.locator("#reminderDialog[open]").waitFor();
+    expect(await page.locator("#reminderDialogHeading").textContent()).toBe("Edit reminder");
+    expect(await page.locator("#reminderCron").inputValue()).toBe("0 9 * * 1-5");
+    expect(await page.locator("#reminderTimezone").inputValue()).toBe("Asia/Tokyo");
+    await page.locator("#reminderText").fill("Edited standup at {time}");
+    await page.locator("#btnSubmitReminder").click();
+    await page.locator(".reminder-list li").getByText("Edited standup at {time}").waitFor();
+    expect(calls.findLast((call) => call.method === "PATCH")).toMatchObject({ body: { sessionID: expect.any(String), text: "Edited standup at {time}" } });
+    expect(calls.findLast((call) => call.method === "PATCH").body.schedule).toBeUndefined();
+    await page.locator(".reminder-list li button").filter({ hasText: "Pause" }).click();
     await page.locator(".reminder-list li button").getByText("Resume").waitFor();
     expect(calls.findLast((call) => call.method === "PATCH")).toMatchObject({ body: { sessionID: expect.any(String), paused: true } });
     const deleteRace = holdNextGet(), staleReminder = page.waitForResponse((response: any) => response.request().method() === "GET" && response.url().includes("/reminders?"), { timeout: 60000 });
     await page.locator("#btnRefreshReminders").click(); await deleteRace.startedPromise;
     page.once("dialog", (dialog: any) => dialog.accept());
-    await page.locator(".reminder-list li button").nth(1).click();
+    await page.locator(".reminder-list li button").filter({ hasText: "Delete" }).click();
     await page.locator(".reminder-list li").waitFor({ state: "detached" });
     expect(calls.at(-1)).toMatchObject({ method: "DELETE", body: { sessionID: expect.any(String) } });
     deleteRace.release(); await staleReminder;
@@ -125,6 +146,12 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
     expect(await page.locator("#reminderTemplateHint").textContent()).toBe("可使用 {{time}}、{{initiator}} 和 {{room}}。");
     await page.setViewportSize({ width: 375, height: 812 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const mobileForm = await page.locator("#reminderDialog").evaluate((node: HTMLElement) => {
+      const box = node.getBoundingClientRect(), area = document.querySelector<HTMLElement>("#reminderText")!.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, areaHeight: area.height };
+    });
+    expect(mobileForm.left).toBeGreaterThanOrEqual(8); expect(mobileForm.right).toBeLessThanOrEqual(367);
+    expect(mobileForm.top).toBeGreaterThanOrEqual(0); expect(mobileForm.areaHeight).toBeGreaterThan(120);
     await page.locator("#reminderText").fill("Keep this draft when changing rooms");
     const sessionID = await page.evaluate(async (url: string) => (await import(url)).LS.sessionID, "/assets/chat/state.js");
     const other = await api(origin, "/rooms", "POST", { name: "Second reminder room", ownerId: "Reminder tester", sessionID });

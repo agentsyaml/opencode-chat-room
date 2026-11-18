@@ -68,7 +68,7 @@ describe("room plugin", () => {
     await h.emit();
     expect(h.injected).toHaveLength(1);
     expect(h.injected[0]!.source.kind).toBe("dsh-chat-room");
-    expect(h.injected[0]!.content[0]!.text).toContain("bob: hello room");
+    expect(h.injected[0]!.content[0]!.text).toContain("bob: (id: m1) hello room");
     expect(fake.requests.find((request) => request.path === "/read")?.body).toEqual({ roomId: "r1", sessionID: "dsh:session-1", ts: 100 });
 
     await h.emit();

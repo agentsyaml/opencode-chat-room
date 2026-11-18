@@ -11,6 +11,7 @@ export interface InboxItem {
   text: string;
   createdAt: number;
   answerQuestionExcerpt?: string;
+  recalledAt?: number;
 }
 
 /** The central inbox page; `member` is false once the session is no longer joined. */
@@ -84,6 +85,7 @@ export async function readInbox(cfg: RoomConfig, sessionID: string, roomId?: str
       senderId: text(item.senderId), text: text(item.text), createdAt: item.createdAt,
       ...(text(item.answerQuestionExcerpt) ? { answerQuestionExcerpt: text(item.answerQuestionExcerpt) } : {}),
       ...(text(item.senderSessionID) ? { senderSessionID: text(item.senderSessionID) } : {}),
+      ...(typeof item.recalledAt === "number" ? { recalledAt: item.recalledAt } : {}),
     });
   }
   return {
@@ -110,22 +112,24 @@ export function formatMessages(roomName: string, roomKind: "group" | "direct" | 
     const answer = item.answerQuestionExcerpt
       ? `\n  answer to: ${item.answerQuestionExcerpt.replace(/\s+/g, " ").trim().slice(0, 200)}`
       : "";
-    return `- ${item.senderId}: ${body}${answer}`;
+    return `- ${item.senderId}: (id: ${item.id}) ${body}${answer}`;
   });
   return `<notification>\n${context}:\n${lines.join("\n")}\n</notification>`;
 }
 
 /** Actions the room tool exposes; kept in the schema enum and the switch together. */
-export const ROOM_ACTIONS = ["list", "create", "join", "leave", "send", "poll", "members"] as const;
+export const ROOM_ACTIONS = ["list", "create", "join", "join_status", "leave", "send", "poll", "recall", "members"] as const;
 export type RoomAction = (typeof ROOM_ACTIONS)[number];
 
 /** Validated model arguments for one room call. */
 export interface RoomArgs {
   action: RoomAction;
   roomId?: string;
+  messageId?: string;
   name?: string;
   text?: string;
   isQuestion?: boolean;
+  joinPolicy?: "open" | "approval";
 }
 
 function optionalString(value: unknown, field: string, max: number): string | undefined {
@@ -141,15 +145,21 @@ export function parseRoomArgs(value: unknown): RoomArgs {
   const action = text(raw.action) as RoomAction;
   if (!ROOM_ACTIONS.includes(action)) throw new TypeError(`room: action must be one of ${ROOM_ACTIONS.join(", ")}`);
   if (raw.isQuestion !== undefined && typeof raw.isQuestion !== "boolean") throw new TypeError("room: isQuestion must be a boolean");
+  if (raw.joinPolicy !== undefined && raw.joinPolicy !== "open" && raw.joinPolicy !== "approval") {
+    throw new TypeError("room: joinPolicy must be open or approval");
+  }
   const roomId = optionalString(raw.roomId, "roomId", 128);
+  const messageId = optionalString(raw.messageId, "messageId", 128);
   const name = optionalString(raw.name, "name", 64);
-  const message = optionalString(raw.text, "text", 2000);
+  const message = optionalString(raw.text, "text", 5000);
   return {
     action,
     ...(roomId === undefined ? {} : { roomId }),
+    ...(messageId === undefined ? {} : { messageId }),
     ...(name === undefined ? {} : { name }),
     ...(message === undefined ? {} : { text: message }),
     ...(raw.isQuestion === true ? { isQuestion: true } : {}),
+    ...(raw.joinPolicy === "approval" ? { joinPolicy: "approval" as const } : {}),
   };
 }
 
@@ -173,7 +183,10 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
     case "create": {
       if (!args.name) throw new TypeError("room: create requires name");
       const data = record(await request(cfg, "/rooms", {
-        method: "POST", body: { name: args.name, ownerId: cfg.participant, sessionID },
+        method: "POST", body: {
+          name: args.name, ownerId: cfg.participant, sessionID,
+          ...(args.joinPolicy ? { joinPolicy: args.joinPolicy } : {}),
+        },
       }, signal));
       return `created room ${text(data.id)} (${text(data.name)})`;
     }
@@ -183,7 +196,17 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
       const data = record(await request(cfg, `/rooms/${id}/join`, {
         method: "POST", body: { sessionID, participantId: args.name, participantName: args.name },
       }, signal));
+      if (data.status === "pending") {
+        return `pending: join request sent to room ${args.roomId}; a human administrator must approve it. You are NOT a member yet: do not claim you joined, and do not send or poll until join_status reports joined.`;
+      }
       return `joined room ${text(data.id)} (${text(data.name)})`;
+    }
+    case "join_status": {
+      const id = requireRoomId(args);
+      const data = record(await request(cfg, `/rooms/${id}/join-requests/status?sessionID=${encodeURIComponent(sessionID)}`, {}, signal));
+      if (data.status === "joined") return `joined room ${args.roomId}`;
+      if (data.status === "pending") return `pending: join request for room ${args.roomId} is waiting for a human administrator; you are NOT a member yet`;
+      return `none: no join request for room ${args.roomId}; run join with your name to request access`;
     }
     case "leave": {
       const id = requireRoomId(args);
@@ -193,10 +216,22 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
     case "send": {
       const id = requireRoomId(args);
       if (!args.text) throw new TypeError("room: send requires text");
-      await request(cfg, `/rooms/${id}/messages`, {
+      const room = record(await request(cfg, `/rooms/${id}/messages`, {
         method: "POST", body: { sessionID, text: args.text, ...(args.isQuestion ? { isQuestion: true } : {}) },
+      }, signal));
+      const messages = Array.isArray(room.messages) ? room.messages.map(record) : [];
+      const sentID = [...messages].reverse()
+        .find((message) => message.senderSessionID === sessionID && message.text === args.text)?.id
+        ?? messages.at(-1)?.id;
+      return `sent to room ${args.roomId}${typeof sentID === "string" && sentID ? ` (id: ${sentID})` : ""}`;
+    }
+    case "recall": {
+      const id = requireRoomId(args);
+      if (!args.messageId) throw new TypeError("room: recall requires messageId");
+      await request(cfg, `/rooms/${id}/messages/${encodeURIComponent(args.messageId)}/recall`, {
+        method: "POST", body: { sessionID },
       }, signal);
-      return `sent to room ${args.roomId}`;
+      return `recalled message ${args.messageId}`;
     }
     case "members": {
       const id = requireRoomId(args);
@@ -207,10 +242,11 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
     case "poll": {
       const page = await readInbox(cfg, sessionID, args.roomId, signal);
       if (!page.member) throw new CenterError(409, "room: not joined to this room");
-      if (page.items.length === 0) return "no new messages";
-      const newest = Math.max(...page.items.map((item) => item.createdAt));
-      await markRead(cfg, page.items[0]!.roomId, sessionID, newest, signal).catch(() => {});
-      const lines = page.items.map((item) => `[${item.senderId}] ${item.text}`);
+      const items = page.items.filter((item) => !item.recalledAt);
+      if (items.length === 0) return "no new messages";
+      const newest = Math.max(...items.map((item) => item.createdAt));
+      await markRead(cfg, items[0]!.roomId, sessionID, newest, signal).catch(() => {});
+      const lines = items.map((item) => `[${item.senderId}] ${item.text} (id: ${item.id})`);
       return lines.join("\n") + (page.hasMore ? "\nMore unread messages remain; poll again." : "");
     }
   }

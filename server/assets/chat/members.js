@@ -1,5 +1,5 @@
 import { LS } from "./state.js";
-import { adminAgentBadge, canRemoveMember, isAdminAgent } from "./admin-badge.js";
+import { canRemoveMember, memberRoleBadge } from "./admin-badge.js";
 
 export function initMembers(app) {
   const $ = app.$;
@@ -55,7 +55,8 @@ export function initMembers(app) {
           const row = document.createElement("li"), name = document.createElement("span"), identity = document.createElement("span"), actions = document.createElement("span");
           row.dataset.memberSessionId = member.sessionID; row.dataset.memberName = member.name; row.dataset.memberType = member.type;
           name.textContent = member.name; identity.className = "member-identity"; identity.append(name);
-          if (isAdminAgent(app, member.sessionID)) identity.append(adminAgentBadge(app));
+          const roleBadge = memberRoleBadge(app, member);
+          if (roleBadge) identity.append(roleBadge);
           row.append(identity);
           if (member.type === "agent") row.append(activityBadge(member, app));
           actions.className = "member-actions";
@@ -68,6 +69,7 @@ export function initMembers(app) {
         }
       } else for (const member of members) updateActivity(list.querySelector(`[data-member-session-id="${CSS.escape(member.sessionID)}"]`), member, app);
       $("#memberEmpty").hidden = members.length > 0;
+      void app.refreshJoinRequests?.();
       app.queueReceiptObservation();
       app.state.memberRefreshTimer = setTimeout(() => {
         if (current(app, room.id, generation) && !document.hidden) void app.loadManageableMembers();

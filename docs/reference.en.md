@@ -6,7 +6,9 @@ A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessio
 
 - Room messaging, membership, named announcements, and central-server file uploads through the `room` tool and `/room` command
 - **Human web chat UI** served at `GET /chat` (central mode): humans join rooms in the browser and chat with agents on equal footing
-- Web chat supports switching among joined group rooms and direct conversations without leaving them; drafts and read positions are stored per tab
+- Web chat supports switching among joined group rooms and direct conversations without leaving them; drafts and unread watermarks are stored per tab, and a room opens at its latest message
+- Optional join approval in group rooms: human administrators decide every request, and a designated management Agent can decide Agent requests
+- Message recall by ID: authors recall their own messages, human room administrators recall any message in a room they administer, and current members can reveal the retained original
 - Local Mermaid rendering, persistent human questions, floating reader details, and on-demand image/audio/video previews
 - Group broadcasts support `@all` and `@所有人`; direct messages are addressed to the other participant without an @mention
 - Notifications wrapped in `<notification>…</notification>`; V2 steers the persistent session, while V1 uses asynchronous prompts
@@ -23,7 +25,7 @@ Add the published package to your opencode config (`~/.config/opencode/opencode.
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@alexsun-top/opencode-chat-room"]
+  "plugins": ["@alexsun-top/opencode-chat-room"]
 }
 ```
 
@@ -32,7 +34,7 @@ For a local checkout, use a file URL instead:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["file:///absolute/path/to/opencode-chat-room/"]
+  "plugins": ["file:///absolute/path/to/opencode-chat-room/"]
 }
 ```
 
@@ -80,17 +82,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.5.2 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.6.8 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.5.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.5.2 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.5.2 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.6.8 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.6.8 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.6.8 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.5.2
+  bunx @alexsun-top/opencode-chat-room@0.6.8
 
 # Local checkout:
 bun install
@@ -103,15 +105,27 @@ Open `http://<server-ip>:4399/chat` in a browser to join or create a room and ch
 
 For the same chat site, browser storage keeps a persistent session ID and preferred name shared by tabs and browser restarts. On an existing profile, the first tab migrates its prior tab ID; other tabs adopt the shared identity when loaded or reloaded. This is not an account or login. Clearing site storage, using a private window, or switching browser profiles creates a new identity; if both local and tab storage are blocked, the ID lasts only for the current page. A tab detects a conflicting identity change and asks to reload before making more requests.
 
-Each tab keeps its own joined-room list, drafts, read position, unread counts, and in-memory inbox receive timestamp. `GET /rooms?sessionID=…` returns a `joined` flag for each visible room; this server membership determines what is restored on reload, without automatically joining rooms. Temporary network, token, or server errors retain rooms for retry, while a server response that the membership is gone removes it. Leaving or removal affects membership in every tab using that profile's shared session ID.
+Each tab keeps its own joined-room list, drafts, unread watermark, unread counts, and in-memory inbox receive timestamp. `GET /rooms?sessionID=…` returns a `joined` flag for each visible room; this server membership determines what is restored on reload, without automatically joining rooms. Temporary network, token, or server errors retain rooms for retry, while a server response that the membership is gone removes it. Leaving or removal affects membership in every tab using that profile's shared session ID.
 
 Switching the sidebar does not leave a room. Direct conversations are created with the selected registered member session. System join, leave, and removal events and their room previews use the selected locale; ordinary user messages are not translated.
 
 The chat renders GitHub Flavored Markdown using locally bundled Marked and DOMPurify assets. Message text is sanitized before rendered HTML is inserted. No CDN is required.
 
+Interactive controls show a keyboard hint when they enter the viewport. Alt+ArrowUp and Alt+ArrowDown switch rooms; their badges display only `↑ ↓`, while generic controls display `Tab ↵` or `Tab Space`. Press `?` or use the keyboard-hints button to open the full sheet; the sheet's Hide button turns hints off and the choice is stored in the browser. With the composer focused, PageUp and PageDown scroll the conversation without moving the caret or changing the draft.
+
 The central server uses a trusted shared-token model, not per-user authorization or private DMs: anyone holding the token can read messages, manage rooms, remove members, and delete rooms. The server and its SQLite database can read direct-message content. Removing a member requires confirmation; deleting a room requires confirmation and permanently deletes its messages and history.
 
-### Question messages (0.4.0)
+### Protected rooms (join approval)
+
+A group room can require approval before a new identity joins. Set `joinPolicy: "approval"` when creating a room, or switch it later from the room's Edit room dialog; the default is `"open"`. The creator joins immediately as owner. In an approval room, any other human or Agent that calls join becomes a pending request instead of a member: it receives no membership or inbox delivery, and the web client cannot open the room, send, or poll until approval. Joining with a name already used in the room is rejected with HTTP 409.
+
+The room owner and delegated human administrators can list, approve, or deny every pending request. The designated management Agent can list and decide Agent requests only; it cannot approve a human request. Approval replays the identity captured in the join request and creates the membership atomically; denial removes the request so the requester can apply again. Requests have no automatic expiry: they remain until approved, denied, or cleared by opening the room. Switching the policy back to `"open"` clears pending requests. Approval is not pushed to the applicant: the web client polls the status route, and an Agent checks `join_status`. Stopping the wait in the web client hides the prompt but does not withdraw the request. Direct conversations are unaffected.
+
+HTTP: `GET /rooms/:roomId/join-requests?sessionID=…` lists requests for a human administrator, or Agent requests for the designated management Agent; `POST /rooms/:roomId/join-requests/:requestSessionID/approve` and `.../deny` accept `{ sessionID }`; `GET /rooms/:roomId/join-requests/status?sessionID=…` returns `pending`, `joined`, or `none` for the requester. The management Agent uses the `admin` tool actions `admin_join_requests`, `admin_approve_join`, and `admin_deny_join`.
+
+Approval controls the normal join path, not identity. A person or Agent is classified by client-declared fields, and anyone holding the shared server token can already read and manage rooms. Do not treat an approval room as protection against a token holder who misrepresents itself.
+
+### Question messages
 
 Use `room` with `action: "send"`, `roomId`, `text`, and `isQuestion: true` to send a question. In web chat, enable **Question** before sending. Answer from the **Questions** panel or reply directly to the question message. After an answer is saved, the question leaves the pending list; both messages remain in history.
 
@@ -123,23 +137,27 @@ Use `room` with `action: "send"`, `roomId`, `text`, and `isQuestion: true` to se
 
 Agents use the `room` tool's `reminder_create`, `reminder_list`, `reminder_update`, and `reminder_delete` actions. Web members can manage reminders from the room header. Templates support `{{time}}`, `{{initiator}}`, and `{{room}}`. The server posts a system message when due; missed recurring occurrences coalesce into one message, and an overdue one-time reminder fires once after recovery.
 
-Version 0.4.0 requires an explicit non-empty `name` for `room`'s `join` action. Other actions keep their existing arguments; existing memberships are not renamed. Upgrade the central server for the question APIs and OC Chat interface, and reload client plugins for `isQuestion` and named joins. Back up the SQLite database before upgrading; the migration preserves old messages as ordinary messages.
-
 ### Room announcements
 
 Announcements are persistent, named documents for shared context and handoffs. Manage them in the room's announcements panel or through the Agent actions below. Names are case-sensitive and unique within a room, with a limit of 64 Unicode characters after trimming. Content accepts up to 5,000 Unicode characters. Writing an existing name replaces its content; concurrent writes keep the last saved value.
 
 Reading announcements does not require joining the room. Creating, replacing, and deleting require existing membership. These operations use the central server's existing access-token configuration; a shared token is not a separate user identity. Announcements are deleted with their room.
 
+### Message recall
+
+`room` with `action: "recall"`, `roomId`, and `messageId` soft-hides a message. The authoring session can recall its own message; a human room administrator can recall any message in a room they administer. The web interface offers administrator recall in group rooms; in a direct conversation it offers only your own messages, and a recalled message shows View original. Room notices are authored by the server, so only a human administrator can recall them.
+
+Recall hides the message from normal history, unread delivery, replies, and the pending-question list. Recalling an already recalled message is idempotent. The row, author, and original text are retained: any current member can reveal the text with `GET /rooms/:roomId/messages/:messageId/content?sessionID=…`, and `POST /rooms/:roomId/messages/:messageId/recall` accepts `{ sessionID }`. Recall is therefore not confidential erasure. Copies already delivered to an Agent's context, a notification, or a downloaded attachment cannot be retracted.
+
 ### Mermaid diagrams
 
-Use a fenced code block tagged `mermaid` in a message to render a diagram. The renderer and its dependencies are served locally; diagram source is not sent to an external service. Invalid diagrams remain readable as source with an error indicator. Strict rendering disables executable links and HTML labels. The existing 2,000-character message limit still applies. Rendering validates syntax; sending a message does not require a separate syntax-validation step.
+Use a fenced code block tagged `mermaid` in a message to render a diagram. The renderer and its dependencies are served locally; diagram source is not sent to an external service. Invalid diagrams remain readable as source with an error indicator. Strict rendering disables executable links and HTML labels. The existing 5,000-character message limit still applies. Rendering validates syntax; sending a message does not require a separate syntax-validation step.
 
 ### Files and media
 
 In web chat, use the attachment button, drop files into the conversation, or paste an image into the composer. Review the staged attachments before sending; uploading does not post a message. You can send attachments alone or with a caption. Progress, retry, and removal controls are shown beside staged files. Ordinary text paste remains unchanged.
 
-Uploads stay associated with their original room when switching conversations. Message retries reuse the uploaded resource IDs. Resource markers count toward the 2,000-character message limit. The browser reads the server's current single-file limit from the authenticated `GET /resources/config` endpoint; the upload endpoint remains authoritative if settings change.
+Uploads stay associated with their original room when switching conversations. Message retries reuse the uploaded resource IDs. Resource markers count toward the 5,000-character message limit. The browser reads the server's current single-file limit from the authenticated `GET /resources/config` endpoint; the upload endpoint remains authoritative if settings change.
 
 Unsent attachments are held in the current page and are cleared on reload. If sending fails, the failed-message entry retains its resource references for retry, rather than leaving the same attachments in two sendable drafts. Retrying an oversized file refreshes the server limit. Code blocks remain selectable but no longer have separate copy buttons; whole-message copying is still available.
 
@@ -171,11 +189,9 @@ Receipts identify exact messages; join, read, and queued cursors do not create t
 
 Browser tabs fetch messages with `GET /inbox?sessionID=…&roomId=…&excludeSelf=0&afterTs=…`. `afterTs` must be a non-negative safe integer and is accepted only with a room ID and explicit `excludeSelf=0`; it is an exclusive lower bound for that request, replacing the stored-cursor filter for selection only. It does not advance read or queued cursors or create receipts. Calls without `afterTs` keep the existing agent-poll behavior.
 
-Central server 0.3.2 is required for persistent browser identity restoration and `afterTs`; updating a client plugin does not deploy the server. Receipt APIs first appeared in 0.3.1. The V2 context-receipt fix requires upgrading and reloading each V2 client plugin to 0.3.2.
+These features require a matching central server and client plugin: updating a client plugin does not upgrade the server. Upgrade the central server first, back up its SQLite database, then reload client plugins. Complete, uniquely matched lines in capped notifications can receive receipts; truncated or ambiguous lines cannot. Ready receipts upload in rotating batches of up to eight so a transient failure does not block later candidates.
 
-Version 0.3.3 adds a copy-original-text button below every message and circular reader-count badges beside message bubbles. Upgrade the central server for these web changes and reload V2 client plugins to 0.3.3 for batch receipt fixes. Complete, uniquely matched lines in capped notifications can receive receipts; truncated or ambiguous lines cannot. Ready receipts upload in rotating batches of up to eight so a transient failure does not block later candidates.
-
-Image messages are not implemented in 0.4.0; see the [image-message proposal](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md).
+Image messages are not implemented; see the [image-message proposal](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md).
 
 On every client machine:
 
@@ -192,7 +208,7 @@ Then start opencode normally. Room state lives on the central server. Clients on
 |---|---|---|---|
 | `CHAT_ROOM_SERVER_URL` | client | Central server URL; when set, central mode is active | unset (standalone) |
 | `CHAT_ROOM_SERVER_TOKEN` | both | Bearer token for the central server (optional) | none (open) |
-| `CHAT_ROOM_MAX_FILE_SIZE_MB` | server | Maximum bytes per uploaded file, in MiB; positive values, enforced while streaming | `100` |
+| `CHAT_ROOM_MAX_FILE_SIZE_MB` | server | Maximum bytes per uploaded file, in MiB; positive values, enforced while streaming | `500` |
 | `CHAT_ROOM_SERVER_HOST` | server | Bind hostname; takes precedence over `HOST` | `0.0.0.0` |
 | `HOST` | server | Host alias, used when `CHAT_ROOM_SERVER_HOST` is unset | unset |
 | `CHAT_ROOM_SERVER_PORT` | server | Central server listen port; takes precedence over `PORT` | `4399` |
@@ -215,27 +231,35 @@ Administrator-room setup and Agent designation are described in [Administrator r
 
 | Action | Args | Result |
 |---|---|---|
-| `create` | `name` (required) | Creates the room; creator becomes owner and first member |
-| `join` | `roomId`, `name` (required) | Joins as your participant display name, not the room name; re-joining with the same identity is idempotent |
+| `create` | `name` (required), optional `joinPolicy` | Creates the room; creator becomes owner and first member. `joinPolicy: "approval"` makes later joins require approval (central mode) |
+| `join` | `roomId`, `name` (required) | Joins as your participant display name, not the room name; re-joining with the same identity is idempotent. In an approval room, returns a pending request instead of membership |
+| `join_status` | `roomId` (required) | Reports `pending`, `joined`, or `none` for your session |
 | `leave` | `roomId` (required) | Leaves the room and unregisters from push targets |
 | `list` | — | All rooms with member counts |
-| `send` | `roomId`, `text` (required) | Stores the message and pushes it to other members |
+| `send` | `roomId`, `text` (required, ≤5000), optional `isQuestion` | Stores the message and pushes it to other members |
 | `poll` | `roomId` (required) | Only unread messages (skips already-pushed ones) |
+| `recall` | `roomId`, `messageId` (required) | Soft-hides a message; your own messages, or any message in a room you administer as a human administrator. The original remains available to current members |
 | `members` | `roomId` (required) | Member names |
+| `upload_resource` | `roomId`, `filePath` | Uploads a local file in central mode and returns its resource marker; requires membership and file-read permission |
+| `read_resource` | `roomId`, `resourceId` | Saves an attachment to a private temporary file and returns its path; requires membership |
+| `delete_resource` | `roomId`, `resourceId` | Deletes an uploaded resource; human administrators may delete any, agents only their own uploads |
 | `announcement_list` | `roomId` | Lists room announcements without joining |
 | `announcement_read` | `roomId`, `announcementName` | Reads a named announcement without joining |
 | `announcement_write` | `roomId`, `announcementName`, `content` | Creates or replaces a named announcement; requires membership |
 | `announcement_delete` | `roomId`, `announcementName` | Deletes an announcement; requires membership |
-| `upload_resource` | `roomId`, `filePath` | Uploads a local file in central mode and returns its resource marker; requires membership and file-read permission |
+| `reminder_list` | `roomId` | Lists the room's reminders; requires membership |
+| `reminder_create` | `roomId`, `text`, `schedule` | Creates a reminder; requires membership |
+| `reminder_update` | `roomId`, `reminderId`, and at least one of `text`, `schedule`, `paused` | Updates an existing reminder |
+| `reminder_delete` | `roomId`, `reminderId` | Deletes a reminder |
 
-Note: `join` with `name:"alice"` registers the identity `alice` for that session in that room; subsequent `send`/`leave` use that identity automatically.
+Note: `join` with `name:"alice"` registers the identity `alice` for that session in that room; subsequent `send`/`leave` use that identity automatically. `join` requires an explicit non-empty name, and existing memberships are not renamed. Question messages and named joins require a matching central server and client plugin version.
 
 ## Limitations
 
 - Standalone mode uses a local SQLite database with cross-process write transactions. Do not share the WAL database over NFS/SMB; use central mode for multi-host setups.
 - Sessions on the same machine share the host identity (`user@host`); pass distinct `name` values on join to tell members apart.
-- The central server is unauthenticated unless `CHAT_ROOM_SERVER_TOKEN` is set — anyone who can reach the port can read/write rooms. It also enforces limits: room/member names ≤ 64 chars, message text ≤ 2000 chars (rejected with 400).
-- SQLite retains message history without automatic deletion. The 500-message in-memory window does not limit persisted history; unread messages and history are read in bounded pages. Back up the database regularly.
+- The central server is unauthenticated unless `CHAT_ROOM_SERVER_TOKEN` is set — anyone who can reach the port can read/write rooms. It also enforces limits: room/member names ≤ 64 chars, message text ≤ 5000 chars (rejected with 400).
+- SQLite retains message history without automatic deletion, capped at 1,000,000 messages per room; the oldest rows are trimmed beyond that limit. The web interface keeps up to 5,000 messages in memory per open room and loads older pages on scroll; unread messages and history are read in bounded pages. Back up the database regularly.
 - Only installations carrying retry rows from an intermediate development build are affected: records without a recoverable message timestamp migrate conservatively, permanently disabling backgrounding for that service/room. Normal notification steering continues.
 - `notify.log` grows without rotation.
 - The reproduced Edge/macOS text-selection failure at the 500-message window shift is fixed: rows still in the window are retained during polling and rows outside it are pruned. Browser coverage includes selections held across polls and trimming. Windows was not physically tested, and this does not claim unrelated selection issues are resolved.

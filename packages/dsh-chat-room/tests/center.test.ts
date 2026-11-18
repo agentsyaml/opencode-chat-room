@@ -21,7 +21,8 @@ describe("central actions", () => {
       if (method === "GET" && path === "/rooms") return [200, [{ id: "r1", name: "dev", participants: [{}, {}] }]];
       if (method === "POST" && path === "/rooms") return [201, { id: "r1", name: "dev" }];
       if (method === "POST" && path === "/rooms/r1/join") return [201, { id: "r1", name: "dev" }];
-      if (method === "POST" && path === "/rooms/r1/messages") return [200, { ok: true }];
+      if (method === "POST" && path === "/rooms/r1/messages") return [200, { messages: [{ id: "m-sent" }] }];
+      if (method === "POST" && path === "/rooms/r1/messages/m-sent/recall") return [200, { ok: true, messageID: "m-sent", recalledAt: 2, recalledBy: "alice" }];
       if (method === "GET" && path === "/rooms/r1") return [200, { participants: [{ name: "alice" }, { name: "bob" }] }];
       return undefined;
     });
@@ -29,7 +30,12 @@ describe("central actions", () => {
     expect(await roomAction(config, parseRoomArgs({ action: "list" }), "dsh:s1")).toBe("r1 (dev): 2 members");
     expect(await roomAction(config, parseRoomArgs({ action: "create", name: "dev" }), "dsh:s1")).toContain("r1");
     expect(await roomAction(config, parseRoomArgs({ action: "join", roomId: "r1", name: "alice" }), "dsh:s1")).toContain("r1");
-    expect(await roomAction(config, parseRoomArgs({ action: "send", roomId: "r1", text: "hi", isQuestion: true }), "dsh:s1")).toContain("r1");
+    expect(await roomAction(config, parseRoomArgs({ action: "send", roomId: "r1", text: "hi", isQuestion: true }), "dsh:s1"))
+      .toBe("sent to room r1 (id: m-sent)");
+    expect(await roomAction(config, parseRoomArgs({ action: "recall", roomId: "r1", messageId: "m-sent" }), "dsh:s1"))
+      .toBe("recalled message m-sent");
+    expect(fake.requests.find((request) => request.path === "/rooms/r1/messages/m-sent/recall")?.body)
+      .toEqual({ sessionID: "dsh:s1" });
     expect(await roomAction(config, parseRoomArgs({ action: "members", roomId: "r1" }), "dsh:s1")).toBe("alice\nbob");
     expect(fake.requests.every((request) => request.authorization === "Bearer secret")).toBe(true);
     expect(fake.requests.find((request) => request.path === "/rooms/r1/messages")?.body).toEqual({ sessionID: "dsh:s1", text: "hi", isQuestion: true });
@@ -48,11 +54,17 @@ describe("central actions", () => {
       return undefined;
     });
     const result = await roomAction(cfg(fake.url), parseRoomArgs({ action: "poll", roomId: "r1" }), "dsh:s1");
-    expect(result).toBe("[bob] hello\n[bob] again");
+    expect(result).toBe("[bob] hello (id: m1)\n[bob] again (id: m2)");
     const inbox = fake.requests.find((request) => request.path === "/inbox")!;
     expect(inbox.query.get("excludeSelf")).toBe("1");
     expect(inbox.query.get("roomId")).toBe("r1");
     expect(fake.requests.find((request) => request.path === "/read")?.body).toEqual({ roomId: "r1", sessionID: "dsh:s1", ts: 200 });
+  });
+
+  test("message text accepts 5000 characters and rejects 5001", () => {
+    const longest = "x".repeat(5000);
+    expect(parseRoomArgs({ action: "send", roomId: "r1", text: longest }).text).toBe(longest);
+    expect(() => parseRoomArgs({ action: "send", roomId: "r1", text: `${longest}x` })).toThrow(TypeError);
   });
 
   test("server failures keep their status and message", async () => {

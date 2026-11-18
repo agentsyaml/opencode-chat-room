@@ -110,8 +110,8 @@ test("afterTs replays and paginates a member room without mutating cursors", asy
   const replay = await (await inbox("reader-session", fixture.roomID, "&excludeSelf=0&afterTs=0")).json() as { items: Array<{ id: string }> };
   expect(replay.items.map((item) => item.id)).toEqual(fixture.messages.slice(0, 100).map((message) => message.id));
   expect((await store.loadRegistry())[fixture.roomID]!["reader-session"]!.lastReadTs).toBe(fixture.messages.at(-1)!.createdAt);
-  const outsider = await (await inbox("outsider", fixture.roomID, "&excludeSelf=0&afterTs=0")).json() as { member: boolean; items: unknown[]; queuedTs: Record<string, number>; hasMore: boolean };
-  expect(outsider).toEqual({ member: false, items: [], queuedTs: {}, hasMore: false });
+  const outsider = await (await inbox("outsider", fixture.roomID, "&excludeSelf=0&afterTs=0")).json() as { member: boolean; items: unknown[]; queuedTs: Record<string, number>; hasMore: boolean; recallVersion: number };
+  expect(outsider).toEqual({ member: false, items: [], queuedTs: {}, hasMore: false, recallVersion: 0 });
 });
 
 test("afterTs validation requires an explicit member-room echo request", async () => {
@@ -123,5 +123,30 @@ test("afterTs validation requires an explicit member-room echo request", async (
   expect((await call(`/inbox?sessionID=reader-session&excludeSelf=0&afterTs=0`)).status).toBe(400);
   expect((await call(`/inbox?sessionID=reader-session&roomId=${fixture.roomID}&afterTs=0`)).status).toBe(400);
   expect((await call(`/inbox?sessionID=reader-session&roomId=${fixture.roomID}&excludeSelf=1&afterTs=0`)).status).toBe(400);
+});
+
+test("inbox uses the client recall version and returns immediately when it is stale", async () => {
+  const fixture = await store.writeState((service, registry) => {
+    const room = service.createRoom("recall version", "Other");
+    service.joinRoom(room.id, { id: "Reader", name: "Reader" });
+    service.joinRoom(room.id, { id: "Other", name: "Other" });
+    const message = service.sendMessage(room.id, "Other", "withdraw me", "other-session");
+    registry[room.id] = {
+      "reader-session": { serverUrl: "", apiPrefix: "/api", name: "Reader" },
+      "other-session": { serverUrl: "", apiPrefix: "/api", name: "Other" },
+    };
+    return { roomID: room.id, messageID: message.id };
+  });
+  expect((await store.recallMessage(fixture.roomID, fixture.messageID, "other-session")).status).toBe("ok");
+  const started = Date.now();
+  const response = await inbox("reader-session", fixture.roomID, "&excludeSelf=0&afterTs=0&timeout=25000&recallVersion=0");
+  expect(Date.now() - started).toBeLessThan(5000);
+  expect(response.status).toBe(200);
+  const body = await response.json() as { items: Array<{ id: string }>; recallVersion: number };
+  expect(body.recallVersion).toBe(1);
+  expect(body.items.some((item) => item.id === fixture.messageID)).toBe(false);
+  for (const value of ["", "abc", "1.5", "-1", "9007199254740992", "1e3"]) {
+    expect((await inbox("reader-session", fixture.roomID, `&recallVersion=${value}`)).status).toBe(400);
+  }
 });
 }

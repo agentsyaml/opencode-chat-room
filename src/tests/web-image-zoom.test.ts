@@ -12,7 +12,7 @@ const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
 const token = "chat-image-zoom-test-token";
 const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600"><rect width="900" height="600" fill="#22695c"/></svg>');
 
-test.skipIf(!browserModule)("clicking a message image opens the overlay and Esc closes it without moving the thread", async () => {
+test.skipIf(!browserModule)("clicking a message image opens the overlay, zooms with the wheel, and closes without moving the thread", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-zoom-"));
   const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
@@ -59,11 +59,36 @@ test.skipIf(!browserModule)("clicking a message image opens the overlay and Esc 
     expect(opened.scrollTop).toBe(before.scrollTop);
     expect(opened.closeLabel).toBe("Close");
     expect(opened.focus).toBe("btnCloseImage");
+    const zoomLevel = () => page.locator("#zoomLevel").textContent();
+    expect(await zoomLevel()).toBe("100%");
+    await page.locator("#imageDialogImage").hover();
+    await page.mouse.wheel(0, -240);
+    await page.waitForTimeout(80);
+    expect(Number((await zoomLevel())!.replace("%", ""))).toBeGreaterThan(100);
+    expect(await scrollTop()).toBe(before.scrollTop);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnCloseImage");
+    for (let index = 0; index < 12; index++) await page.mouse.wheel(0, -500);
+    expect(await zoomLevel()).toBe("400%");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight && scrollY === 0)).toBe(true);
+    const imageBox = () => page.locator("#imageDialogImage").evaluate((element: HTMLImageElement) => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right }; });
+    for (let index = 0; index < 12; index++) await page.keyboard.press("Shift+ArrowLeft");
+    expect(Math.abs((await imageBox()).left - 20)).toBeLessThanOrEqual(2);
+    for (let index = 0; index < 24; index++) await page.keyboard.press("Shift+ArrowRight");
+    expect(Math.abs((await imageBox()).right - 1260)).toBeLessThanOrEqual(2);
+    await page.locator("#btnZoomReset").click();
+    expect(await zoomLevel()).toBe("100%");
+    await page.keyboard.press("+");
+    expect(await zoomLevel()).toBe("125%");
     await page.keyboard.press("Escape");
     await page.locator("#imageDialog").waitFor({ state: "hidden" });
     const closed = await page.evaluate(() => ({ scrollTop: document.querySelector<HTMLElement>("#thread")!.scrollTop, focusTag: document.activeElement?.tagName }));
     expect(closed.scrollTop).toBe(before.scrollTop);
     expect(closed.focusTag).toBe("IMG");
+    await page.locator("#msgList img").click();
+    await page.locator("#imageDialog[open]").waitFor();
+    expect(await page.locator("#zoomLevel").textContent()).toBe("100%");
+    await page.keyboard.press("Escape");
+    await page.locator("#imageDialog").waitFor({ state: "hidden" });
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 60000);
 
@@ -152,7 +177,7 @@ test.skipIf(!browserModule)("the owner hands the room to a person and never to a
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);
 
-test.skipIf(!browserModule)("the rail footer divider and the composer divider share one height", async () => {
+test.skipIf(!browserModule)("the rail footer stays compact and bottom anchored as the composer grows", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-divider-"));
   const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
@@ -169,22 +194,54 @@ test.skipIf(!browserModule)("the rail footer divider and the composer divider sh
     await page.locator("#inRoomName").fill("__Test_DividerRoom");
     await page.locator("#btnCreate").click();
     await page.locator("#chatView").waitFor({ state: "visible" });
-    const gap = async () => {
+    const layout = async () => {
       await page.waitForTimeout(120);
       return page.evaluate(() => {
-        const foot = document.querySelector<HTMLElement>("#roomRail .rail-foot")!, composer = document.querySelector<HTMLElement>("#chatView > .composer")!;
-        return Math.round((foot.getBoundingClientRect().top - composer.getBoundingClientRect().top) * 10) / 10;
+        const box = (selector: string) => { const rect = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect(); return { top: Math.round(rect.top * 10) / 10, bottom: Math.round(rect.bottom * 10) / 10, height: Math.round(rect.height * 10) / 10 }; };
+        return { composer: box("#chatView > .composer"), foot: box("#roomRail .rail-foot"), trigger: box("#btnSettings"), rail: box("#roomRail") };
       });
     };
-    expect(Math.abs(await gap())).toBeLessThanOrEqual(1);
-    await page.locator("#msgInput").fill("Line one\nLine two\nLine three\nLine four\nLine five");
-    expect(Math.abs(await gap())).toBeLessThanOrEqual(1);
+    const sameFooter = (a: any, b: any) => Math.abs(a.foot.top - b.foot.top) <= 1 && Math.abs(a.foot.height - b.foot.height) <= 1
+      && Math.abs(a.trigger.top - b.trigger.top) <= 1 && Math.abs(a.trigger.height - b.trigger.height) <= 1;
+    const lines = "Line one\nLine two\nLine three\nLine four\nLine five";
+    const idle = await layout();
+    expect(Math.abs(idle.foot.top - idle.composer.top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(idle.foot.bottom - idle.rail.bottom)).toBeLessThanOrEqual(1);
+    await page.locator("#msgInput").fill(lines);
+    const expanded = await layout();
+    expect(sameFooter(expanded, idle)).toBe(true);
+    expect(expanded.composer.height).toBeGreaterThan(idle.composer.height + 40);
+    // Staged files grow the composer too; the footer and identity row must not move.
+    await page.locator("#attachmentPicker").setInputFiles({ name: "__Test_divider.txt", mimeType: "text/plain", buffer: Buffer.from("Rail footer stays compact.") });
+    await page.waitForFunction(() => document.querySelector("#attachmentList .attachment-detail")?.textContent?.includes("Ready to send"));
+    const attached = await layout();
+    expect(sameFooter(attached, idle)).toBe(true);
+    // Emptying the composer restores idle alignment, including after a viewport change.
+    await page.locator('#attachmentList [data-upload-action="remove"]').click();
+    await page.waitForFunction(() => !document.querySelectorAll("#attachmentList .attachment-item").length);
     await page.locator("#msgInput").fill("");
+    await page.waitForTimeout(150);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator("#btnRoomsDrawer").click(); await page.locator("#roomRail.drawer-open").waitFor();
-    expect(Math.abs(await gap())).toBeLessThanOrEqual(1);
-    await page.locator("#msgInput").fill("Line one\nLine two\nLine three\nLine four\nLine five");
-    expect(Math.abs(await gap())).toBeLessThanOrEqual(1);
+    const mobile = await layout();
+    expect(Math.abs(mobile.foot.top - mobile.composer.top)).toBeLessThanOrEqual(1);
+    await page.locator("#msgInput").fill(lines);
+    const mobileExpanded = await layout();
+    expect(sameFooter(mobileExpanded, mobile)).toBe(true);
+    expect(Math.abs(mobileExpanded.foot.bottom - mobileExpanded.rail.bottom)).toBeLessThanOrEqual(1);
+    await page.locator("#attachmentPicker").setInputFiles({ name: "__Test_mobile_divider.txt", mimeType: "text/plain", buffer: Buffer.from("Mobile rail footer stays compact.") });
+    await page.waitForFunction(() => document.querySelector("#attachmentList .attachment-detail")?.textContent?.includes("Ready to send"));
+    const mobileAttached = await layout();
+    expect(sameFooter(mobileAttached, mobile)).toBe(true);
+    expect(Math.abs(mobileAttached.foot.bottom - mobileAttached.rail.bottom)).toBeLessThanOrEqual(1);
+    // A restored draft must not become the idle height on the next visit.
+    await page.reload();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    await page.waitForTimeout(250);
+    await page.locator("#btnRoomsDrawer").click(); await page.locator("#roomRail.drawer-open").waitFor();
+    const restored = await layout();
+    expect(restored.foot.height).toBeLessThanOrEqual(mobile.foot.height + 1);
+    expect(restored.foot.height).toBeLessThan(restored.composer.height);
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
 }, 60000);
 

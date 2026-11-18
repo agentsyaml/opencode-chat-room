@@ -32,8 +32,11 @@ export function setRoomPreview(entry, message) {
   entry.preview = message.text;
   entry.previewAt = message.createdAt;
   entry.previewSenderId = message.senderId;
+  entry.previewRecalled = Boolean(message.recalledAt);
 }
 
 export function formatRoomPreview(entry, latest, app) {
+  // A recalled message must not leak its text through the room rail.
+  if (entry?.previewRecalled || latest?.recalledAt) return app.t("messageRecalled");
   return formatSystemMessage(entry?.preview ? { senderId: entry.previewSenderId, text: entry.preview } : latest, app);
 }

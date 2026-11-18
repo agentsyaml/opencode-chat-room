@@ -4,6 +4,8 @@ import {
   formatServeWakePrompt,
 } from "../state/store.ts";
 import { explicitlyAddresses } from "./mentions.ts";
+import { withMessageIds } from "./message-ids.ts";
+import { notificationPrefix } from "./notification-budget.ts";
 import {
   clearPendingAdmission,
   getOrCreatePendingAdmission,
@@ -105,14 +107,15 @@ export async function wakeSessions(
           await serializeSessionPush(sessionID, async () => {
             const inbox = await request(opts,
               `/inbox?sessionID=${encodeURIComponent(sessionID)}&roomId=${encodeURIComponent(roomId)}&excludeSelf=1&timeout=0`,
-              "GET") as { items?: InboxItem[]; queuedTs?: Record<string, number> };
+              "GET") as { items?: InboxItem[]; queuedTs?: Record<string, number>; hasMore?: boolean };
             const queuedTs = Math.max(entry.lastQueuedTs ?? 0, inbox.queuedTs?.[roomId] ?? 0);
             const items = (Array.isArray(inbox.items) ? inbox.items : []).filter(
               (item) => item.roomId === roomId && item.createdAt > queuedTs,
             );
             if (!items.length) return;
             const target = { ...transport, directory: entry.directory ?? transport.directory };
-            const pushed = await pushItemsToSession(opts, sessionID, items, target, inbox.queuedTs);
+            const pushed = await pushItemsToSession(opts, sessionID, items, target, inbox.queuedTs,
+              new Set(), !(inbox.hasMore ?? false));
             if (pushed !== "unreachable" || !serveUrl) return;
             const currentRegistry = await request(opts, `/rooms/${encodeURIComponent(roomId)}/registry`, "GET") as Record<string, typeof entry>;
             const current = currentRegistry[sessionID];
@@ -123,21 +126,31 @@ export async function wakeSessions(
             const unread = items.filter((item) => item.createdAt > currentCursor);
             const mentioned = unread.some((item) => explicitlyAddresses(item, current.name, sessionID, roomKind));
             if (!mentioned) return;
-            const currentMax = unread.reduce((max, item) => Math.max(max, item.createdAt), 0);
+            const live = new Set(items.map((item) => item.id).filter(Boolean));
             prunePendingAdmission(sessionID, roomId, currentCursor, (pending) => {
               const { lines, capped } = formatNotificationLines(pending);
               return { prompt: formatServeWakePrompt(unread[0]!.roomName, roomId, lines), capped };
-            });
+            }, (item) => !item.id || inbox.hasMore !== false || live.has(item.id));
             const existing = pendingAdmission(sessionID, roomId);
-            const delta = existing?.state === "admitted" && currentMax > existing.maxTs
-              ? unread.filter((item) => item.createdAt > existing.maxTs) : unread;
-            if (existing?.state === "admitted" && (currentMax <= existing.maxTs || !delta.length)) return;
-            const { lines, capped } = formatNotificationLines(delta);
-            const prompt = formatServeWakePrompt(delta[0]!.roomName, roomId, lines);
-            const maxTs = delta.reduce((max, item) => Math.max(max, item.createdAt), 0);
-            const admission = getOrCreatePendingAdmission(sessionID, roomId, delta, prompt, maxTs, capped);
+            const deliveredIDs = new Set(existing?.state === "admitted" ? existing.items.map((item) => item.id) : []);
+            const delta = existing?.state === "admitted"
+              ? unread.filter((item) => item.createdAt > existing.maxTs || !deliveredIDs.has(item.id)) : unread;
+            if (existing?.state === "admitted" && !delta.length) return;
+            // Merge an undelivered admission with the newer delta instead of
+            // replacing it, so retrying the old prompt cannot skip messages.
+            const carried = existing?.state === "pending" ? existing.items : [];
+            const carriedIDs = new Set(carried.map((item) => item.id));
+            const merged = carried.length
+              ? [...carried, ...delta.filter((item) => !carriedIDs.has(item.id)).slice(0, Math.max(0, 20 - carried.length))]
+              : delta;
+            const deliverable = notificationPrefix(merged);
+            const displayDelta = withMessageIds(deliverable);
+            const { lines, capped } = formatNotificationLines(displayDelta);
+            const prompt = formatServeWakePrompt(items[0]!.roomName, roomId, lines);
+            const maxTs = deliverable.reduce((max, item) => Math.max(max, item.createdAt), 0);
+            const admission = getOrCreatePendingAdmission(sessionID, roomId, displayDelta, prompt, maxTs, capped);
             await wakeViaServe(serveUrl, sessionID, roomId, opts, target, admission,
-              delta[0]!.roomName, entry.host, entry.directory, roomKind);
+              items[0]!.roomName, entry.host, entry.directory, roomKind);
           });
         }
       } catch {

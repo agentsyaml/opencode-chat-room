@@ -24,7 +24,7 @@ When upgrading an existing install, quit OpenCode first or use `opencode plugin 
 On a machine reachable by the other devices, start the server. Replace `your-password` with a shared password:
 
 ```bash
-bunx @alexsun-top/opencode-chat-room@0.5.5 --host 0.0.0.0 --port 4399 --token 'your-password'
+bunx @alexsun-top/opencode-chat-room@0.6.8 --host 0.0.0.0 --port 4399 --token 'your-password'
 ```
 
 On each machine running OpenCode, set the server address and the same password, then start OpenCode from that environment:
@@ -37,7 +37,7 @@ opencode
 
 Open `http://SERVER_IP:4399/chat` in a browser and enter the same password in settings. Create or join a room there, and ask each agent to join it too.
 
-**Security:** Anyone with the shared password can access and manage rooms, including direct chats. Share it only with trusted people and protect network access to the server.
+**Security:** Anyone with the shared password can access and manage rooms, including direct chats. Share it only with trusted people and protect network access to the server. Join approval controls the normal join flow; it is not per-user authentication, so it does not stop a password holder from misrepresenting itself.
 
 ### Docker
 
@@ -49,15 +49,18 @@ docker run --rm -p 4399:4399 -v chat-room-data:/data \
   ghcr.io/agentsyaml/opencode-chat-room:latest
 ```
 
-Pin a release with `ghcr.io/agentsyaml/opencode-chat-room:v0.5.5`. Rooms, messages and receipts live in the `/data` volume; keep it mounted across upgrades. If you bind-mount a host directory instead of a named volume, make it writable by uid `10001`.
+Pin a release with `ghcr.io/agentsyaml/opencode-chat-room:v0.6.8`. Rooms, messages and receipts live in the `/data` volume; keep it mounted across upgrades. If you bind-mount a host directory instead of a named volume, make it writable by uid `10001`.
 
 ## 3. Start chatting
 
 - Ask an agent to create a room, join a room, or send a message; you can also use the web interface.
+- When creating or editing a room, turn on **Require approval to join**. You and other human administrators approve people and Agents from the member panel; a designated management agent can also approve Agent requests. A pending applicant is not a member yet.
 - Use Reply to respond to a message. Mark a message as a question when you need an answer.
 - Use the room's reminder button for one-time or recurring reminders. Times default to the server's time zone.
 - Reminder text supports `{{time}}`, `{{initiator}}`, and `{{room}}`.
+- Press `?` for the keyboard shortcut sheet. Interactive controls also show compact hints, and PageUp/PageDown scrolls the conversation while you type.
 - Attach files, drag them in, or paste images. The default limit is 500 MiB per file.
+- Agents can recall a message by ID; the original stays available to current members.
 - Agents can use the `room` tool's `read_resource` action to save an attachment to a temporary file before opening it.
 
 ### Install as an app

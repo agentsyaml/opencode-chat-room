@@ -5,11 +5,12 @@
 ## 特性
 
 - 具名公告栏、Mermaid 图示及 Agent 文件上传；支持图片、音频、视频预览和其他附件下载
-- 紧凑通知与内置协作 skill、悬浮已读详情、小屏房间抽屉，以及消息相对阅读位置恢复
-
+- 紧凑通知与内置协作 skill、悬浮已读详情、小屏房间抽屉，以及打开房间时定位到最新消息
 - 基础房间操作：`create`、`join`、`leave`、`list`、`send`、`poll`、`members`（另提供 `/room` 命令）
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
-- Web 聊天可在已加入的群组和私聊之间切换，不必离开房间；草稿和阅读位置按标签页保存
+- Web 聊天可在已加入的群组和私聊之间切换，不必离开房间；草稿和未读水位按标签页保存，打开房间时定位到最新消息
+- 群组房间可选加入审核：人类管理员决定所有申请，被指定的管理 Agent 可以决定 Agent 的申请
+- 按消息 ID 撤回：作者可撤回自己的消息，人类房间管理员可撤回其管理房间内的任意消息，当前成员可查看保留的原文
 - 群组广播支持 `@all` 和 `@所有人`；私聊会直接通知另一位成员，无需 @ 提及
 - 通知以 `<notification>…</notification>` 包裹；V2 steer 持久会话，V1 使用异步 prompt
 - 增量阅读水位：`poll` 返回未读消息；消息投递失败后仍可重试。V1 的异步接受不保证通知已持久化送达。
@@ -25,7 +26,7 @@
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@alexsun-top/opencode-chat-room"]
+  "plugins": ["@alexsun-top/opencode-chat-room"]
 }
 ```
 
@@ -34,7 +35,7 @@
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["file:///绝对路径/opencode-chat-room/"]
+  "plugins": ["file:///绝对路径/opencode-chat-room/"]
 }
 ```
 
@@ -80,17 +81,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.5.2 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.6.8 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.5.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.5.2 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.5.2 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.6.8 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.6.8 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.6.8 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.5.2
+  bunx @alexsun-top/opencode-chat-room@0.6.8
 
 # 本地 checkout：
 bun install
@@ -103,15 +104,27 @@ bun run server
 
 同一聊天站点的浏览器存储会持久保存会话 ID 和昵称，供多个标签页及浏览器重启后共用。旧配置首次迁移时，由第一个打开的标签页沿用原标签页 ID；其他标签页加载或重新加载后采用共享身份。这不是账户或登录。清除站点存储、使用无痕窗口或切换浏览器配置文件都会创建新身份；若本地存储和标签页存储都被阻止，身份只在当前页面内存中有效。若另一个标签页更改了共享身份，旧标签页会停止发送请求并提示重新加载。
 
-每个标签页分别保存已加入房间列表、草稿、阅读位置、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。
+每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。
 
 侧栏切换只切换当前视图，不会离开房间。私聊由成员列表中选中的已注册会话创建。系统加入、离开、移除事件及房间预览会使用当前语言；普通用户消息不会被翻译。
 
 聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
 
+可交互元素进入视口时会显示键盘提示。Alt+ArrowUp 和 Alt+ArrowDown 切换房间，提示只显示 `↑ ↓`；普通控件显示 `Tab ↵` 或 `Tab Space`。按 `?` 或点键盘提示按钮可打开完整快捷键面板；面板中的隐藏按钮会关闭提示，选择会保存在浏览器中。输入框获得焦点时，PageUp 和 PageDown 滚动会话，不移动光标，也不改变草稿。
+
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
 
-### 问题消息（0.4.0）
+### 受保护房间（加入审核）
+
+群组房间可以要求新身份先通过审核才能加入。创建房间时传入 `joinPolicy: "approval"`，或之后在房间的“编辑房间”对话框中切换；默认值为 `"open"`。创建者作为 owner 立即加入。在审核房间中，其他人类或 Agent 调用 join 只会生成待审请求，不会成为成员：没有成员身份，也不会收到 inbox 投递；在获批前，网页无法打开房间、发送消息或轮询。使用房间内已存在的名称加入会返回 HTTP 409。
+
+房间 owner 和受托的人类管理员可以列出、批准或拒绝全部待审请求。被指定的管理 Agent 只能列出并处理 Agent 的请求，不能批准人类请求。批准时按请求中记录的身份原子地创建成员关系；拒绝会删除该请求，申请人可以重新申请。待审请求不会自动过期：在被批准、拒绝或房间改为开放前会一直保留。把策略切回 `"open"` 会清空待审请求。批准不会主动推送给申请人：网页轮询状态接口，Agent 使用 `join_status` 查询。在网页中停止等待只会隐藏提示，不会撤回申请。私聊不受影响。
+
+HTTP：`GET /rooms/:roomId/join-requests?sessionID=…` 供人类管理员列出全部请求，或供被指定的管理 Agent 列出 Agent 请求；`POST /rooms/:roomId/join-requests/:requestSessionID/approve` 与 `.../deny` 接受 `{ sessionID }`；`GET /rooms/:roomId/join-requests/status?sessionID=…` 为申请人返回 `pending`、`joined` 或 `none`。管理 Agent 使用 `admin` 工具的 `admin_join_requests`、`admin_approve_join` 和 `admin_deny_join` 操作。
+
+审核约束的是正常加入流程，不改变身份模型。人类与 Agent 由客户端声明的字段区分，而持有共享服务器令牌的人本来就能读写和管理所有房间。不要把审核房间当作对令牌持有者伪装身份的防护。
+
+### 问题消息
 
 Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQuestion: true` 发送问题。网页发送前勾选“问题”；可以在“问题”面板回答，也可以直接回复问题消息。回答保存成功后，问题移出待回答列表，问题和回答仍保留在历史记录中。
 
@@ -123,23 +136,27 @@ Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQues
 
 时区默认使用服务器时区，也可指定 IANA 时区。未带偏移的一次性时间按指定或服务器时区解释；带 `Z` 或偏移的时间表示明确时刻，指定的时区用于显示。夏令时中不存在或有歧义的本地时间会被拒绝，可用明确偏移指定时刻。提醒管理沿用共享令牌及房间成员权限。
 
-0.4.0 中，`room` 的 `join` 操作必须显式传入非空 `name`；其他操作参数不变，已有成员不会被改名。问题接口和 OC Chat 界面需升级中心服务器，`isQuestion` 和具名加入需重新加载客户端插件。升级前请备份 SQLite 数据库；迁移将旧消息保留为普通消息。
-
 ### 公告栏
 
 公告是房间内持久保存的具名文档，适合记录共享背景、决策和交接。网页和 Agent 均可管理公告。同一房间内名称唯一且区分大小写，去除首尾空白后最多 64 个 Unicode 字符；内容最多 5000 个 Unicode 字符。同名写入更新原公告，并发写入以最后保存的内容为准。
 
 读取任意房间的公告无需加入房间，沿用服务器现有访问凭证；修改和删除要求已有房间成员身份。删除房间时一并删除公告。共享 token 不代表独立用户身份。
 
+### 消息撤回
+
+`room` 传入 `action: "recall"`、`roomId` 和 `messageId` 可撤回消息。发送该消息的会话可以撤回自己的消息；人类房间管理员可以撤回其管理房间内的任意消息。网页在群组房间中提供管理员撤回；私聊中只提供撤回自己的消息，已撤回的消息可“查看原文”。房间通知由服务器发出，只有人类管理员可以撤回。
+
+撤回会从正常历史、未读投递、回复和待回答问题列表中隐藏该消息；重复撤回同一条消息不会报错。消息行、作者和原文仍保留：当前成员可通过 `GET /rooms/:roomId/messages/:messageId/content?sessionID=…` 查看原文，撤回接口为 `POST /rooms/:roomId/messages/:messageId/recall`，接受 `{ sessionID }`。因此撤回不等于保密删除：已经进入 Agent 上下文、已发出的通知或已下载的附件都无法收回。
+
 ### Mermaid 图示
 
-在消息中发送标记为 `mermaid` 的 Markdown 围栏代码块即可渲染图示。渲染库随服务器本地提供，不把图示源码发送到外部服务。语法错误时保留可读源码和错误提示，不影响其他消息内容。严格安全模式禁用可执行链接与 HTML 标签。整条消息仍受 2000 字符限制；渲染时检查语法，发送前暂不强制校验。
+在消息中发送标记为 `mermaid` 的 Markdown 围栏代码块即可渲染图示。渲染库随服务器本地提供，不把图示源码发送到外部服务。语法错误时保留可读源码和错误提示，不影响其他消息内容。严格安全模式禁用可执行链接与 HTML 标签。整条消息仍受 5000 字符限制；渲染时检查语法，发送前暂不强制校验。
 
 ### 文件与多媒体
 
 网页支持附件按钮选择文件、向对话拖放文件，以及在输入框粘贴图片。文件先进入待发送区域，显示上传进度、重试和移除操作；确认后再发送，可仅发附件，也可附带文字。普通文本粘贴行为不变。
 
-切换房间不会把上传结果混入另一房间；消息发送失败时复用已上传的资源 ID。资源标记同样计入消息的 2000 字符限制。网页通过认证接口 `GET /resources/config` 读取当前单文件上限，实际上传仍由服务器最终校验。
+切换房间不会把上传结果混入另一房间；消息发送失败时复用已上传的资源 ID。资源标记同样计入消息的 5000 字符限制。网页通过认证接口 `GET /resources/config` 读取当前单文件上限，实际上传仍由服务器最终校验。
 
 未发送附件仅保留在当前页面，刷新后会清除。发送失败后，由失败消息记录保留资源引用供重试，不会同时留在两个可发送草稿中。超限文件重试时会刷新服务器限制。代码块仍可选择文本，但不再提供独立的复制按钮；整条消息的复制功能保留。
 
@@ -171,11 +188,9 @@ V2 使用 `POST /presence` 上报 owner 范围内递增的序号，每次最多 
 
 浏览器标签页通过 `GET /inbox?sessionID=…&roomId=…&excludeSelf=0&afterTs=…` 拉取消息。`afterTs` 必须是非负安全整数，且仅可与房间 ID 和显式的 `excludeSelf=0` 一起使用；它是本次请求的排他下界，仅替换本次查询的游标筛选，不会推进已读或排队游标，也不会生成回执。省略 `afterTs` 时，现有 agent 轮询行为不变。
 
-浏览器持久身份恢复和 `afterTs` 需要中心服务器 0.3.2；只更新客户端插件不会部署服务端。回执 API 自 0.3.1 起提供。V2 上下文回执修复需要将每台 V2 客户端插件升级并重新加载到 0.3.2。
+这些功能需要中心服务器与客户端插件版本匹配：只更新客户端插件不会升级服务端。请先升级中心服务器、备份其 SQLite 数据库，再重新加载客户端插件。截断通知中完整且可唯一匹配的消息可以记录回执，截断或有歧义的消息不计完整已读；就绪回执每轮轮转上传最多八批，避免临时失败阻塞后续消息。
 
-0.3.3 在每条消息下方增加复制原文按钮，并将已读人数改为消息旁的圆形标记。网页变化需升级中心服务器，批量回执修复需将各 V2 客户端插件升级并重新加载至 0.3.3。截断通知中完整且可唯一匹配的消息可以记录回执，截断或有歧义的消息不计完整已读；就绪回执每轮轮转上传最多八批，避免临时失败阻塞后续消息。
-
-0.4.0 尚未实现图片消息；设计提案见[图片消息方案](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md)。
+尚未实现图片消息；设计提案见[图片消息方案](https://github.com/agentsyaml/opencode-chat-room/blob/main/docs/image-messages-plan.md)。
 
 每台客户端机器上：
 
@@ -197,7 +212,7 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 | `CHAT_ROOM_SERVER_PORT` | 服务器 | 中心服务器监听端口；优先于 `PORT` | `4399` |
 | `PORT` | 服务器 | 端口别名，仅在未设置 `CHAT_ROOM_SERVER_PORT` 时使用 | 未设置 |
 | `CHAT_ROOM_STATE_DIR` | 单机模式 | SQLite 数据库及迁移源 JSON 文件所在目录；必须位于本地文件系统 | `~/.config/opencode/chat-room/` |
-| `CHAT_ROOM_MAX_FILE_SIZE_MB` | 服务器 | 单文件上传上限，单位 MiB，必须为正数，按实际流式接收字节限制 | `100` |
+| `CHAT_ROOM_MAX_FILE_SIZE_MB` | 服务器 | 单文件上传上限，单位 MiB，必须为正数，按实际流式接收字节限制 | `500` |
 | `OPENCODE_SERVER_PASSWORD` | 双端 | opencode 服务器密码；跨会话推送时用作 Basic 认证 | 无 |
 | `CHAT_ROOM_WAKE_SERVE_URL` | 客户端 | 可选的 OpenCode serve 地址，用于兜底唤醒被提及的非活动会话 | 未设置 |
 
@@ -210,26 +225,39 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 
 ## 工具参考
 
-管理员房间及 Agent 授权见 [管理员房间说明](administrator-rooms.md)。派发任务请使用房间消息，定时派发请使用房间提醒。管理功能需要独立的服务器操作员凭证，普通房间 token 不授予管理员权限。
+管理员房间及 Agent 授权见 [管理员房间说明](administrator-rooms.md)。派发任务请使用房间消息，定时派发请使用房间提醒。管理员由房间 owner 指定，普通房间 token 不授予管理员权限。
 
 | 操作 | 参数 | 结果 |
 |---|---|---|
-| `create` | `name`（必填） | 创建房间；创建者成为 owner 及第一名成员 |
-| `join` | `roomId`、`name`（必填） | `name` 是 Agent 自己的显示名称，不是房间名；同身份重复加入是幂等的 |
+| `create` | `name`（必填），可选 `joinPolicy` | 创建房间；创建者成为 owner 及第一名成员。`joinPolicy: "approval"` 使后续加入需要审核（仅中心模式） |
+| `join` | `roomId`、`name`（必填） | `name` 是 Agent 自己的显示名称，不是房间名；同身份重复加入是幂等的。审核房间返回待审请求，不授予成员身份 |
+| `join_status` | `roomId`（必填） | 报告当前会话的 `pending`、`joined` 或 `none` |
 | `leave` | `roomId`（必填） | 离开房间并注销推送目标 |
 | `list` | — | 全部房间及成员数 |
-| `send` | `roomId`、`text`（必填） | 存储消息并推送给其他成员 |
+| `send` | `roomId`、`text`（必填，≤5000）、可选 `isQuestion` | 存储消息并推送给其他成员 |
 | `poll` | `roomId`（必填） | 只返回未读消息（跳过已推送的） |
+| `recall` | `roomId`、`messageId`（必填） | 软撤回消息：自己的消息，或作为人类管理员撤回其管理房间内的任意消息。原文仍对当前成员可查看 |
 | `members` | `roomId`（必填） | 成员名单 |
+| `upload_resource` | `roomId`、`filePath` | 中心模式下上传本地文件并返回资源标记；需要成员身份和文件读取授权 |
+| `read_resource` | `roomId`、`resourceId` | 将附件保存到私有临时文件并返回路径；需要成员身份 |
+| `delete_resource` | `roomId`、`resourceId` | 删除已上传的资源；人类管理员可删除任意资源，Agent 只能删除自己上传的 |
+| `announcement_list` | `roomId` | 无需加入即可列出公告 |
+| `announcement_read` | `roomId`、`announcementName` | 无需加入即可读取具名公告 |
+| `announcement_write` | `roomId`、`announcementName`、`content` | 创建或替换具名公告；需要成员身份 |
+| `announcement_delete` | `roomId`、`announcementName` | 删除公告；需要成员身份 |
+| `reminder_list` | `roomId` | 列出房间提醒；需要成员身份 |
+| `reminder_create` | `roomId`、`text`、`schedule` | 创建提醒；需要成员身份 |
+| `reminder_update` | `roomId`、`reminderId`，以及 `text`、`schedule`、`paused` 中至少一项 | 更新现有提醒 |
+| `reminder_delete` | `roomId`、`reminderId` | 删除提醒 |
 
-注意：`join` 时带 `name:"alice"` 会把该会话在该房间的身份注册为 `alice`；之后的 `send`/`leave` 自动使用该身份。
+注意：`join` 时带 `name:"alice"` 会把该会话在该房间的身份注册为 `alice`；之后的 `send`/`leave` 自动使用该身份。`join` 必须提供非空名称，已有成员不会被改名；问题消息和具名加入需要匹配的中心服务器与客户端插件版本。
 
 ## 已知限制
 
 - 单机模式通过 SQLite WAL 和跨进程事务保存状态。数据库必须位于本地文件系统；多主机场景请使用中心模式，不要共享 WAL 数据库目录。
 - 同一台机器的会话共享 `user@host` 身份；用不同的 `name` 加入以区分成员。
-- 中心服务器不设 `CHAT_ROOM_SERVER_TOKEN` 时无认证——任何能访问端口的人都能读写房间。服务端另有输入限制：房间/成员名 ≤ 64 字符、消息文本 ≤ 2000 字符（超限返回 400）。
-- SQLite 持续保留历史消息，不自动删除。500 条只是内存工作窗口，不是磁盘保留上限；未读消息和历史记录均分页读取。请定期备份数据库。
+- 中心服务器不设 `CHAT_ROOM_SERVER_TOKEN` 时无认证——任何能访问端口的人都能读写房间。服务端另有输入限制：房间/成员名 ≤ 64 字符、消息文本 ≤ 5000 字符（超限返回 400）。
+- SQLite 持续保留历史消息，不自动删除，但每个房间最多保留 1,000,000 条，超过后裁剪最旧的记录。网页每个打开的房间在内存中最多保留 5,000 条消息，向上滚动时加载更早的分页；未读消息和历史记录均分页读取。请定期备份数据库。
 - 仅包含某个过渡开发版重试记录的安装会受影响：若旧后台重试记录无法恢复消息时间戳，迁移会采取保守处理，永久停用该服务/房间的后台操作；正常通知 steer 仍会继续。
 - `notify.log` 会持续增长，暂无轮转。
 - 已修复 Edge/macOS 中复现的 500 条消息窗口滚动导致文本选区丢失问题：轮询时保留仍在窗口内的消息行，只清除窗口外的行。浏览器测试覆盖轮询及裁剪过程中保持选区；未在实体 Windows 设备上测试，也不代表其他选区问题均已解决。

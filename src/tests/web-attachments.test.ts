@@ -59,8 +59,8 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     if (process.env.CHAT_UI_SCREENSHOT_DIR) await writeFile(path.join(process.env.CHAT_UI_SCREENSHOT_DIR, "chat-attachments-metrics.json"), JSON.stringify({ viewport: [390, 844], initialBottomGap: initialGap, fiveLineInputBottomGap: inputGap, stagedTrayBottomGap: stagedLayout.gap, fiveLineInputFits: stagedLayout.inputFits }, null, 2));
     await page.waitForFunction(() => getComputedStyle(document.querySelector("#chatView")!).opacity === "1");
     if (process.env.CHAT_UI_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, "chat-attachments-staged-mobile.png"), fullPage: true });
-    await page.locator("#msgInput").fill("x".repeat(2000)); expect(await page.locator("#btnSend").isDisabled()).toBe(true);
-    expect(Number((await page.locator("#draftCount").textContent())!.split(" /")[0])).toBeGreaterThan(2000);
+    await page.locator("#msgInput").fill("x".repeat(5000)); expect(await page.locator("#btnSend").isDisabled()).toBe(true);
+    expect(Number((await page.locator("#draftCount").textContent())!.split(" /")[0])).toBeGreaterThan(5000);
     await page.locator("#msgInput").fill("__Test_caption");
     await page.locator("#btnRoomsDrawer").click(); await page.locator("#btnNewRoom").click();
     await page.locator("#inRoomNameChat").fill("__Test_AttachmentSecond"); await page.locator("#btnCreateChatRoom").click();
@@ -230,11 +230,93 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     expect(configHeaders.every(({ url, headers }) => new URL(url).search === "" && headers.authorization === `Bearer ${token}` && !headers["x-chat-admin-token"])).toBe(true);
     expect(uploads.length).toBeGreaterThan(0);
     expect(uploads.every(({ url, headers }) => new URL(url).search === "" && headers.authorization === `Bearer ${token}` && headers["x-session-id"] === info.sessionID && !headers["x-chat-admin-token"] && headers["content-type"] === "application/octet-stream" && /^[\da-f-]{36}$/.test(headers["x-resource-id"] || ""))).toBe(true);
+    const pageErrors: string[] = []; page.on("pageerror", (error: Error) => pageErrors.push(error.message));
+    await page.addInitScript(() => {
+      const original = File.prototype.arrayBuffer;
+      const state = { reads: [] as string[], unreadable: [] as string[], gate: null as Promise<void> | null, rejections: [] as string[], holdReads: false, pendingReads: [] as Array<() => void>, releaseReads: () => { state.holdReads = false; for (const release of state.pendingReads.splice(0)) release(); } };
+      (window as any).__attachmentReadState = state;
+      File.prototype.arrayBuffer = function (this: File) {
+        state.reads.push(this.name);
+        if (state.unreadable.includes(this.name)) return Promise.reject(new TypeError("simulated read failure"));
+        if (state.holdReads) { const file = this; return new Promise((resolve) => state.pendingReads.push(() => resolve(original.call(file)))); }
+        if (state.gate) { const gate = state.gate; state.gate = null; return gate.then(() => original.call(this)); }
+        return original.call(this);
+      };
+      addEventListener("unhandledrejection", (event) => state.rejections.push(String((event as PromiseRejectionEvent).reason)));
+    });
+    let releaseConfig!: () => void, configArrived!: () => void;
+    const configGate = new Promise<void>((resolve) => { releaseConfig = resolve; });
+    const configSeen = new Promise<void>((resolve) => { configArrived = resolve; });
+    await page.route("**/resources/config", async (route: BrowserRoute) => { configArrived(); await configGate; await route.fulfill({ contentType: "application/json", body: JSON.stringify({ maxFileSizeBytes: 2 * 1024 * 1024 }) }); });
+    await page.reload(); await page.locator("#chatView").waitFor({ state: "visible" }); await configSeen;
+    await pastePng(page, "__Test_read_before_config.png");
+    await page.waitForFunction(() => (window as any).__attachmentReadState?.reads.includes("__Test_read_before_config.png"));
+    releaseConfig();
+    await page.waitForFunction(() => document.querySelector("#attachmentList .attachment-detail")?.textContent?.includes("Ready to send"));
+    expect(uploads.filter((request) => decodeURIComponent(request.headers["x-file-name"]) === "__Test_read_before_config.png")).toHaveLength(1);
+    await page.locator("#attachmentList [data-upload-action=remove]").click();
+    await page.evaluate(() => (window as any).__attachmentReadState.unreadable.push("__Test_unreadable_paste.png"));
+    await pastePng(page, "__Test_unreadable_paste.png");
+    await page.waitForFunction(() => document.querySelector("#attachmentList .attachment-detail")?.textContent?.includes("cannot be read"));
+    expect(uploads.filter((request) => decodeURIComponent(request.headers["x-file-name"]) === "__Test_unreadable_paste.png")).toHaveLength(0);
+    expect(await page.locator("#attachmentList img").count()).toBe(0);
+    await page.locator("#attachmentList [data-upload-action=retry]").click();
+    await page.waitForFunction(() => (window as any).__attachmentReadState.reads.filter((name: string) => name === "__Test_unreadable_paste.png").length >= 2);
+    expect(uploads.filter((request) => decodeURIComponent(request.headers["x-file-name"]) === "__Test_unreadable_paste.png")).toHaveLength(0);
+    await page.waitForTimeout(200);
+    expect(await page.locator("#attachmentList .attachment-detail").textContent()).toContain("cannot be read");
+    await page.locator("#attachmentList [data-upload-action=remove]").click();
+    await page.evaluate(() => { const state = (window as any).__attachmentReadState; state.gate = new Promise((resolve) => { (window as any).__releaseRead = resolve; }); });
+    await pastePng(page, "__Test_cancel_read.png");
+    await page.waitForFunction(() => (window as any).__attachmentReadState.reads.includes("__Test_cancel_read.png"));
+    await page.locator("#attachmentList [data-upload-action=remove]").click();
+    await page.waitForFunction(() => document.querySelector<HTMLElement>("#attachmentTray")!.hidden);
+    await page.evaluate(() => (window as any).__releaseRead());
+    await page.waitForTimeout(300);
+    expect(uploads.filter((request) => decodeURIComponent(request.headers["x-file-name"]) === "__Test_cancel_read.png")).toHaveLength(0);
+    expect(await page.evaluate(() => (window as any).__attachmentReadState.rejections)).toEqual([]);
+    expect(pageErrors).toEqual([]);
+    await page.evaluate(() => { (window as any).__attachmentReadState.holdReads = true; });
+    const manyNames = Array.from({ length: 6 }, (_, index) => `__Test_many_${index}.png`);
+    await pastePngMany(page, manyNames, Buffer.alloc(512 * 1024, 1));
+    await page.waitForTimeout(150);
+    const eagerReads = await page.evaluate((names: string[]) => (window as any).__attachmentReadState.reads.filter((name: string) => names.includes(name)).length, manyNames);
+    expect(eagerReads).toBeGreaterThan(0);
+    expect(eagerReads).toBeLessThanOrEqual(2);
+    await page.evaluate(() => (window as any).__attachmentReadState.releaseReads());
+    await page.waitForFunction((names: string[]) => {
+      const details = Array.from(document.querySelectorAll("#attachmentList .attachment-detail"));
+      return document.querySelectorAll("#attachmentList .attachment-item").length === names.length && details.every((node) => node.textContent?.includes("Ready to send"));
+    }, manyNames);
+    expect(uploads.filter((request) => manyNames.includes(decodeURIComponent(request.headers["x-file-name"])))).toHaveLength(6);
+    expect(await page.evaluate((names: string[]) => (window as any).__attachmentReadState.reads.filter((name: string) => names.includes(name)).length, manyNames)).toBe(6);
+    expect(await page.evaluate(() => (window as any).__attachmentReadState.rejections)).toEqual([]);
+    expect(pageErrors).toEqual([]);
     await context.close();
   } finally {
     await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true });
   }
 }, 120000);
+
+async function pastePng(page: any, name: string) {
+  return page.evaluate((payload: { name: string; base64: string }) => {
+    const transfer = new DataTransfer(), bytes = Uint8Array.from(atob(payload.base64), (char) => char.charCodeAt(0));
+    const file = new File([bytes], payload.name, { type: "image/png" });
+    transfer.items.add(file); transfer.setData("text/plain", "");
+    const event = new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true });
+    document.querySelector<HTMLElement>("#msgInput")!.dispatchEvent(event);
+  }, { name, base64: png.toString("base64") });
+}
+
+async function pastePngMany(page: any, names: string[], buffer: Buffer) {
+  return page.evaluate((payload: { names: string[]; base64: string }) => {
+    const transfer = new DataTransfer(), bytes = Uint8Array.from(atob(payload.base64), (char) => char.charCodeAt(0));
+    for (const name of payload.names) transfer.items.add(new File([bytes], name, { type: "image/png" }));
+    transfer.setData("text/plain", "");
+    const event = new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true });
+    document.querySelector<HTMLElement>("#msgInput")!.dispatchEvent(event);
+  }, { names, base64: buffer.toString("base64") });
+}
 
 async function setLocaleThroughProfile(page: any, locale: string) {
   const drawer = page.locator("#btnRoomsDrawer"), rail = page.locator("#roomRail"), trigger = page.locator("#btnSettings");

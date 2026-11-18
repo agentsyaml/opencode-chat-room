@@ -16,12 +16,20 @@ export type Message = {
   isQuestion?: boolean;
   answerToMessageID?: string;
   answeredByMessageID?: string;
+  // Soft recall: the original text stays in storage for member reveal, while
+  // read paths expose the message as a tombstone.
+  recalledAt?: number;
+  recalledBy?: string;
 };
+
+export type JoinPolicy = "open" | "approval";
 
 export type Room = {
   id: string;
   name: string;
   description?: string;
+  // Absent means "open" so rooms created before approvals existed stay open.
+  joinPolicy?: JoinPolicy;
   ownerId: string;
   // Server-issued membership binding for the owner and the explicitly chosen successor.
   // Display names remain the public identity; the membership IDs guard against name reuse.
@@ -72,11 +80,12 @@ export default class RoomService {
     }
   }
 
-  createRoom(name: string, ownerId: string): Room {
+  createRoom(name: string, ownerId: string, joinPolicy?: JoinPolicy): Room {
     const room: Room = {
       id: randomUUID(),
       name,
       ownerId,
+      ...(joinPolicy === "approval" ? { joinPolicy } : {}),
       participants: new Map(),
       messages: [],
       createdAt: Date.now(),

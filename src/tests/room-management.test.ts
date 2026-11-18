@@ -122,6 +122,17 @@ describe.serial("shared-token room management", () => {
     expect((await call(`/rooms/${id}/questions/missing/answers`, "POST", { sessionID: "outsider", text: "reply" })).status).toBe(409);
     expect((await call(`/rooms/${id}/questions/missing/answers`, "POST", { sessionID: "human", text: " " })).status).toBe(400);
   });
+  test("message and answer text accept 5000 characters and reject 5001", async () => {
+    const { id } = await (await call("/rooms", "POST", { name: "limits", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
+    await call(`/rooms/${id}/join`, "POST", { sessionID: "human", participantId: "human", participantName: "human" });
+    const longest = "x".repeat(5000);
+    expect((await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: longest })).status).toBe(201);
+    expect((await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: `${longest}x` })).status).toBe(400);
+    const question = await call(`/rooms/${id}/messages`, "POST", { sessionID: "owner", text: "question", isQuestion: true });
+    const questionID = (await question.json() as { messages: Array<{ id: string }> }).messages.at(-1)!.id;
+    expect((await call(`/rooms/${id}/questions/${questionID}/answers`, "POST", { sessionID: "human", text: longest })).status).toBe(201);
+    expect((await call(`/rooms/${id}/questions/${questionID}/answers`, "POST", { sessionID: "human", text: `${longest}x` })).status).toBe(400);
+  });
   test("ordinary replies persist in history and inbox without changing read watermarks", async () => {
     const { id } = await (await call("/rooms", "POST", { name: "replies", ownerId: "owner", sessionID: "owner" })).json() as { id: string };
     await call(`/rooms/${id}/join`, "POST", { sessionID: "human", participantId: "human", participantName: "human" });

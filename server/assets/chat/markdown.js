@@ -129,17 +129,17 @@ async function loadResourceCard(card, roomId, app) {
     actions.className = "resource-actions"; status.className = "resource-status"; status.setAttribute("role", "status");
     card.replaceChildren(info, actions, status);
     const download = resourceButton("resourceDownload", resource.name, () => downloadResource(card, roomId, id, resource, app, status, download), app);
-    actions.append(download);
+    download.classList.add("resource-download");
+    if (isRoomAdmin(app)) {
+      let remove;
+      remove = resourceMenuItem("resourceDelete", () => deleteResource(card, roomId, id, resource, app, status, remove), app);
+      actions.append(resourceSplit(app, resource, download, remove));
+    } else actions.append(download);
     if (previewKind(type)) {
       const preview = resourceButton("resourcePreview", resource.name, () => previewResource(card, roomId, id, resource, type, preview, app, status), app);
       actions.append(preview);
       // Media you sent yourself is shown inline; other people's media stays collapsed.
       if (card.closest(".msg.own")) void previewResource(card, roomId, id, resource, type, preview, app, status);
-    }
-    if (isRoomAdmin(app)) {
-      const remove = resourceButton("resourceDelete", resource.name, () => deleteResource(card, roomId, id, resource, app, status, remove), app);
-      remove.classList.add("danger-text");
-      actions.append(remove);
     }
   } catch (error) { if (card.isConnected) setResourceError(card, app, error?.status === 404 ? "resourceDeleted" : "resourceFailed"); }
 }
@@ -152,6 +152,54 @@ function resourceButton(key, name, action, app) {
   button.type = "button"; button.className = "btn ghost small resource-button";
   setResourceButton(button, key, name, app);
   button.addEventListener("click", action); return button;
+}
+function resourceMenuItem(key, action, app) {
+  const button = document.createElement("button");
+  button.type = "button"; button.className = "menu-action danger-text"; button.setAttribute("role", "menuitem");
+  button.dataset.i18n = key; button.textContent = app.t(key);
+  button.addEventListener("click", action); return button;
+}
+function resourceSplit(app, resource, download, item) {
+  const group = document.createElement("span"), toggle = document.createElement("button"), menu = document.createElement("span");
+  group.className = "resource-split";
+  toggle.type = "button"; toggle.className = "btn ghost small resource-button resource-split-toggle";
+  toggle.setAttribute("aria-haspopup", "menu"); toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("data-i18n-aria-label", "resourceMoreActions");
+  toggle._i18nValues = { name: resource.name };
+  toggle.setAttribute("aria-label", app.t("resourceMoreActions", { name: resource.name }));
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg"), path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  icon.setAttribute("aria-hidden", "true"); icon.setAttribute("viewBox", "0 0 24 24"); path.setAttribute("d", "M6 9l6 6 6-6"); icon.append(path); toggle.append(icon);
+  menu.className = "resource-split-menu"; menu.hidden = true; menu.setAttribute("role", "menu"); menu.append(item);
+  group.append(download, toggle, menu);
+  function close(focusToggle = false) {
+    if (menu.hidden) return;
+    menu.hidden = true; toggle.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", outside);
+    if (focusToggle) toggle.focus();
+  }
+  function open() {
+    if (!menu.hidden) return;
+    menu.hidden = false; toggle.setAttribute("aria-expanded", "true");
+    document.addEventListener("click", outside); item.focus();
+  }
+  function outside(event) { if (!group.isConnected || !group.contains(event.target)) close(); }
+  item.addEventListener("click", () => close(), { capture: true });
+  toggle.addEventListener("click", () => { if (menu.hidden) open(); else close(true); });
+  toggle.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); open(); }
+  });
+  menu.addEventListener("keydown", (event) => {
+    const items = [...menu.querySelectorAll('[role="menuitem"]:not(:disabled)')], index = items.indexOf(document.activeElement);
+    if (event.key === "Escape") { event.preventDefault(); close(true); }
+    else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault(); items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+    } else if (event.key === "Home" || event.key === "End") { event.preventDefault(); (event.key === "Home" ? items[0] : items.at(-1))?.focus(); }
+  });
+  group.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !menu.hidden) { event.preventDefault(); close(true); }
+  });
+  group.addEventListener("focusout", (event) => { if (!menu.hidden && !group.contains(event.relatedTarget)) close(); });
+  return group;
 }
 async function deleteResource(card, roomId, id, resource, app, status, button) {
   if (!confirm(app.t("resourceDeleteConfirm", { name: resource.name }))) return;

@@ -106,7 +106,7 @@ function quoteButton(message, app) {
   const original = app.state.room.messages.find((item) => item.id === targetId);
   button.type = "button"; button.className = "reply-quote"; button.dataset.replyTargetId = targetId;
   button.setAttribute("aria-label", app.t("replyOpenOriginal")); button.dataset.i18nAriaLabel = "replyOpenOriginal";
-  button.textContent = original ? `${senderName(original, app)} · ${excerpt(original.text)}` : app.t("replyOpenOriginal");
+  button.textContent = original ? (original.recalledAt ? app.t("replyOriginalRecalled") : `${senderName(original, app)} · ${excerpt(original.text)}`) : app.t("replyOpenOriginal");
   return button;
 }
 

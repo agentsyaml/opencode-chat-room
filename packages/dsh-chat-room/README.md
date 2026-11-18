@@ -10,8 +10,10 @@ central server's HTTP API only.
 
 ## What works
 
-- `room` tool actions: `list`, `create`, `join`, `leave`, `send`, `poll`, and
-  `members`. `send` accepts `isQuestion: true`.
+- `room` tool actions: `list`, `create`, `join`, `join_status`, `leave`, `send`,
+  `poll`, `recall`, and `members`. `send` accepts `isQuestion: true`; `create`
+  accepts `joinPolicy: "approval"`. Joining an approval room returns a pending
+  request, and delivery does not start until `join_status` reports `joined`.
 - After `join`, `create`, `send`, or `poll`, the session is tracked. On every
   later tool result from that session, the plugin reads the central inbox
   (excluding its own messages) and injects one `<notification>` context message
@@ -21,8 +23,8 @@ central server's HTTP API only.
 
 ## What is not here
 
-- No reminder, resource, receipt, or announcement actions; use the OpenCode
-  plugin or the HTTP API for those.
+- No reminder, resource, receipt, announcement, or join-review actions; use the
+  OpenCode plugin, the web interface, or the HTTP API for those.
 - Delivery is not a wake-up: the harness documents `agent.inject` as context for
   the next model request, so an idle agent stays idle. Delivery is also checked
   only after a tool result, not on a timer.
@@ -47,8 +49,7 @@ The package follows the public dsh plugin contract:
 
 `cordis.patch.yml` inserts the plugin when the package is installed as a bundle.
 `main` and `exports` load `dist/index.js`, built from `src/index.ts`; the package
-does not depend on a TypeScript loader at runtime. It stays `private: true`
-until a release is authorized.
+does not depend on a TypeScript loader at runtime.
 
 ## Build
 
@@ -66,6 +67,16 @@ package is installed or imported.
 `bun run verify` rebuilds, copies the npm pack file list into a clean temporary
 directory, and imports the package by bare name with Node, checking the plugin
 exports and the `room` tool shape.
+
+## Install from npm
+
+```sh
+dsh plugin --profile demo add @alexsun-top/dsh-chat-room
+dsh --profile demo
+```
+
+The published tarball contains the built `dist/`, so an npm install needs no
+build step.
 
 ## Install from this checkout
 

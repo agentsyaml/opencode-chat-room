@@ -2,13 +2,23 @@ import { LS } from "./state.js";
 
 export function initReminders(app) {
   const $ = app.$, panel = $("#reminderPanel"), trigger = $("#btnReminders"), list = $("#reminderList"), dialog = $("#reminderDialog"), newButton = $("#btnNewReminder");
+  const heading = $("#reminderDialogHeading"), submit = $("#btnSubmitReminder");
   app.setText($("#reminderTemplateHint"), "reminderTemplateHint", { time: "{time}", initiator: "{initiator}", room: "{room}" });
-  let reminders = [], generation = 0, roomGeneration = 0, activeRoomId;
+  let reminders = [], generation = 0, roomGeneration = 0, activeRoomId, editing = null, createDraft = null, saving = false, saveToken = 0;
   const drafts = new Map();
   const roomId = () => app.state.room?.id;
   const status = (text) => { $("#reminderStatus").textContent = text; };
   const formStatus = (text) => { $("#reminderDialogStatus").textContent = text; };
-  function openDialog() {
+  function openDialog(reminder = null) {
+    // Opening an edit parks the create draft; the next New puts it back.
+    if (reminder && createDraft === null) createDraft = formDraft();
+    if (!reminder && createDraft !== null) { restoreDraft(createDraft); createDraft = null; }
+    editing = reminder;
+    heading.textContent = app.t(reminder ? "reminderEditHeading" : "reminderCreate");
+    submit.textContent = app.t(reminder ? "reminderSave" : "reminderCreate");
+    if (reminder) { delete heading.dataset.i18n; delete submit.dataset.i18n; }
+    else { heading.dataset.i18n = "reminderCreate"; submit.dataset.i18n = "reminderCreate"; }
+    if (reminder) restoreDraft(editDraft(reminder));
     formStatus("");
     if (!dialog.open) dialog.showModal();
     $("#reminderText").focus();
@@ -23,6 +33,18 @@ export function initReminders(app) {
     $("#reminderType").value = draft?.type || "once"; $("#reminderAt").value = draft?.at || "";
     $("#reminderCron").value = draft?.cron || ""; $("#reminderTimezone").value = draft?.timezone || "";
     $("#reminderText").value = draft?.text || ""; $("#reminderType").dispatchEvent(new Event("change"));
+  }
+  // datetime-local has no zone; format the stored instant in its own zone so saving reproduces it.
+  function inputValue(iso, timezone) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(new Date(iso)).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  }
+  function editDraft(reminder) {
+    const timezone = reminder.schedule.timezone || "UTC";
+    return reminder.schedule.type === "once"
+      ? { type: "once", at: inputValue(reminder.schedule.at, timezone), timezone, text: reminder.text }
+      : { type: "cron", cron: reminder.schedule.expression, timezone, text: reminder.text };
   }
   function formatTime(value, timezone) {
     const effectiveZone = timezone || "UTC";
@@ -40,13 +62,16 @@ export function initReminders(app) {
       const schedule = reminder.schedule.type === "once" ? formatTime(reminder.schedule.at, timezone) : `${reminder.schedule.expression} · ${timezone}`;
       const next = reminder.schedule.type === "cron" && reminder.nextRunAt ? ` · ${app.t("reminderNext", { time: formatTime(reminder.nextRunAt, timezone) })}` : "";
       detail.textContent = `${schedule}${reminder.paused ? ` · ${app.t("reminderPaused")}` : next}`;
+      const edit = document.createElement("button"); edit.type = "button"; edit.className = "btn ghost small"; edit.textContent = app.t("reminderEdit");
+      edit.setAttribute("aria-label", `${edit.textContent}: ${text.textContent.slice(0, 80)}`);
+      edit.addEventListener("click", () => openDialog(reminder));
       const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "btn ghost small"; toggle.textContent = app.t(reminder.paused ? "reminderResume" : "reminderPause");
       toggle.setAttribute("aria-label", `${toggle.textContent}: ${text.textContent.slice(0, 80)}`);
       toggle.addEventListener("click", () => void update(reminder, !reminder.paused));
       const remove = document.createElement("button"); remove.type = "button"; remove.className = "btn ghost small danger-text"; remove.textContent = app.t("reminderDelete");
       remove.setAttribute("aria-label", `${remove.textContent}: ${text.textContent.slice(0, 80)}`);
       remove.addEventListener("click", () => { if (confirm(app.t("reminderDeleteConfirm"))) void erase(reminder); });
-      row.append(text, detail, toggle, remove); list.append(row);
+      row.append(text, detail, edit, toggle, remove); list.append(row);
     }
   }
   async function load(id = roomId()) {
@@ -61,6 +86,10 @@ export function initReminders(app) {
   }
   function validCron(expression) {
     return expression.trim().split(/\s+/).length === 5;
+  }
+  function validZone(value) {
+    if (!value) return true;
+    try { new Intl.DateTimeFormat("en-US", { timeZone: value }); return true; } catch { return false; }
   }
   async function update(reminder, paused) {
     const id = roomId(), context = roomGeneration;
@@ -88,17 +117,31 @@ export function initReminders(app) {
     const schedule = type.value === "once"
       ? { type: "once", at: `${date.value}:00`, ...(zone ? { timezone: zone } : {}) }
       : { type: "cron", expression: cron.value.trim(), ...(zone ? { timezone: zone } : {}) };
-    if (!id || !text || text.length > 1000 || type.value === "once" && !date.value || type.value === "cron" && !validCron(schedule.expression)) return formStatus(app.t("reminderInvalid"));
+    if (!id || !text || text.length > 2000 || !validZone(zone) || type.value === "once" && !date.value || type.value === "cron" && !validCron(schedule.expression)) return formStatus(app.t("reminderInvalid"));
+    if (saving) return;
+    saving = true; submit.disabled = true;
+    const token = ++saveToken;
+    // Keep the stored schedule when only the text changed, so a fired one-time reminder stays editable.
     try {
-      const result = await app.api(`/rooms/${encodeURIComponent(id)}/reminders`, { method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, schedule, text }) });
-      if (current(id, context)) { invalidateLoads(); reminders = [...reminders.filter((item) => item.id !== result.reminder.id), result.reminder]; render(); status(app.t("reminderCreated")); dialog.close(); }
+      const editingId = editing?.id;
+      const sameSchedule = Boolean(editing?.schedule) && editing.schedule.type === type.value
+        && (type.value === "once" ? inputValue(editing.schedule.at, zone || "UTC") === date.value : editing.schedule.expression === schedule.expression)
+        && (editing.schedule.timezone || "UTC") === (zone || "UTC");
+      const result = await app.api(`/rooms/${encodeURIComponent(id)}/reminders${editingId ? `/${encodeURIComponent(editingId)}` : ""}`, { method: editingId ? "PATCH" : "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, ...(sameSchedule ? {} : { schedule }) }) });
+      if (current(id, context)) {
+        invalidateLoads();
+        reminders = editingId ? reminders.map((item) => item.id === editingId ? result.reminder : item) : [...reminders.filter((item) => item.id !== result.reminder.id), result.reminder];
+        render(); status(app.t(editingId ? "reminderUpdated" : "reminderCreated")); editing = null; dialog.close();
+      }
     } catch (error) { if (current(id, context)) { invalidateLoads(); formStatus(errorText(error)); } }
+    finally { if (token === saveToken) { saving = false; submit.disabled = false; } }
   });
   $("#btnRefreshReminders").addEventListener("click", () => void load());
-  newButton.addEventListener("click", openDialog);
+  newButton.addEventListener("click", () => openDialog());
   $("#btnCloseReminder").addEventListener("click", () => dialog.close());
   $("#btnCancelReminder").addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener("close", () => { editing = null; });
   trigger.addEventListener("click", () => {
     const open = panel.hidden; app.closePanels(); panel.hidden = !open; trigger.setAttribute("aria-expanded", String(open));
     if (open) { void load(); $("#reminderHeading").focus(); }
@@ -107,9 +150,10 @@ export function initReminders(app) {
   const close = app.closePanels;
   app.closePanels = () => { close(); panel.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
   document.addEventListener("chat-room-activated", (event) => {
+    if (activeRoomId) drafts.set(activeRoomId, createDraft ?? formDraft());
     if (dialog.open) dialog.close();
     formStatus("");
-    if (activeRoomId) drafts.set(activeRoomId, formDraft());
+    editing = null; createDraft = null; saving = false; saveToken++; submit.disabled = false;
     activeRoomId = event.detail; restoreDraft(drafts.get(activeRoomId));
     roomGeneration++; generation++; reminders = []; render(); void load(activeRoomId);
   });

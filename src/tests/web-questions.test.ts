@@ -139,9 +139,15 @@ test.skipIf(!browserModule)("questions can be answered inline without replacing 
     await replyEditor.evaluate((node: HTMLElement) => node.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, keyCode: 229 })));
     expect(await replyEditor.evaluate((node: any) => node.value)).toBe("Composition draft");
     expect(answerPayloads).toHaveLength(0);
-    await replyEditor.fill("x".repeat(2001));
+    await replyEditor.fill("x".repeat(5000));
+    expect(await page.locator("#questionReply button[type=submit]").isDisabled()).toBe(false);
+    await replyEditor.fill("x".repeat(5001));
     expect(await page.locator("#questionReply button[type=submit]").isDisabled()).toBe(true);
-    expect(await page.locator("#questionStatus").textContent()).toContain("2,000");
+    expect(await page.locator("#questionStatus").textContent()).toContain("5,000");
+    await replyEditor.fill("x".repeat(4999));
+    expect(await page.locator("#questionReply button[type=submit]").isDisabled()).toBe(false);
+    expect(await page.locator("#questionStatus").textContent()).toBe("");
+    await replyEditor.fill("x".repeat(5001));
     await page.evaluate(() => document.querySelector<HTMLFormElement>("#questionReply form")!.requestSubmit());
     expect(answerPayloads).toHaveLength(0);
     await page.locator("#questionReply [contenteditable=true]").fill("Use the warmer palette.");

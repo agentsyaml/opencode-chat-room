@@ -4,7 +4,8 @@
 import path from "node:path";
 import os from "node:os";
 import RoomService, { type Message, type Room } from "../rooms/room-service.ts";
-import { acknowledgeQueued as sqliteAcknowledgeQueued, acknowledgeRead as sqliteAcknowledgeRead, answerQuestion as sqliteAnswerQuestion, appendRoomMessage as sqliteAppendRoomMessage, sendReply as sqliteSendReply, readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestionExcerpt as sqliteQuestionExcerpt, readQuestions as sqliteReadQuestions, countOpenQuestions as sqliteCountOpenQuestions, readSqliteState, readUnreadPage, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage } from "./sqlite-state.ts";
+import { acknowledgeQueued as sqliteAcknowledgeQueued, acknowledgeRead as sqliteAcknowledgeRead, answerQuestion as sqliteAnswerQuestion, appendRoomMessage as sqliteAppendRoomMessage, sendReply as sqliteSendReply, readHistoryPage, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestionExcerpt as sqliteQuestionExcerpt, readQuestions as sqliteReadQuestions, countOpenQuestions as sqliteCountOpenQuestions, readSqliteState, readUnreadPage, recallMessage as sqliteRecallMessage, revealMessageContent as sqliteRevealMessageContent, isMessageRecalled, recalledMessageIDs as sqliteRecalledMessageIDs, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage, type JoinRequest, listJoinRequests as sqliteListJoinRequests, readJoinRequest as sqliteReadJoinRequest, type RecallMessageResult, type RevealMessageResult } from "./sqlite-state.ts";
+export type { JoinRequest, RecallMessageResult, RevealMessageResult } from "./sqlite-state.ts";
 
 export function statePath(): string {
   // JSON path remains the migration source; SQLite lives beside it.
@@ -31,7 +32,7 @@ export async function readUnreadMessages(roomID: string, afterTs: number, limit 
 export async function readInboxMessages(sessionID: string, roomID: string | null, excludeSelf: boolean, limit = 100, afterTs?: number) {
   return sqliteInboxPage(databasePath(), sessionID, roomID, excludeSelf, limit, afterTs);
 }
-export async function readHistory(roomID: string, beforeSeq?: number, limit = 100, exclude?: { sessionID: string; name: string }): Promise<{ messages: HistoryMessage[]; nextBeforeSeq: number | null; hasMore: boolean }> {
+export async function readHistory(roomID: string, beforeSeq?: number, limit = 100, exclude?: { sessionID: string; name: string }): Promise<{ messages: HistoryMessage[]; nextBeforeSeq: number | null; hasMore: boolean; recallVersion: number }> {
   return readHistoryPage(databasePath(), roomID, beforeSeq, limit, exclude?.sessionID, exclude?.name);
 }
 export async function readQuestions(roomID: string): Promise<Message[]> { return sqliteReadQuestions(databasePath(), roomID); }
@@ -42,6 +43,24 @@ export async function answerQuestion(roomID: string, questionID: string, session
 export async function sendReply(roomID: string, targetID: string, sessionID: string, text: string) { return sqliteSendReply(databasePath(), roomID, targetID, sessionID, text); }
 export function appendRoomMessage(roomID: string, sessionID: string, text: string, isQuestion: boolean) { return sqliteAppendRoomMessage(databasePath(), roomID, sessionID, text, isQuestion); }
 export async function readQuestionExcerpt(roomID: string, questionID: string) { return sqliteQuestionExcerpt(databasePath(), roomID, questionID); }
+export function readJoinRequest(roomID: string, sessionID: string): Promise<JoinRequest | undefined> { return sqliteReadJoinRequest(databasePath(), roomID, sessionID); }
+export function listJoinRequests(roomID: string, agentOnly = false): Promise<JoinRequest[]> { return sqliteListJoinRequests(databasePath(), roomID, agentOnly); }
+
+// Soft recall + member-only reveal. Same implementation standalone and central.
+export function recallMessage(roomID: string, messageID: string, sessionID: string): Promise<RecallMessageResult> {
+  return sqliteRecallMessage(databasePath(), roomID, messageID, sessionID);
+}
+export function revealMessageContent(roomID: string, messageID: string, sessionID: string): Promise<RevealMessageResult> {
+  return sqliteRevealMessageContent(databasePath(), roomID, messageID, sessionID);
+}
+export function messageRecalled(roomID: string, messageID: string): Promise<boolean> {
+  return isMessageRecalled(databasePath(), roomID, messageID);
+}
+// Authoritative batch recall check for pending notification batches; independent
+// of the in-memory 500-message window.
+export async function recalledMessageIDs(roomID: string, messageIDs: string[]): Promise<Set<string>> {
+  return new Set(await sqliteRecalledMessageIDs(databasePath(), roomID, messageIDs));
+}
 
 export async function loadRooms(): Promise<Room[]> {
   return (await readSqliteState(databasePath())).rooms;
@@ -175,7 +194,7 @@ export function formatRoom(svc: RoomService, room: Room): string {
     .join(", ");
   const lines = [`Room ${room.id} (${room.name}) \u2014 members: ${members}`];
   for (const m of room.messages.slice(-5)) {
-    lines.push(`[${timeOf(m.createdAt)}] ${senderName(svc, m)}: ${m.text}`);
+    lines.push(`[${timeOf(m.createdAt)}] ${senderName(svc, m)}: ${m.recalledAt ? "[recalled message]" : m.text}`);
   }
   return lines.join("\n");
 }

@@ -1,6 +1,6 @@
 # Image messages: proposal
 
-**Status:** planning only. Image messages are not part of 0.3.2; no upload or attachment API is shipped.
+**Status:** planning only. Image messages are not implemented: an image is not yet delivered as image content in an Agent's native multimodal context. Room attachments are implemented as uploaded files referenced by a `[[resource:…]]` marker; an attachment is not an image message.
 
 ## Proposed first experience
 

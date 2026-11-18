@@ -57,6 +57,7 @@ export function initRooms(app) {
     const description = app.state.room.description || "";
     $("#roomDescription").textContent = description;
     $("#roomDescription").hidden = !description;
+    $("#roomPolicy").hidden = app.state.room.joinPolicy !== "approval";
     // Everyone sees the settings entry; people who cannot manage the room get a
     // secondary style and an explanation. Dissolving the room stays the owner's call.
     const owner = app.state.myName === app.state.room.ownerId;
@@ -78,7 +79,7 @@ export function initRooms(app) {
 
   app.ensureJoinedRoom = (room, name) => {
     const existing = app.state.rooms.get(room.id);
-    const entry = existing || { unreadIds: new Map(), unreadOverflow: false, preview: "", previewAt: 0, position: 0, readTs: 0, receivedTs: room.messages.at(-1)?.createdAt ?? 0 };
+    const entry = existing || { unreadIds: new Map(), unreadOverflow: false, preview: "", previewAt: 0, position: 0, readTs: 0, receivedTs: room.messages.at(-1)?.createdAt ?? 0, recallVersion: 0 };
     entry.unreadIds ||= new Map();
     entry.unreadOverflow ||= false;
     const latest = room.messages.at(-1), savedReadTs = app.state.lastReadTs.get(room.id) ?? (typeof room.lastReadTs === "number" ? room.lastReadTs : undefined);
@@ -104,6 +105,8 @@ export function initRooms(app) {
       entry.unreadOverflow ||= Boolean(room.hasMore && entry.readTs < (room.messages[0]?.createdAt ?? Infinity));
     }
     entry.receivedTs ??= latest?.createdAt ?? 0;
+    entry.recallStale = Boolean(existing && (Number(room.recallVersion) || 0) > (existing.recallVersion || 0));
+    entry.recallVersion = Number(room.recallVersion) || entry.recallVersion || 0;
     if (latest && (!existing || latest.createdAt >= entry.previewAt)) setRoomPreview(entry, latest);
     app.state.rooms.set(room.id, entry);
     app.state.roomNames.set(room.id, name);
@@ -140,6 +143,10 @@ export function initRooms(app) {
     app.restoreReadingPosition?.(roomId);
     app.state.readAnchorGuard = null;
     app.startPolling();
+    if (entry.recallStale) {
+      entry.recallStale = false;
+      void app.syncLoadedHistory?.(roomId, app.state.pollGeneration);
+    }
     app.renderMembers();
     $("#msgInput").contentEditable = "true";
     $("#msgInput").setAttribute("aria-disabled", "false"); $("#msgInput").tabIndex = 0;
@@ -173,13 +180,15 @@ export function initRooms(app) {
       });
       invalidateRoomList();
       LS.name = name;
+      if (room?.status === "pending") { app.showJoinPending(roomId, name); return; }
       app.enterRoom(room, name, intent);
     } catch (error) {
       if (error.status === 401) {
         app.state.pendingAction = { type: "join", roomId, name };
         if (app.state.room) { app.openChatSettings(); app.showSendError("sendAuth"); }
         else { app.openTokenBox(); app.showJoinError("authRetry"); }
-      } else { app.showJoinError(error.network ? "networkRetry" : "joinFailed", { message: error.message }); void app.refreshRoomList(); }
+      } else if (error.status === 409) { app.showJoinError("joinNameTaken"); void app.refreshRoomList(); }
+      else { app.showJoinError(error.network ? "networkRetry" : "joinFailed", { message: error.message }); void app.refreshRoomList(); }
     } finally { app.setJoinBusy(false); }
   };
 
@@ -187,6 +196,7 @@ export function initRooms(app) {
     const fromChat = pending?.fromChat ?? Boolean(app.state.room);
     const name = pending?.name || (fromChat ? app.state.myName : $("#inName").value.trim()) || LS.name || app.t("guest");
     const roomName = pending?.roomName || $(fromChat ? "#inRoomNameChat" : "#inRoomName").value.trim();
+    const joinPolicy = pending?.joinPolicy ?? ((fromChat ? $("#inApprovalRequiredChat").checked : $("#inApprovalRequired").checked) ? "approval" : "open");
     if (!roomName) return fromChat ? app.showSendError("roomNameRequired") : app.showJoinError("roomNameRequired");
     const intent = ++app.state.navigationGeneration; invalidateRoomList();
     app.setJoinBusy(true);
@@ -196,10 +206,12 @@ export function initRooms(app) {
     try {
       const room = await app.api("/rooms", {
         method: "POST",
-        body: JSON.stringify({ name: roomName, ownerId: name, sessionID: LS.sessionID }),
+        body: JSON.stringify({ name: roomName, ownerId: name, sessionID: LS.sessionID, joinPolicy }),
       });
       invalidateRoomList();
       LS.name = name;
+      $("#inApprovalRequired").checked = false;
+      $("#inApprovalRequiredChat").checked = false;
       if (fromChat) {
         $("#inRoomNameChat").value = "";
         $("#railRoomForm").hidden = true;
@@ -207,7 +219,7 @@ export function initRooms(app) {
       app.enterRoom(room, name, intent);
     } catch (error) {
       if (error.status === 401) {
-        app.state.pendingAction = { type: "create", name, roomName, fromChat };
+        app.state.pendingAction = { type: "create", name, roomName, fromChat, joinPolicy };
         if (fromChat) { app.openChatSettings(); app.showSendError("sendAuth"); }
         else { app.openTokenBox(); app.showJoinError("authRetry"); }
       } else if (fromChat) { app.showSendError("sendFailed", { message: error.message }); void app.refreshRoomList(); }

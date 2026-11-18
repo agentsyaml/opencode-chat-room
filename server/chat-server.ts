@@ -9,7 +9,8 @@ import RoomService, {
   type Message,
   type Room,
 } from "../src/rooms/room-service.ts";
-import { acknowledgeQueued, answerQuestion, appendRoomMessage, sendReply, readQuestions, readState, writeState, type Registry, type RegistryEntry } from "../src/state/store.ts";
+import { acknowledgeQueued, answerQuestion, appendRoomMessage, databasePath, sendReply, readQuestions, readState, writeState, type Registry, type RegistryEntry } from "../src/state/store.ts";
+import { saveJoinRequest, writeSqliteStateWithDatabase } from "../src/state/sqlite-state.ts";
 import {
   admissionMatches,
   clearPendingAdmission,
@@ -18,14 +19,17 @@ import { readInbox } from "./inbox";
 import { isReceiverOwnerID } from "../src/state/receiver-owner.ts";
 import { claimWake, touchActive, wakeMentionedSessions } from "./wake";
 import { historyRoute } from "./history-route";
+import { messageRecallRoutes } from "./message-recall-routes";
 import { roomPayload } from "./room-payload";
-import { bindOwner, isUser, settleAdmins, settleOwner } from "./room-owner";
+import { isUser, settleAdmins, settleOwner } from "./room-owner";
 import { jsonObject } from "./json-body";
 import { roomManagement } from "./newrooms";
 import { memberRoutes } from "./member-routes";
 import { resourceRoutes } from "./resource-routes";
 import { maxResourceBytes } from "../src/rooms/resources.ts";
 import { adminRoutes } from "./admin-routes";
+import { joinRequestRoutes } from "./join-requests";
+import { joinRoomMember } from "./room-join";
 import { roomReminderRoutes, startRoomReminderScheduler } from "./room-reminders";
 
 // The chat page shows this next to the app title; a missing package must not
@@ -148,6 +152,8 @@ async function handle(req: Request): Promise<Response> {
     if (resource) return resource;
     const history = await historyRoute(url);
     if (history) return history;
+    const recall = await messageRecallRoutes(req, url);
+    if (recall) return recall;
     if (req.method === "GET" && p === "/rooms/summary") {
       // ponytail: 轻量房间摘要（不含消息）——wakeSessions 每 10s 用它计算
       // latest，避免下载全部房间历史（orc-1 #5）
@@ -184,6 +190,8 @@ async function handle(req: Request): Promise<Response> {
     }
     const members = await memberRoutes(req, url);
     if (members) return members;
+    const joinRequests = await joinRequestRoutes(req, url);
+    if (joinRequests) return joinRequests;
     const management = await roomManagement(req, url);
     if (management) return management;
     if (req.method === "POST" && p === "/rooms") {
@@ -203,8 +211,12 @@ async function handle(req: Request): Promise<Response> {
       if (owner.length > 64) {
         return json({ error: "ownerId too long (max 64)" }, 400);
       }
+      if (body.joinPolicy !== undefined && body.joinPolicy !== "open" && body.joinPolicy !== "approval") {
+        return json({ error: "joinPolicy must be open or approval" }, 400);
+      }
+      const joinPolicy = body.joinPolicy === "approval" ? "approval" : body.joinPolicy === "open" ? "open" : undefined;
       const room = await mutate((svc, reg) => {
-        const created = svc.createRoom(name, owner);
+        const created = svc.createRoom(name, owner, joinPolicy);
         if (body.sessionID) {
           const regRoom = (reg[created.id] =
             reg[created.id] ?? Object.create(null) as Record<string, RegistryEntry>);
@@ -236,6 +248,12 @@ async function handle(req: Request): Promise<Response> {
       const roomFilter = url.searchParams.get("roomId");
       const afterValue = url.searchParams.get("afterTs");
       const afterTs = afterValue === null ? undefined : Number(afterValue);
+      const recallVersionValue = url.searchParams.get("recallVersion");
+      if (url.searchParams.has("recallVersion") && (recallVersionValue === "" || !/^\d+$/.test(recallVersionValue ?? "") ||
+        !Number.isSafeInteger(Number(recallVersionValue)))) {
+        return json({ error: "recallVersion must be a non-negative safe integer" }, 400);
+      }
+      const clientRecallVersion = recallVersionValue === null ? undefined : Number(recallVersionValue);
       if (url.searchParams.has("afterTs") && (afterValue === "" || !/^\d+$/.test(afterValue ?? "") ||
         !Number.isSafeInteger(afterTs) || afterTs! < 0 || !roomFilter || url.searchParams.get("excludeSelf") !== "0")) {
         return json({ error: "afterTs requires a roomId and excludeSelf=0, with a non-negative safe integer value" }, 400);
@@ -252,7 +270,12 @@ async function handle(req: Request): Promise<Response> {
       );
       const deadline = Date.now() + timeout;
       let result = await readInbox(sessionID, roomFilter, excludeSelf, afterTs);
-      while (result.items.length === 0 && Date.now() < deadline) {
+      // The client's rendered snapshot version is the baseline; using the first
+      // read instead would hide a recall that landed before this request started.
+      const initialRecallVersion = clientRecallVersion ?? result.recallVersion;
+      // A recall bumps the version without creating a message; wake the poll so
+      // the client can refetch the room snapshot (reliable version compare).
+      while (result.items.length === 0 && result.recallVersion === initialRecallVersion && Date.now() < deadline) {
         // ponytail: 2s between disk scans (orc-1 #7) — 1s × 25 iterations
         // doubles the file reads on shared-mount deployments
         await sleep(Math.max(1, Math.min(2000, deadline - Date.now())));
@@ -324,71 +347,37 @@ async function handle(req: Request): Promise<Response> {
         if (id.length > 64 || name.length > 64) {
           return json({ error: "name too long (max 64)" }, 400);
         }
-        const room = await mutate((svc, reg) => {
+        const result = await writeSqliteStateWithDatabase(databasePath(), (svc, reg, db) => {
           const currentRoom = svc.getRoom(roomId);
-          const participantId = currentRoom.kind === "direct" ? sessionID : id;
-          const regRoom = (reg[roomId] =
-            reg[roomId] ?? Object.create(null) as Record<string, RegistryEntry>);
-          // retire the participant this session previously held, if renamed
-          // — skipped when another session still uses the old name
-          const prevEntry = regRoom[sessionID];
-          if (currentRoom.kind !== "direct" && prevEntry && prevEntry.name !== name) {
-            const shared = Object.entries(regRoom).some(
-              ([sid, e]) => sid !== sessionID && e.name === prevEntry.name,
-            );
-            if (!shared && svc.containsParticipant(roomId, prevEntry.name)) {
-              svc.leaveRoom(roomId, prevEntry.name);
-            }
+          // A restricted room treats a new identity as a pending request; no
+          // participant or registry entry exists until a reviewer approves.
+          if (currentRoom.joinPolicy === "approval" && currentRoom.kind !== "direct" && !reg[roomId]?.[sessionID]) {
+            if (svc.containsParticipant(roomId, id)) return { status: 409 as const, error: "participant name is already in use in this room" };
+            const duplicate = db.query("SELECT 1 FROM room_join_requests WHERE room_id=? AND session_id<>? AND (participant_id=? OR name=?)").get(roomId, sessionID, id, name);
+            if (duplicate) return { status: 409 as const, error: "participant name is already in use in this room" };
+            saveJoinRequest(db, {
+              roomID: roomId, sessionID, participantId: id, name,
+              isAgent: Boolean(body.protocol || body.receiverOwnerID || body.host),
+              createdAt: Date.now(),
+              ...(body.protocol === "v2" ? { protocol: "v2" as const } : {}),
+              ...(body.protocol === "v2" && isReceiverOwnerID(body.receiverOwnerID) ? { receiverOwnerID: body.receiverOwnerID } : {}),
+              ...(body.directory ? { directory: body.directory } : {}),
+              ...(body.host ? { host: body.host } : {}),
+            });
+            return { pending: true as const };
           }
-          const already = svc.containsParticipant(roomId, participantId);
-          // ponytail: prune a stale registry entry for the same participant
-          // name from another session (closed tab / cleared localStorage) —
-          // but only when the identity is NOT already present, otherwise two
-          // live sessions sharing a nickname would evict each other forever
-          if (!already && currentRoom.kind !== "direct") {
-            for (const [sid, e] of Object.entries(regRoom)) {
-              if (sid !== sessionID && e.name === name) {
-                delete regRoom[sid];
-              }
-            }
-          }
-          svc.joinRoom(roomId, { id: participantId, name });
-          if (!already) {
-            svc.addEvent(roomId, `${name} joined the room`);
-          }
-
-          const latestMessageTs =
-            svc.getMessages(roomId).at(-1)?.createdAt ?? 0;
-          regRoom[sessionID] = {
-            // ponytail: central mode self-pulls the inbox; no cross-host URL.
-            // Re-join must not rewind the read watermark (unread messages
-            // would be silently dropped); a first join starts at join time.
-            serverUrl: "",
-            apiPrefix: "/api",
+          return { room: joinRoomMember(svc, reg, roomId, {
+            sessionID, participantId: id, name,
             ...(body.protocol === "v2" ? { protocol: "v2" as const } : {}),
             ...(body.protocol === "v2" && isReceiverOwnerID(body.receiverOwnerID) ? { receiverOwnerID: body.receiverOwnerID } : {}),
-            name,
-            membershipID: prevEntry?.membershipID ?? randomUUID(),
-            directory: body.directory || undefined,
-            // ora-1 #2: 归属主机——跨机 @-wake 只由所属机器执行
+            ...(body.directory ? { directory: body.directory } : {}),
             host: body.host ?? "",
-            lastQueuedTs: regRoom[sessionID]?.lastQueuedTs,
-            lastReadTs:
-              regRoom[sessionID]?.lastReadTs ??
-              Math.max(Date.now(), latestMessageTs),
-          };
-          // An ownerless room is claimed by the first person who arrives; agents never are.
-          const joinedRoom = svc.getRoom(roomId);
-          if (!joinedRoom.ownerId && isUser(regRoom[sessionID])) {
-            joinedRoom.ownerId = name;
-            joinedRoom.ownerMembershipID = regRoom[sessionID]!.membershipID;
-          } else {
-            bindOwner(joinedRoom, regRoom);
-          }
-          return svc.getRoom(roomId);
+          }) };
         });
+        if ("status" in result) return json({ error: result.error }, result.status);
+        if ("pending" in result) return json({ status: "pending" }, 202);
         touchActive(sessionID); // join = active
-        return json(await roomPayload(room), 201);
+        return json(await roomPayload(result.room), 201);
       }
       if (req.method === "POST" && m[2] === "leave") {
         await mutate((svc, reg) => {
@@ -437,8 +426,8 @@ async function handle(req: Request): Promise<Response> {
         if (!text) {
           return json({ error: "text is required" }, 400);
         }
-        if (text.length > 2000) {
-          return json({ error: "text too long (max 2000)" }, 400);
+        if (text.length > 5000) {
+          return json({ error: "text too long (max 5000)" }, 400);
         }
         const replyTo = (body as Record<string, unknown>).replyToMessageID;
         if (replyTo !== undefined && (typeof replyTo !== "string" || !replyTo)) return json({ error: "replyToMessageID must be a non-empty message ID" }, 400);
@@ -479,9 +468,9 @@ async function handle(req: Request): Promise<Response> {
       const roomId = decodeURIComponent(answer[1]!);
       const questionID = decodeURIComponent(answer[2]!);
       const body: unknown = await req.json();
-      if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "sessionID and non-empty text (max 2000) are required" }, 400);
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "sessionID and non-empty text (max 5000) are required" }, 400);
       const input = body as Record<string, unknown>;
-      if (typeof input.sessionID !== "string" || !input.sessionID || typeof input.text !== "string" || !input.text.trim() || input.text.trim().length > 2000) return json({ error: "sessionID and non-empty text (max 2000) are required" }, 400);
+      if (typeof input.sessionID !== "string" || !input.sessionID || typeof input.text !== "string" || !input.text.trim() || input.text.trim().length > 5000) return json({ error: "sessionID and non-empty text (max 5000) are required" }, 400);
       const result = await answerQuestion(roomId, questionID, input.sessionID, input.text.trim());
       if (result.status === "missing") return json({ error: "room not found" }, 404);
       if (result.status === "question") return json({ error: "question not found" }, 404);

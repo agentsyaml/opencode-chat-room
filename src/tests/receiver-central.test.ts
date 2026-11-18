@@ -32,6 +32,7 @@ const { centerAction } = await import("../center/center-client.ts");
 const { closeReceiverState } = await import("../state/receiver-state.ts");
 const { checkCenterInbox } = await import("../center/center-inbox.ts");
 const { wakeMentionedSessions } = await import("../../server/wake");
+const queue = await import("../center/queue.ts");
 const ownerID = "123e4567-e89b-42d3-a456-426614174000";
 
 async function call(pathname: string, method = "GET", body?: unknown) {
@@ -113,7 +114,7 @@ describe.serial("central receiver membership scope", () => {
     const all = await call("/inbox?sessionID=room-filter-session&excludeSelf=0");
     expect(await all.json()).toMatchObject({ member: true, queuedTs: { [memberID]: 0 } });
     const filtered = await call(`/inbox?sessionID=room-filter-session&roomId=${otherID}&excludeSelf=0`);
-    expect(await filtered.json()).toEqual({ member: false, items: [], queuedTs: {}, hasMore: false });
+    expect(await filtered.json()).toMatchObject({ member: false, items: [], queuedTs: {}, hasMore: false });
     const previousFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       server.fetch(new Request(String(input), init))) as unknown as typeof fetch;
@@ -292,6 +293,159 @@ describe.serial("central receiver membership scope", () => {
     expect(sent[5]!.delivery).toBe("steer");
     expect(backgrounds).toBe(1);
     expect(traced.some((route) => route.includes(`/history?limit=20&excludeSessionID=restored 200`))).toBe(true);
+  });
+
+  test("wake drops a recalled item from an undelivered pending admission", async () => {
+    const sessionID = "wake-pending-recall";
+    const { roomID, message } = await store.writeState((service, registry) => {
+      const room = service.createRoom("pending recall", "alice");
+      service.joinRoom(room.id, { id: "alice", name: "alice" });
+      const message = service.sendMessage(room.id, "alice", "@bob withdraw this", "origin");
+      registry[room.id] = {
+        [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "bob", host: hostname(), lastReadTs: 0, lastQueuedTs: 0 },
+        origin: { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "alice", host: hostname() },
+      };
+      return { roomID: room.id, message };
+    });
+    queue.getOrCreatePendingAdmission(sessionID, roomID,
+      [{ id: message.id, senderId: "alice", text: message.text, createdAt: message.createdAt }], "OLD PROMPT WITH withdraw this", message.createdAt, false);
+    expect((await store.recallMessage(roomID, message.id, "origin")).status).toBe("ok");
+    const oldFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => { calls++; return new Response(null, { status: 204 }); }) as unknown as typeof fetch;
+    try {
+      await wakeMentionedSessions("http://serve.invalid", roomID, "pending recall", message.text, "origin", message);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally { globalThis.fetch = oldFetch; }
+    expect(calls).toBe(0);
+    expect(queue.pendingAdmission(sessionID, roomID)).toBeUndefined();
+  });
+
+  test("wake delivers an unread gap below an admitted notification watermark", async () => {
+    const sessionID = "wake-gap-fill";
+    const { roomID, older, newer } = await store.writeState((service, registry) => {
+      const room = service.createRoom("gap fill", "alice");
+      service.joinRoom(room.id, { id: "alice", name: "alice" });
+      const older = service.sendMessage(room.id, "alice", "@bob older gap", "origin");
+      const newer = service.sendMessage(room.id, "alice", "@bob newer delivered", "origin");
+      registry[room.id] = {
+        [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "bob", host: hostname(), lastReadTs: 0, lastQueuedTs: 0 },
+        origin: { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "alice", host: hostname() },
+      };
+      return { roomID: room.id, older, newer };
+    });
+    const delivered = queue.getOrCreatePendingAdmission(sessionID, roomID,
+      [{ id: newer.id, senderId: "alice", text: newer.text, createdAt: newer.createdAt }], "OLD ADMITTED PROMPT newer delivered", newer.createdAt, false);
+    queue.markPendingAdmissionAdmitted(sessionID, roomID, delivered.id);
+    const oldFetch = globalThis.fetch;
+    let prompt = "";
+    let finish!: () => void;
+    const posted = new Promise<void>((resolve) => { finish = resolve; });
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      prompt = String((JSON.parse(String(init?.body)).parts as Array<{ text: string }>)[0]!.text);
+      finish();
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    try {
+      await wakeMentionedSessions("http://serve.invalid", roomID, "gap fill", older.text, "origin", older);
+      await posted;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally { globalThis.fetch = oldFetch; }
+    expect(prompt).toContain("older gap");
+    expect(prompt).not.toContain("newer delivered");
+    expect((await store.loadRegistry())[roomID]![sessionID]!.lastQueuedTs).toBe(newer.createdAt);
+  });
+
+  test("wake trims a recalled pending item older than the 500-message window", async () => {
+    const sessionID = "wake-old-recall";
+    const seed = await store.writeState((service, registry) => {
+      const room = service.createRoom("old recall", "alice");
+      service.joinRoom(room.id, { id: "alice", name: "alice" });
+      registry[room.id] = {
+        [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "bob", host: hostname(), lastReadTs: 0, lastQueuedTs: 0 },
+        origin: { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "alice", host: hostname() },
+      };
+      return { roomID: room.id };
+    });
+    const append = async (text: string) => {
+      const sent = await store.appendRoomMessage(seed.roomID, "origin", text, false);
+      if (sent.status !== "ok") throw new Error(`append failed: ${sent.status}`);
+      return sent.message;
+    };
+    const old = await append("@bob old recalled content");
+    let readThrough = old.createdAt;
+    for (let index = 0; index < 499; index++) readThrough = (await append(`ordinary-${index}`)).createdAt;
+    const trigger = await append("@bob current content");
+    await store.writeState((_service, registry) => {
+      registry[seed.roomID]![sessionID]!.lastReadTs = readThrough;
+    });
+    // The store snapshot keeps only the newest 500 messages, so `old` is absent
+    // from it; the recall check must ask the database directly.
+    expect((await store.loadRooms()).find((room) => room.id === seed.roomID)?.messages.some((message) => message.id === old.id)).toBe(false);
+    queue.getOrCreatePendingAdmission(sessionID, seed.roomID,
+      [{ id: old.id, senderId: "alice", text: old.text, createdAt: old.createdAt }], "OLD PENDING PROMPT old recalled content", old.createdAt, false);
+    expect((await store.recallMessage(seed.roomID, old.id, "origin")).status).toBe("ok");
+    const oldFetch = globalThis.fetch;
+    let prompt = "";
+    let finish!: () => void;
+    const posted = new Promise<void>((resolve) => { finish = resolve; });
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      prompt = String((JSON.parse(String(init?.body)).parts as Array<{ text: string }>)[0]!.text);
+      finish();
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    try {
+      await wakeMentionedSessions("http://serve.invalid", seed.roomID, "old recall", trigger.text, "origin", trigger);
+      await posted;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally { globalThis.fetch = oldFetch; }
+    expect(readThrough).toBeLessThan(trigger.createdAt);
+    expect(prompt).toContain("current content");
+    expect(prompt).not.toContain("old recalled content");
+    expect(prompt).not.toContain("OLD PENDING PROMPT");
+  });
+
+  test("wake advances the watermark only past rendered notification lines", async () => {
+    const sessionID = "wake-budget";
+    const seed = await store.writeState((service, registry) => {
+      const room = service.createRoom("budget wake", "alice");
+      service.joinRoom(room.id, { id: "alice", name: "alice" });
+      const questions = Array.from({ length: 11 }, (_, index) =>
+        service.sendMessage(room.id, "alice", `question-${index}`, "origin", true).id);
+      registry[room.id] = {
+        [sessionID]: { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "bob", host: hostname(), lastQueuedTs: 0,
+          lastReadTs: service.getMessages(room.id).at(-1)!.createdAt },
+        origin: { serverUrl: "", apiPrefix: "/api", protocol: "v1", name: "alice", host: hostname() },
+      };
+      return { roomID: room.id, questions };
+    });
+    const answers = [];
+    for (let index = 0; index < seed.questions.length; index++) {
+      const answer = await store.answerQuestion(seed.roomID, seed.questions[index]!, "origin", `@bob answer-${index}`);
+      if (answer.status !== "ok") throw new Error(`answer failed: ${answer.status}`);
+      answers.push(answer.answer);
+    }
+    const oldFetch = globalThis.fetch;
+    let prompt = "";
+    let finish!: () => void;
+    const posted = new Promise<void>((resolve) => { finish = resolve; });
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      prompt = String((JSON.parse(String(init?.body)).parts as Array<{ text: string }>)[0]!.text);
+      finish();
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    try {
+      await wakeMentionedSessions("http://serve.invalid", seed.roomID, "budget wake", answers[10]!.text, "origin", answers[10]!);
+      await posted;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally { globalThis.fetch = oldFetch; }
+    expect(prompt).toContain("answer-0");
+    expect(prompt).toContain("answer-9");
+    expect(prompt).not.toContain("answer-10");
+    const queuedTs = (await store.loadRegistry())[seed.roomID]![sessionID]!.lastQueuedTs;
+    expect(queuedTs).toBe(answers[9]!.createdAt);
+    expect(queuedTs).toBeLessThan(answers[10]!.createdAt);
+    expect(queue.pendingAdmission(sessionID, seed.roomID)).toBeUndefined();
   });
 });
 

@@ -100,6 +100,7 @@ export async function roomManagement(req: Request, url: URL): Promise<Response |
     if (!sessionID || sessionID.length > 128) return json({ error: "sessionID is required" }, 400);
     if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim() || body.name.trim().length > 64)) return json({ error: "name must be 1-64 characters" }, 400);
     if (body.description !== undefined && (typeof body.description !== "string" || body.description.length > 2000)) return json({ error: "description too long (max 2000)" }, 400);
+    if (body.joinPolicy !== undefined && body.joinPolicy !== "open" && body.joinPolicy !== "approval") return json({ error: "joinPolicy must be open or approval" }, 400);
     if (body.adminSessionID !== undefined && body.adminSessionID !== null && (typeof body.adminSessionID !== "string" || body.adminSessionID.length > 128)) return json({ error: "invalid adminSessionID" }, 400);
     if (body.adminIds !== undefined && (!Array.isArray(body.adminIds) || body.adminIds.length > 50 || body.adminIds.some((name) => typeof name !== "string" || !name.trim() || name.trim().length > 64))) return json({ error: "adminIds must be up to 50 member names" }, 400);
     if (body.successorId !== undefined && body.successorId !== null && (typeof body.successorId !== "string" || !body.successorId.trim() || body.successorId.trim().length > 64)) return json({ error: "successorId must be a member name or null" }, 400);
@@ -107,6 +108,7 @@ export async function roomManagement(req: Request, url: URL): Promise<Response |
     const adminIds = Array.isArray(body.adminIds) ? [...new Set(body.adminIds.map((name) => (name as string).trim()))] : undefined;
     const name = typeof body.name === "string" ? body.name.trim() : undefined;
     const description = typeof body.description === "string" ? body.description.trim() : undefined;
+    const joinPolicy = body.joinPolicy === "open" || body.joinPolicy === "approval" ? body.joinPolicy : undefined;
     const adminSessionID = typeof body.adminSessionID === "string" ? body.adminSessionID : body.adminSessionID === null ? null : undefined;
     if (body.ownerId !== undefined && (typeof body.ownerId !== "string" || !body.ownerId.trim() || body.ownerId.trim().length > 64)) return json({ error: "ownerId must be 1-64 characters" }, 400);
     const nextOwner = typeof body.ownerId === "string" ? body.ownerId.trim() : undefined;
@@ -122,6 +124,13 @@ export async function roomManagement(req: Request, url: URL): Promise<Response |
       const changes: string[] = [];
       if (name !== undefined && name !== room.name) { changes.push(`${actor.name} renamed the room from "${room.name}" to "${name}"`); room.name = name; }
       if (description !== undefined && description !== (room.description ?? "")) { room.description = description || undefined; changes.push(`${actor.name} updated the room description`); }
+      if (joinPolicy !== undefined && joinPolicy !== (room.joinPolicy ?? "open")) {
+        if (joinPolicy === "approval") room.joinPolicy = "approval"; else delete room.joinPolicy;
+        // Opening the room makes waiting requests moot; they would otherwise stay
+        // listed forever because anyone can now join directly.
+        if (joinPolicy === "open") db.query("DELETE FROM room_join_requests WHERE room_id=?").run(roomId);
+        changes.push(`${actor.name} set join approval to ${joinPolicy}`);
+      }
       if (adminSessionID !== undefined) {
         if (!adminSessionID) {
           if (binding(db, roomId)) { exec(db, "DELETE FROM admin_rooms WHERE room_id=?", roomId); changes.push(`${actor.name} revoked the administrator designation`); }

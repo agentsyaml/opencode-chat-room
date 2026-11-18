@@ -33,6 +33,10 @@ test.skipIf(!browserModule)("system events translate in messages and room previe
     await api(origin, `/rooms/${roomId}/join`, "POST", { sessionID: "i18n-peer", participantId: "Peer", participantName: "Peer" });
     await page.locator("#msgList").getByText("Peer joined the room").waitFor();
     await setLocale(page, "zh-CN");
+    await page.locator("#btnMembers").click();
+    await page.locator("#memberList .owner-badge").waitFor();
+    expect(await page.locator("#memberList .owner-badge").textContent()).toBe("房主");
+    await page.locator("#btnMembers").click();
     const joinPreviewZh = await expectText(page, "Peer 加入了房间", roomId);
     await api(origin, `/rooms/${roomId}/leave`, "POST", { sessionID: "i18n-peer" });
     const leavePreviewZh = await expectText(page, "Peer 离开了房间", roomId);
@@ -43,6 +47,10 @@ test.skipIf(!browserModule)("system events translate in messages and room previe
     const removedPreviewZh = await expectText(page, "Alex 被移出了房间", roomId);
     await page.screenshot({ path: path.join(artifactDir, "chat-system-removed-zh.png"), fullPage: true });
     await setLocale(page, "en");
+    await page.locator("#btnMembers").click();
+    await page.locator("#memberList .owner-badge").waitFor();
+    expect(await page.locator("#memberList .owner-badge").textContent()).toBe("Owner");
+    await page.locator("#btnMembers").click();
     const removedPreviewEn = await expectText(page, "Alex was removed from the room", roomId);
     await page.screenshot({ path: path.join(artifactDir, "chat-system-removed-en.png"), fullPage: true });
     await page.locator("#msgList").getByText("Peer joined the room").waitFor();

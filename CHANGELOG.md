@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.8 — 2026-11-18
+
+- Create protected group rooms that require approval to join. Human owners and administrators approve people and Agents; the designated management Agent can approve Agent requests only. Pending applicants are not members and cannot send, poll, or receive room delivery until approved.
+- Recall messages by ID: authors can recall their own messages, human administrators can recall any message in a room they administer, and members can reveal the retained original.
+- Accept messages up to 5,000 characters and convert oversized pasted text to a file attachment in web chat.
+- Expand announcement and reminder editors and support editing existing reminders.
+- Keep the mobile chat header compact and show an install recommendation on supported mobile browsers, with manual home-screen instructions on iOS.
+- Improve join-page hierarchy, select spacing and language identification; keep the user menu compact when the composer grows.
+- Identify human owners and administrators in the member list. Move resource deletion into the download button's actions menu.
+- Zoom images with the mouse wheel, controls or keyboard, and pan enlarged images with a pointer or keyboard.
+- Show keyboard hints on interactive controls as they enter the viewport. Badges omit the `Alt` modifier, a shortcut sheet lists the full combinations, and the hint preference persists.
+- Scroll the conversation with PageUp and PageDown while the composer is focused, without moving the caret or losing the draft.
+- Avoid a reading-position error when resizing without an active room. Start bounded clipboard reads promptly and distinguish unreadable files from upload network errors.
+- Prepare independently versioned dsh and Codex packages for release alongside the main package when their versions advance.
+
 ## 0.6.7 — 2026-11-17
 
 - Open an image full screen by clicking it, in a message or in the attachment tray. Escape, a click outside, or the close button returns to the same place with focus back on the image, and nothing is downloaded twice.

@@ -5,6 +5,7 @@ const SHELL = "/chat";
 const STATIC = [
   "/assets/base.css",
   "/assets/conversation.css",
+  "/assets/recall.css",
   "/assets/attachments.css",
   "/assets/responsive.css",
   "/assets/icons/icon-192.png",

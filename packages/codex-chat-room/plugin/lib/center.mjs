@@ -67,6 +67,7 @@ export async function centerAction(cfg, args, sessionID) {
         ownerId: identity(),
         sessionID,
         host: os.hostname(),
+        ...(args.joinPolicy ? { joinPolicy: args.joinPolicy } : {}),
       });
       return formatRoom(room);
     }
@@ -80,7 +81,17 @@ export async function centerAction(cfg, args, sessionID) {
         participantName: me,
         host: os.hostname(),
       });
+      if (room.status === "pending") {
+        return `pending: join request sent to room ${args.roomId}; a human administrator must approve it. You are NOT a member yet: do not claim you joined, and do not send or poll until join_status reports joined.`;
+      }
       return formatRoom(room);
+    }
+    case "join_status": {
+      if (!args.roomId) return "error: roomId is required";
+      const result = await request(cfg, `/rooms/${encodeURIComponent(args.roomId)}/join-requests/status?sessionID=${encodeURIComponent(sessionID)}`, "GET");
+      if (result.status === "joined") return `joined room ${args.roomId}`;
+      if (result.status === "pending") return `pending: join request for room ${args.roomId} is waiting for a human administrator; you are NOT a member yet`;
+      return `none: no join request for room ${args.roomId}; run join with your name to request access`;
     }
     case "leave": {
       if (!args.roomId) return "error: roomId is required";
@@ -102,7 +113,16 @@ export async function centerAction(cfg, args, sessionID) {
         text,
         ...(args.isQuestion ? { isQuestion: true } : {}),
       });
-      return `sent: ${text}\n${formatRoom(room)}`;
+      const messages = room.messages || [];
+      const sentID = [...messages].reverse().find((message) => message.senderSessionID === sessionID && message.text === text)?.id
+        ?? messages.at(-1)?.id;
+      return `sent: ${text}\n${sentID ? `message id: ${sentID}\n` : ""}${formatRoom(room)}`;
+    }
+    case "recall": {
+      if (!args.roomId) return "error: roomId is required";
+      if (!args.messageId) return "error: messageId is required";
+      await request(cfg, `/rooms/${encodeURIComponent(args.roomId)}/messages/${encodeURIComponent(args.messageId)}/recall`, "POST", { sessionID });
+      return `recalled message ${args.messageId}`;
     }
     case "poll": {
       if (!args.roomId) return "error: roomId is required";
@@ -112,9 +132,9 @@ export async function centerAction(cfg, args, sessionID) {
         "GET",
       );
       if (!result.member) return "error: not joined";
-      const items = (result.items || []).filter((item) => item.senderSessionID !== sessionID);
+      const items = (result.items || []).filter((item) => item.senderSessionID !== sessionID && !item.recalledAt);
       if (items.length === 0) return "no new messages";
-      const lines = items.map((item) => `[${timeOf(item.createdAt)}] ${item.senderId}: ${item.text}`);
+      const lines = items.map((item) => `[${timeOf(item.createdAt)}] ${item.senderId}: ${item.text} (id: ${item.id})`);
       const maxTs = items.reduce((max, item) => Math.max(max, item.createdAt), 0);
       await request(cfg, "/read", "POST", { roomId: args.roomId, sessionID, ts: maxTs }).catch(() => {});
       return lines.join("\n") + (result.hasMore ? "\nMore unread messages remain; poll again." : "");

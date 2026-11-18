@@ -10,6 +10,7 @@ export type QueueItem = {
   createdAt: number;
   roomKind?: "group" | "direct";
   answerQuestionExcerpt?: string;
+  recalledAt?: number;
 };
 
 export type QueueBody = {
@@ -85,23 +86,30 @@ export function getOrCreatePendingAdmission(
   const id = queueAdmissionId(sessionID, roomId, items, prompt);
   const retriesOriginal = existing?.state === "pending" && existing.items.length < items.length &&
     queueAdmissionId(sessionID, roomId, existing.items) === queueAdmissionId(sessionID, roomId, items.slice(0, existing.items.length));
+  // An admitted prompt only covers the items it carried. Older unread items
+  // that surfaced later must get their own admission even below its maxTs.
+  const covered = existing?.state === "admitted" &&
+    items.every((item) => !item.id || existing.items.some((delivered) => delivered.id === item.id));
   if (
     existing &&
-    (existing.state === "admitted" ? maxTs <= existing.maxTs : existing.id === id || retriesOriginal)
+    (existing.state === "admitted" ? maxTs <= existing.maxTs && covered : existing.id === id || retriesOriginal)
   ) {
     return existing;
   }
+  // Keep the watermark monotonic when a retried admission fills a delivery gap
+  // below an already-admitted one.
+  const admissionMaxTs = existing?.state === "admitted" ? Math.max(maxTs, existing.maxTs) : maxTs;
   const admission: PendingAdmission = {
     id,
     createdAt: now,
     prompt,
     itemCount: items.length,
-    maxTs,
+    maxTs: admissionMaxTs,
     capped,
     state: "pending",
     items: items.slice(-20).map((item) => ({ ...item })),
   };
-  if (maxTs > 0) {
+  if (admissionMaxTs > 0) {
     save(sessionID, roomId, admission, now);
   }
   return admission;
@@ -112,6 +120,8 @@ export function prunePendingAdmission(
   roomId: string,
   throughTs: number,
   rebuild: (items: QueueItem[]) => { prompt: string; capped: boolean },
+  // Authoritative recheck: drop items the source no longer returns (recalled).
+  keep?: (item: QueueItem) => boolean,
 ): PendingAdmission | undefined {
   const existing = pendingAdmission(sessionID, roomId);
   if (!existing) return undefined;
@@ -119,7 +129,7 @@ export function prunePendingAdmission(
     if (existing.maxTs <= throughTs) deletePendingAdmission(sessionID, roomId);
     return existing.maxTs <= throughTs ? undefined : existing;
   }
-  const items = existing.items.filter((item) => item.createdAt > throughTs);
+  const items = existing.items.filter((item) => item.createdAt > throughTs && (!keep || keep(item)));
   if (items.length === existing.items.length) return existing;
   if (!items.length) { deletePendingAdmission(sessionID, roomId); return undefined; }
   const { prompt, capped } = rebuild(items);

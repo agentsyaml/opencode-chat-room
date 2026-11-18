@@ -6,11 +6,14 @@ import {
   loadRegistry,
   loadRooms,
   readQuestionExcerpt,
+  recalledMessageIDs,
   statePath,
   timeOf,
 } from "../state/store.ts";
 import { backgroundResult, backgroundServiceKey, sendAsyncNotification, sendQueue, type BackgroundResult, type QueueTransport } from "../center/queue-transport.ts";
 import { explicitlyAddresses } from "../center/mentions.ts";
+import { withMessageIds } from "../center/message-ids.ts";
+import { notificationPrefix } from "../center/notification-budget.ts";
 import { claimBackgroundAttempt } from "../state/receiver-state.ts";
 import { serializeSessionPush } from "../center/center-inbox.ts";
 import { prepareReceiptCandidate, receiptDestination } from "../agent/agent-receipts.ts";
@@ -75,10 +78,13 @@ export function createNotifier(deps: {
     batch: NotifyBatch,
     transport: QueueTransport,
   ): Promise<NotifyAttempt | undefined> {
-    batch = { ...batch, messages: await Promise.all(batch.messages.map(async (message) => message.answerToMessageID
-      ? { ...message, answerQuestionExcerpt: await readQuestionExcerpt(batch.roomId, message.answerToMessageID) }
-      : message)) };
     const [registry, rooms] = await Promise.all([loadRegistry(), loadRooms()]);
+    // Recheck against the current room snapshot: a recall may land after the
+    // notifier batch was captured but before this delivery attempt.
+    const fresh = new Map((rooms.find((room) => room.id === batch.roomId)?.messages ?? []).map((message) => [message.id, message]));
+    batch = { ...batch, messages: (await Promise.all(batch.messages.map(async (message) => message.answerToMessageID
+      ? { ...message, answerQuestionExcerpt: await readQuestionExcerpt(batch.roomId, message.answerToMessageID) }
+      : message))).filter((message) => !message.recalledAt && !fresh.get(message.id)?.recalledAt) };
     const entry = registry[batch.roomId]?.[sessionID];
     const roomKind = batch.roomKind ?? rooms.find((room) => room.id === batch.roomId)?.kind ?? "group";
     if (!entry || (entry.protocol !== "v2" && !entry.serverUrl)) return undefined;
@@ -95,7 +101,14 @@ export function createNotifier(deps: {
     };
     const service = backgroundServiceKey(targetTransport);
     const cutoff = Math.max(entry.lastReadTs ?? 0, entry.lastQueuedTs ?? 0);
-    prunePendingAdmission(sessionID, batch.roomId, cutoff, (items) => render(batch, entry.name, roomKind, items));
+    // The room snapshot is the recall authority. A trigger batch may be only a
+    // small delta, so an ID missing from it does not mean the message is gone.
+    // The snapshot window is bounded, so ask the store for older pending IDs.
+    const missingIDs = (pendingAdmission(sessionID, batch.roomId)?.items ?? [])
+      .map((item) => item.id).filter((id): id is string => !!id && !fresh.has(id));
+    const recalledIDs = missingIDs.length ? await recalledMessageIDs(batch.roomId, missingIDs) : new Set<string>();
+    prunePendingAdmission(sessionID, batch.roomId, cutoff, (items) => render(batch, entry.name, roomKind, items),
+      (item) => !item.id || (!fresh.get(item.id)?.recalledAt && !recalledIDs.has(item.id)));
     const unreadAll = batch.messages.filter((m) =>
       m.createdAt > cutoff &&
       (m.senderSessionID !== undefined ? m.senderSessionID !== sessionID : m.senderId !== (roomKind === "direct" ? sessionID : entry.name)),
@@ -103,9 +116,11 @@ export function createNotifier(deps: {
     const unread = unreadAll.slice(-20).map((item) => ({ ...item, roomKind }));
     const existing = pendingAdmission(sessionID, batch.roomId);
     if (!unread.length && existing?.state !== "pending") return undefined;
-    const maxTs = unread.reduce((max, m) => Math.max(max, m.createdAt), 0);
-    const delta = existing?.state === "admitted" && maxTs > existing.maxTs
-      ? unread.filter((m) => m.createdAt > existing.maxTs)
+    // An admitted prompt only covers the items it carried; older unread items
+    // that surface later still need delivery, below its watermark or not.
+    const deliveredIDs = new Set(existing?.state === "admitted" ? existing.items.map((item) => item.id) : []);
+    const delta = existing?.state === "admitted"
+      ? unread.filter((message) => message.createdAt > existing.maxTs || !deliveredIDs.has(message.id))
       : unread;
     const eligibleItems = existing?.state === "pending" ? existing.items : delta.slice(-20);
     if (mentionOnly && !eligibleItems.some((message) => explicitlyAddresses(message, entry.name, sessionID, roomKind)) &&
@@ -115,14 +130,25 @@ export function createNotifier(deps: {
     const endpoint = entry.protocol === "v2" ? "prompt" : "prompt_async";
     const path = `${prefix ? `/${prefix}` : ""}/session/${encodeURIComponent(sessionID)}/${endpoint}`;
     const url = base ? `${base.origin}${path}` : `opencode://session/${sessionID}/${endpoint}`;
-    if (existing?.state === "admitted" && (maxTs <= existing.maxTs || !delta.length)) {
+    if (existing?.state === "admitted" && !delta.length) {
       if (existing.maxTs > 0) await deps.bumpQueued(batch.roomId, sessionID, existing.maxTs);
       return { url, status: entry.protocol === "v2" ? 200 : 204 };
     }
-    const { prompt, capped } = render(batch, entry.name, roomKind, delta);
-    const deltaTs = delta.reduce((max, m) => Math.max(max, m.createdAt), 0);
+    // Keep an undelivered admission intact when a later trigger carries only
+    // newer messages; the retry goes out first and the new delta follows.
+    const carried = existing?.state === "pending" ? existing.items : [];
+    const carriedIDs = new Set(carried.map((item) => item.id));
+    const merged = carried.length
+      ? [...carried, ...delta.filter((item) => !carriedIDs.has(item.id)).slice(0, Math.max(0, 20 - carried.length))]
+      : delta;
+    // Only the oldest fitting prefix may move the watermark; anything beyond
+    // the line budget stays unread for the next sweep.
+    const deliverable = notificationPrefix(merged);
+    const displayDelta = withMessageIds(deliverable);
+    const { prompt, capped } = render(batch, entry.name, roomKind, displayDelta);
+    const deltaTs = deliverable.reduce((max, m) => Math.max(max, m.createdAt), 0);
     const admission = getOrCreatePendingAdmission(
-      sessionID, batch.roomId, delta, prompt, deltaTs, capped,
+      sessionID, batch.roomId, displayDelta, prompt, deltaTs, capped,
     );
     if (admission.state === "admitted" && deltaTs <= admission.maxTs) {
       await deps.bumpQueued(batch.roomId, sessionID, admission.maxTs);

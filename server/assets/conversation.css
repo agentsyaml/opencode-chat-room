@@ -288,12 +288,12 @@
   .reader-close:hover { border-color: var(--line); color: var(--ink); background: var(--surface-2); }
   .close-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }
   .reader-panel .receipt-reader-list li { display: grid; gap: 3px; padding: 10px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
-  .image-dialog { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 20px; border: 0; background: transparent; }
+  .image-dialog { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 20px; overflow: hidden; border: 0; background: transparent; }
   .image-dialog[open] { display: grid; place-items: center; }
   .image-dialog::backdrop { background: rgb(9 16 22 / .84); backdrop-filter: blur(3px); }
   .image-dialog img { display: block; max-width: 100%; max-height: calc(100dvh - 40px); width: auto; height: auto; object-fit: contain; border-radius: 8px; animation: image-zoom-in .16s ease both; }
   @keyframes image-zoom-in { from { opacity: 0; transform: scale(.97); } }
-  .image-dialog-close { position: fixed; top: 14px; right: 14px; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid rgb(255 255 255 / .34); border-radius: 50%; color: #fff; background: rgb(9 16 22 / .58); font: inherit; line-height: 1; cursor: pointer; }
+  .image-dialog-close { position: fixed; z-index: 2; top: 14px; right: 14px; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid rgb(255 255 255 / .34); border-radius: 50%; color: #fff; background: rgb(9 16 22 / .58); font: inherit; line-height: 1; cursor: pointer; }
   .image-dialog-close .close-icon { width: 22px; height: 22px; }
   .image-dialog-close:hover, .image-dialog-close:focus-visible { background: rgb(9 16 22 / .82); outline: 2px solid #fff; outline-offset: 2px; }
   .msg-text img, .chat-resource img, .attachment-preview img { cursor: zoom-in; }

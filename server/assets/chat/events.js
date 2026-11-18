@@ -20,11 +20,23 @@ export function initEvents(app) {
     new ResizeObserver(syncHeadBottom).observe(chatHead);
     syncHeadBottom();
   }
-  // The rail footer divider sits above the identity row, so it has to land on the
-  // composer's divider at any composer height, including five wrapped lines.
+  // The rail footer divider sits above the identity row. Keep it on the composer's
+  // divider while the composer is idle; staged files or wrapped lines grow only the
+  // composer, so the footer keeps its idle height instead of stretching with it.
   const composer = document.querySelector("#chatView > .composer");
   if (composer) {
-    const syncComposerBlock = () => document.documentElement.style.setProperty("--composer-block", `${Math.round(composer.getBoundingClientRect().height)}px`);
+    const root = document.documentElement, editor = app.$("#msgInput");
+    // A restored draft or staged files must not become the idle height people see on load.
+    const idleComposer = () => !editor?.textContent?.trim()
+      && !["#sendError", "#replyPreview", "#mentionPicker", "#attachmentTray"].some((selector) => { const node = app.$(selector); return node && !node.hidden; })
+      && !composer.querySelector(".failed-messages:not([hidden])");
+    const syncComposerBlock = () => {
+      const height = composer.getBoundingClientRect().height;
+      if (!height || !idleComposer()) return;
+      const idle = parseFloat(getComputedStyle(root).getPropertyValue("--composer-block")) || 0;
+      if (idle && height > idle + 2) return;
+      root.style.setProperty("--composer-block", `${Math.round(height)}px`);
+    };
     new ResizeObserver(syncComposerBlock).observe(composer);
     syncComposerBlock();
   }
@@ -67,7 +79,7 @@ export function initEvents(app) {
     readingPosition = { roomId: app.state.room?.id, messageId: anchor?.dataset.msgId, offset: anchor ? anchor.getBoundingClientRect().top - top : 0,
       atBottom: thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 80 };
     const guard = app.state.readAnchorGuard;
-    let missing = guard?.roomId === readingPosition.roomId && guard.missing;
+    let missing = Boolean(guard) && guard.roomId === readingPosition.roomId && Boolean(guard.missing);
     // A failed restore keeps its anchor while the landing stays put; scrolling to a
     // different message means the reader chose a new position and the old one is stale.
     if (missing) {
@@ -210,7 +222,8 @@ export function initEvents(app) {
   $("#railRoomForm").addEventListener("submit", (event) => { event.preventDefault(); void app.createRoom(); });
   $("#inRoomNameChat").addEventListener("input", app.hideSendError);
 
-  const input = $("#msgInput");
+  const input = $("#msgInput"), thread = $("#thread");
+  const markScrollIntent = () => { scrollGeneration++; app.state.userScrollIntentUntil = performance.now() + 700; };
   window.addEventListener("resize", () => app.autoGrow(input));
   $(".composer").addEventListener("click", (event) => {
     const button = event.target.closest?.("[data-failed-action]");
@@ -238,7 +251,16 @@ export function initEvents(app) {
     if (element?.closest(".editor-mention")) input.setCaret(input.selectionStart);
     app.recomputeMention(input);
   });
-  input.addEventListener("keydown", (event) => handleMessageKey(event, app));
+  input.addEventListener("keydown", (event) => {
+    if ((event.key === "PageUp" || event.key === "PageDown")
+        && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      markScrollIntent();
+      thread.scrollTop += (event.key === "PageDown" ? 1 : -1) * Math.max(80, thread.clientHeight * 0.9);
+      return;
+    }
+    handleMessageKey(event, app);
+  });
   input.addEventListener("keyup", (event) => {
     if (app.mentionActive && /^(ArrowLeft|ArrowRight|Home|End)$/.test(event.key)) app.recomputeMention();
   });
@@ -250,8 +272,6 @@ export function initEvents(app) {
     event.preventDefault();
     app.insertMention(option.dataset.name);
   });
-  const thread = $("#thread");
-  const markScrollIntent = () => { scrollGeneration++; app.state.userScrollIntentUntil = performance.now() + 700; };
   // Stop wheel overscroll at the ends. Without this, some layouts let the
   // document absorb the leftover delta and the view jumps a few pixels.
   thread.addEventListener("wheel", (event) => {

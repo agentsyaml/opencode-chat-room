@@ -340,9 +340,9 @@ export function initMessages(app) {
 
   app.send = async () => {
     const input = $("#msgInput"), room = app.state.room, replyTarget = room && app.replyTargetFor?.(room.id);
-    if (!room || app.state.sendingRooms?.has(room.id)) return;
+    if (!room || app.state.sendingRooms?.has(room.id)) return false;
     const message = app.prepareMessage?.(room.id, input.value) || { text: input.value.trim(), ids: [], ready: Boolean(input.value.trim()) };
-    if (!message.ready) return;
+    if (!message.ready) return false;
     // Clicking Send focuses the button; it is disabled when the draft clears, so
     // keep the caret in the composer or the next keystrokes go nowhere.
     input.focus({ preventScroll: true });
@@ -365,7 +365,7 @@ export function initMessages(app) {
         method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, ...(replyTarget ? { replyToMessageID: replyTarget.id } : {}) }),
       });
       app.completeAttachments?.(room.id, message.ids);
-      if (app.state.room?.id !== room.id) return;
+      if (app.state.room?.id !== room.id) return true;
       const entry = app.state.rooms.get(room.id);
       // The POST snapshot is older than anything polling received while it was
       // in flight; merge instead of dropping those messages.
@@ -392,6 +392,7 @@ export function initMessages(app) {
       void app.markActiveRoomRead();
       app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
+      return true;
     } catch (error) {
       const unchanged = (app.state.draftRevision.get(room.id) || 0) === revision;
       // Someone answered the question first; retrying the answer can never succeed,
@@ -404,7 +405,7 @@ export function initMessages(app) {
         app.renderFailedMessages();
       }
       app.completeAttachments?.(room.id, message.ids);
-      if (app.state.room?.id !== room.id) return;
+      if (app.state.room?.id !== room.id) return false;
       if (unchanged && !staleReply) app.clearDraft(room.id);
       if (staleReply) input.draftValue = text;
       app.autoGrow(input);
@@ -412,6 +413,7 @@ export function initMessages(app) {
       app.updateDraftCount();
       if (error.status === 401) { app.openChatSettings(); app.showSendError("sendAuth"); }
       else app.showSendError(error.network ? "sendNetwork" : "sendFailed", { message: error.message });
+      return false;
     } finally {
       app.state.sendingRooms.delete(room.id);
       if (app.state.room?.id === room.id) app.updateSendState();

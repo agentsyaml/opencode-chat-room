@@ -27,6 +27,7 @@ function inbox() {
     items: [
       { id: "old", roomId: "r1", roomName: "dev", roomKind: "group", senderId: "alice", text: "old", createdAt: 50 },
       { id: "m1", roomId: "r1", roomName: "dev", roomKind: "group", senderId: "alice", text: "first", createdAt: 200 },
+      { id: "recalled", roomId: "r1", roomName: "dev", roomKind: "group", senderId: "bob", text: "withdrawn", createdAt: 250, recalledAt: 260 },
       { id: "m2", roomId: "r1", roomName: "dev", roomKind: "group", senderId: "bob", text: "second", createdAt: 300 },
       { id: "m3", roomId: "r2", roomName: "dm", roomKind: "direct", senderId: "carol", text: "direct", createdAt: 400 },
     ],
@@ -51,6 +52,8 @@ test("delivery queues one prompt per room and advances the watermark", async () 
       assert.match(call.args[4], /- \[.*\] (alice|carol): /);
     }
     assert.doesNotMatch(fake.calls[0].args[4], /old/);
+    assert.doesNotMatch(fake.calls[0].args[4], /withdrawn/);
+    assert.match(fake.calls[0].args[4], /\(id: m1\) first/);
 
     const marks = center.requests.filter((r) => r.path === "/queued").map((r) => r.body);
     assert.deepEqual(marks, [

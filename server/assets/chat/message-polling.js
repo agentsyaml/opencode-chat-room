@@ -40,6 +40,9 @@ export function initMessagePolling(app, isUnreadMessage) {
     try {
       const entry = app.state.rooms.get(roomId);
       const query = new URLSearchParams({ sessionID: LS.sessionID, roomId, excludeSelf: "0", timeout: "25000", afterTs: String(entry?.receivedTs || 0) });
+      // Lets the server answer at once when a recall changed the room since our
+      // last rendered snapshot instead of holding the long-poll.
+      if (entry && Number.isFinite(entry.recallVersion)) query.set("recallVersion", String(entry.recallVersion));
       const data = await app.api(`/inbox?${query}`, { signal });
       if (!isCurrentPoll(roomId, generation)) return;
       if (data.member === false) {
@@ -67,6 +70,14 @@ export function initMessagePolling(app, isUnreadMessage) {
            entry.unreadIds.delete(item.answerToMessageID); unreadChanged = true;
          }
        }
+      // A changed recall version means rows were hidden since the last look; refetch
+      // the newest page and patch the rows already on screen.
+      const recallVersion = Number(data.recallVersion);
+      if (entry && Number.isFinite(recallVersion) && recallVersion !== (entry.recallVersion ?? 0) && !entry.recallSync) {
+        entry.recallSync = true;
+        app.lastReconcileAt = Date.now();
+        void app.reconcileRoom?.(roomId, generation, true);
+      }
       if (entry) entry.receivedTs = items.reduce((latest, item) => Number.isSafeInteger(item.createdAt) ? Math.max(latest, item.createdAt) : latest, previousReceivedTs);
       if (entry) entry.unreadOverflow = Boolean(data.hasMore);
        if (messages.length > LOADED_MESSAGE_LIMIT) { const anchorId = app.state.positions.get(roomId)?.messageId, anchor = anchorId && messages.find((item) => item.id === anchorId); messages.splice(0, messages.length - LOADED_MESSAGE_LIMIT); if (anchor && !messages.includes(anchor)) messages.unshift(anchor); }
@@ -117,14 +128,23 @@ export function initMessagePolling(app, isUnreadMessage) {
     } catch { /* The next room event will retry. */ }
   };
 
-  app.reconcileRoom = async (roomId, generation = app.state.pollGeneration) => {
+  app.reconcileRoom = async (roomId, generation = app.state.pollGeneration, syncHistory = false) => {
+    const entry = app.state.rooms.get(roomId);
     try {
       const room = await app.api(`/rooms/${encodeURIComponent(roomId)}`);
       if (!isCurrentPoll(roomId, generation)) return;
+      if (entry && Number.isFinite(Number(room.recallVersion))) entry.recallVersion = Number(room.recallVersion);
       const current = app.state.room.messages;
       const ids = new Set(current.map((message) => message.id));
       const missing = room.messages.filter((message) => !ids.has(message.id));
-      if (!missing.length && !app.failedRenderIds.size) return;
+      // History carries recall state; patch rows whose live recall event was missed.
+      let recalled = false;
+      for (const message of room.messages) {
+        if (message.recalledAt && app.applyRecall?.(roomId, { messageID: message.id, recalledAt: message.recalledAt, recalledBy: message.recalledBy })) recalled = true;
+      }
+      // Older loaded pages sit below this payload; hide their recalled text too.
+      if (syncHistory) void app.syncLoadedHistory?.(roomId, generation);
+      if (!missing.length && !recalled && !app.failedRenderIds.size) return;
       for (const message of missing) {
         const index = current.findIndex((item) => item.createdAt > message.createdAt);
         current.splice(index < 0 ? current.length : index, 0, message);
@@ -133,5 +153,6 @@ export function initMessagePolling(app, isUnreadMessage) {
       const result = app.rerenderMessages();
       if (result.skipped === 0) void app.markActiveRoomRead();
     } catch { /* Try again during the next reconciliation. */ }
+    finally { if (entry) entry.recallSync = false; }
   };
 }

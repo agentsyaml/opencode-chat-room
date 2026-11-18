@@ -6,7 +6,7 @@ export type InboxItem = Pick<Message, "id" | "roomId" | "senderId" | "senderSess
   roomKind?: "group" | "direct";
   answerQuestionExcerpt?: string;
 };
-export type InboxResult = { member: boolean; items: InboxItem[]; queuedTs: Record<string, number>; hasMore: boolean };
+export type InboxResult = { member: boolean; items: InboxItem[]; queuedTs: Record<string, number>; hasMore: boolean; recallVersion: number };
 
 export async function readInbox(sessionID: string, roomFilter: string | null, excludeSelf: boolean, afterTs?: number): Promise<InboxResult> {
   return readInboxMessages(sessionID, roomFilter, excludeSelf, excludeSelf ? 20 : 100, afterTs);

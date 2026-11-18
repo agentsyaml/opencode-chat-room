@@ -417,12 +417,12 @@ async function checkComposerEditor(page: any) {
   await editor.fill("Line\n@Pe"); await page.locator('#mentionPicker [data-name="Peer"]').waitFor(); await page.keyboard.press("Enter");
   expect(await editor.evaluate((node: any) => node.value)).toBe("Line\n<at>@Peer</at>");
   await editor.fill("@Pe"); await page.locator('#mentionPicker [data-name="Peer"]').waitFor(); await page.keyboard.press("Enter");
-  await editor.evaluate((node: any) => { node.value = "x".repeat(1986) + node.value; node.dispatchEvent(new InputEvent("input", { bubbles: true })); });
-  expect(await editor.evaluate((node: any) => node.value.length)).toBe(2000); expect(await page.locator("#btnSend").isDisabled()).toBe(false);
+  await editor.evaluate((node: any) => { node.value = "x".repeat(4986) + node.value; node.dispatchEvent(new InputEvent("input", { bubbles: true })); });
+  expect(await editor.evaluate((node: any) => node.value.length)).toBe(5000); expect(await page.locator("#btnSend").isDisabled()).toBe(false);
   await page.locator("#btnSend").click();
-  await page.waitForFunction(async (url: string) => (await import(url)).app.state.room.messages.at(-1)?.text.length === 2000, "/assets/chat/state.js");
-  await editor.evaluate((node: any) => { node.value = "x".repeat(1987) + "<at>@Peer</at>"; node.dispatchEvent(new InputEvent("input", { bubbles: true })); });
-  expect(await editor.evaluate((node: any) => node.value.length)).toBe(2001); expect(await page.locator("#btnSend").isDisabled()).toBe(true); await editor.fill("");
+  await page.waitForFunction(async (url: string) => (await import(url)).app.state.room.messages.at(-1)?.text.length === 5000, "/assets/chat/state.js");
+  await editor.evaluate((node: any) => { node.value = "x".repeat(4987) + "<at>@Peer</at>"; node.dispatchEvent(new InputEvent("input", { bubbles: true })); });
+  expect(await editor.evaluate((node: any) => node.value.length)).toBe(5001); expect(await page.locator("#btnSend").isDisabled()).toBe(false); await editor.fill("");
   await editor.fill("Hello @Pe"); await page.locator('#mentionPicker [data-name="Peer"]').waitFor(); await page.keyboard.press("Enter");
   const before = await page.locator("#msgList [data-msg-id]").count(); await editor.evaluate((node: any) => node.setCaret(node.value.length));
   await page.evaluate(() => document.querySelector<HTMLElement>("#msgInput")!.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));

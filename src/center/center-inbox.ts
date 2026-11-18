@@ -10,6 +10,8 @@ import {
 } from "./queue.ts";
 import { request, markQueued, type CenterOpts } from "./center-client.ts";
 import { explicitlyAddresses } from "./mentions.ts";
+import { withMessageIds } from "./message-ids.ts";
+import { notificationPrefix } from "./notification-budget.ts";
 import { claimBackgroundAttempt } from "../state/receiver-state.ts";
 import { prepareReceiptCandidate, receiptDestination } from "../agent/agent-receipts.ts";
 import { serializeSessionPush } from "./session-delivery.ts";
@@ -67,7 +69,7 @@ export async function checkCenterInbox(
         }
         items = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
       }
-      await pushItemsToSession(opts, sessionID, items, transport, queued, qualified);
+      await pushItemsToSession(opts, sessionID, items, transport, queued, qualified, result.hasMore === false);
     });
   } catch {
     // The next inbox poll retries failed delivery.
@@ -136,6 +138,8 @@ export async function pushItemsToSession(
   transport: QueueTransport,
   queuedTs: Readonly<Record<string, number>> = {},
   qualifiedRooms: ReadonlySet<string> = new Set(),
+  // A truncated multi-room page cannot prove an absent pending item was recalled.
+  pageComplete = true,
 ): Promise<PushResult> {
   const rooms = new Map<string, InboxItem[]>();
   const mentionOnly = transport.mentionOnlySessions?.has(sessionID) ?? false;
@@ -160,28 +164,49 @@ export async function pushItemsToSession(
     const target = { ...transport, directory: recipient.directory ?? transport.directory };
     const roomKind = recipient.roomKind ?? batch.find((item) => item.roomKind)?.roomKind ?? "group";
     const cutoff = Math.max(queuedTs[roomId] ?? 0, recipient.lastReadTs ?? 0, recipient.lastQueuedTs ?? 0);
-    const unread = batch.filter((item) => item.createdAt > cutoff);
+    const unread = batch.filter((item) => item.createdAt > cutoff && !item.recalledAt);
+    // Recalled messages disappear from the authoritative inbox; drop them from
+    // a pending admission before its prompt is delivered again.
+    const live = new Set(batch.map((item) => item.id).filter((id): id is string => typeof id === "string" && !!id));
+    // A truncated page cannot mark recalls; the room snapshot can.
+    const recalled = new Set<string>();
+    if (!pageComplete && pendingAdmission(sessionID, roomId)?.state === "pending") {
+      try {
+        const room = await request(opts, `/rooms/${encodeURIComponent(roomId)}`, "GET") as { messages?: Array<{ id?: string; recalledAt?: number }> };
+        for (const message of room.messages ?? []) if (message.id && message.recalledAt) recalled.add(message.id);
+      } catch { /* keep the page view */ }
+    }
     prunePendingAdmission(sessionID, roomId, cutoff,
-      (pending) => render(batch[0]!.roomName, roomId, roomKind, recipient!.name ?? "you", pending));
+      (pending) => render(batch[0]!.roomName, roomId, roomKind, recipient!.name ?? "you", pending),
+      (item) => !item.id || (!recalled.has(item.id) && (!pageComplete || live.has(item.id))));
     const existing = pendingAdmission(sessionID, roomId);
     if (!unread.length && existing?.state !== "pending") continue;
-    const maxTs = unread.reduce((max, item) => Math.max(max, item.createdAt), 0);
-    const delta = existing?.state === "admitted" && maxTs > existing.maxTs
-      ? unread.filter((item) => item.createdAt > existing.maxTs)
+    const deliveredIDs = new Set(existing?.state === "admitted" ? existing.items.map((item) => item.id) : []);
+    const delta = existing?.state === "admitted"
+      ? unread.filter((item) => item.createdAt > existing.maxTs || !deliveredIDs.has(item.id))
       : unread;
     const eligibleItems = existing?.state === "pending" ? existing.items : delta.slice(-20);
     if (roomMentionOnly && (!recipient?.name ||
       !eligibleItems.some((item) => explicitlyAddresses(item, recipient.name!, sessionID, roomKind)) &&
       !delta.slice(-20).some((item) => explicitlyAddresses(item, recipient.name!, sessionID, roomKind)))) continue;
-    if (existing?.state === "admitted" && (maxTs <= existing.maxTs || !delta.length)) {
+    if (existing?.state === "admitted" && !delta.length) {
       if (existing.maxTs > 0 && await markQueued(opts, roomId, sessionID, existing.maxTs)) {
         clearPendingAdmission(sessionID, roomId, existing.maxTs);
       }
       continue;
     }
-    const deltaTs = delta.reduce((max, item) => Math.max(max, item.createdAt), 0);
-    const { prompt, capped } = render(batch[0]!.roomName, roomId, roomKind, recipient.name ?? "you", delta);
-    const admission = getOrCreatePendingAdmission(sessionID, roomId, delta, prompt, deltaTs, capped);
+    // A later trigger may carry only newer messages; retain the undelivered
+    // admission so retrying it first cannot skip older unread messages.
+    const carried = existing?.state === "pending" ? existing.items : [];
+    const carriedIDs = new Set(carried.map((item) => item.id));
+    const merged = carried.length
+      ? [...carried, ...delta.filter((item) => !carriedIDs.has(item.id)).slice(0, Math.max(0, 20 - carried.length))]
+      : delta;
+    const deliverable = notificationPrefix(merged);
+    const deltaTs = deliverable.reduce((max, item) => Math.max(max, item.createdAt), 0);
+    const displayDelta = withMessageIds(deliverable);
+    const { prompt, capped } = render(batch[0]!.roomName, roomId, roomKind, recipient.name ?? "you", displayDelta);
+    const admission = getOrCreatePendingAdmission(sessionID, roomId, displayDelta, prompt, deltaTs, capped);
     const addressedTs = recipient.name
       ? admission.items.filter((item) => explicitlyAddresses(item, recipient.name!, sessionID, roomKind))
         .reduce((max, item) => Math.max(max, item.createdAt), 0)

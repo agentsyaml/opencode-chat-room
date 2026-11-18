@@ -1,21 +1,25 @@
 import { loadAdminCapability, saveAdminCapability, type AdminIdentity } from "./admin-credentials.ts";
 import type { CenterOpts } from "../center/center-client.ts";
+import { decideJoinRequest, listJoinRequests } from "../center/center-client.ts";
 import type { QueueTransport } from "../center/queue-transport.ts";
 import { z } from "zod";
 
 export type AdminContext = { sessionID: string };
 export type AdminArgs = {
-  action: "admin_claim" | "admin_overview" | "admin_history" | "admin_remove_member";
+  action: "admin_claim" | "admin_overview" | "admin_history" | "admin_remove_member"
+    | "admin_join_requests" | "admin_approve_join" | "admin_deny_join";
   roomId?: string; enrollmentKey?: string; targetRoomId?: string; targetSessionID?: string;
   limit?: number;
 };
+const ADMIN_ACTIONS = ["admin_claim", "admin_overview", "admin_history", "admin_remove_member",
+  "admin_join_requests", "admin_approve_join", "admin_deny_join"] as const;
 export const adminToolSchema = z.object({
-  action: z.enum(["admin_claim", "admin_overview", "admin_history", "admin_remove_member"]),
+  action: z.enum(ADMIN_ACTIONS),
   roomId: z.string().optional(), enrollmentKey: z.string().optional(), targetRoomId: z.string().optional(),
-  targetSessionID: z.string().optional().describe("Member session to remove for admin_remove_member."),
+  targetSessionID: z.string().optional().describe("Member session to remove for admin_remove_member; requester session ID for admin_approve_join and admin_deny_join."),
   limit: z.number().int().min(1).max(50).optional(),
 });
-export const adminToolDescription = "Administer an operator-designated room: overview, history and member removal of that room only. This tool never joins a room.";
+export const adminToolDescription = "Administer an operator-designated room: overview, history, member removal and join-approval review of that room only. Join approval lists only requests visible to this designated management agent; only a human administrator can approve human requests. This tool never joins a room.";
 const safe = (value: string) => encodeURIComponent(value);
 
 async function send(opts: CenterOpts, path: string, method: string, body?: unknown,
@@ -71,6 +75,11 @@ export async function adminTool(args: AdminArgs, context: AdminContext, opts: Ce
   // Designation is immediate; a claimed capability is only sent when one exists.
   const capability = (await loadAdminCapability(identity)) ?? "";
   const root = `/admin/rooms/${safe(roomId)}`;
+  const agentHeaders = {
+    ...(capability ? { "X-Chat-Admin-Capability": capability } : {}),
+    "X-Chat-Agent-Session": context.sessionID,
+    "X-Chat-Agent-Owner": ownerID ?? "",
+  };
   const request = (route: string, method: string, body?: unknown) =>
     send(opts, `${root}${route}`, method, body, capability, context.sessionID, ownerID ?? "");
   try {
@@ -88,6 +97,21 @@ export async function adminTool(args: AdminArgs, context: AdminContext, opts: Ce
         if (!targetSessionID) return "error: targetSessionID is required";
         result = await send(opts, `/rooms/${safe(roomId)}/kick`, "POST", { sessionID: context.sessionID, targetSessionID }, capability, context.sessionID, ownerID ?? "");
         break;
+      }
+      case "admin_join_requests": {
+        const pending = await listJoinRequests(opts, roomId, context.sessionID, agentHeaders);
+        if (!pending.length) return "no pending join requests";
+        return pending
+          .map((entry) => `${entry.sessionID} (${entry.name}, ${entry.isAgent ? "agent" : "human"}): requested ${new Date(entry.createdAt).toISOString()}`)
+          .join("\n");
+      }
+      case "admin_approve_join":
+      case "admin_deny_join": {
+        const requestSessionID = args.targetSessionID?.trim();
+        if (!requestSessionID) return "error: targetSessionID is required";
+        const approve = args.action === "admin_approve_join";
+        await decideJoinRequest(opts, roomId, requestSessionID, approve, context.sessionID, agentHeaders);
+        return `${approve ? "approved" : "denied"} join request ${requestSessionID}`;
       }
       default: return "error: unsupported admin action";
     }

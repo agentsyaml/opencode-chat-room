@@ -174,7 +174,7 @@ export function roomSchema() {
     roomId: z.string().optional(),
     resourceId: z.string().optional(),
     filePath: z.string().optional().describe("Local regular file to upload; central mode only; requires host read permission."),
-    text: z.string().max(2000).optional(),
+    text: z.string().max(5000).optional(),
     isQuestion: z.boolean().optional(),
     announcementName: z.string().optional().describe("Name of a room announcement; distinct from participant or room name."),
     content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters."),

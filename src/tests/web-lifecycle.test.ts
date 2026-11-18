@@ -207,6 +207,9 @@ async function delayedCreateKeepsLatestIntent(page: any, origin: string, activeR
   await page.locator("#btnNewRoom").click();
   await page.locator("#inRoomNameChat").fill("Late created room");
   await page.locator("#btnCreateChatRoom").click(); await requested;
+  // The quick-create popover overlays the room rows; dismiss it before switching.
+  await page.keyboard.press("Escape");
+  await page.locator("#railRoomForm").waitFor({ state: "hidden" });
   await switchTo(page, activeRoom);
   release(); await completed; await page.waitForTimeout(100);
   expect(await roomId(page)).toBe(activeRoom);
@@ -372,6 +375,10 @@ async function sameNameGroupIdentity(browser: any, origin: string) {
   await directIncoming.waitFor();
   expect(await directOwn.evaluate((node: HTMLElement) => node.classList.contains("own"))).toBe(true);
   expect(await directIncoming.evaluate((node: HTMLElement) => node.classList.contains("own"))).toBe(false);
+  await a.locator("#btnMembers").click();
+  await a.locator("#memberList li").first().waitFor();
+  expect(await a.locator("#memberList .owner-badge, #memberList .admin-badge, #memberList .admin-agent-badge").count()).toBe(0);
+  await a.locator("#btnMembers").click();
   await aContext.close(); await bContext.close();
 }
 

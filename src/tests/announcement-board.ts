@@ -7,6 +7,15 @@ export async function announcementBoardWorks(page: any, artifacts: string) {
   await page.locator("#announcementPanel").waitFor({ state: "visible" });
   await page.waitForFunction(() => document.querySelector("#announcementStatus")?.textContent === "No announcements yet.");
   await openAnnouncement(page);
+  // The editor is a writing surface, not a four-line dialog.
+  const layout = await page.locator("#announcementDialog").evaluate((node: HTMLElement) => {
+    const box = node.getBoundingClientRect(), area = document.querySelector<HTMLElement>("#announcementContent")!.getBoundingClientRect();
+    return { width: box.width, left: box.left, right: box.right, areaHeight: area.height, viewport: innerWidth, scrollY: document.scrollingElement!.scrollTop };
+  });
+  expect(layout.width).toBeGreaterThan(700);
+  expect(layout.areaHeight).toBeGreaterThan(240);
+  expect(layout.left).toBeGreaterThanOrEqual(0); expect(layout.right).toBeLessThanOrEqual(layout.viewport);
+  expect(layout.scrollY).toBe(0);
   await page.locator("#announcementName").fill(name);
   await page.locator("#announcementContent").fill(content);
   await page.locator("#btnSaveAnnouncement").click();

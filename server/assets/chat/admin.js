@@ -60,6 +60,7 @@ export function initAdmin(app) {
     const room = app.state.room; if (!room) return;
     $("#editRoomName").value = room.name;
     $("#editRoomDescription").value = room.description || "";
+    $("#editRoomJoinPolicy").checked = room.joinPolicy === "approval";
     $("#editRoomStatus").textContent = "";
     people = []; agentsReady = false; rosterReady = false;
     renderOwnerOptions(room);
@@ -98,8 +99,11 @@ export function initAdmin(app) {
     // Until the registry loads, empty rosters are placeholders, not revocations.
     const owner = isOwner(), nextOwner = $("#editRoomOwner").value;
     const checkedAdmins = [...$("#editRoomAdminIds").querySelectorAll("input:checked")].map((input) => input.value);
+    const joinPolicy = $("#editRoomJoinPolicy").checked ? "approval" : "open";
+    if (joinPolicy !== (room.joinPolicy ?? "open") && joinPolicy === "open" && !confirm(app.t("joinPolicyOpenConfirm"))) return;
     const body = {
       sessionID: LS.sessionID, name, description: $("#editRoomDescription").value.trim(),
+      ...(joinPolicy !== (room.joinPolicy ?? "open") ? { joinPolicy } : {}),
       ...(owner && agentsReady ? { adminSessionID: $("#editRoomAdmin").value || null } : {}),
       ...(owner && nextOwner && nextOwner !== room.ownerId ? { ownerId: nextOwner } : {}),
       ...(rosterReady ? { adminIds: checkedAdmins, successorId: $("#editRoomSuccessor").value || null } : {}),
@@ -107,7 +111,7 @@ export function initAdmin(app) {
     const button = event.submitter; if (button) button.disabled = true;
     try {
       const updated = await app.api(`/rooms/${encodeURIComponent(room.id)}`, { method: "PATCH", body: JSON.stringify(body) });
-      const meta = { name: updated.name, description: updated.description, adminSessionID: updated.adminSessionID, ownerId: updated.ownerId, adminIds: updated.adminIds ?? [], successorId: updated.successorId ?? null, openQuestions: updated.openQuestions };
+      const meta = { name: updated.name, description: updated.description, joinPolicy: updated.joinPolicy ?? "open", adminSessionID: updated.adminSessionID, ownerId: updated.ownerId, adminIds: updated.adminIds ?? [], successorId: updated.successorId ?? null, openQuestions: updated.openQuestions };
       const entry = app.state.rooms.get(room.id);
       if (entry) { Object.assign(entry.room, meta); app.state.room = entry.room; }
       const listed = app.state.availableRooms?.find((item) => item.id === room.id);
@@ -117,6 +121,8 @@ export function initAdmin(app) {
       app.rerenderMessages();
       app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
+      if ((updated.joinPolicy ?? "open") === "approval") void app.refreshJoinRequests?.();
+      else app.clearJoinRequests?.();
       app.cacheRoomSoon?.(room.id);
       dialog.close();
     } catch (error) { $("#editRoomStatus").textContent = error.message; }

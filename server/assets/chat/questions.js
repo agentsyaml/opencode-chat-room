@@ -76,7 +76,10 @@ export function initQuestions(app) {
       box.hidden = false;
       copy.textContent = app.t("copyQuestion"); send.textContent = app.t("sendAnswer"); input.setAttribute("aria-placeholder", app.t("answerPlaceholder"));
       if (feedback.dataset.copyState) feedback.textContent = app.t(feedback.dataset.copyState);
-      if (input && send) send.disabled = !input.value.trim() || input.value.length > 2000 || submitting.has(key);
+      if (input && send) {
+        send.disabled = !input.value.trim() || input.value.length > 5000 || submitting.has(key);
+        if (input.value.length > 5000) { app.setText(status, "answerTooLong"); status.hidden = false; status.dataset.tooLong = "true"; }
+      }
       return;
     }
     box.textContent = "";
@@ -104,12 +107,13 @@ export function initQuestions(app) {
     send.type = "submit";
     send.className = "btn primary small";
     send.textContent = app.t("sendAnswer");
-    send.disabled = !input.value.trim() || input.value.length > 2000 || submitting.has(key);
+    send.disabled = !input.value.trim() || input.value.length > 5000 || submitting.has(key);
     input.addEventListener("input", (event) => {
       drafts.set(`${roomId}\0${question.id}`, input.draftValue);
       if (!event.isComposing) app.recomputeMention(input);
-      send.disabled = !input.value.trim() || input.value.length > 2000 || submitting.has(key);
-      if (input.value.length > 2000) { app.setText(status, "answerTooLong"); status.hidden = false; }
+      send.disabled = !input.value.trim() || input.value.length > 5000 || submitting.has(key);
+      if (input.value.length > 5000) { app.setText(status, "answerTooLong"); status.hidden = false; status.dataset.tooLong = "true"; }
+      else if (status.dataset.tooLong) { delete status.dataset.tooLong; status.hidden = true; status.textContent = ""; }
     });
     input.addEventListener("compositionend", () => app.recomputeMention(input));
     input.addEventListener("keydown", (event) => {
@@ -185,7 +189,7 @@ export function initQuestions(app) {
   function showFailed() { status.dataset.error = "true"; app.setText(status, "questionsFailed"); status.hidden = false; }
 
   app.answerQuestionFromReply = async (roomId, questionId, text) => {
-    if (text.length > 2000) throw Object.assign(new Error(app.t("answerTooLong")), { status: 413 });
+    if (text.length > 5000) throw Object.assign(new Error(app.t("answerTooLong")), { status: 413 });
     try {
       const result = await app.api(`/rooms/${encodeURIComponent(roomId)}/questions/${encodeURIComponent(questionId)}/answers`, {
         method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text }),
@@ -201,7 +205,7 @@ export function initQuestions(app) {
   async function answer(roomId, questionId, text, button) {
     const key = `${roomId}\0${questionId}`;
     if (!text || submitting.has(key)) return;
-    if (text.length > 2000) { app.setText(status, "answerTooLong"); status.hidden = false; return; }
+    if (text.length > 5000) { app.setText(status, "answerTooLong"); status.hidden = false; return; }
     submitting.add(key);
     button.disabled = true;
     renderReply(roomId);

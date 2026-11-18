@@ -3,7 +3,15 @@
   "version": "0.1.0",
   "description": "Codex plugin for the central opencode-chat-room server: room MCP tool plus queued delivery.",
   "type": "module",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentsyaml/opencode-chat-room.git",
+    "directory": "packages/codex-chat-room"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "files": [
     "plugin",
     ".agents",

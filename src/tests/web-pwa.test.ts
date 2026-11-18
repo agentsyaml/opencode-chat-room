@@ -31,6 +31,8 @@ test.skipIf(!browserModule)("installs as an app and starts from the shell while 
     expect(manifest.display).toBe("standalone");
     expect(manifest.icons.length).toBeGreaterThanOrEqual(2);
     expect(await page.locator('link[rel="manifest"]').getAttribute("href")).toBe("/manifest.webmanifest");
+    expect(await page.locator('meta[name="mobile-web-app-capable"]').getAttribute("content")).toBe("yes");
+    expect(await page.locator('meta[name="apple-mobile-web-app-capable"]').getAttribute("content")).toBe("yes");
     const worker = await (await fetch(`${origin}/sw.js`)).text();
     expect(worker).not.toContain("{{version}}");
     expect(worker).toContain('const VERSION = "v');

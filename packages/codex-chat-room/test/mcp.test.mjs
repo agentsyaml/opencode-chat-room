@@ -4,8 +4,13 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import readline from "node:readline";
 import { roomPayload, startCenter } from "./helpers.mjs";
+import { ROOM_TOOL } from "../plugin/lib/server.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+
+test("room tool accepts message text up to 5000 characters", () => {
+  assert.equal(ROOM_TOOL.inputSchema.properties.text.maxLength, 5000);
+});
 
 function startMcp(env) {
   const child = spawn(process.execPath, ["plugin/mcp-server.mjs"], {

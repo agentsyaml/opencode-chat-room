@@ -8,8 +8,14 @@ test("list, create, join and send map to central routes", async () => {
     if (method === "GET" && path === "/rooms") {
       return [200, [roomPayload()]];
     }
-    if (method === "POST" && (path === "/rooms" || path.endsWith("/join") || path.endsWith("/messages"))) {
-      return [path.endsWith("/messages") ? 200 : 201, roomPayload()];
+    if (method === "POST" && path.endsWith("/recall")) {
+      return [200, { ok: true, messageID: "m-sent", recalledAt: 2000, recalledBy: "alex@host" }];
+    }
+    if (method === "POST" && path.endsWith("/messages")) {
+      return [200, roomPayload({ messages: [{ id: "m-sent", senderId: "alex@host", text: "hello", createdAt: 1000 }] })];
+    }
+    if (method === "POST" && (path === "/rooms" || path.endsWith("/join"))) {
+      return [201, roomPayload()];
     }
     return undefined;
   });
@@ -32,9 +38,14 @@ test("list, create, join and send map to central routes", async () => {
     assert.equal(join.body.participantName, "alice");
 
     const sent = await centerAction(cfg, { action: "send", roomId: "r1", text: " hello " }, "codex:t1");
-    assert.equal(sent, "sent: hello\n" + created);
+    assert.match(sent, /^sent: hello\nmessage id: m-sent\nRoom r1 \(dev\)/);
     const message = center.requests.find((r) => r.path === "/rooms/r1/messages");
     assert.deepEqual(message.body, { sessionID: "codex:t1", text: "hello" });
+
+    assert.equal(await centerAction(cfg, { action: "recall", roomId: "r1", messageId: "m-sent" }, "codex:t1"), "recalled message m-sent");
+    const recall = center.requests.find((r) => r.path === "/rooms/r1/messages/m-sent/recall");
+    assert.equal(recall.method, "POST");
+    assert.deepEqual(recall.body, { sessionID: "codex:t1" });
   } finally {
     await center.close();
   }
@@ -60,7 +71,7 @@ test("poll excludes self, acknowledges the newest foreign message and reports er
   try {
     const cfg = { url: center.url, token: "" };
     const polled = await centerAction(cfg, { action: "poll", roomId: "r1" }, "codex:t1");
-    assert.match(polled, /alice: hi/);
+    assert.match(polled, /alice: hi \(id: m1\)/);
     assert.doesNotMatch(polled, /own/);
     const inbox = center.requests.find((r) => r.path === "/inbox");
     assert.equal(inbox.query.excludeSelf, "1");

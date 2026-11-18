@@ -1,9 +1,10 @@
 import { LS } from "./state.js";
 import { followsBottom } from "./message-window.js";
+import { persist, forget, recover, forgetTextSource } from "./attachment-store.js";
 
 const MAX_PARALLEL_UPLOADS = 2;
 const MAX_BUFFERED_BYTES = 32 * 1024 * 1024; // Pasted files are small; larger ones stream to keep the heap bounded.
-const TEXT_LIMIT = 2000;
+const TEXT_LIMIT = 5000;
 const previewTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp"]);
 
 export function initAttachments(app) {
@@ -11,7 +12,9 @@ export function initAttachments(app) {
   const drafts = new Map();
   const statuses = new Map();
   app.state.sendingRooms ||= new Set();
-  let limit = null, configRequest = null, activeUploads = 0;
+  let limit = null, configRequest = null, activeUploads = 0, eagerQueued = 0;
+  const converting = new Set(), restoring = new Set(), uploadWaiters = new Map();
+  let editorLock = null, unloadGuard = false;
   const roomId = () => app.state.room?.id || "";
   const filesFor = (id) => drafts.get(id) || [];
   const markers = (items) => items.filter((item) => item.resource).map((item) => `[[resource:${item.resource.id}]]`);
@@ -22,6 +25,31 @@ export function initAttachments(app) {
     bytes[6] = (bytes[6] & 0x0f) | 0x40; bytes[8] = (bytes[8] & 0x3f) | 0x80;
     const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  // Pasted files are read at paste time so a handle the browser cannot read fails
+  // as a read error, not later as a misleading network error. Eager reads only take
+  // the free upload slots; the rest read when they start uploading, so at most
+  // MAX_PARALLEL_UPLOADS buffers are held.
+  function releaseEager(item) {
+    if (item.eagerQueued) { item.eagerQueued = false; eagerQueued--; }
+  }
+  function releaseBuffer(item) {
+    item.buffer = null;
+    if (item.readPending) item.released = true;
+    else { item.read = null; releaseEager(item); }
+  }
+  function startRead(item, eager = false) {
+    if (!item.pasted || item.file.size > MAX_BUFFERED_BYTES) return null;
+    if (eager) {
+      if (activeUploads + eagerQueued >= MAX_PARALLEL_UPLOADS) return null;
+      item.eagerQueued = true; eagerQueued++;
+    }
+    const read = Promise.resolve().then(() => item.file.arrayBuffer());
+    item.read = read; item.readPending = true; item.released = false;
+    // Hold the eager slot until the read settles, even if the item is removed meanwhile.
+    const settle = () => { item.readPending = false; if (item.released) { item.read = null; releaseEager(item); } };
+    void read.then(settle, settle);
+    return read;
   }
   const textFor = (id, caption) => {
     const parts = [String(caption || "").trim(), ...markers(filesFor(id))].filter(Boolean);
@@ -49,8 +77,67 @@ export function initAttachments(app) {
     });
   }
   function prepareMessage(id, caption) {
-    const items = filesFor(id), composed = textFor(id, caption);
-    return { ...composed, ready: Boolean(composed.text) && composed.text.length <= TEXT_LIMIT && items.every((item) => item.status === "uploaded") };
+    const items = filesFor(id), composed = textFor(id, caption), body = String(caption || "");
+    const overLimit = composed.text.length > TEXT_LIMIT, question = Boolean(app.replyTargetFor?.(id)?.isQuestion);
+    // A prior attempt can already carry this text; reusing it avoids a second file.
+    const conversion = body.length > TEXT_LIMIT ? items.find((item) => item.textSource === body) : undefined;
+    const markerText = textFor(id, "").text, effective = conversion ? markerText : composed.text;
+    // Converting moves the draft into a file; the message then carries only resource markers.
+    const canConvert = overLimit && body.length > TEXT_LIMIT && markerText.length <= TEXT_LIMIT && !question && items.every((item) => item.status !== "failed");
+    return { ...composed, overLimit, conversion, canConvert, ready: Boolean(composed.text) && effective.length <= TEXT_LIMIT && items.every((item) => item.status === "uploaded") };
+  }
+  const pastedTextName = () => `pasted-text-${new Date().toISOString().slice(0, 19).replace(/\D/g, "")}.txt`;
+  // Mentions are stored as editor tokens; the file gets the visible text instead.
+  const plainText = (text) => String(text).replace(/<at>@([^<]+)<\/at>/g, "@$1");
+  const textFile = (text) => new File([text], pastedTextName(), { type: "text/plain" });
+  function persistItem(item, id) {
+    if (!item.pasted) return;
+    void persist(item, id).then((ok) => { if (!ok) persistenceFailed(id); });
+  }
+  function persistenceFailed(id) {
+    updateDurability();
+    setStatus("attachmentNotPersisted", true, id);
+  }
+  function warnUnload(event) { event.preventDefault(); event.returnValue = ""; }
+  function updateDurability() {
+    const unsafe = [...drafts.values()].flat().some((item) => item.durable === false);
+    if (unsafe && !unloadGuard) { window.onbeforeunload = warnUnload; unloadGuard = true; }
+    else if (!unsafe && unloadGuard) { window.onbeforeunload = null; unloadGuard = false; }
+    const id = roomId(), hint = $("#attachmentVolatile"), volatile = filesFor(id).some((item) => item.durable === false);
+    hint.textContent = app.t(volatile ? "attachmentNotPersisted" : "attachmentVolatile");
+    hint.classList.toggle("danger-text", volatile);
+  }
+  async function restoreRoom(id) {
+    if (restoring.has(id)) return;
+    restoring.add(id);
+    try {
+      const restored = await recover(id, app.state.drafts.get(id) || "");
+      const existing = filesFor(id), keys = new Set(existing.map((item) => item.uploadID)), items = [...existing];
+      for (const record of restored) {
+        if (keys.has(record.uploadID)) continue;
+        keys.add(record.uploadID);
+        items.push({ ...record, pasted: true, status: "queued", buffer: undefined, read: undefined, retried: false, loaded: 0, percent: 0, cancelled: false, durable: true });
+      }
+      if (items.length === existing.length) return;
+      drafts.set(id, items);
+      if (roomId() === id) { render(); pump(); }
+    } finally {
+      restoring.delete(id);
+      if (roomId() === id) app.updateSendState();
+    }
+  }
+  function lockComposer() {
+    if (editorLock) return;
+    editorLock = { editable: input.contentEditable, disabled: input.getAttribute("aria-disabled"), busy: input.getAttribute("aria-busy"), selection: input.getSelectionOffsets?.() || null };
+    input.contentEditable = "false"; input.setAttribute("aria-disabled", "true"); input.setAttribute("aria-busy", "true");
+  }
+  function unlockComposer() {
+    if (!editorLock) return;
+    input.contentEditable = "true";
+    input.setAttribute("aria-disabled", editorLock.disabled ?? "false");
+    if (editorLock.busy === null) input.removeAttribute("aria-busy"); else input.setAttribute("aria-busy", editorLock.busy);
+    const selection = editorLock.selection; editorLock = null;
+    if (selection) input.setSelectionRange?.(selection[0], selection[1]);
   }
   app.prepareMessage = prepareMessage;
   const baseDraftCount = app.updateDraftCount;
@@ -62,11 +149,11 @@ export function initAttachments(app) {
   };
   app.updateSendState = () => {
     const id = roomId(), message = id && prepareMessage(id, input.value);
-    $("#btnSend").disabled = !id || !message?.ready || app.state.sendingRooms.has(id);
+    $("#btnSend").disabled = !id || !(message?.ready || message?.canConvert) || app.state.sendingRooms.has(id) || converting.has(id) || restoring.has(id);
   };
   app.completeAttachments = (id, resourceIDs) => {
     const used = new Set(resourceIDs), items = filesFor(id), removed = items.filter((item) => used.has(item.resource?.id));
-    for (const item of removed) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    for (const item of removed) { forget(item); if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); }
     const remaining = items.filter((item) => !used.has(item.resource?.id));
     if (remaining.length) drafts.set(id, remaining); else { drafts.delete(id); statuses.delete(id); }
     if (roomId() === id) render();
@@ -87,6 +174,7 @@ export function initAttachments(app) {
     });
     const status = statuses.get(id); $("#attachmentStatus").textContent = status?.key ? app.t(status.key, status.values) : "";
     if (status?.key) tray.hidden = false;
+    updateDurability();
   }
   function render() {
     preserveLayout(() => {
@@ -95,6 +183,7 @@ export function initAttachments(app) {
       $("#attachmentStatus").textContent = savedStatus?.key ? app.t(savedStatus.key, savedStatus.values) : ""; $("#attachmentStatus").classList.toggle("danger-text", Boolean(savedStatus?.error));
       list.replaceChildren();
       items.forEach((item, index) => { const row = renderItem(item); row.dataset.index = String(index); list.append(row); });
+      updateDurability();
       app.updateDraftCount(); app.updateSendState();
     });
   }
@@ -102,7 +191,7 @@ export function initAttachments(app) {
   function renderItem(item) {
     const row = document.createElement("li"), preview = document.createElement("span"), info = document.createElement("div"), name = document.createElement("p"), detail = document.createElement("p"), progress = document.createElement("progress"), actions = document.createElement("div");
     row.className = "attachment-item"; preview.className = "attachment-preview";
-    if (previewTypes.has(item.file.type)) {
+    if (previewTypes.has(item.file.type) && item.errorKey !== "fileUnreadable") {
       item.previewUrl ||= URL.createObjectURL(item.file);
       const image = document.createElement("img"); image.src = item.previewUrl; image.alt = ""; preview.append(image);
     } else preview.textContent = item.file.name.split(".").at(-1)?.slice(0, 4).toUpperCase() || "FILE";
@@ -120,8 +209,9 @@ export function initAttachments(app) {
   function action(kind, label) {
     const button = document.createElement("button"); button.type = "button"; button.dataset.uploadAction = kind; button.textContent = label; button.setAttribute("aria-label", label); return button;
   }
-  function removeItem(id, item) {
-    item.cancelled = true; item.xhr?.abort();
+  function removeItem(id, item, purge = true) {
+    item.cancelled = true; item.xhr?.abort(); releaseBuffer(item);
+    if (purge) forget(item);
     if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
     const remaining = filesFor(id).filter((entry) => entry !== item);
     if (remaining.length) {
@@ -129,10 +219,12 @@ export function initAttachments(app) {
       if (statuses.get(id)?.error && !remaining.some((entry) => entry.status === "failed")) statuses.delete(id);
     } else { drafts.delete(id); statuses.delete(id); }
     if (roomId() === id) render();
+    settleUploads(id);
   }
   function clearRoom(id) {
-    for (const item of [...filesFor(id)]) removeItem(id, item);
+    for (const item of [...filesFor(id)]) removeItem(id, item, false);
     drafts.delete(id); statuses.delete(id);
+    settleUploads(id);
   }
   app.disposeRoomAttachments = clearRoom;
   function getLimit(refresh = false) {
@@ -152,7 +244,7 @@ export function initAttachments(app) {
     while (activeUploads < MAX_PARALLEL_UPLOADS) {
       const next = [...drafts].flatMap(([id, items]) => items.map((item) => ({ id, item }))).find(({ item }) => item.status === "queued");
       if (!next) return;
-      activeUploads++; next.item.status = "uploading"; next.item.percent = 0;
+      activeUploads++; releaseEager(next.item); next.item.status = "uploading"; next.item.percent = 0;
       if (roomId() === next.id) render();
       void uploadItem(next.id, next.item);
     }
@@ -163,16 +255,29 @@ export function initAttachments(app) {
       try { max = await getLimit(item.refreshLimit); } catch {}
       item.refreshLimit = false;
       if (item.cancelled) return;
-      if (max !== null && item.file.size > max) { item.errorKey = "fileTooLarge"; item.status = "failed"; if (roomId() === id) setStatus(item.errorKey, true, id); return; }
-      if (item.pasted && item.buffer === undefined && item.file.size <= MAX_BUFFERED_BYTES) item.buffer = await item.file.arrayBuffer().catch(() => null);
-      if (item.cancelled) return;
+      if (max !== null && item.file.size > max) { releaseBuffer(item); item.errorKey = "fileTooLarge"; item.status = "failed"; if (roomId() === id) setStatus(item.errorKey, true, id); return; }
+      if (item.pasted && item.file.size <= MAX_BUFFERED_BYTES) {
+        try {
+          const buffer = await (item.read ?? startRead(item));
+          if (item.cancelled) return;
+          item.buffer = buffer;
+        } catch {
+          releaseBuffer(item);
+          if (item.cancelled) return;
+          item.errorKey = "fileUnreadable"; item.errorValues = null; item.status = "failed";
+          if (roomId() === id) setStatus("fileUnreadable", true, id);
+          return;
+        }
+      }
       item.resource = await sendUpload(id, item);
       if (item.cancelled) return;
-      item.status = "uploaded"; item.loaded = item.file.size; item.percent = 100; item.buffer = null;
-      if (roomId() === id && filesFor(id).every((entry) => entry.status === "uploaded")) setStatus("uploadReady");
+      item.status = "uploaded"; item.loaded = item.file.size; item.percent = 100; releaseBuffer(item);
+      if (roomId() === id && filesFor(id).every((entry) => entry.status === "uploaded")) setStatus(filesFor(id).some((entry) => entry.durable === false) ? "attachmentNotPersisted" : "uploadReady");
     } catch (error) {
+      releaseBuffer(item);
       if (item.cancelled) return;
       if (error.status === 413) { limit = null; item.errorKey = "fileTooLarge"; }
+      else if (error.unreadable) item.errorKey = "fileUnreadable";
       else { item.errorKey = "uploadFailed"; item.errorValues = { reason: error.status ? `HTTP ${error.status}` : error.timeout ? "timeout" : error.network ? "network" : error.message }; }
       item.status = "failed";
       if (roomId() === id) setStatus(item.errorKey, true, id, item.errorValues || {});
@@ -180,6 +285,7 @@ export function initAttachments(app) {
       activeUploads--;
       if (roomId() === id) render();
       pump();
+      settleUploads(id);
     }
   }
   // One fallback after a network failure: a lost response is recovered by ID, and a
@@ -192,7 +298,10 @@ export function initAttachments(app) {
       const existing = await findUploaded(id, item);
       if (item.cancelled) throw error;
       if (existing) return existing;
-      if (item.buffer === undefined && item.file.size <= MAX_BUFFERED_BYTES) item.buffer = await item.file.arrayBuffer().catch(() => null);
+      if (item.buffer === undefined && item.file.size <= MAX_BUFFERED_BYTES) {
+        try { item.buffer = await item.file.arrayBuffer(); }
+        catch { if (item.cancelled) throw error; throw Object.assign(new Error("Upload unreadable"), { unreadable: true }); }
+      }
       if (item.cancelled || !item.buffer) throw error;
       return upload(id, item);
     }
@@ -239,17 +348,79 @@ export function initAttachments(app) {
       xhr.send(item.buffer ?? item.file);
     });
   }
-  function addFiles(files, pasted = false) {
+  function addFiles(files, pasted = false, meta = {}) {
     const id = roomId(); if (!id) return;
     const accepted = [...files].filter((file) => file instanceof File);
     if (!accepted.length) return;
     const items = filesFor(id);
-    for (const file of accepted) items.push({ file, uploadID: newUploadID(), pasted, buffer: undefined, retried: false, status: "queued", loaded: 0, percent: 0, cancelled: false });
+    accepted.forEach((file, index) => {
+      const item = { file, uploadID: newUploadID(), pasted, buffer: undefined, read: undefined, retried: false, status: "queued", loaded: 0, percent: 0, cancelled: false, ...(index ? {} : meta) };
+      items.push(item);
+      if (pasted) { startRead(item, true); persistItem(item, id); }
+    });
     drafts.set(id, items); setStatus(""); render(); pump();
   }
+  function settleUploads(id) {
+    const waiters = uploadWaiters.get(id);
+    if (!waiters) return;
+    const items = filesFor(id);
+    if (items.some((item) => item.status === "queued" || item.status === "uploading")) return;
+    uploadWaiters.delete(id);
+    const uploaded = items.length > 0 && items.every((item) => item.status === "uploaded");
+    for (const resolve of waiters) resolve(uploaded);
+  }
+  function waitForUploads(id) {
+    return new Promise((resolve) => {
+      uploadWaiters.set(id, [...(uploadWaiters.get(id) || []), resolve]);
+      settleUploads(id);
+    });
+  }
+  const baseSend = app.send;
+  app.send = async () => {
+    const id = roomId();
+    if (!id || converting.has(id) || restoring.has(id) || app.state.sendingRooms.has(id)) return false;
+    const message = prepareMessage(id, input.value);
+    if (!message.canConvert) return baseSend();
+    const requested = input.value, revision = app.state.draftRevision.get(id) || 0, replyId = app.replyTargetFor?.(id)?.id;
+    converting.add(id);
+    lockComposer();
+    app.saveDraft(id, input.draftValue);
+    let item = message.conversion;
+    try {
+      if (!item) {
+        const content = plainText(requested), attachment = textFile(content);
+        addFiles([attachment], true, { textSource: requested, textContent: content });
+        item = filesFor(id).find((entry) => entry.file === attachment);
+      }
+      setStatus("sendAsFile", false, id, { count: requested.length });
+      if (!(await waitForUploads(id))) {
+        if (roomId() === id) {
+          if (item?.status === "failed") setStatus("sendAsFileFailed", true, id);
+          else if (!item) setStatus("");
+        }
+        return false;
+      }
+      if (roomId() !== id) return false;
+      const changed = (app.state.draftRevision.get(id) || 0) !== revision || app.replyTargetFor?.(id)?.id !== replyId;
+      if (changed) { setStatus("uploadReady"); return false; }
+      // The composer stayed locked, so clearing it now cannot drop text typed during the upload.
+      unlockComposer();
+      input.value = "";
+      app.clearDraft(id);
+      const sent = await baseSend();
+      if (sent) forgetTextSource(id, requested);
+      return sent;
+    } finally {
+      converting.delete(id);
+      if (roomId() === id) { unlockComposer(); app.updateDraftCount(); app.updateSendState(); }
+      else editorLock = null;
+    }
+  };
   function retryItem(item) {
     if (item.status !== "failed") return;
+    if (item.errorKey === "fileUnreadable") item.read = null;
     item.refreshLimit = item.errorKey === "fileTooLarge"; item.status = "queued"; item.errorKey = ""; item.errorValues = null; item.loaded = 0; item.percent = 0; item.retried = false;
+    if (item.pasted && !item.readPending) startRead(item, true);
     if (roomId()) setStatus(""); render(); pump();
   }
   $("#btnAddAttachments").addEventListener("click", () => picker.click());
@@ -269,15 +440,24 @@ export function initAttachments(app) {
   chatView.addEventListener("dragover", (event) => { if (!hasFiles(event)) return; event.preventDefault(); event.dataTransfer.dropEffect = "copy"; showDrop(); });
   chatView.addEventListener("dragleave", (event) => { if (hasFiles(event) && !chatView.contains(event.relatedTarget)) clearDrop(); });
   chatView.addEventListener("drop", (event) => { if (!hasFiles(event)) return; event.preventDefault(); clearDrop(); addFiles(event.dataTransfer.files); });
+  // Capture before the editor's paste handler: an oversized paste never enters the DOM.
   input.addEventListener("paste", (event) => {
+    const text = event.clipboardData?.getData("text/plain") || "";
+    if (text.length > TEXT_LIMIT && roomId() && input.contentEditable === "true") {
+      event.preventDefault();
+      const files = Array.from(event.clipboardData?.items || []).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter(Boolean);
+      addFiles([textFile(text), ...files], true, { textSource: text, textContent: text });
+      setStatus("pasteAsFile", false, roomId(), { count: text.length });
+      return;
+    }
     const images = Array.from(event.clipboardData?.items || []).filter((item) => item.kind === "file" && item.type.startsWith("image/")).map((item) => item.getAsFile()).filter(Boolean);
     if (!images.length) return;
     if (!event.clipboardData.getData("text/plain")) event.preventDefault();
     addFiles(images, true);
-  });
+  }, true);
   document.addEventListener("chat-room-activated", (event) => {
     render(); const id = event.detail; $("#btnAddAttachments").disabled = !id;
-    void getLimit().catch(() => {});
+    void restoreRoom(id); void getLimit().catch(() => {});
   });
   render();
 }

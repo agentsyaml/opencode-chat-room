@@ -92,6 +92,24 @@ test.skipIf(!browserModule)("agent uploads render and download real browser medi
     const peerCard = page.locator(`.msg[data-sender="__Test_MediaPeer"] .chat-resource[data-resource-id="${resources[0]!.id}"]`);
     await peerCard.getByRole("button", { name: /Preview/ }).waitFor({ timeout: 15000 });
     expect(await peerCard.locator("img, audio, video").count()).toBe(0);
+    // A member who cannot delete files gets only the plain download button, no arrow or empty menu.
+    const peerContext = await browser.newContext({ acceptDownloads: true });
+    const peerPage = await peerContext.newPage();
+    await peerPage.addInitScript(({ token, roomID }: { token: string; roomID: string }) => {
+      localStorage.setItem("chat.token", token);
+      sessionStorage.setItem("chat.sessionID", "__Test_MediaPeer");
+      sessionStorage.setItem("chat.name", "__Test_MediaPeer");
+      sessionStorage.setItem("chat.roomId", roomID);
+      sessionStorage.setItem("chat.joinedRoomIds", JSON.stringify([roomID]));
+    }, { token, roomID });
+    await peerPage.goto(`${origin}/chat`);
+    await peerPage.locator(`#roomList [data-room-id="${roomID}"]`).click();
+    await peerPage.locator("#chatView").waitFor({ state: "visible" });
+    const peerView = peerPage.locator(`.msg[data-sender="__Test_MediaPeer"] .chat-resource[data-resource-id="${resources[0]!.id}"]`);
+    await peerView.getByRole("button", { name: /Download/ }).waitFor({ timeout: 15000 });
+    expect(await peerView.locator(".resource-split-toggle").count()).toBe(0);
+    expect(await peerView.getByRole("menu").count()).toBe(0);
+    await peerContext.close();
     const brokenId = "9f9f9f9f-9f9f-4f9f-8f9f-9f9f9f9f9f9f";
     await page.route(`**/resources/${brokenId}`, (route: any) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ resource: { id: brokenId, roomID, name: "broken.png", mimeType: "image/png", size: 6, createdAt: Date.now() } }) }));
     await page.route(`**/resources/${brokenId}/content`, (route: any) => route.fulfill({ contentType: "image/png", body: Buffer.from("broken") }));
@@ -108,8 +126,24 @@ test.skipIf(!browserModule)("agent uploads render and download real browser medi
     expect(await broken.locator("img, audio, video").count()).toBe(0);
     const removedResource = resources[0]!;
     const removedCard = page.locator(`.chat-resource[data-resource-id="${removedResource.id}"]`).first();
+    const menuToggle = removedCard.locator(".resource-split-toggle"), menu = removedCard.getByRole("menu");
+    expect(await menuToggle.getAttribute("aria-expanded")).toBe("false");
+    await menuToggle.press("ArrowDown");
+    await menu.getByRole("menuitem", { name: "Delete file" }).waitFor();
+    expect(await menuToggle.getAttribute("aria-expanded")).toBe("true");
+    await page.keyboard.press("Escape");
+    expect(await menu.isVisible()).toBe(false);
+    expect(await menuToggle.evaluate((node: HTMLElement) => document.activeElement === node)).toBe(true);
+    await menuToggle.click();
+    await menu.getByRole("menuitem", { name: "Delete file" }).waitFor();
+    await menuToggle.focus();
+    expect(await menu.isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
+    expect(await menu.isVisible()).toBe(false);
+    expect(await menuToggle.evaluate((node: HTMLElement) => document.activeElement === node)).toBe(true);
+    await menuToggle.click();
     page.once("dialog", (dialog: { accept(): Promise<void> }) => void dialog.accept());
-    await removedCard.getByRole("button", { name: /Delete file/ }).click();
+    await menu.getByRole("menuitem", { name: "Delete file" }).click();
     await removedCard.getByText("File deleted.").waitFor();
     expect((await fetch(`${origin}/rooms/${roomID}/resources/${removedResource.id}`, { headers: { Authorization: `Bearer ${token}` } })).status).toBe(404);
     expect(resourceQueries.length).toBeGreaterThan(0);
@@ -120,7 +154,7 @@ test.skipIf(!browserModule)("agent uploads render and download real browser medi
     await new Promise((resolve) => server.once("exit", resolve));
     await rm(dir, { recursive: true, force: true });
   }
-}, 60000);
+}, 90000);
 
 function makeWav() {
   const samples = 800, bytes = Buffer.alloc(44 + samples * 2);
@@ -135,16 +169,33 @@ function makeWav() {
 async function makeWebm(page: any): Promise<number[] | undefined> {
   return page.evaluate(async () => {
     if (!window.MediaRecorder || !MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) return undefined;
-    const canvas = document.createElement("canvas"); canvas.width = 16; canvas.height = 16;
-    const context = canvas.getContext("2d")!, stream = canvas.captureStream(0);
-    const track = stream.getVideoTracks()[0]! as CanvasCaptureMediaStreamTrack, chunks: Blob[] = [];
+    const canvas = document.createElement("canvas"); canvas.width = 64; canvas.height = 64;
+    canvas.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px";
+    document.body.append(canvas);
+    const context = canvas.getContext("2d")!, stream = canvas.captureStream(30);
+    const chunks: Blob[] = [];
     const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp8" });
     recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
     const done = new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
-    recorder.start(); context.fillStyle = "red"; context.fillRect(0, 0, 16, 16); track.requestFrame();
-    await new Promise((resolve) => setTimeout(resolve, 150)); recorder.stop(); await done;
-    stream.getTracks().forEach((item) => item.stop());
-    return [...new Uint8Array(await new Blob(chunks, { type: recorder.mimeType }).arrayBuffer())];
+    // Chromium reports start together with the first captured frame, so draw before waiting.
+    recorder.start(100);
+    for (let frame = 0; frame < 6; frame++) {
+      context.fillStyle = frame % 2 ? "red" : "blue"; context.fillRect(0, 0, 64, 64);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    recorder.stop(); await done;
+    stream.getTracks().forEach((item) => item.stop()); canvas.remove();
+    // A header-only blob cannot be previewed. Validate the fixture itself so the test
+    // can skip video coverage on browsers that cannot produce/ decode WebM.
+    const blob = new Blob(chunks, { type: recorder.mimeType }), url = URL.createObjectURL(blob);
+    const video = document.createElement("video"); video.muted = true; video.src = url;
+    const valid = await new Promise<boolean>((resolve) => {
+      video.onloadedmetadata = () => resolve(video.videoWidth > 0 && video.videoHeight > 0);
+      video.onerror = () => resolve(false);
+      setTimeout(() => resolve(false), 3000);
+    });
+    URL.revokeObjectURL(url);
+    return valid ? [...new Uint8Array(await blob.arrayBuffer())] : undefined;
   });
 }
 
