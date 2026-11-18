@@ -53,9 +53,9 @@ test.skipIf(!browserModule)("chat messages remain selectable and reopening lands
     expect(unloadedReceipts.receipts[0].readers.some((reader: any) => reader.sessionID === sessionID)).toBe(false);
     // A poll re-render keeps the row moving, which times out Playwright's "wait for element to be stable".
     await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.stopPolling(), "/assets/chat/state.js");
-    // Drag a row that is already on screen. Reaching an older row scrolls to the top, which
-    // pages history in, and the arriving page moves the row out from under the pointer.
-    await dragSelect(page, `#msgList [data-msg-id]:has(.msg-text:has-text("History 509")) .msg-text`);
+    // Drag the newest rendered row. Which row is on screen depends on the restored
+    // reading position, so do not pin the test to a particular message number.
+    await dragSelect(page, "#msgList [data-msg-id]:not(.sys):not(.day-sep) .msg-text", true);
     await page.evaluate(async (modulePath: string) => (await import(modulePath)).app.startPolling(), "/assets/chat/state.js");
     await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID, text: "| Left | Right |\n| --- | --- |\n| One | Two |\n\n```js\nconst value = 42;\n```" });
     await page.locator(".msg-text table").waitFor();
@@ -252,9 +252,10 @@ async function selectedPalette(page: any, selector: string) {
   });
 }
 
-async function dragSelect(page: any, selector: string) {
-  // Pin the node: an older page can prepend while we drag, and a re-resolved ".first()" would then be off-screen.
-  let bubble = (await page.locator(selector).first().elementHandle())!;
+async function dragSelect(page: any, selector: string, last = false) {
+  // Pin the node: an older page can prepend while we drag, and a re-resolved row would then be off-screen.
+  const pick = () => (last ? page.locator(selector).last() : page.locator(selector).first()).elementHandle();
+  let bubble = (await pick())!;
   await bubble.scrollIntoViewIfNeeded();
   let text = "";
   for (let attempt = 0; attempt < 3 && text.length <= 2; attempt++) {
@@ -281,7 +282,7 @@ async function dragSelect(page: any, selector: string) {
       });
     } catch {
       // The pinned row was pruned by a re-render; pick a fresh one.
-      bubble = (await page.locator(selector).first().elementHandle())!;
+      bubble = (await pick())!;
       await bubble.scrollIntoViewIfNeeded();
       continue;
     }
