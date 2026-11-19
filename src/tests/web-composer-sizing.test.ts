@@ -189,6 +189,21 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     await page.waitForFunction(() => {
       const thread = document.querySelector<HTMLElement>("#thread")!;
       return thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
+    }).catch(async (error: Error) => {
+      const state = await page.evaluate(async (url: string) => {
+        const { app } = await import(url), thread = document.querySelector<HTMLElement>("#thread")!;
+        return {
+          gap: thread.scrollHeight - thread.scrollTop - thread.clientHeight,
+          scrollTop: thread.scrollTop, scrollHeight: thread.scrollHeight, clientHeight: thread.clientHeight,
+          followBottom: app.state.followBottom, room: app.state.room?.id,
+          roomName: document.querySelector("#roomName")?.textContent,
+          draft: document.querySelector<HTMLElement>("#msgInput")?.textContent?.length ?? 0,
+          active: document.activeElement?.id,
+          appHeight: getComputedStyle(document.documentElement).getPropertyValue("--app-height"),
+          selection: getSelection()?.toString().length ?? 0,
+        };
+      }, "/assets/chat/state.js");
+      throw new Error(`${error.message} STATE=${JSON.stringify(state)}`);
     });
     expect(await page.locator("#thread").evaluate((node: HTMLElement) => node.scrollHeight - node.scrollTop - node.clientHeight)).toBeLessThanOrEqual(2);
     expect(await measure(input)).toMatchObject({ overflow: "auto", fits: false });

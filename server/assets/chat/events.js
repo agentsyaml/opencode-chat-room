@@ -56,6 +56,12 @@ export function initEvents(app) {
     const thread = $("#thread");
     app.state.listMetrics = { height: messageList.offsetHeight, top: thread.scrollTop, client: thread.clientHeight };
   };
+  const scrollThread = $("#thread");
+  if (scrollThread) {
+    new ResizeObserver(() => {
+      if (followsBottom(app) && scrollThread.scrollHeight - scrollThread.scrollTop - scrollThread.clientHeight > 1) scrollThread.scrollTop = scrollThread.scrollHeight;
+    }).observe(scrollThread);
+  }
   new ResizeObserver(() => {
     const thread = $("#thread"), previous = app.state.listMetrics;
     const grew = messageList.offsetHeight > previous.height, sameBox = thread.clientHeight === previous.client;
@@ -166,6 +172,7 @@ export function initEvents(app) {
     });
   }
   syncRoomDrawer();
+  window.addEventListener("pageshow", () => { if (app.state.followBottom) $("#thread").scrollTop = $("#thread").scrollHeight; });
   window.addEventListener("resize", preserveReadingPosition);
   window.addEventListener("pagehide", () => { captureReadingPosition(); app.flushReadOnHide?.(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) { captureReadingPosition(); app.flushReadOnHide?.(); } });
