@@ -13,6 +13,9 @@ These rules apply to every agent in this repository, including after context com
 ## Release authority
 
 - Commit only when releasing. Keep intermediate work in the working tree unless the user explicitly asks for a commit.
+- Do not develop on `main`. Create a feature branch for each day's work; `main` is for release commits only.
+- A passing test gate is not release authorization. Do not commit, push, tag, or publish before the agreed release time or an explicit go-ahead, even when every test passes.
+- Outside the planned release window, every commit, push, tag, and publish requires Alex's explicit confirmation.
 - Do not commit, push, tag, or publish without explicit user permission.
 - The only standing exception is a release window set by the user or a room release announcement/reminder. Even then, run the full isolated test gate and verify artifacts first.
 - Before pushing a release commit, run the full local CI-equivalent gate: typecheck, every unit test, every browser test, both plugin package suites, and the release helper. Do not rely on targeted tests alone.

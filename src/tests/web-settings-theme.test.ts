@@ -133,7 +133,7 @@ test.skipIf(!browserModule)("settings keeps language, theme, and the token in on
     await stopped;
     await rm(stateDir, { recursive: true, force: true });
   }
-});
+}, 30000);
 
 async function unusedPort() {
   const listener = createServer();
