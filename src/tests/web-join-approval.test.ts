@@ -82,8 +82,25 @@ test.skipIf(!browserModule)("a browser joins a protected room only after approva
     await applicant.evaluate(async (url: string) => { await (await import(url)).app.refreshRoomList(); }, "/assets/chat/state.js");
     const secondRow = applicant.locator("#roomListChat button").filter({ hasText: "Second protected" });
     await secondRow.click();
+    await applicant.locator("#confirmDialog").waitFor({ state: "visible" });
+    expect(await applicant.locator("#confirmMessage").textContent()).toContain("Second protected");
+    await applicant.locator("#btnCancelConfirm").click();
+    await applicant.locator("#confirmDialog").waitFor({ state: "hidden" });
+    expect(await applicant.locator("#joinNotice").isVisible()).toBe(false);
+    await secondRow.click();
+    await applicant.locator("#confirmDialog").waitFor({ state: "visible" });
+    await applicant.locator("#btnAcceptConfirm").click();
     await applicant.locator("#joinNotice").waitFor({ state: "visible" });
     expect(await applicant.evaluate(async (url: string) => (await import(url)).app.state.room.id, "/assets/chat/state.js")).toBe(roomId);
+    await applicant.setViewportSize({ width: 1350, height: 316 });
+    await applicant.waitForFunction(() => Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-height")) - innerHeight) < 1);
+    const rail = await applicant.evaluate(() => {
+      const list = document.querySelector<HTMLElement>("#roomListChat")!;
+      const row = Array.from(list.querySelectorAll<HTMLElement>(".room-row")).find((node) => node.textContent?.includes("Second protected"))!;
+      return { footHeight: document.querySelector<HTMLElement>(".rail-foot")!.getBoundingClientRect().height, listBottom: list.getBoundingClientRect().bottom, rowBottom: row.getBoundingClientRect().bottom };
+    });
+    expect(rail.footHeight).toBeLessThan(80);
+    expect(rail.rowBottom).toBeLessThanOrEqual(rail.listBottom + 1);
     const cancelled = applicant.waitForResponse((response: any) => response.request().method() === "DELETE" && response.url().includes("/join-requests?") && response.status() === 200);
     await applicant.locator("#btnJoinNoticeStop").click();
     await cancelled;

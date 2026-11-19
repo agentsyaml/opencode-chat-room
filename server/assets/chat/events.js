@@ -28,7 +28,7 @@ export function initEvents(app) {
     const root = document.documentElement, editor = app.$("#msgInput");
     // A restored draft or staged files must not become the idle height people see on load.
     const idleComposer = () => !editor?.textContent?.trim()
-      && !["#sendError", "#replyPreview", "#mentionPicker", "#attachmentTray"].some((selector) => { const node = app.$(selector); return node && !node.hidden; })
+      && !["#joinNotice", "#sendError", "#replyPreview", "#mentionPicker", "#attachmentTray"].some((selector) => { const node = app.$(selector); return node && !node.hidden; })
       && !composer.querySelector(".failed-messages:not([hidden])");
     const syncComposerBlock = () => {
       const height = composer.getBoundingClientRect().height;

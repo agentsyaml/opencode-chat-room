@@ -58,6 +58,10 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     await page.locator("#shortcutsDialog").waitFor({ state: "hidden" });
     await page.keyboard.press("Alt+/");
     await page.locator("#shortcutsDialog").waitFor({ state: "visible" });
+    await page.mouse.click(4, 4);
+    await page.locator("#shortcutsDialog").waitFor({ state: "hidden" });
+    await page.keyboard.press("Alt+/");
+    await page.locator("#shortcutsDialog").waitFor({ state: "visible" });
     await page.locator("#btnCloseShortcuts").click();
     await page.locator("#shortcutsDialog").waitFor({ state: "hidden" });
 
@@ -84,6 +88,11 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     expect(entry.label).toBe("none");
     expect(await page.locator("#btnShortcuts").getAttribute("tabindex")).toBe("-1");
     await page.locator("#msgInput").click();
+    await page.locator("#btnShortcuts").click();
+    await page.locator("#shortcutsDialog").waitFor({ state: "visible" });
+    await page.mouse.click(4, 4);
+    await page.locator("#shortcutsDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "msgInput");
     await page.locator("#btnShortcuts").click();
     await page.locator("#shortcutsDialog").waitFor({ state: "visible" });
     await page.keyboard.press("Escape");

@@ -42,7 +42,8 @@
   #app {
     max-width: 760px;
     height: 100vh;
-    height: var(--app-height, 100dvh);
+    /* A stale --app-height must never make the page taller than the live viewport. */
+    height: min(100dvh, var(--app-height, 100dvh));
     margin: 0 auto;
     display: flex;
     flex-direction: column;

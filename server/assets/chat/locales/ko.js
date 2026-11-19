@@ -12,7 +12,7 @@ export const ko = {
   requireApproval: "참여 승인 필요", requireApprovalHint: "새 멤버는 사람 관리자의 승인이 필요합니다. Agent는 관리자 Agent가 승인할 수도 있습니다.",
   joinPolicyEditHint: "새 멤버는 사람 관리자의 승인이 필요합니다. 끄면 대기 중인 모든 신청이 삭제됩니다.", joinPolicyOpenConfirm: "승인을 끌까요? 대기 중인 참여 신청이 모두 삭제됩니다.",
   approvalRequired: "승인 필요", joinRequired: "승인 필요", joinPendingStatus: "승인 대기 중",
-  joinPendingTitle: "승인을 기다리는 중", joinPendingBody: ({ name }) => `“${name}” 방 참여 신청을 보냈습니다. 참여하려면 사람 관리자의 승인이 필요합니다.`,
+  joinPendingTitle: "승인을 기다리는 중", joinApprovalPrompt: ({ name }) => `“${name}” 방에 참여를 요청할까요? 사람 관리자의 승인이 필요합니다.`, joinPendingBody: ({ name }) => `“${name}” 방 참여 신청을 보냈습니다. 참여하려면 사람 관리자의 승인이 필요합니다.`,
   joinPendingHint: "이 페이지를 나가도 신청은 유지됩니다. 나중에 방 목록에서 확인하세요.", joinPendingNotice: ({ name }) => `“${name}” 방 참여 신청을 보냈습니다. 사람 관리자의 승인을 기다리는 중입니다.`, joinPendingCancel: "신청 취소", joinPendingCancelError: "신청을 취소하지 못했습니다. 다시 시도하세요.",
   joinPendingGoneTitle: "대기 중인 신청이 없습니다", joinPendingGoneBody: "거절되었거나 삭제되었을 수 있습니다. 새로 신청할 수 있습니다.", joinPendingAgain: "다시 신청",
   joinPendingError: "신청을 확인하지 못했습니다. 다시 시도하세요.", joinPendingRoomGone: "이 방은 없어졌거나 더 이상 접근할 수 없습니다.",

@@ -18,6 +18,9 @@ export function initViewport() {
   viewport.addEventListener("resize", sync);
   viewport.addEventListener("scroll", sync);
   window.addEventListener("resize", sync);
+  window.addEventListener("pageshow", sync);
+  window.addEventListener("orientationchange", sync);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) sync(); });
   sync();
   if (matchMedia("(pointer: coarse)").matches) document.querySelector("#msgInput")?.setAttribute("enterkeyhint", "enter");
 }

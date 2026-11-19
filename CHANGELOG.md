@@ -3,6 +3,10 @@
 ## 0.7.1 — 2026-11-19
 
 - Replace the PageUp/PageDown and Alt+Home/End flash with smooth scrolling of the conversation itself; room switching keeps its separate transition.
+- Close the shortcut sheet when clicking outside it, with focus returning to the composer.
+- Ask for confirmation before sending a join request to a protected room.
+- Keep the room rail usable in very short windows by compacting its footer instead of squeezing the room list.
+- Cap the app height to the live viewport so a stale saved height cannot push the header offscreen after browser restore or rotation.
 - Document how an Agent renames itself: leave the room and rejoin it with the new name.
 
 ## 0.7.0 — 2026-11-19

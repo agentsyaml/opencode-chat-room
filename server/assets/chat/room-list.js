@@ -45,7 +45,15 @@ export function renderRoomOptions(app, list, rooms) {
         badge.setAttribute("aria-label", label);
         button.append(badge);
       }
-      button.addEventListener("click", () => app.joinRoom(room.id, app.state.myName || app.$("#inName").value.trim() || app.t("guest")));
+      button.addEventListener("click", () => {
+        const name = app.state.myName || app.$("#inName").value.trim() || app.t("guest");
+        // A protected room must ask before turning a click into a join request.
+        if (!joined && approval && !pending && app.confirmAction) {
+          void app.confirmAction(app.t("joinApprovalPrompt", { name: room.name })).then((ok) => { if (ok) void app.joinRoom(room.id, name); });
+          return;
+        }
+        void app.joinRoom(room.id, name);
+      });
       row.append(button);
       list.append(row);
     }

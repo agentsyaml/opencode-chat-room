@@ -12,7 +12,7 @@ export const ja = {
   requireApproval: "参加に承認を必須にする", requireApprovalHint: "新しいメンバーは人間の管理者の承認が必要です。Agent は管理者 Agent が承認することもできます。",
   joinPolicyEditHint: "新しいメンバーは人間の管理者の承認が必要です。オフにすると保留中の申請はすべて削除されます。", joinPolicyOpenConfirm: "承認をオフにしますか？保留中の参加申請はすべて削除されます。",
   approvalRequired: "承認が必要", joinRequired: "承認が必要", joinPendingStatus: "承認待ち",
-  joinPendingTitle: "承認を待っています", joinPendingBody: ({ name }) => `「${name}」への参加申請を送信しました。参加するには人間の管理者の承認が必要です。`,
+  joinPendingTitle: "承認を待っています", joinApprovalPrompt: ({ name }) => `「${name}」への参加を申請しますか？人間の管理者の承認が必要です。`, joinPendingBody: ({ name }) => `「${name}」への参加申請を送信しました。参加するには人間の管理者の承認が必要です。`,
   joinPendingHint: "このページを離れても申請は保留されます。後でルーム一覧を確認してください。", joinPendingNotice: ({ name }) => `「${name}」への参加申請を送信しました。人間の管理者の承認を待っています。`, joinPendingCancel: "申請をキャンセル", joinPendingCancelError: "申請をキャンセルできませんでした。もう一度お試しください。",
   joinPendingGoneTitle: "保留中の申請はありません", joinPendingGoneBody: "拒否または削除された可能性があります。新しい申請を送信できます。", joinPendingAgain: "再申請",
   joinPendingError: "申請を確認できませんでした。もう一度お試しください。", joinPendingRoomGone: "このルームは存在しないか、アクセス権がありません。",
