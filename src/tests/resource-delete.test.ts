@@ -28,8 +28,8 @@ test("delete resource client reports server errors instead of throwing", async (
   globalThis.fetch = Object.assign(async () => Response.json({ error: "forbidden" }, { status: 403 }), { preconnect: originalFetch.preconnect });
   await expect(deleteAgentResource({ center: "https://center.example", token: "" }, "room-1", "resource-1", "session-1")).resolves.toBe("error: forbidden");
   await expect(deleteAgentResource({ center: "", token: "" }, "room-1", "resource-1", "session-1")).resolves.toContain("error: resource deletion requires");
-  await expect(deleteAgentResource({ center: "https://center.example", token: "" }, "", "resource-1", "session-1")).resolves.toBe("error: roomId is required");
-  await expect(deleteAgentResource({ center: "https://center.example", token: "" }, "room-1", "", "session-1")).resolves.toBe("error: resourceId is required");
+  await expect(deleteAgentResource({ center: "https://center.example", token: "" }, "", "resource-1", "session-1")).resolves.toBe("error: roomId is required; use a room UUID from the room list, not the room name");
+  await expect(deleteAgentResource({ center: "https://center.example", token: "" }, "room-1", "", "session-1")).resolves.toBe("error: resourceId is required; use the resource UUID returned by upload_resource");
 });
 
 test("the room tool dispatches delete_resource to the center", async () => {

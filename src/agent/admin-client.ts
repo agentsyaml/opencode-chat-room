@@ -51,10 +51,10 @@ export async function adminTool(args: AdminArgs, context: AdminContext, opts: Ce
   transport: QueueTransport): Promise<string> {
   if (!opts.center) return "error: admin actions require central mode";
   const roomId = args.roomId?.trim();
-  if (!roomId) return "error: roomId is required";
+  if (!roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
   const ownerID = transport.receiverOwnerID;
   if (args.action === "admin_claim") {
-    if (!args.enrollmentKey?.trim()) return "error: enrollmentKey is required";
+    if (!args.enrollmentKey?.trim()) return "error: enrollmentKey is required; use the one-time key from the room owner";
     if (transport.protocol === "v2" && !ownerID) return "error: this runtime has no verified receiver owner identity";
     const identity: AdminIdentity = { center: opts.center, roomId, sessionID: context.sessionID, ownerID: ownerID ?? "" };
     try {
@@ -94,7 +94,7 @@ export async function adminTool(args: AdminArgs, context: AdminContext, opts: Ce
       }
       case "admin_remove_member": {
         const targetSessionID = args.targetSessionID?.trim();
-        if (!targetSessionID) return "error: targetSessionID is required";
+        if (!targetSessionID) return "error: targetSessionID is required; use a session ID from the member list";
         result = await send(opts, `/rooms/${safe(roomId)}/kick`, "POST", { sessionID: context.sessionID, targetSessionID }, capability, context.sessionID, ownerID ?? "");
         break;
       }
@@ -108,7 +108,7 @@ export async function adminTool(args: AdminArgs, context: AdminContext, opts: Ce
       case "admin_approve_join":
       case "admin_deny_join": {
         const requestSessionID = args.targetSessionID?.trim();
-        if (!requestSessionID) return "error: targetSessionID is required";
+        if (!requestSessionID) return "error: targetSessionID is required; run admin_join_requests and use its session ID";
         const approve = args.action === "admin_approve_join";
         await decideJoinRequest(opts, roomId, requestSessionID, approve, context.sessionID, agentHeaders);
         return `${approve ? "approved" : "denied"} join request ${requestSessionID}`;
@@ -117,7 +117,15 @@ export async function adminTool(args: AdminArgs, context: AdminContext, opts: Ce
     }
     return JSON.stringify(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "admin request failed";
+    const status = (error as { status?: unknown })?.status;
+    const base = error instanceof Error ? error.message : "admin request failed";
+    const message = status === 401
+      ? "admin capability is missing or expired; run admin_claim with a current enrollmentKey, or ask the room owner to designate this agent again"
+      : status === 403
+        ? `${base}; this agent is not the designated management agent for this room, or the action exceeds its scope`
+        : status === 404
+          ? `${base}; verify roomId and targetSessionID, then run admin_join_requests or admin_overview first`
+          : base;
     return `error: ${capability ? message.replaceAll(capability, "[redacted]") : message}`;
   }
 }

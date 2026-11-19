@@ -49,7 +49,7 @@ test.skipIf(!browserModule)("authors and human admins recall messages and member
     // Own message: recall from the row actions.
     await page.locator("#msgInput").fill("Recall me please");
     await page.locator("#btnSend").click();
-    const ownRow = page.locator("#msgList [data-msg-id]").filter({ hasText: "Recall me please" }).last();
+    const ownRow = page.locator('#msgList [data-msg-id]:not([data-msg-id^="pending-"])').filter({ hasText: "Recall me please" }).last();
     await ownRow.waitFor();
     const ownID = await ownRow.getAttribute("data-msg-id");
     const row = page.locator(`#msgList [data-msg-id="${ownID}"]`);
@@ -191,7 +191,7 @@ test.skipIf(!browserModule)("the confirmed recall and content endpoints drive th
     await page.locator("#chatView").waitFor({ state: "visible" });
     await page.locator("#msgInput").fill("Recall through the server");
     await page.locator("#btnSend").click();
-    const row = page.locator("#msgList [data-msg-id]").filter({ hasText: "Recall through the server" }).last();
+    const row = page.locator('#msgList [data-msg-id]:not([data-msg-id^="pending-"])').filter({ hasText: "Recall through the server" }).last();
     await row.waitFor();
     const id = await row.getAttribute("data-msg-id");
     const target = page.locator(`#msgList [data-msg-id="${id}"]`);

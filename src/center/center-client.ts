@@ -145,8 +145,8 @@ export async function markQueued(
 
 export async function deleteAgentResource(opts: CenterOpts, roomID: string, resourceID: string, sessionID: string): Promise<string> {
   if (!opts.center) return "error: resource deletion requires CHAT_ROOM_SERVER_URL (central server mode)";
-  if (!roomID) return "error: roomId is required";
-  if (!resourceID) return "error: resourceId is required";
+  if (!roomID) return "error: roomId is required; use a room UUID from the room list, not the room name";
+  if (!resourceID) return "error: resourceId is required; use the resource UUID returned by upload_resource";
   try {
     await request(opts, `/rooms/${encodeURIComponent(roomID)}/resources/${encodeURIComponent(resourceID)}`, "DELETE", {}, { "X-Session-ID": sessionID });
     return `deleted resource ${resourceID}`;
@@ -190,7 +190,7 @@ export async function centerAction(
     }
     case "create": {
       if (!args.name?.trim()) {
-        return "error: name is required";
+        return "error: name is required for create; pass the new room name";
       }
       const room = await request(opts, "/rooms", "POST", {
         name: args.name.trim(),
@@ -206,10 +206,10 @@ export async function centerAction(
     }
     case "join": {
       if (!args.name?.trim()) {
-        return "error: name is required to join a room";
+        return "error: name is required to join a room; pass your participant display name";
       }
       if (!args.roomId) {
-        return "error: roomId is required";
+        return "error: roomId is required; use a room UUID from the room list, not the room name";
       }
       const me = identity(args.name.trim());
       const room = await request(
@@ -232,7 +232,7 @@ export async function centerAction(
       return formatRoom(svcOf(room), toRoom(room));
     }
     case "join_status": {
-      if (!args.roomId) return "error: roomId is required";
+      if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
       const status = await joinStatus(opts, args.roomId, sessionID);
       if (status === "joined") return `joined room ${args.roomId}`;
       if (status === "pending") {
@@ -242,7 +242,7 @@ export async function centerAction(
     }
     case "leave": {
       if (!args.roomId) {
-        return "error: roomId is required";
+        return "error: roomId is required; use a room UUID from the room list, not the room name";
       }
       await request(
         opts,
@@ -254,7 +254,7 @@ export async function centerAction(
     }
     case "members": {
       if (!args.roomId) {
-        return "error: roomId is required";
+        return "error: roomId is required; use a room UUID from the room list, not the room name";
       }
       const room = await request(
         opts,
@@ -271,8 +271,8 @@ export async function centerAction(
     case "announcement_read":
     case "announcement_write":
     case "announcement_delete": {
-      if (!args.roomId) return "error: roomId is required";
-      if (args.action !== "announcement_list" && !args.announcementName) return "error: announcementName is required";
+      if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
+      if (args.action !== "announcement_list" && !args.announcementName) return "error: announcementName is required; run announcement_list, then pass one listed name exactly";
       const root = `/rooms/${encodeURIComponent(args.roomId)}/announcements`;
       if (args.action === "announcement_list") {
         const result = await request(opts, root, "GET") as { announcements: Array<{ name: string; content: string }> };
@@ -284,7 +284,7 @@ export async function centerAction(
         return `${result.announcement.name}:\n${result.announcement.content}`;
       }
       if (args.action === "announcement_write") {
-        if (typeof args.content !== "string") return "error: content is required";
+        if (typeof args.content !== "string") return "error: content is required; pass the announcement text";
         const result = await request(opts, path, "PUT", { sessionID, content: args.content }) as { announcement: { name: string; content: string } };
         return `announcement saved: ${result.announcement.name}`;
       }
@@ -293,10 +293,10 @@ export async function centerAction(
     }
     case "send": {
       if (!args.roomId) {
-        return "error: roomId is required";
+        return "error: roomId is required; use a room UUID from the room list, not the room name";
       }
       if (!args.text?.trim()) {
-        return "error: text is required";
+        return "error: text is required; pass a non-empty message body";
       }
       const room = await request(
         opts,
@@ -311,14 +311,14 @@ export async function centerAction(
       return `sent: ${args.text.trim()}\n${sentID ? `message id: ${sentID}\n` : ""}${formatRoom(svcOf(room), parsed)}`;
     }
     case "recall": {
-      if (!args.roomId) return "error: roomId is required";
-      if (!args.messageId) return "error: messageId is required";
+      if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
+      if (!args.messageId) return "error: messageId is required; use the full message ID returned by send or poll";
       await request(opts, `/rooms/${encodeURIComponent(args.roomId)}/messages/${encodeURIComponent(args.messageId)}/recall`, "POST", { sessionID });
       return `recalled message ${args.messageId}`;
     }
     case "poll": {
       if (!args.roomId) {
-        return "error: roomId is required";
+        return "error: roomId is required; use a room UUID from the room list, not the room name";
       }
       let member: { membershipID?: string; receiverOwnerID?: string } | undefined;
       let legacyCenter = false;
@@ -334,7 +334,7 @@ export async function centerAction(
       )) as unknown as { member: boolean; items: InboxItem[]; hasMore?: boolean };
       // ponytail: F6 — same gate as standalone: only members can read
       if (!result.member) {
-        return "error: not joined";
+        return "error: not joined; call join for this room first, and wait for approval if required";
       }
       const items = (Array.isArray(result.items) ? result.items : [])
         .filter((item) => item.senderSessionID !== sessionID && !item.recalledAt);

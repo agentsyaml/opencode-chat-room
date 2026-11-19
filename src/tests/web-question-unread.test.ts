@@ -35,6 +35,10 @@ test.skipIf(!browserModule)("reading clears the unread badge while the question 
     const sent = await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: "__Test_QuestionPeer", text: "__Test_open_question", isQuestion: true });
     const questionId = sent.messages.at(-1).id;
     await page.locator("#msgList").getByText("__Test_open_question").waitFor();
+    await page.waitForFunction(() => {
+      const badge = document.querySelector("#questionBadge");
+      return badge instanceof HTMLElement && !badge.hidden && badge.textContent === "1";
+    });
 
     // A read acknowledgement may already be in flight from the arrival render;
     // retry until the watermark lands instead of asserting one instant.
@@ -71,6 +75,7 @@ test.skipIf(!browserModule)("reading clears the unread badge while the question 
     await api(origin, `/rooms/${room.id}/questions/${questionId}/answers`, "POST", { sessionID: "__Test_QuestionPeer", text: "__Test_answer" });
     // Answering keeps the badge clear and empties the Questions panel.
     await page.waitForFunction(async ({ url, qid }: any) => !(await import(url)).app.unansweredQuestionIds()?.has(qid), { url: "/assets/chat/state.js", qid: questionId }, { timeout: 15000 });
+    await page.waitForFunction(() => document.querySelector<HTMLElement>("#questionBadge")?.hidden === true);
     await page.reload();
     await page.locator("#chatView").waitFor({ state: "visible" });
     await page.waitForFunction(async (url: string) => {

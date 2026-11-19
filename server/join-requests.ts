@@ -45,6 +45,17 @@ export async function joinRequestRoutes(req: Request, url: URL): Promise<Respons
     return json({ status: await readJoinRequest(roomID, sessionID) ? "pending" : "none" });
   }
 
+  if (list && req.method === "DELETE") {
+    const roomID = decodeURIComponent(list[1]!);
+    const sessionID = url.searchParams.get("sessionID") ?? "";
+    if (!bounded(sessionID)) return json({ error: "sessionID is required" }, 400);
+    const removed = await writeSqliteStateWithDatabase(databasePath(), (svc, _registry, db) => {
+      svc.getRoom(roomID);
+      return removeJoinRequest(db, roomID, sessionID);
+    });
+    return removed ? json({ ok: true }) : json({ error: "join request not found" }, 404);
+  }
+
   if (list && req.method === "GET") {
     const roomID = decodeURIComponent(list[1]!);
     const actor = url.searchParams.get("sessionID") ?? "";

@@ -1,0 +1,124 @@
+/* Fenced code blocks: a quiet frame, a hover toolbar, and readable tokens in every palette. */
+
+:root {
+  --code-bg: color-mix(in srgb, var(--ink) 5%, var(--surface));
+  --code-keyword: var(--accent);
+  --code-string: color-mix(in srgb, var(--mention-blue) 82%, var(--ink));
+  --code-number: color-mix(in srgb, var(--warning) 68%, var(--ink));
+  --code-title: color-mix(in srgb, var(--accent) 72%, var(--ink));
+  --code-comment: color-mix(in srgb, var(--ink-3) 78%, var(--ink));
+}
+
+.code-block { position: relative; min-width: 0; }
+
+.code-block pre {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--code-bg);
+  overflow-x: auto;
+}
+
+.code-block pre code {
+  display: block;
+  white-space: pre;
+}
+
+.code-block.is-wrapped pre { overflow-x: hidden; }
+.code-block.is-wrapped pre code { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.code-toolbar {
+  position: absolute;
+  z-index: 2;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 52%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 3px rgb(20 40 32 / .08);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .14s ease;
+}
+
+.code-block:hover .code-toolbar,
+.code-block:focus-within .code-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Touch screens have no hover: keep the controls reachable at all times. */
+@media (hover: none), (pointer: coarse) {
+  .code-toolbar { opacity: 1; pointer-events: auto; }
+}
+
+.code-tool-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: var(--ink-2);
+  background: transparent;
+  cursor: pointer;
+  transition: color .14s, background .14s;
+}
+
+.code-tool-button:hover { color: var(--accent); background: var(--accent-soft); }
+.code-tool-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.code-tool-button[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.code-tool-button.is-copied { color: var(--accent); background: var(--accent-soft); }
+.code-tool-button.is-copy-failed { color: var(--danger); background: var(--danger-soft); }
+
+.code-tool-icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.code-check-icon { display: none; }
+.code-tool-button.is-copied .code-copy-icon { display: none; }
+.code-tool-button.is-copied .code-check-icon { display: block; }
+
+/* highlight.js tokens use palette tokens, so dark, forest, and sand stay legible. */
+.code-block .hljs { color: var(--ink); }
+.code-block .hljs-comment,
+.code-block .hljs-quote { color: var(--code-comment); font-style: italic; }
+.code-block .hljs-keyword,
+.code-block .hljs-selector-tag,
+.code-block .hljs-literal,
+.code-block .hljs-section,
+.code-block .hljs-doctag { color: var(--code-keyword); font-weight: 650; }
+.code-block .hljs-string,
+.code-block .hljs-regexp,
+.code-block .hljs-addition,
+.code-block .hljs-template-tag,
+.code-block .hljs-template-variable { color: var(--code-string); }
+.code-block .hljs-number,
+.code-block .hljs-symbol,
+.code-block .hljs-bullet,
+.code-block .hljs-built_in,
+.code-block .hljs-type { color: var(--code-number); }
+.code-block .hljs-title,
+.code-block .hljs-title.function_,
+.code-block .hljs-title.class_,
+.code-block .hljs-attr,
+.code-block .hljs-attribute,
+.code-block .hljs-property,
+.code-block .hljs-selector-class,
+.code-block .hljs-selector-id { color: var(--code-title); }
+.code-block .hljs-deletion { color: var(--danger); }
+.code-block .hljs-emphasis { font-style: italic; }
+.code-block .hljs-strong { font-weight: 700; }

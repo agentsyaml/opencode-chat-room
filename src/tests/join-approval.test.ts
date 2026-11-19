@@ -92,7 +92,10 @@ if (process.env.CHAT_ROOM_JOIN_APPROVAL_CHILD !== "1") {
       const room = await createRoom("approval-basic", "approval");
       const pending = await join(room.id, "bob-session", "bob");
       expect(pending.status).toBe(202);
-      expect(await pending.json()).toEqual({ status: "pending" });
+      expect(await pending.json()).toEqual({
+        status: "pending",
+        message: "Join request submitted. You are not a member yet; a human administrator must approve it before you can send or poll.",
+      });
       expect(await statusOf(room.id, "bob-session")).toEqual({ status: "pending" });
       expect(await store.readState((svc, registry) => ({
         participants: svc.getParticipants(room.id).map((participant) => participant.name),
@@ -118,6 +121,20 @@ if (process.env.CHAT_ROOM_JOIN_APPROVAL_CHILD !== "1") {
       expect(approvedState.membership).toEqual(expect.any(String));
       expect((await join(room.id, "bob-session", "bob")).status).toBe(201);
       expect(await requestsOf(room.id, "owner-session")).toEqual({ requests: [] });
+    });
+
+    test("lets only the requester cancel a pending request", async () => {
+      const room = await createRoom("approval-cancel", "approval");
+      expect((await join(room.id, "carol-session", "carol")).status).toBe(202);
+      expect((await call(`/rooms/${room.id}/join-requests?sessionID=bob-session`, "DELETE", {})).status).toBe(404);
+      expect(await statusOf(room.id, "carol-session")).toEqual({ status: "pending" });
+      const cancelled = await call(`/rooms/${room.id}/join-requests?sessionID=carol-session`, "DELETE", {});
+      expect(cancelled.status).toBe(200);
+      expect(await cancelled.json()).toEqual({ ok: true });
+      expect(await statusOf(room.id, "carol-session")).toEqual({ status: "none" });
+      expect(await requestsOf(room.id, "owner-session")).toEqual({ requests: [] });
+      expect((await call(`/rooms/${room.id}/join-requests?sessionID=carol-session`, "DELETE", {})).status).toBe(404);
+      expect((await join(room.id, "carol-session", "carol")).status).toBe(202);
     });
 
     test("clears a denied request so the same session can retry", async () => {

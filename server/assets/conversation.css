@@ -76,6 +76,12 @@
   .profile-trigger .rail-avatar { width: 25px; height: 25px; font-size: 12px; font-weight: 700; }
   .chip.danger { color: var(--danger); }
   .chip.danger:hover { border-color: var(--danger); background: var(--danger-soft); }
+  .chip.keys-entry { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px; font-size: 10.5px; line-height: 1; }
+  .composer-meta .chip.keys-entry { margin-right: auto; }
+  .composer-meta .chip.keys-entry .keys-key { min-width: 15px; height: 16px; padding: 0 3px; font-size: 9px; }
+  .composer-meta .chip.keys-entry .keys-sep { font-size: 9px; }
+  .chip.keys-entry .action-label { line-height: 1; }
+  @media (max-width: 560px) { .composer-meta .chip.keys-entry .action-label { display: none; } }
 
   .anchor { position: relative; }
   .panel {
@@ -111,7 +117,7 @@
   #memberList .member-activity + .member-actions { grid-column: 2; grid-row: 2; }
   #memberList .member-action { white-space: normal; }
   #memberList li:last-child { border-bottom: none; }
-  #chatSettings [data-i18n="privacyNote"] { min-height: 63px; line-height: 21px; }
+
   .m-time { font-size: 11.5px; color: var(--ink-3); }
   .member-activity { flex: none; padding: 2px 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 10px; }
   .member-activity.working { color: var(--accent); background: var(--accent-soft); }
@@ -201,6 +207,7 @@
   .msg { display: flex; flex-direction: column; margin-bottom: 16px; }
   .msg.in, .sys.in, .day-sep.in { animation: msg-in .25s ease both; }
   .msg.own { align-items: flex-end; }
+  .msg.pending .msg-text { opacity: .62; }
   .msg.repeat { margin-bottom: 8px; }
   .msg-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 3px; }
   .msg-name { font-size: 13px; font-weight: 650; color: var(--ink-2); }
@@ -483,9 +490,10 @@
     resize: none;
     overflow-y: hidden;
   }
-  #msgInput:empty, #msgInput:has(> br:only-child), #msgInput:has(> div:only-child > br:only-child) { height: 50px !important; }
+  #msgInput[data-empty="true"] { height: 50px !important; }
   .message-editor { white-space: pre-wrap; overflow-wrap: anywhere; outline: none; }
-  .message-editor:empty::before, .message-editor:has(> br:only-child)::before, .message-editor:has(> div:only-child > br:only-child)::before { content: attr(aria-placeholder); position: absolute; inset: 12px 13px auto; overflow: hidden; color: var(--ink-3); pointer-events: none; text-overflow: ellipsis; white-space: nowrap; }
+  #msgInput br[data-chat-tail] { line-height: 0; font-size: 0; }
+  .message-editor[data-empty="true"]::before { content: attr(aria-placeholder); position: absolute; inset: 12px 13px auto; overflow: hidden; color: var(--ink-3); pointer-events: none; text-overflow: ellipsis; white-space: nowrap; }
   .editor-mention { display: inline-block; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--mention-blue) 32%, transparent); border-radius: 999px; color: var(--mention-blue); background: color-mix(in srgb, var(--mention-blue) 14%, transparent); font-size: .92em; font-weight: 600; vertical-align: baseline; white-space: nowrap; }
   #btnSend { padding: 12px 22px; }
   .send-error { margin: 0; font-size: 12.5px; color: var(--danger); }
@@ -497,3 +505,13 @@
   .failed-reply-context { flex: 0 0 100%; overflow: hidden; color: var(--accent); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .failed-message button { flex: none; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; }
   .failed-message button:disabled { opacity: .5; cursor: default; }
+
+@keyframes room-switch-next { from { opacity: 0; transform: translateY(8px); } }
+@keyframes room-switch-prev { from { opacity: 0; transform: translateY(-8px); } }
+#msgList.room-switch-next { animation: room-switch-next .22s ease-out; }
+#msgList.room-switch-prev { animation: room-switch-prev .22s ease-out; }
+
+@keyframes thread-jump-up { from { opacity: .45; transform: translateY(6px); } }
+@keyframes thread-jump-down { from { opacity: .45; transform: translateY(-6px); } }
+#msgList.thread-jump-up { animation: thread-jump-up .18s ease-out; }
+#msgList.thread-jump-down { animation: thread-jump-down .18s ease-out; }

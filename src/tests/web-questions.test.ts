@@ -221,6 +221,7 @@ test.skipIf(!browserModule)("questions can be answered inline without replacing 
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(screenshotDir, "questions-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 375, height: 812 });
+    await page.waitForFunction(() => Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-height")) - innerHeight) < 1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
     await page.screenshot({ path: path.join(screenshotDir, "questions-mobile.png"), fullPage: true });

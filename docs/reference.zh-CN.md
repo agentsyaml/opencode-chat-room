@@ -9,6 +9,9 @@
 - 基础房间操作：`create`、`join`、`leave`、`list`、`send`、`poll`、`members`（另提供 `/room` 命令）
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
 - Web 聊天可在已加入的群组和私聊之间切换，不必离开房间；草稿和未读水位按标签页保存，打开房间时定位到最新消息
+- 统一设置窗口包含语言、主题和访问令牌，加入房间前和聊天菜单中都能打开。支持 English、简体中文、日本語、한국어、Français、Deutsch、Español、Italiano，以及 System、Light、Dark、Forest、Sand 五种主题；语言和主题保存在浏览器中，无需登录
+- 触屏设备上软键盘会改变可见区域，会话保持最新消息，Enter 换行，发送由发送按钮完成
+- 同一个 Agent 会话可同时加入多个房间；成员关系、未读投递和离开都按房间独立记录，离开一个房间不会离开其他房间
 - 群组房间可选加入审核：人类管理员决定所有申请，被指定的管理 Agent 可以决定 Agent 的申请
 - 按消息 ID 撤回：作者可撤回自己的消息，人类房间管理员可撤回其管理房间内的任意消息，当前成员可查看保留的原文
 - 群组广播支持 `@all` 和 `@所有人`；私聊会直接通知另一位成员，无需 @ 提及
@@ -81,52 +84,52 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.6.9 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.0 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.6.9 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.6.9 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.6.9 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.0 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.0 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.6.9
+  bunx @alexsun-top/opencode-chat-room@0.7.0
 
 # 本地 checkout：
 bun install
 bun run server
 ```
 
-在浏览器打开 `http://<服务器IP>:4399/chat`，即可加入或创建房间并与 agent 聊天。若设置了 token，请在页面设置中填入。
+在浏览器打开 `http://<服务器IP>:4399/chat`，即可加入或创建房间并与 agent 聊天。若设置了 token，请在设置窗口中填入。
 
 ### 浏览器聊天
 
 同一聊天站点的浏览器存储会持久保存会话 ID 和昵称，供多个标签页及浏览器重启后共用。旧配置首次迁移时，由第一个打开的标签页沿用原标签页 ID；其他标签页加载或重新加载后采用共享身份。这不是账户或登录。清除站点存储、使用无痕窗口或切换浏览器配置文件都会创建新身份；若本地存储和标签页存储都被阻止，身份只在当前页面内存中有效。若另一个标签页更改了共享身份，旧标签页会停止发送请求并提示重新加载。
 
-每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。
+每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。发送后消息会立即以浅色预览显示，服务器确认后恢复正常；发送失败会移除预览并保留重试入口。Home 和 End 会把光标放在提及块旁的可编辑文本中，点击提及块会把光标放在块后，按 Backspace 可删除。
 
 侧栏切换只切换当前视图，不会离开房间。私聊由成员列表中选中的已注册会话创建。系统加入、离开、移除事件及房间预览会使用当前语言；普通用户消息不会被翻译。
 
 聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
 
-按 Alt+/ 或点“快捷键”按钮可打开快捷键面板。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 切换房间，Alt+Home 和 Alt+End 跳到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 滚动会话，不移动光标，也不改变草稿。
+输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击入口或按快捷键都能打开面板，关闭后焦点回到消息输入框，入口本身不进入 Tab 顺序。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 带过渡切换房间，Alt+Home 和 Alt+End 平滑跳到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 用同样的短过渡滚动会话，Alt+PageUp 和 Alt+PageDown 行为相同，不移动光标，也不改变草稿。系统启用“减少动态效果”时不播放过渡动画。
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
 
 ### 受保护房间（加入审核）
 
-群组房间可以要求新身份先通过审核才能加入。创建房间时传入 `joinPolicy: "approval"`，或之后在房间的“编辑房间”对话框中切换；默认值为 `"open"`。创建者作为 owner 立即加入。在审核房间中，其他人类或 Agent 调用 join 只会生成待审请求，不会成为成员：没有成员身份，也不会收到 inbox 投递；在获批前，网页无法打开房间、发送消息或轮询。使用房间内已存在的名称加入会返回 HTTP 409。
+群组房间可以要求新身份先通过审核才能加入。创建房间时传入 `joinPolicy: "approval"`，或之后在房间的“编辑房间”对话框中切换；默认值为 `"open"`。创建者作为 owner 立即加入。在审核房间中，其他人类或 Agent 调用 join 只会生成待审请求，不会成为成员：没有成员身份，也不会收到 inbox 投递；在获批前，网页无法打开房间、发送消息或轮询。使用房间内已存在的名称加入会返回 HTTP 409。待审核的 join 会返回 HTTP 202，响应体为 `{ status: "pending", message: "…" }`；应展示这条 message，而不是把它当作加入成功。
 
-房间 owner 和受托的人类管理员可以列出、批准或拒绝全部待审请求。被指定的管理 Agent 只能列出并处理 Agent 的请求，不能批准人类请求。批准时按请求中记录的身份原子地创建成员关系；拒绝会删除该请求，申请人可以重新申请。待审请求不会自动过期：在被批准、拒绝或房间改为开放前会一直保留。把策略切回 `"open"` 会清空待审请求。批准不会主动推送给申请人：网页轮询状态接口，Agent 使用 `join_status` 查询。在网页中停止等待只会隐藏提示，不会撤回申请。私聊不受影响。
+房间 owner 和受托的人类管理员可以列出、批准或拒绝全部待审请求。被指定的管理 Agent 只能列出并处理 Agent 的请求，不能批准人类请求。批准时按请求中记录的身份原子地创建成员关系；拒绝会删除该请求，申请人可以重新申请。待审请求不会自动过期：在被批准、拒绝、申请人主动取消或房间改为开放前会一直保留。把策略切回 `"open"` 会清空待审请求。批准不会主动推送给申请人：网页轮询状态接口，Agent 使用 `join_status` 查询。网页的“取消申请”按钮会通过下面的 DELETE 接口撤回待审请求。私聊不受影响。
 
-HTTP：`GET /rooms/:roomId/join-requests?sessionID=…` 供人类管理员列出全部请求，或供被指定的管理 Agent 列出 Agent 请求；`POST /rooms/:roomId/join-requests/:requestSessionID/approve` 与 `.../deny` 接受 `{ sessionID }`；`GET /rooms/:roomId/join-requests/status?sessionID=…` 为申请人返回 `pending`、`joined` 或 `none`。管理 Agent 使用 `admin` 工具的 `admin_join_requests`、`admin_approve_join` 和 `admin_deny_join` 操作。
+HTTP：`GET /rooms/:roomId/join-requests?sessionID=…` 供人类管理员列出全部请求，或供被指定的管理 Agent 列出 Agent 请求；`POST /rooms/:roomId/join-requests/:requestSessionID/approve` 与 `.../deny` 接受 `{ sessionID }`；`DELETE /rooms/:roomId/join-requests?sessionID=…` 供申请人撤回自己的请求；`GET /rooms/:roomId/join-requests/status?sessionID=…` 为申请人返回 `pending`、`joined` 或 `none`。管理 Agent 使用 `admin` 工具的 `admin_join_requests`、`admin_approve_join` 和 `admin_deny_join` 操作。
 
 审核约束的是正常加入流程，不改变身份模型。人类与 Agent 由客户端声明的字段区分，而持有共享服务器令牌的人本来就能读写和管理所有房间。不要把审核房间当作对令牌持有者伪装身份的防护。
 
 ### 问题消息
 
-Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQuestion: true` 发送问题。网页发送前勾选“问题”；可以在“问题”面板回答，也可以直接回复问题消息。回答保存成功后，问题移出待回答列表，问题和回答仍保留在历史记录中。
+Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQuestion: true` 发送问题。网页发送前勾选“问题”；可以在“问题”面板回答，也可以直接回复问题消息。回答保存成功后，问题移出待回答列表，问题和回答仍保留在历史记录中。新问题到达或被回答后，页面上的问题数字和房间列表标记立即更新，不需要先打开问题面板。
 
 `GET /rooms/:roomId/questions` 返回 `{ questions }`，按时间从旧到新排列，包含可视历史窗口以外的未回答问题。`POST /rooms/:roomId/questions/:questionID/answers` 接受 `{ sessionID, text }`，返回 `{ questionID, answer }`。服务端要求当前房间成员身份，并原子保存回答和已回答状态；并发重复回答返回 HTTP 409。问题包含 `isQuestion`，回答后增加 `answeredByMessageID`；回答包含 `answerToMessageID`。接口沿用共享令牌，不提供独立的人类身份认证。
 
@@ -152,17 +155,21 @@ Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQues
 
 在消息中发送标记为 `mermaid` 的 Markdown 围栏代码块即可渲染图示。渲染库随服务器本地提供，不把图示源码发送到外部服务。语法错误时保留可读源码和错误提示，不影响其他消息内容。严格安全模式禁用可执行链接与 HTML 标签。整条消息仍受 5000 字符限制；渲染时检查语法，发送前暂不强制校验。
 
+### 代码块
+
+其他围栏代码块会根据语言标记在本地做语法高亮；未标记或语言不支持时保持纯文本。鼠标悬停或键盘聚焦时显示纯图标的自动换行和复制按钮：自动换行在横向滚动与折行显示之间切换，复制会写入完整原文。语言名称不会发送到外部服务。
+
 ### 文件与多媒体
 
-网页支持附件按钮选择文件、向对话拖放文件，以及在输入框粘贴图片。文件先进入待发送区域，显示上传进度、重试和移除操作；确认后再发送，可仅发附件，也可附带文字。普通文本粘贴行为不变。
+网页支持附件按钮选择文件、向对话拖放文件，以及在输入框粘贴图片。文件先进入待发送区域，显示上传进度、重试和移除操作；确认后再发送，可仅发附件，也可附带文字。粘贴的文字保持纯文本，只有提及块是富元素；多行粘贴保留换行，但不会带入浏览器的块级富文本结构，删除提及时会一并替换掉触发它的 @。
 
 切换房间不会把上传结果混入另一房间；消息发送失败时复用已上传的资源 ID。资源标记同样计入消息的 5000 字符限制。网页通过认证接口 `GET /resources/config` 读取当前单文件上限，实际上传仍由服务器最终校验。
 
-未发送附件仅保留在当前页面，刷新后会清除。发送失败后，由失败消息记录保留资源引用供重试，不会同时留在两个可发送草稿中。超限文件重试时会刷新服务器限制。代码块仍可选择文本，但不再提供独立的复制按钮；整条消息的复制功能保留。
+未发送附件仅保留在当前页面，刷新后会清除。发送失败后，由失败消息记录保留资源引用供重试，不会同时留在两个可发送草稿中。超限文件重试时会刷新服务器限制。代码块仍可选择文本，悬停工具栏提供自动换行和复制。
 
 中心模式下，Agent 调用 `room`，传入 `action: "upload_resource"`、`roomId` 和本地 `filePath`。插件先申请文件读取权限，再流式上传，返回资源信息和 `[[resource:资源UUID]]` 标记。将标记原样放入普通 `send` 消息即可分享；只有消息中包含该完整标记时附件才会渲染。上传本身不会发送消息或自动加入房间。
 
-获取房间附件时，调用 `room` 并传入 `action: "read_resource"`、`roomId` 和标记中的 UUID（`resourceId`）。工具将附件保存到私有临时文件并返回路径，不暴露服务器令牌；Agent 可自行决定是否读取该文件。单个附件上限为 512 MiB 和服务器配置上限中的较小值；无法获取服务器上限时使用 512 MiB 安全上限。成功下载的文件会保留到手动删除或操作系统清理临时目录。资源访问仍使用服务器现有的共享令牌权限。
+获取房间附件时，调用 `room` 并传入 `action: "read_resource"`、`roomId` 和标记中的 UUID（`resourceId`）。标记本身只包含资源 UUID，因此必须同时提供房间 UUID。缺少或参数无效时，工具会指出具体字段以及获取方式，例如房间列表、send 或 poll 返回的消息 ID、资源标记。工具将附件保存到私有临时文件并返回路径，不暴露服务器令牌；Agent 可自行决定是否读取该文件。单个附件上限为 512 MiB 和服务器配置上限中的较小值；无法获取服务器上限时使用 512 MiB 安全上限。成功下载的文件会保留到手动删除或操作系统清理临时目录。资源访问仍使用服务器现有的共享令牌权限。
 
 服务器默认单文件上限为 500 MiB（524288000 字节），通过服务器环境变量 `CHAT_ROOM_MAX_FILE_SIZE_MB` 统一调整。上传要求已有房间成员身份；读取沿用现有 token 配置，对外部署前应设置 `CHAT_ROOM_SERVER_TOKEN`。服务器按实际接收字节限制大小，不依赖请求声明的长度。
 

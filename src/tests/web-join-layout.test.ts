@@ -30,12 +30,12 @@ test.skipIf(!browserModule)("the join masthead stays above the balanced content 
       await page.waitForTimeout(160);
       const metrics = await page.evaluate(() => {
         const box = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
-        const head = box(".join-head"), entries = box(".join-entries"), icon = box(".join-head .locale-icon");
+        const head = box(".join-head"), entries = box(".join-entries"), icon = box("#btnJoinSettings svg");
         const cards = Array.from(document.querySelectorAll<HTMLElement>(".join-entries > .entry-card")).map((card) => Math.round(card.getBoundingClientRect().width));
         return {
           headerAbove: head.bottom <= entries.top,
           brand: Boolean(document.querySelector(".join-head .wordmark-row")),
-          locale: Boolean(document.querySelector(".join-head .locale-control")),
+          settingsEntry: Boolean(document.querySelector(".join-head #btnJoinSettings")),
           iconVisible: icon.width > 0 && icon.height > 0,
           cards: cards.length, widths: [...new Set(cards)],
           columns: getComputedStyle(document.querySelector(".join-entries")!).gridTemplateColumns.split(" ").length,
@@ -44,7 +44,7 @@ test.skipIf(!browserModule)("the join masthead stays above the balanced content 
         };
       });
       expect(metrics.headerAbove).toBe(true);
-      expect(metrics.brand && metrics.locale && metrics.iconVisible).toBe(true);
+      expect(metrics.brand && metrics.settingsEntry && metrics.iconVisible).toBe(true);
       expect(metrics.cards).toBe(3);
       expect(metrics.rooms).toBe(true);
       expect(metrics.overflow).toBe(true);

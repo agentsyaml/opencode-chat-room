@@ -19,7 +19,7 @@ export function editorText(editor, draft = false) {
       if (node.dataset?.chatAutoSeparator) value += draft && node.textContent.startsWith(" ")
         ? autoSeparator + encodeDraftText(node.textContent.slice(1)) : draft ? encodeDraftText(node.textContent) : node.textContent;
       else if (mention !== null) value += `<at>@${mention}</at>`;
-      else if (node.tagName === "BR") value += "\n";
+      else if (node.tagName === "BR") { if (!node.dataset?.chatTail) value += "\n"; }
       else node.childNodes.forEach((child, index, all) => {
         if (index && (block(child) || block(all[index - 1]))) value += "\n";
         if (!(block(child) && child.childNodes.length === 1 && child.firstChild.nodeName === "BR")) walk(child);
@@ -37,19 +37,26 @@ export const editorDraftText = (editor) => editorText(editor, true);
 export const autoMentionDraft = (name) => `<at>@${name}</at>${autoSeparator}`;
 const literalMention = /<at>@([^<]+)<\/at>/g;
 function encodeDraftText(text) { return String(text).replace(/\uE000/g, "\uE000\uE000").replace(literalMention, "\uE000$&"); }
+function appendText(editor, text) {
+  String(text).split("\n").forEach((line, index) => {
+    if (index) editor.append(document.createElement("br"));
+    if (line) editor.append(document.createTextNode(line));
+  });
+}
 
 export function setEditorText(editor, value, draft = false) {
   editor.replaceChildren();
   const pattern = draft ? /\uE000\uE001|\uE000\uE000|\uE000<at>@([^<]+)<\/at>|<at>@([^<]+)<\/at>/g : /<at>@([^<]+)<\/at>/g;
   let offset = 0, match;
   while ((match = pattern.exec(String(value))) !== null) {
-    editor.append(document.createTextNode(String(value).slice(offset, match.index)));
+    appendText(editor, String(value).slice(offset, match.index));
     if (draft && match[0] === autoSeparator) { editor.append(createAutoSeparator()); offset = pattern.lastIndex; continue; }
-    if (draft && match[0] === "\uE000\uE000") { editor.append(document.createTextNode("\uE000")); offset = pattern.lastIndex; continue; }
-    if (draft && match[0].startsWith("\uE000")) { editor.append(document.createTextNode(match[0].slice(1))); offset = pattern.lastIndex; continue; }
+    if (draft && match[0] === "\uE000\uE000") { appendText(editor, "\uE000"); offset = pattern.lastIndex; continue; }
+    if (draft && match[0].startsWith("\uE000")) { appendText(editor, match[0].slice(1)); offset = pattern.lastIndex; continue; }
     editor.append(createMention(draft ? match[2] : match[1])); offset = pattern.lastIndex;
   }
-  editor.append(document.createTextNode(String(value).slice(offset)));
+  appendText(editor, String(value).slice(offset));
+  editor.dataset.empty = value ? "false" : "true";
   pruneTrustedChipNames();
 }
 
@@ -76,7 +83,7 @@ function lengthBefore(root, target, position) {
   const block = (node) => node.nodeType === Node.ELEMENT_NODE && node.tagName === "DIV";
   const length = (node) => node.nodeType === Node.TEXT_NODE ? node.length
     : mentionName(node) !== null ? `<at>@${mentionName(node)}</at>`.length
-      : node.tagName === "BR" ? 1 : childrenLength(node);
+      : node.tagName === "BR" ? (node.dataset?.chatTail ? 0 : 1) : childrenLength(node);
   const childrenLength = (parent, until = parent.childNodes.length) => {
     let sum = 0;
     for (let index = 0; index < until; index++) {
@@ -113,6 +120,10 @@ export function setCaret(editor, offset) {
 function textPoint([container, offset]) {
   if (container.nodeType !== Node.ELEMENT_NODE) return [container, offset];
   const child = container.childNodes[offset], previous = container.childNodes[offset - 1];
+  if (child?.nodeType === Node.TEXT_NODE && child.length === 0) {
+    const next = child.nextSibling;
+    if (next?.nodeType === Node.TEXT_NODE) { child.remove(); return [next, 0]; }
+  }
   if (child?.nodeType === Node.TEXT_NODE) return [child, 0];
   if (previous?.nodeType === Node.TEXT_NODE) return [previous, previous.length];
   const text = document.createTextNode("");
@@ -128,12 +139,19 @@ export function setEditorSelection(editor, start, end = start) {
 }
 
 function editorPoint(editor, offset) {
+  const atEnd = offset === editorText(editor).length;
+  if (atEnd && editor.lastChild?.nodeType === Node.TEXT_NODE && editor.lastChild.nodeValue === "") editor.lastChild.remove();
   const last = editor.lastElementChild;
-  if (offset === editorText(editor).length && editor.lastChild === last && last?.tagName === "DIV" && last.firstChild?.nodeName === "BR") {
+  if (atEnd && editor.lastChild === last && last?.tagName === "DIV" && last.firstChild?.nodeName === "BR") {
     const text = last.appendChild(document.createTextNode("")); return [text, 0];
   }
-  if (offset === editorText(editor).length && editor.lastChild?.nodeName === "BR") {
-    const text = editor.appendChild(document.createTextNode("")); return [text, 0];
+  if (atEnd && editor.lastChild?.nodeName === "BR") {
+    if (!editor.lastChild.dataset?.chatTail) {
+      const tail = document.createElement("br");
+      tail.dataset.chatTail = "true";
+      editor.append(tail);
+    }
+    return [editor, editor.childNodes.length - 1];
   }
   const block = (node) => node.nodeType === Node.ELEMENT_NODE && node.tagName === "DIV";
   let left = offset, point = null;
@@ -161,8 +179,13 @@ function editorPoint(editor, offset) {
 }
 
 export function replaceEditorRange(editor, start, end, value, parseMentions = true) {
+  const emptyBefore = !editorText(editor);
   setEditorSelection(editor, start, end);
-  if (!parseMentions && document.execCommand("insertText", false, String(value))) return;
+  if (!parseMentions && document.execCommand("insertText", false, String(value))) {
+    if (emptyBefore && !String(value).endsWith("\n")) trimTrailingBreak(editor);
+    editor.dataset.empty = editorText(editor) ? "false" : "true";
+    return;
+  }
   const marker = `chat-insert-${createRandomId()}`;
   const source = String(value), generatedSpace = parseMentions && source.endsWith(" "), content = generatedSpace ? source.slice(0, -1) : source;
   const token = parseMentions ? /<at>@([^<]+)<\/at>/g : null;
@@ -178,6 +201,7 @@ export function replaceEditorRange(editor, start, end, value, parseMentions = tr
   if (generatedSpace) html += `<span data-chat-auto-separator="true"> </span>`;
   if (document.execCommand("insertHTML", false, html)) {
     editor.querySelectorAll(`[data-insert-marker="${marker}"]`).forEach((chip) => chip.removeAttribute("data-insert-marker"));
+    if (emptyBefore && !String(value).endsWith("\n")) trimTrailingBreak(editor);
     setCaret(editor, start + source.length);
     pruneTrustedChipNames();
   } else {
@@ -186,6 +210,31 @@ export function replaceEditorRange(editor, start, end, value, parseMentions = tr
     if (generatedSpace) wrapAutoSeparator(editor, start + source.length - 1);
     setCaret(editor, start + value.length);
     pruneTrustedChipNames();
+  }
+  editor.dataset.empty = editorText(editor) ? "false" : "true";
+}
+
+function trimTrailingBreak(editor) {
+  let last = editor.lastChild;
+  if (last?.nodeName === "BR" && last.dataset?.chatTail) last = last.previousSibling;
+  if (last?.nodeName === "BR") last.remove();
+}
+
+function sanitizeEditor(editor) {
+  for (const node of editor.querySelectorAll("*")) {
+    if (node.tagName === "BR" || node.classList.contains("editor-mention") || node.hasAttribute("data-chat-auto-separator")) continue;
+    const selection = getSelection(), range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const [start, end] = editorSelectionOffsets(editor), text = editorText(editor);
+    let atEnd = false;
+    if (range?.collapsed && editor.contains(range.endContainer)) {
+      const tail = document.createRange();
+      tail.setStart(range.endContainer, range.endOffset);
+      tail.setEnd(editor, editor.childNodes.length);
+      atEnd = tail.toString().length === 0;
+    }
+    setEditorText(editor, text);
+    setEditorSelection(editor, atEnd ? text.length : start, atEnd ? text.length : end);
+    return;
   }
 }
 
@@ -211,18 +260,24 @@ function wrapAutoSeparator(editor, offset) {
 }
 
 function deleteMentionAtCaret(editor, event) {
-  if (event.isComposing || event.keyCode === 229 || event.key !== "Backspace") return;
+  if (event.isComposing) return;
+  const backward = event.inputType === "deleteContentBackward" || (event.key === "Backspace" && event.keyCode !== 229);
+  if (!backward) return;
   const [caret, end] = editorSelectionOffsets(editor);
   if (caret !== end) return;
+  const chips = [...editor.querySelectorAll(".editor-mention")];
   const separator = [...editor.querySelectorAll("[data-chat-auto-separator]")].find((node) => {
-    const start = lengthBefore(editor, node, 0); return node.textContent === " " && caret === start + 1;
+    const start = lengthBefore(editor, node, 0);
+    return caret === start + 1 && node.previousElementSibling?.classList.contains("editor-mention");
   });
-  const mention = separator?.previousElementSibling || [...editor.querySelectorAll(".editor-mention")].find((node) => {
-    return caret === lengthBefore(editor, node, 0) + `<at>@${mentionName(node)}</at>`.length;
+  const mention = separator?.previousElementSibling || chips.find((node) => {
+    const start = lengthBefore(editor, node, 0);
+    return caret > start && caret <= start + `<at>@${mentionName(node)}</at>`.length;
   });
-  if (!mention || (separator && separator.previousElementSibling !== mention)) return;
+  if (!mention) return;
   const start = lengthBefore(editor, mention, 0);
-  event.preventDefault(); mention.remove(); separator?.remove(); setCaret(editor, start);
+  const autoSeparator = mention.nextElementSibling?.dataset.chatAutoSeparator ? mention.nextElementSibling : null;
+  event.preventDefault(); mention.remove(); autoSeparator?.remove(); setCaret(editor, start);
   editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
 }
 
@@ -246,10 +301,34 @@ export function installEditor(editor) {
   });
   editor.getSelectionOffsets = () => editorSelectionOffsets(editor);
   editor.setCaret = (offset) => setCaret(editor, offset);
+  editor.moveCaretToLineEdge = (end) => {
+    const [start, finish] = editorSelectionOffsets(editor);
+    const text = editorText(editor);
+    const caret = end ? finish : start;
+    const next = text.indexOf("\n", caret);
+    // A native Home next to a non-editable chip can land inside the chip, where
+    // the caret is invisible. Re-seat all line-edge moves in a real text node.
+    const lineStart = end ? caret : text.lastIndexOf("\n", caret - 1) + 1;
+    const target = end ? (next === -1 ? text.length : next) : lineStart;
+    // A caret before a leading mention chip can render invisibly in Chromium.
+    // Home starts at the first editable character after that chip instead.
+    const leading = !end ? text.slice(lineStart).match(/^(?:<at>@[^<]+<\/at>)+/) : null;
+    setCaret(editor, leading ? lineStart + leading[0].length : target);
+  };
   editor.setSelectionRange = (start, end = start) => setEditorSelection(editor, start, end);
   editor.replaceTextRange = (start, end, value) => replaceEditorRange(editor, start, end, value);
   editor.addEventListener("input", pruneTrustedChipNames);
   editor.addEventListener("keydown", (event) => deleteMentionAtCaret(editor, event));
+  editor.addEventListener("beforeinput", (event) => deleteMentionAtCaret(editor, event));
+  editor.addEventListener("pointerdown", (event) => {
+    const chip = event.target.closest?.(".editor-mention");
+    if (!chip || !editor.contains(chip)) return;
+    event.preventDefault();
+    editor.focus({ preventScroll: true });
+    // A tap on a chip is usually followed by Backspace/Delete. Place the caret
+    // after it so a narrow or rounded chip cannot trap the caret before it.
+    setCaret(editor, lengthBefore(editor, chip, 0) + `<at>@${mentionName(chip)}</at>`.length);
+  });
   editor.addEventListener("copy", (event) => {
     const [start, end] = editorSelectionOffsets(editor);
     if (start === end) return;
@@ -269,6 +348,7 @@ export function installEditor(editor) {
     // and keeps the native insert path, which handles newlines correctly.
     const marked = (event.clipboardData?.getData("text/html") || "").includes("data-chatroom-mentions");
     replaceEditorRange(editor, start, end, text, marked && /<at>@[^<]+<\/at>/.test(text));
+    sanitizeEditor(editor);
     editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
   });
   editor.addEventListener("drop", (event) => {
@@ -281,6 +361,7 @@ export function installEditor(editor) {
     if (range && editor.contains(range.startContainer)) { selection.removeAllRanges(); selection.addRange(range); }
     const [start, end] = editorSelectionOffsets(editor);
     replaceEditorRange(editor, start, end, text, html.includes("data-chatroom-mentions") && /<at>@[^<]+<\/at>/.test(text));
+    sanitizeEditor(editor);
     editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromDrop" }));
   });
 }

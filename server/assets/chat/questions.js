@@ -25,6 +25,14 @@ export function initQuestions(app) {
     return row;
   };
 
+  function renderBadge(count) {
+    const value = Math.max(0, Number(count) || 0);
+    $("#questionBadge").textContent = value > 99 ? "99+" : String(value);
+    $("#questionBadge").hidden = !value;
+    trigger.setAttribute("aria-label", `${app.t("questions")}: ${value}`);
+  }
+  app.updateQuestionBadge = renderBadge;
+
   function render(roomId) {
     const items = pending.get(roomId) || [];
     const entry = app.state.rooms.get(roomId);
@@ -41,9 +49,7 @@ export function initQuestions(app) {
       if (list.dataset.signature === signature) { renderReply(roomId); return; }
       const hadItems = Boolean(list.querySelector(".question-item"));
       list.dataset.signature = signature;
-      $("#questionBadge").textContent = items.length > 99 ? "99+" : String(items.length);
-      $("#questionBadge").hidden = !items.length;
-      trigger.setAttribute("aria-label", `${app.t("questions")}: ${items.length}`);
+      renderBadge(items.length);
       list.textContent = "";
       for (const question of items) {
         const item = document.createElement("li"), card = document.createElement("article"), select = document.createElement("button"), body = document.createElement("div");
@@ -104,11 +110,13 @@ export function initQuestions(app) {
     installEditor(input);
     const key = `${roomId}\0${question.id}`;
     input.draftValue = drafts.has(key) ? drafts.get(key) : questionAuthorMention(question, roomId, app);
+    input.dataset.empty = input.value ? "false" : "true";
     send.type = "submit";
     send.className = "btn primary small";
     send.textContent = app.t("sendAnswer");
     send.disabled = !input.value.trim() || input.value.length > 5000 || submitting.has(key);
     input.addEventListener("input", (event) => {
+      input.dataset.empty = input.value ? "false" : "true";
       drafts.set(`${roomId}\0${question.id}`, input.draftValue);
       if (!event.isComposing) app.recomputeMention(input);
       send.disabled = !input.value.trim() || input.value.length > 5000 || submitting.has(key);

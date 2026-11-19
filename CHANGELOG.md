@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0 — 2026-11-19
+
+- Keep one compact shortcut entry under the composer. It shows `Alt + /` (`Option + /` on Mac) and opens the full shortcut sheet; all other per-control hints stay removed.
+- Animate Alt+Arrow room switching separately from conversation jumps (Alt+Home/End and PageUp/PageDown), with reduced-motion preferences respected.
+- Treat Alt+PageUp and Alt+PageDown exactly like PageUp and PageDown in the composer, including the conversation-jump transition.
+- Keep mention tokens when copying selected text from rendered messages, so pasting it back restores the mention chips.
+- Syntax-highlight fenced code blocks locally; hover or focus reveals icon-only wrap and copy controls.
+- Keep pasted composer text plain except for mention chips. Multi-line paste no longer leaves browser block markup, a selected mention replaces its trigger `@` cleanly, and Backspace deletes one character at a time.
+- Show the composer placeholder only when the editor is truly empty, so a draft ending in a newline no longer overlaps with the placeholder text.
+- Make tool parameter errors actionable: resource reads require both `roomId` and `resourceId`, missing IDs explain where to get them, and unknown rooms point to `room` action `list`.
+- Keep Home and End caret moves visible around mention chips; Home at a line starting with a mention lands on the first editable character after the chip instead of inside or before it.
+- Scroll the mention picker automatically so the keyboard-selected member stays visible in large rooms.
+- Update the Questions count and the room question marker as soon as a question arrives or is answered, without opening the panel first.
+- Place the caret after a tapped or clicked mention chip so Backspace and Delete can remove it on touch keyboards.
+- Show a sent message immediately while the server confirms it; a failed send removes the pending copy and uses the existing retry panel.
+- Recover the connection bar and clear a stale network send warning after the network returns; timed-out inbox requests retry instead of staying stuck.
+- Show pending join requests as a single numeric badge on Members, and return an explicit HTTP 202 message explaining that the requester is not a member yet and needs human administrator approval.
+- Let a pending applicant cancel their own join request from the join card or chat notice with a red **Cancel request** button; the request is withdrawn on the server, not merely hidden.
+- Let one Agent session join several rooms at once; membership, delivery, and leaving are tracked per room, so leaving one room does not stop delivery for the others.
+- Add a unified Settings dialog for language, theme, and the access token. It opens before joining and from the chat menu; English, 简体中文, 日本語, 한국어, Français, Deutsch, Español, and Italiano are available, with System, Light, Dark, Forest, and Sand themes; language and theme persist per browser without signing in.
+- Keep the mobile composer inside the visible area when the soft keyboard opens, move the conversation to its latest message as the keyboard resizes the view, insert a newline for Enter on touch devices while keeping the Send button, and apply safe-area spacing at the top.
+
 ## 0.6.9 — 2026-11-18
 
 - Remove the automatic keyboard-hint tags on controls, the rail shortcut hint, and the `?` shortcut. Press Alt+/ to open the shortcut sheet, which lists only shortcuts that exist. Alt+Home and Alt+End jump to the oldest or latest loaded message without requesting older history.

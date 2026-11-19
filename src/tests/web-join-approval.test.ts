@@ -41,11 +41,14 @@ test.skipIf(!browserModule)("a browser joins a protected room only after approva
     const request = owner.locator("#joinRequestList li").filter({ hasText: "Applicant" });
     await request.waitFor();
     expect((await request.textContent())?.trim()).toContain("Human");
+    const badge = owner.locator("#joinRequestBadge");
+    expect((await badge.textContent())?.trim()).toBe("1");
+    expect(await badge.getAttribute("title")).toContain("1 join request");
+    expect(await owner.locator("#joinRequestBadgeWord").count()).toBe(0);
     await request.locator('[data-request-action="approve"]').click();
     await owner.locator("#joinRequestList li").waitFor({ state: "detached" });
 
-    await applicant.locator("#btnJoinPendingCheck").click();
-    await applicant.locator("#chatView").waitFor({ state: "visible" });
+    await applicant.locator("#chatView").waitFor({ state: "visible", timeout: 10000 });
     expect(await applicant.evaluate(async (url: string) => (await import(url)).app.state.room.id, "/assets/chat/state.js")).toBe(roomId);
 
     const denied = await openPage(browser, origin, "Denied");
@@ -58,8 +61,7 @@ test.skipIf(!browserModule)("a browser joins a protected room only after approva
     await deniedRow.locator('[data-request-action="deny"]').click();
     await owner.locator("#joinRequestList li").waitFor({ state: "detached" });
 
-    await denied.locator("#btnJoinPendingCheck").click();
-    await denied.locator("#btnJoinPendingAgain").waitFor({ state: "visible" });
+    await denied.locator("#btnJoinPendingAgain").waitFor({ state: "visible", timeout: 10000 });
     await denied.locator("#btnJoinPendingAgain").click();
     await denied.locator("#joinPending").waitFor({ state: "visible" });
     await showRequests(owner);
@@ -67,8 +69,7 @@ test.skipIf(!browserModule)("a browser joins a protected room only after approva
     await retryRow.waitFor();
     await retryRow.locator('[data-request-action="approve"]').click();
     await owner.locator("#joinRequestList li").waitFor({ state: "detached" });
-    await denied.locator("#btnJoinPendingCheck").click();
-    await denied.locator("#chatView").waitFor({ state: "visible" });
+    await denied.locator("#chatView").waitFor({ state: "visible", timeout: 10000 });
 
     // Joining a second protected room from the chat rail must show pending
     // feedback without leaving the room the browser is already in.
@@ -83,8 +84,13 @@ test.skipIf(!browserModule)("a browser joins a protected room only after approva
     await secondRow.click();
     await applicant.locator("#joinNotice").waitFor({ state: "visible" });
     expect(await applicant.evaluate(async (url: string) => (await import(url)).app.state.room.id, "/assets/chat/state.js")).toBe(roomId);
+    const cancelled = applicant.waitForResponse((response: any) => response.request().method() === "DELETE" && response.url().includes("/join-requests?") && response.status() === 200);
     await applicant.locator("#btnJoinNoticeStop").click();
+    await cancelled;
     await applicant.locator("#joinNotice").waitFor({ state: "hidden" });
+    const applicantSession = await applicant.evaluate(() => sessionStorage.getItem("chat.sessionID"));
+    const statusResponse = await fetch(`${origin}/rooms/${secondRoomId}/join-requests/status?sessionID=${encodeURIComponent(applicantSession!)}`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(await statusResponse.json()).toEqual({ status: "none" });
     expect(secondRoomId).not.toBe(roomId);
   } finally {
     await browser?.close(); server.kill("SIGTERM");

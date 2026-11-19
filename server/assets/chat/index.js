@@ -19,7 +19,10 @@ import { initReminders } from "./reminders.js";
 import { initPwa } from "./pwa.js";
 import { initInstallPrompt } from "./install-prompt.js";
 import { initShortcuts } from "./shortcuts.js";
+import { initViewport } from "./viewport.js";
+import { initSettings } from "./settings.js";
 
+initSettings(app);
 initConfirmDialog(app);
 initMentions(app);
 initMessages(app);
@@ -39,4 +42,5 @@ initReminders(app);
 initAdmin(app);
 initImageZoom(app);
 initPwa();
+initViewport();
 initInstallPrompt(app);

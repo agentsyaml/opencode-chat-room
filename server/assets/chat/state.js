@@ -1,3 +1,5 @@
+import { extraLocales } from "./locales/index.js";
+
 // Upper bound on messages kept in memory per open room; older pages load on scroll.
 export const LOADED_MESSAGE_LIMIT = 5000;
 
@@ -137,6 +139,7 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
     set name(value) { ensureIdentity(); browserIdentity.name = String(value ?? "").slice(0, 64); writeSession("chat.name", browserIdentity.name || null); saveIdentity(); },
     get token() { return read("chat.token") || ""; }, set token(value) { write("chat.token", value || null); },
     get locale() { return read("chat.locale") || "en"; }, set locale(value) { write("chat.locale", value || null); },
+    get theme() { return read("chat.theme") || "system"; }, set theme(value) { write("chat.theme", value || null); },
 
     get joinedRoomIds() {
       try {
@@ -197,7 +200,7 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
   return { LS: auth, saveToken, api, apiBlob };
 }
 
-const messages = {
+export const messages = {
   en: {
     brand: "OC Chat", documentTitle: "OC Chat",
     roomTitle: ({ name }) => `${name} · OC Chat`,
@@ -212,7 +215,7 @@ const messages = {
     joinPolicyEditHint: "New members need a human administrator's approval. Turning this off clears all pending requests.", joinPolicyOpenConfirm: "Turn off approval? All pending join requests will be cleared.",
     approvalRequired: "Approval required", joinRequired: "Approval required", joinPendingStatus: "Approval pending",
     joinPendingTitle: "Waiting for approval", joinPendingBody: ({ name }) => `Your request to join “${name}” was sent. A human administrator must approve it before you can join.`,
-    joinPendingHint: "You can leave this page; the request stays pending. Check the room list later.", joinPendingNotice: ({ name }) => `Request sent to join “${name}”. Waiting for a human administrator.`, joinPendingCheck: "Check again", joinPendingStop: "Stop waiting",
+    joinPendingHint: "You can leave this page; the request stays pending. Check the room list later.", joinPendingNotice: ({ name }) => `Request sent to join “${name}”. Waiting for a human administrator.`, joinPendingCancel: "Cancel request", joinPendingCancelError: "Could not cancel the request. Try again.",
     joinPendingGoneTitle: "Request not pending", joinPendingGoneBody: "It may have been denied or cleared. You can send a new request.", joinPendingAgain: "Request again",
     joinPendingError: "Could not check the request. Try again.", joinPendingRoomGone: "This room is gone, or you no longer have access.",
     joinNameTaken: "That name is already used in this room. Choose another name.",
@@ -221,7 +224,6 @@ const messages = {
     joinRequestApproveLabel: ({ name }) => `Approve ${name}`, joinRequestDenyLabel: ({ name }) => `Deny ${name}`,
     joinRequestTime: ({ time }) => `Requested ${time}`, joinRequestApproved: ({ name }) => `${name} approved.`, joinRequestDenied: ({ name }) => `${name} denied.`,
     joinRequestActionFailed: ({ message }) => `Could not update the request: ${message}`, membersWithRequests: ({ count }) => `Members, ${count} join request${count === 1 ? "" : "s"} pending`,
-    joinRequestBadgeOne: " request", joinRequestBadgeMany: " requests",
     accessKeyTitle: "Access key", accessKeyHint: "This server asks for an access key. It stays in this browser and is sent with each request.",
     tokenOptional: "Access token (optional)", bearerToken: "Bearer token",
     tokenPlaceholder: "Enter if the server requires it", save: "Save",
@@ -230,7 +232,7 @@ const messages = {
     editRoom: "Edit room", roomOwnerOnlyTitle: "Owner or administrator only", roomOwnerOnlyNote: ({ owner }) => `Only the room owner or a room administrator can change these settings. This room belongs to ${owner}.`, roomNameLabel: "Room name", roomDescriptionLabel: "Description", adminAgentLabel: "Administrator agent", roomOwnerBadge: "Owner", roomAdminBadge: "Admin",
     adminIdsLabel: "Human administrators", adminIdsHint: "These members can edit room details, manage members, delete files, and choose a successor. The owner always has the same powers.", adminIdsEmpty: "No other members are in this room yet.", newOwnerLabel: "New owner", newOwnerHint: "Hand the room to another person who is in it. Only the owner can do this; agents cannot own a room.",
     successorLabel: "Successor if the owner leaves", successorNone: "Longest-present member", successorHint: "If the owner leaves, this person becomes owner. If an administrator leaves, this person takes that role. Leave empty to use the longest-present member.", ownerOnlySettingsNote: "Only the owner can change the administrator agent or hand off the room.", adminAgentHint: "The designated agent can use the admin tool to inspect this room and its history. Only the owner can change this; leave empty for none.",
-    noAdminAgent: "None", roomNameRequired: "Room name is required", openQuestions: ({ count }) => `${count} unanswered question${count === 1 ? "" : "s"}`,
+    noAdminAgent: "None", openQuestions: ({ count }) => `${count} unanswered question${count === 1 ? "" : "s"}`,
     newRoom: "Create a room",
     copyRoomIdTitle: ({ id }) => `Click to copy the full room ID: ${id}`, copied: "Copied",
     members: "Members", membersCount: ({ count }) => `Members (${count})`, noMembers: "No members yet.", profileMenu: "Your profile and settings",
@@ -255,6 +257,8 @@ const messages = {
     answerFailed: "Reply failed. Your draft is still here.", answerTooLong: "Reply must be 5,000 characters or fewer.", questionAlreadyAnswered: "This question was answered elsewhere.",
     adminBindingGuide: "Choose a room and an Agent in it. Send the invitation privately to finish setup.", adminRoomLabel: "Administrator room", adminDesignateAgent: "Invite Agent",
     settings: "Settings", adminAccess: "Administration", adminToken: "Administration token", openAdministration: "Open administration", administration: "Administration", designations: "Designations", adminRoom: "Administrator room", targetRoom: "Agent membership room", adminScopeNote: "Choose an Agent in the administrator room. Administrators can manage all rooms.", targetAgent: "Registered agent", designate: "Designate administrator", revokeDesignation: "Revoke designation", globalStatus: "Global status", adminTasks: "Tasks", taskText: "Task", dispatchTask: "Dispatch task", timers: "Timers", planName: "Timer name", createTimer: "Create timer", tokenRequired: "The server requires an access token (401).",
+    themeLabel: "Theme", themeSystem: "System", themeLight: "Light", themeDark: "Dark", themeForest: "Forest", themeSand: "Sand",
+    settingsLocalHint: "Language and theme are saved in this browser.",
     adminLoading: "Loading administration…", refreshAdmin: "Refresh", adminRoomBadge: "admin", chooseAdminRoom: "Choose a normal room", chooseTargetRoom: "Choose an agent room", chooseAgent: "Choose a registered agent", taskTargetRoom: "Target room", taskTargetAgent: "Target agent", createAdminRoomFirst: "Create a normal room first, then select it as the admin room.", noAgents: "No registered agents", selectAdminAgent: "Choose an admin room and registered agent.", adminDesignated: "Administrator designation is active immediately and stays until you revoke it.", revokeConfirm: "Revoke this admin designation? The normal room will remain.", updateTask: "Update task", task_pending: "Pending", task_working: "Working", task_blocked: "Blocked", task_completed: "Completed", task_cancelled: "Cancelled", nextRun: ({ time, minutes }) => `Every ${minutes} min · next ${time}`, paused: "Paused", pauseTimer: "Pause", resumeTimer: "Resume", deleteTimer: "Delete", deleteTimerConfirm: ({ name }) => `Delete timer “${name}”?`,
     leave: "Leave", reconnecting: "Connection lost. Retrying…", messageList: "Message list",
     noMessages: "No messages yet. Say something.", latestMessages: "Back to latest messages",
@@ -269,8 +273,9 @@ const messages = {
     joinArrow: "Join →", joinDirectTitle: "Click to join directly", mentionEmpty: "No matching members",
     joined: "Joined", joinAction: "Join room", unreadMessages: ({ count }) => `${count} unread`,
     mentionHint: "↑↓ Select · Enter to confirm · Esc to close", today: "Today", yesterday: "Yesterday",
-    keyboardHints: "Keyboard shortcuts", shortcutsLabel: "Shortcuts",
-    shortcutsTitle: "Keyboard shortcuts", shortcutsLead: "ChatRoom shortcuts. Press Alt + / to open this list.",
+
+    shortcutsTitle: "Keyboard shortcuts", shortcutsLead: "ChatRoom shortcuts. Press {modifier} + / to open this list.",
+    shortcutsOpen: "All shortcuts",
     shortcutsWriting: "Writing", shortcutsSend: "Send the message", shortcutsNewline: "Start a new line",
     shortcutsMention: "Choose a member to mention", shortcutsRooms: "Rooms",
     shortcutsSwitchRoom: "Switch to the previous or next room", shortcutsReading: "Reading",
@@ -278,7 +283,7 @@ const messages = {
     shortcutsClose: "Close the open menu, panel, or dialog",
     earlierMessages: "Earlier messages omitted", messagesBetweenOmitted: "Messages between this reading point and latest are omitted.", you: "You", saved: "Saved",
     savedMemory: "Saved for this tab only", copyFailed: ({ id }) => `Copy failed. Copy manually: ${id}`,
-    copyMessage: "Copy", copiedMessage: "Copied", copyMessageFailed: "Could not copy. Select and copy the message manually.",
+    copyMessage: "Copy", copiedMessage: "Copied", copyMessageFailed: "Could not copy. Select and copy the message manually.", wrapCode: "Wrap code",
     replyMessage: "Reply", replyingTo: "Replying to", cancelReply: "Cancel reply", replyOpenOriginal: "View original message", replyOriginalUnavailable: "Original message is unavailable.", replyOriginalRecalled: "Original message was recalled.",
     recallMessage: "Recall", recallSystemMessage: "Recall this room notice", recallSystemConfirm: "Recall this room notice? Everyone will see it as recalled.", recallConfirm: "Recall this message? Everyone will see it as recalled.", recallAdminConfirm: ({ name }) => `Recall ${name}'s message? Everyone will see it as recalled.`, recallFailed: "Could not recall this message.", messageRecalled: "Message recalled", recalledBy: ({ name }) => `Recalled by ${name}`, showRecalled: "View original", hideRecalled: "Hide original", revealFailed: "Load failed. Retry",
     identityChanged: "This browser identity changed in another tab. Reload this tab before continuing.",
@@ -324,7 +329,7 @@ const messages = {
     joinPolicyEditHint: "新成员需经人类管理员审核。关闭后，所有待审核申请都会被清除。", joinPolicyOpenConfirm: "关闭加入审核？所有待审核的加入申请都会被清除。",
     approvalRequired: "需审核加入", joinRequired: "需审核加入", joinPendingStatus: "等待审核",
     joinPendingTitle: "等待审核", joinPendingBody: ({ name }) => `加入“${name}”的申请已发送，需人类管理员审核通过后才能进入。`,
-    joinPendingHint: "可以离开此页面，申请会保留；稍后可在房间列表查看。", joinPendingNotice: ({ name }) => `已发送加入“${name}”的申请，正在等待人类管理员审核。`, joinPendingCheck: "再看一次", joinPendingStop: "不再等待",
+    joinPendingHint: "可以离开此页面，申请会保留；稍后可在房间列表查看。", joinPendingNotice: ({ name }) => `已发送加入“${name}”的申请，正在等待人类管理员审核。`, joinPendingCancel: "取消申请", joinPendingCancelError: "取消申请失败，请重试。",
     joinPendingGoneTitle: "申请已不在等待", joinPendingGoneBody: "申请可能已被拒绝或清除，可以重新发送。", joinPendingAgain: "重新申请",
     joinPendingError: "无法检查申请状态，请重试。", joinPendingRoomGone: "房间不存在，或你已无权访问。",
     joinNameTaken: "这个昵称已被房间里的成员使用，请换一个。",
@@ -333,7 +338,6 @@ const messages = {
     joinRequestApproveLabel: ({ name }) => `通过 ${name} 的加入申请`, joinRequestDenyLabel: ({ name }) => `拒绝 ${name} 的加入申请`,
     joinRequestTime: ({ time }) => `申请于 ${time}`, joinRequestApproved: ({ name }) => `已通过 ${name} 的申请。`, joinRequestDenied: ({ name }) => `已拒绝 ${name} 的申请。`,
     joinRequestActionFailed: ({ message }) => `操作失败：${message}`, membersWithRequests: ({ count }) => `成员，${count} 个待审核加入申请`,
-    joinRequestBadgeOne: " 个申请", joinRequestBadgeMany: " 个申请",
     accessKeyTitle: "访问密钥", accessKeyHint: "这个服务器需要访问密钥。密钥保存在当前浏览器里，并随每个请求发送。",
     bearerToken: "Bearer Token", tokenPlaceholder: "服务器要求时填写", save: "保存",
     tokenHint: "若服务器设置了访问令牌（401），所有请求都会带上它。", existingRooms: "房间",
@@ -341,7 +345,7 @@ const messages = {
     editRoom: "编辑房间", roomOwnerOnlyTitle: "仅房主或管理员可修改", roomOwnerOnlyNote: ({ owner }) => `只有房主或房间管理员可以修改这些设置。这个房间属于 ${owner}。`, roomNameLabel: "房间名称", roomDescriptionLabel: "描述", adminAgentLabel: "管理员 Agent", roomOwnerBadge: "房主", roomAdminBadge: "管理员",
     adminIdsLabel: "成员管理员", adminIdsHint: "这些成员可以修改房间信息、管理成员、删除文件并指定接任者。房主始终拥有这些权限。", adminIdsEmpty: "房间里暂无其他成员。", newOwnerLabel: "新房主", newOwnerHint: "可以把房间交给房间里的另一个人。只有房主可以操作；Agent 不能成为房主。",
     successorLabel: "房主离开后的接任者", successorNone: "最早加入的成员", successorHint: "房主离开后，此人接任房主；管理员离开后，此人接任管理员。留空则最早加入的成员接任房主。", ownerOnlySettingsNote: "只有房主可以更改管理员 Agent 或移交房间。", adminAgentHint: "被指定的 Agent 可用 admin 工具查看此房间及其历史。只有房主可以更改，留空表示不指定。",
-    noAdminAgent: "不指定", roomNameRequired: "房间名称不能为空", openQuestions: ({ count }) => `${count} 个待回答的问题`,
+    noAdminAgent: "不指定", openQuestions: ({ count }) => `${count} 个待回答的问题`,
     newRoom: "创建房间",
     copyRoomIdTitle: ({ id }) => `点击复制完整房间 ID：${id}`, copied: "已复制", members: "成员",
     membersCount: ({ count }) => `成员 ${count}`, noMembers: "暂无成员", settings: "设置", profileMenu: "个人资料和设置",
@@ -367,7 +371,9 @@ const messages = {
     adminBindingGuide: "选择管理员房间和其中的 Agent，再将邀请私下发送给该 Agent 完成设置。", adminRoomLabel: "管理员房间", adminDesignateAgent: "邀请 Agent",
     adminAccess: "管理", adminToken: "管理令牌", openAdministration: "打开管理面板", administration: "管理面板", designations: "管理绑定", adminRoom: "管理员房间", targetRoom: "Agent 所属房间", adminScopeNote: "请选择管理员房间内的 Agent。管理员可以管理所有房间。", adminRoomBadge: "管理", targetAgent: "已注册 Agent", designate: "指定管理员", revokeDesignation: "撤销绑定", globalStatus: "全局状态", adminTasks: "任务", taskText: "任务内容", dispatchTask: "派发任务", timers: "定时任务", planName: "定时任务名称", createTimer: "创建定时任务",
     adminLoading: "正在加载管理面板…", refreshAdmin: "刷新", adminRoomBadge: "管理", chooseAdminRoom: "选择普通房间", chooseTargetRoom: "选择 Agent 房间", chooseAgent: "选择已注册 Agent", taskTargetRoom: "任务目标房间", taskTargetAgent: "任务目标 Agent", createAdminRoomFirst: "请先按普通流程创建房间，再选作管理房间。", noAgents: "没有已注册的 Agent", selectAdminAgent: "请选择管理房间和已注册的 Agent。", adminDesignated: "管理员已立即生效，长期有效，直到撤销。", revokeConfirm: "撤销此管理绑定？普通房间会保留。", updateTask: "更新任务", task_pending: "待处理", task_working: "进行中", task_blocked: "受阻", task_completed: "已完成", task_cancelled: "已取消", nextRun: ({ time, minutes }) => `每 ${minutes} 分钟 · 下次 ${time}`, paused: "已暂停", pauseTimer: "暂停", resumeTimer: "恢复", deleteTimer: "删除", deleteTimerConfirm: ({ name }) => `删除定时任务“${name}”？`,
-    tokenRequired: "服务器要求访问令牌（401）。", leave: "离开", reconnecting: "连接中断，正在重试…",
+    tokenRequired: "服务器要求访问令牌（401）。",
+    themeLabel: "主题", themeSystem: "跟随系统", themeLight: "浅色", themeDark: "深色", themeForest: "森林", themeSand: "沙丘",
+    settingsLocalHint: "语言和主题保存在当前浏览器中。", leave: "离开", reconnecting: "连接中断，正在重试…",
     messageList: "消息列表", noMessages: "还没有消息，说点什么吧。", latestMessages: "回到最新消息",
     mentionMembers: "选择要提及的成员", messagePlaceholder: "输入消息，Enter 发送",
     attachments: "附件", addFiles: "添加文件", dropFilesHere: "将文件拖到这里添加",
@@ -378,8 +384,9 @@ const messages = {
     fileTooLarge: "文件超过服务器当前大小限制。",
     send: "发送", roomMeta: ({ members, count }) => `${members} 人 · ${count} 条消息`, joinArrow: "加入 →",
     joinDirectTitle: "点击直接加入", mentionEmpty: "没有匹配的成员", mentionHint: "↑↓ 选择 · Enter 确认 · Esc 关闭",
-    keyboardHints: "键盘快捷键", shortcutsLabel: "快捷键",
-    shortcutsTitle: "键盘快捷键", shortcutsLead: "ChatRoom 快捷键。按 Alt + / 打开此列表。",
+
+    shortcutsTitle: "键盘快捷键", shortcutsLead: "ChatRoom 快捷键。按 {modifier} + / 打开此列表。",
+    shortcutsOpen: "全部快捷键",
     shortcutsWriting: "输入", shortcutsSend: "发送消息", shortcutsNewline: "换行",
     shortcutsMention: "选择要提及的成员", shortcutsRooms: "房间",
     shortcutsSwitchRoom: "切换到上一个或下一个房间", shortcutsReading: "阅读",
@@ -388,7 +395,7 @@ const messages = {
     joined: "已加入", joinAction: "加入房间", unreadMessages: ({ count }) => `${count} 条未读`,
     today: "今天", yesterday: "昨天", earlierMessages: "更早的消息已省略", messagesBetweenOmitted: "此阅读位置与最新消息之间的部分消息已省略。", you: "我", saved: "已保存",
     savedMemory: "仅保存于当前标签页", copyFailed: ({ id }) => `复制失败，请手动复制：${id}`,
-    copyMessage: "复制", copiedMessage: "已复制", copyMessageFailed: "复制失败，请手动选择并复制消息。",
+    copyMessage: "复制", copiedMessage: "已复制", copyMessageFailed: "复制失败，请手动选择并复制消息。", wrapCode: "自动换行",
     replyMessage: "回复", replyingTo: "回复给", cancelReply: "取消回复", replyOpenOriginal: "查看原始消息", replyOriginalUnavailable: "原始消息不可用。", replyOriginalRecalled: "原消息已撤回。",
     recallMessage: "撤回", recallSystemMessage: "撤回这条房间通知", recallSystemConfirm: "撤回这条房间通知？所有人都会看到“消息已撤回”。", recallConfirm: "撤回这条消息？所有人都会看到“消息已撤回”。", recallAdminConfirm: ({ name }) => `撤回 ${name} 的消息？所有人都会看到“消息已撤回”。`, recallFailed: "撤回失败，请重试。", messageRecalled: "消息已撤回", recalledBy: ({ name }) => `${name} 撤回`, showRecalled: "查看原文", hideRecalled: "收起原文", revealFailed: "加载失败，重试",
     identityChanged: "此浏览器身份已在另一个标签页中更改，请重新加载此标签页后继续。",
@@ -416,6 +423,7 @@ const messages = {
     confirmTitle: "请确认", cancel: "取消", confirmAction: "确认",
     receiptEvidence_displayed: "已显示在屏幕上", receiptEvidence_tool: "通过房间工具读取", receiptEvidence_context: "进入上下文",
   },
+  ...extraLocales,
 };
 
 app.t = (key, values = {}) => {
@@ -428,7 +436,9 @@ app.LS = LS;
 app.api = api;
 app.apiBlob = apiBlob;
 app.setToken = saveToken;
-app.locale = LS.locale === "zh-CN" ? "zh-CN" : "en";
+export const SUPPORTED_LOCALES = ["en", "zh-CN", "ja", "ko", "fr", "de", "es", "it"];
+const intlLocales = { en: "en-US", "zh-CN": "zh-CN", ja: "ja-JP", ko: "ko-KR", fr: "fr-FR", de: "de-DE", es: "es-ES", it: "it-IT" };
+app.locale = messages[LS.locale] ? LS.locale : "en";
 app.state.joinedIds = new Set(LS.joinedRoomIds);
 app.state.drafts = new Map(Object.entries(LS.drafts));
 app.state.positions = new Map(Object.entries(LS.positions).map(([id, value]) => [id, value && typeof value === "object" ? value : Number(value) || 0]));
@@ -493,12 +503,12 @@ app.applyLocale = () => {
   } else app.updateTitle();
 };
 app.setLocale = (locale) => {
-  app.locale = locale === "zh-CN" ? "zh-CN" : "en";
+  app.locale = messages[locale] ? locale : "en";
   LS.locale = app.locale;
   app.applyLocale();
 };
 
-app.intlLocale = () => app.locale === "zh-CN" ? "zh-CN" : "en-US";
+app.intlLocale = () => intlLocales[app.locale] || "en-US";
 app.fmtTime = (timestamp) => {
   const date = new Date(timestamp);
   return date.toDateString() === new Date().toDateString()
@@ -540,12 +550,24 @@ app.updateTitle = () => {
   for (const [id, entry] of app.state.rooms) total += id === active ? app.state.unread : entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
   document.title = total ? `(${total}) ${title}` : title;
 };
-app.setOnline = (online) => { app.$("#connBar").hidden = online; };
-app.showSendError = (key, values = {}) => {
-  app.setText(app.$("#sendError"), key, values);
-  app.$("#sendError").hidden = false;
+app.setOnline = (online) => {
+  app.$("#connBar").hidden = online;
+  // A recovered connection makes the network send warning stale, but an auth
+  // or validation error still needs the user's attention.
+  if (online) app.hideSendError("sendNetwork");
 };
-app.hideSendError = () => { app.$("#sendError").hidden = true; };
+app.showSendError = (key, values = {}) => {
+  const node = app.$("#sendError");
+  app.setText(node, key, values);
+  node.dataset.errorKey = key;
+  node.hidden = false;
+};
+app.hideSendError = (key) => {
+  const node = app.$("#sendError");
+  if (key && node.dataset.errorKey !== key) return;
+  node.hidden = true;
+  delete node.dataset.errorKey;
+};
 app.showJoinError = (key, values = {}) => {
   app.setText(app.$("#joinError"), key, values);
   app.$("#joinError").hidden = false;

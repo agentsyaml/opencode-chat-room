@@ -6,6 +6,14 @@ export function initMessagePolling(app, isUnreadMessage) {
   const $ = app.$;
   let pollDelay = 2000;
 
+  // A restarted network can leave the browser's old request hanging. Retry at
+  // once instead of waiting for the long-poll timeout.
+  window.addEventListener("online", () => {
+    if (!app.state.polling || !app.state.room) return;
+    pollDelay = 2000;
+    app.startPolling();
+  });
+
   function isCurrentPoll(roomId, generation) {
     return app.state.polling && app.state.pollGeneration === generation && app.state.room?.id === roomId;
   }
@@ -43,7 +51,19 @@ export function initMessagePolling(app, isUnreadMessage) {
       // Lets the server answer at once when a recall changed the room since our
       // last rendered snapshot instead of holding the long-poll.
       if (entry && Number.isFinite(entry.recallVersion)) query.set("recallVersion", String(entry.recallVersion));
-      const data = await app.api(`/inbox?${query}`, { signal });
+      // The server long-polls for 25s; abort a dead request so the retry loop
+      // can run and the connection bar can recover.
+      const request = new AbortController();
+      const abort = () => request.abort();
+      const timer = setTimeout(abort, 35000);
+      signal.addEventListener("abort", abort, { once: true });
+      let data;
+      try {
+        data = await app.api(`/inbox?${query}`, { signal: request.signal });
+      } finally {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", abort);
+      }
       if (!isCurrentPoll(roomId, generation)) return;
       if (data.member === false) {
         void app.removeJoinedRoom(roomId, { reason: true });
@@ -53,9 +73,10 @@ export function initMessagePolling(app, isUnreadMessage) {
        const items = data.items, previousReceivedTs = entry?.receivedTs || 0, messages = app.state.room.messages;
        const known = new Set(messages.map((message) => message.id));
        const previousUnreadOverflow = Boolean(entry?.unreadOverflow);
-       let sawSystem = false, added = 0, unreadChanged = false;
+       let sawSystem = false, sawQuestion = false, added = 0, unreadChanged = false;
        for (const item of items) {
          if (item.senderId === "system") sawSystem = true;
+         if (item.isQuestion || item.answerToMessageID) sawQuestion = true;
          const wasKnown = known.has(item.id);
          if (!wasKnown) {
            messages.push({ ...item, roomId }); known.add(item.id);
@@ -83,7 +104,7 @@ export function initMessagePolling(app, isUnreadMessage) {
        if (messages.length > LOADED_MESSAGE_LIMIT) { const anchorId = app.state.positions.get(roomId)?.messageId, anchor = anchorId && messages.find((item) => item.id === anchorId); messages.splice(0, messages.length - LOADED_MESSAGE_LIMIT); if (anchor && !messages.includes(anchor)) messages.unshift(anchor); }
        app.cacheRoomSoon?.(roomId);
       const rendered = app.renderMessages(true);
-      if (sawSystem) {
+      if (sawSystem || sawQuestion) {
         await app.refreshRoomMeta(roomId, generation);
         if (!isCurrentPoll(roomId, generation)) return;
       }
@@ -105,7 +126,7 @@ export function initMessagePolling(app, isUnreadMessage) {
       if (!isCurrentPoll(roomId, generation)) return;
       if (error.status === 401) {
         app.setOnline(false);
-        if ($("#chatSettings").hidden) app.openChatSettings();
+        if (!app.settingsOpen()) app.openChatSettings();
         pollDelay = Math.min(pollDelay * 2, 30000);
       } else if (error.status === 404) {
         void app.removeJoinedRoom(roomId, { reason: true });
@@ -122,7 +143,9 @@ export function initMessagePolling(app, isUnreadMessage) {
       const room = await app.api(`/rooms/${encodeURIComponent(roomId)}`);
       if (!isCurrentPoll(roomId, generation)) return;
       const before = JSON.stringify([app.state.room.ownerId, app.state.room.adminIds ?? [], app.state.room.successorId ?? null, app.state.room.adminSessionID ?? null]);
-      Object.assign(app.state.room, { participants: room.participants, ownerId: room.ownerId ?? app.state.room.ownerId, adminIds: room.adminIds ?? [], successorId: room.successorId ?? null, adminSessionID: room.adminSessionID ?? null });
+      const openQuestions = Number(room.openQuestions);
+      Object.assign(app.state.room, { participants: room.participants, ownerId: room.ownerId ?? app.state.room.ownerId, adminIds: room.adminIds ?? [], successorId: room.successorId ?? null, adminSessionID: room.adminSessionID ?? null, openQuestions: Number.isFinite(openQuestions) ? Math.max(0, openQuestions) : app.state.room.openQuestions });
+      if (Number.isFinite(openQuestions)) app.updateQuestionBadge?.(openQuestions);
       if (JSON.stringify([app.state.room.ownerId, app.state.room.adminIds ?? [], app.state.room.successorId ?? null, app.state.room.adminSessionID ?? null]) !== before) { app.renderHead(); app.rerenderMessages(); }
       app.renderMembers();
     } catch { /* The next room event will retry. */ }

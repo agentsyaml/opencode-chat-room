@@ -5,7 +5,7 @@ import { isRoomAdmin } from "./admin-badge.js";
 export function initJoinRequests(app) {
   const $ = app.$;
   const pendingIds = (app.state.pendingJoinIds ??= new Set());
-  let pending = { roomId: "", name: "", status: "", timer: 0, generation: 0, checking: false };
+  let pending = { roomId: "", name: "", status: "", timer: 0, generation: 0, checking: false, cancelling: false };
   let requests = [], requestsRoomId = "", requestsGeneration = 0, requestsLoading = false, deniedRoomId = "";
   let requestSignature = "";
 
@@ -19,7 +19,7 @@ export function initJoinRequests(app) {
 
   app.showJoinPending = (roomId, name) => {
     clearTimeout(pending.timer);
-    pending = { roomId, name, status: "pending", timer: 0, generation: pending.generation + 1, checking: false };
+    pending = { roomId, name, status: "pending", timer: 0, generation: pending.generation + 1, checking: false, cancelling: false };
     pendingIds.add(roomId);
     const roomName = roomNameFor(roomId);
     app.setText(title, "joinPendingTitle");
@@ -42,17 +42,18 @@ export function initJoinRequests(app) {
   function renderPendingActions() {
     const waiting = pending.status === "pending";
     const gone = pending.status === "gone";
-    $("#btnJoinPendingCheck").hidden = !waiting;
     $("#btnJoinPendingStop").hidden = !waiting;
     $("#btnJoinPendingAgain").hidden = waiting || gone;
-    $("#btnJoinNoticeCheck").hidden = !waiting;
     $("#btnJoinNoticeStop").hidden = !waiting;
     $("#btnJoinNoticeAgain").hidden = waiting || gone;
+    $("#btnJoinPendingStop").disabled = Boolean(pending.cancelling);
+    $("#btnJoinNoticeStop").disabled = Boolean(pending.cancelling);
   }
 
   function closePending(keepWaiting = false) {
     clearTimeout(pending.timer);
     pending.timer = 0;
+    pending.cancelling = false;
     pending.generation++;
     card.hidden = true;
     notice.hidden = true;
@@ -69,12 +70,11 @@ export function initJoinRequests(app) {
     pending.timer = setTimeout(() => void checkPending(), delay);
   }
 
-  async function checkPending(manual = false) {
+  async function checkPending() {
     if (pending.checking || !pending.roomId || pending.status !== "pending") return;
     if (document.hidden) { scheduleCheck(); return; }
     const generation = pending.generation, roomId = pending.roomId;
     pending.checking = true;
-    if (manual) { $("#btnJoinPendingCheck").disabled = true; $("#btnJoinNoticeCheck").disabled = true; }
     try {
       const result = await app.api(`/rooms/${encodeURIComponent(roomId)}/join-requests/status?sessionID=${encodeURIComponent(LS.sessionID)}`);
       if (generation !== pending.generation) return;
@@ -120,8 +120,6 @@ export function initJoinRequests(app) {
       }
     } finally {
       pending.checking = false;
-      $("#btnJoinPendingCheck").disabled = false;
-      $("#btnJoinNoticeCheck").disabled = false;
     }
   }
 
@@ -296,7 +294,6 @@ export function initJoinRequests(app) {
   function updateBadge(count) {
     const badge = $("#joinRequestBadge"), button = $("#btnMembers");
     $("#joinRequestBadgeCount").textContent = count > 99 ? "99+" : String(count);
-    $("#joinRequestBadgeWord").textContent = count === 1 ? app.t("joinRequestBadgeOne") : app.t("joinRequestBadgeMany");
     badge.title = count ? app.t("membersWithRequests", { count }) : "";
     badge.hidden = !count;
     button.setAttribute("aria-label", count ? app.t("membersWithRequests", { count }) : app.t("members"));
@@ -307,20 +304,43 @@ export function initJoinRequests(app) {
     app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
   }
 
-  function stopWaiting() {
-    closePending(true);
-    pending.status = "dismissed";
-    ($("#joinView").hidden ? $("#msgInput") : $("#inRoomId"))?.focus();
+  async function cancelPending() {
+    if (!pending.roomId || pending.status !== "pending" || pending.cancelling) return;
+    const generation = pending.generation, roomId = pending.roomId;
+    pending.cancelling = true;
+    renderPendingActions();
+    try {
+      await app.api(`/rooms/${encodeURIComponent(roomId)}/join-requests?sessionID=${encodeURIComponent(LS.sessionID)}`, { method: "DELETE", body: "{}" });
+      if (generation !== pending.generation) return;
+      pendingIds.delete(roomId);
+      closePending();
+      ($("#joinView").hidden ? $("#msgInput") : $("#inRoomId"))?.focus({ preventScroll: true });
+    } catch (error) {
+      if (generation !== pending.generation) return;
+      if (error.status === 404) {
+        pendingIds.delete(roomId);
+        closePending();
+        ($("#joinView").hidden ? $("#msgInput") : $("#inRoomId"))?.focus({ preventScroll: true });
+        return;
+      }
+      app.setText(hint, "joinPendingCancelError");
+      hint.hidden = false;
+      app.setText(noticeText, "joinPendingCancelError");
+      notice.hidden = $("#chatView").hidden;
+    } finally {
+      if (generation === pending.generation) {
+        pending.cancelling = false;
+        renderPendingActions();
+      }
+    }
   }
 
   function requestAgain() {
     if (pending.roomId) void app.joinRoom(pending.roomId, pending.name || LS.name);
   }
 
-  $("#btnJoinPendingCheck").addEventListener("click", () => void checkPending(true));
-  $("#btnJoinNoticeCheck").addEventListener("click", () => void checkPending(true));
-  $("#btnJoinPendingStop").addEventListener("click", stopWaiting);
-  $("#btnJoinNoticeStop").addEventListener("click", stopWaiting);
+  $("#btnJoinPendingStop").addEventListener("click", () => void cancelPending());
+  $("#btnJoinNoticeStop").addEventListener("click", () => void cancelPending());
   $("#btnJoinPendingAgain").addEventListener("click", requestAgain);
   $("#btnJoinNoticeAgain").addEventListener("click", requestAgain);
   $("#btnMembers").addEventListener("click", () => {

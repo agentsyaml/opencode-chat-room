@@ -41,6 +41,7 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     const initialGap = await thread.evaluate((node: HTMLElement) => node.scrollHeight - node.clientHeight - node.scrollTop);
     expect(Math.abs(initialGap)).toBeLessThan(1);
     await page.locator("#msgInput").fill("1\n2\n3\n4\n5");
+    await page.waitForFunction(() => { const node = document.querySelector<HTMLElement>("#thread")!; return Math.abs(node.scrollHeight - node.clientHeight - node.scrollTop) < 1; });
     const inputGap = await thread.evaluate((node: HTMLElement) => node.scrollHeight - node.clientHeight - node.scrollTop);
     expect(Math.abs(inputGap)).toBeLessThan(1);
     await page.locator("#attachmentPicker").setInputFiles([
@@ -322,7 +323,7 @@ async function setLocaleThroughProfile(page: any, locale: string) {
   const drawer = page.locator("#btnRoomsDrawer"), rail = page.locator("#roomRail"), trigger = page.locator("#btnSettings");
   if (!(await trigger.isVisible())) { await drawer.click(); await rail.waitFor({ state: "visible" }); }
   await trigger.click(); await page.locator("#chatSettings").waitFor({ state: "visible" });
-  await page.locator("#localeSelectSettings").selectOption(locale); await trigger.click(); await page.locator("#chatSettings").waitFor({ state: "hidden" });
+  await page.locator("#localeSelectSettings").selectOption(locale); await page.locator("#btnCloseSettings").click(); await page.locator("#chatSettings").waitFor({ state: "hidden" });
   if (await drawer.getAttribute("aria-expanded") === "true") { await page.keyboard.press("Escape"); await rail.waitFor({ state: "hidden" }); }
 }
 

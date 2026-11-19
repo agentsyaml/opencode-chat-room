@@ -32,6 +32,10 @@ export async function watchRoom(roomId, app) {
       if (Number.isFinite(Number(latest.recallVersion))) entry.recallVersion = Number(latest.recallVersion);
       entry.room.participants = latest.participants;
       entry.room.openQuestions = latest.openQuestions;
+      if (sawQuestion) {
+        app.renderRoomOptions(app.$("#roomList"), app.state.availableRooms || []);
+        app.renderRoomOptions(app.$("#roomListChat"), app.state.availableRooms || []);
+      }
       entry.room.messages = [...new Map([...entry.room.messages, ...latest.messages].map((message) => [message.id, message])).values()].sort((a, b) => a.createdAt - b.createdAt).slice(-LOADED_MESSAGE_LIMIT);
       for (const message of latest.messages) if (message.recalledAt) app.applyRecall?.(roomId, { messageID: message.id, recalledAt: message.recalledAt, recalledBy: message.recalledBy });
       const newest = latest.messages.at(-1);

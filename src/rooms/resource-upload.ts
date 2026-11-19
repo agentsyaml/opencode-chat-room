@@ -7,8 +7,8 @@ type UploadOptions = { center: string; token: string };
 
 export async function uploadAgentResource(opts: UploadOptions, roomID: string, filePath: string, sessionID: string, context: PermissionContext): Promise<string> {
   if (!opts.center) return "error: resource uploads require CHAT_ROOM_SERVER_URL (central server mode)";
-  if (!roomID) return "error: roomId is required";
-  if (!filePath?.trim()) return "error: filePath is required";
+  if (!roomID) return "error: roomId is required; use a room UUID from the room list, not the room name";
+  if (!filePath?.trim()) return "error: filePath is required; pass an absolute path to a regular local file";
   const absolute = path.resolve(context.directory, filePath);
   const directory = path.dirname(absolute);
   const root = context.worktree ?? context.directory;

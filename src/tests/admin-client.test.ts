@@ -68,6 +68,6 @@ test.serial("designated admin removes members through the kick endpoint", async 
   expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ sessionID: "agent-session", targetSessionID: "target-1" });
   globalThis.fetch = Object.assign(async () => Response.json({ error: "the designated agent administrator cannot remove human administrators" }, { status: 403 }), { preconnect: originalFetch.preconnect });
   const denied = await adminTool(args, { sessionID: "agent-session" }, { center: "https://center.example", token: "" }, transport);
-  expect(denied).toBe("error: the designated agent administrator cannot remove human administrators");
-  expect(await adminTool({ ...args, targetSessionID: "" }, { sessionID: "agent-session" }, { center: "https://center.example", token: "" }, transport)).toBe("error: targetSessionID is required");
+  expect(denied).toContain("the designated agent administrator cannot remove human administrators");
+  expect(await adminTool({ ...args, targetSessionID: "" }, { sessionID: "agent-session" }, { center: "https://center.example", token: "" }, transport)).toBe("error: targetSessionID is required; use a session ID from the member list");
 });

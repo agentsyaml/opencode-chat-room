@@ -9,15 +9,18 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const limit = 512 * 1024 * 1024;
 
 export class ResourceReadError extends Error {
-  constructor(readonly code: "permission_denied" | "size_limit" | "not_found" | "aborted" | "network" | "save_failed", message: string) { super(message); }
+  constructor(readonly code: "invalid" | "permission_denied" | "size_limit" | "not_found" | "aborted" | "network" | "save_failed", message: string) { super(message); }
 }
 export function resourceReadFailure(error: unknown): string {
-  return error instanceof ResourceReadError ? error.message : "resource read failed";
+  return error instanceof ResourceReadError ? error.message : "resource read failed; verify roomId and resourceId, check the server connection, then retry";
 }
 
 export async function readAgentResource(opts: Options, roomID: string, id: string, permission: Permission, signal?: AbortSignal) {
   if (!opts.center) throw new Error("resource viewing requires CHAT_ROOM_SERVER_URL (central server mode)");
-  if (!uuid.test(roomID) || !uuid.test(id)) throw new Error("invalid roomId or resourceId");
+  if (!roomID) throw new ResourceReadError("invalid", "roomId is required for read_resource; use the room UUID, not the room name");
+  if (!id) throw new ResourceReadError("invalid", "resourceId is required for read_resource; use the resource UUID returned by upload_resource");
+  if (!uuid.test(roomID)) throw new ResourceReadError("invalid", "invalid roomId; use the room UUID, not the room name");
+  if (!uuid.test(id)) throw new ResourceReadError("invalid", "invalid resourceId; use the resource UUID returned by upload_resource");
   const base = new URL(opts.center);
   if (!/^https?:$/.test(base.protocol) || base.username || base.password) throw new Error("invalid chat server URL");
   await ask(permission, "webfetch", [base.origin], { url: base.origin });
@@ -36,12 +39,14 @@ export async function readAgentResource(opts: Options, roomID: string, id: strin
   const limitNote = configuredLimit ? `server limit ${Math.min(limit, configuredLimit)} bytes` : "512 MiB safety cap (server limit unavailable)";
   const endpoint = `${root}/rooms/${roomID}/resources/${id}`;
   const metadataResponse = await fetchSafe(endpoint, { headers, redirect: "error", signal: requestSignal }, signal);
-  if (metadataResponse.status === 404) throw new ResourceReadError("not_found", "resource not found in this room");
-  if (!metadataResponse.ok) throw new ResourceReadError("network", "could not retrieve resource metadata");
+  if (metadataResponse.status === 404) throw new ResourceReadError("not_found", "resource not found in this room; check both IDs and that you joined the room");
+  if (metadataResponse.status === 401) throw new ResourceReadError("permission_denied", "server requires a valid access token; set CHAT_ROOM_SERVER_TOKEN and retry");
+  if (metadataResponse.status === 403) throw new ResourceReadError("permission_denied", "server denied resource access; check that you joined this room and the token is valid");
+  if (!metadataResponse.ok) throw new ResourceReadError("network", "could not retrieve resource metadata; check the server connection and retry");
   const metadata = await metadataResponse.json() as { resource?: { id?: string; roomID?: string; mimeType?: string; size?: number; name?: string } };
   const resource = metadata.resource;
   if (resource && Number.isSafeInteger(resource.size) && resource.size! > allowed) throw new ResourceReadError("size_limit", `resource exceeds the ${limitNote}`);
-  if (!resource || resource.id !== id || resource.roomID !== roomID || typeof resource.name !== "string" || typeof resource.mimeType !== "string" || !Number.isSafeInteger(resource.size) || resource.size! < 0) throw new ResourceReadError("network", "resource metadata is invalid");
+  if (!resource || resource.id !== id || resource.roomID !== roomID || typeof resource.name !== "string" || typeof resource.mimeType !== "string" || !Number.isSafeInteger(resource.size) || resource.size! < 0) throw new ResourceReadError("network", "resource metadata is invalid; verify roomId and resourceId, then retry");
   const verified: Resource = { id: resource.id!, roomID: resource.roomID!, name: resource.name, mimeType: resource.mimeType, size: resource.size! };
   return saveResource(permission, headers, endpoint, verified, allowed, signal, limitNote);
 }
@@ -59,9 +64,11 @@ async function saveResource(permission: Permission, headers: Record<string, stri
     await ask(permission, "edit", [filepath], { filepath });
     await ask(permission, "read", [filepath], { filepath });
     const response = await fetchSafe(`${endpoint}/content`, { headers, redirect: "error", signal: combineSignal(signal, 30 * 60_000) }, signal);
-    if (response.status === 404) throw new ResourceReadError("not_found", "resource not found in this room");
+    if (response.status === 404) throw new ResourceReadError("not_found", "resource not found in this room; check both IDs and that you joined the room");
+    if (response.status === 401) throw new ResourceReadError("permission_denied", "server requires a valid access token; set CHAT_ROOM_SERVER_TOKEN and retry");
+    if (response.status === 403) throw new ResourceReadError("permission_denied", "server denied resource access; check that you joined this room and the token is valid");
     if (response.status === 413) throw new ResourceReadError("size_limit", "resource exceeds the server download limit");
-    if (!response.ok || !response.body) throw new ResourceReadError("network", "could not retrieve resource content");
+    if (!response.ok || !response.body) throw new ResourceReadError("network", "could not retrieve resource content; check the server connection and retry");
     const file = await fs.open(filepath, "wx", 0o600);
     try { await streamToFile(response.body, file, Math.min(allowed, resource.size), signal); }
     finally { await file.close(); }
@@ -96,7 +103,7 @@ async function streamToFile(body: ReadableStream<Uint8Array>, file: Awaited<Retu
     await reader.cancel().catch(() => {});
     if (error instanceof ResourceReadError) throw error;
     if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw new ResourceReadError("aborted", "resource download was canceled");
-    throw new ResourceReadError("network", "resource download was interrupted");
+    throw new ResourceReadError("network", "resource download was interrupted; retry");
   }
   finally { reader.releaseLock(); }
 }

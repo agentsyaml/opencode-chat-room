@@ -76,7 +76,7 @@ test.skipIf(!browserModule)("restore blocks login, retries transient errors, and
       const geometry = await owner.evaluate(() => {
         const thread = document.querySelector<HTMLElement>("#thread")!;
         const buttons = Array.from(document.querySelectorAll<HTMLElement>(".chat-head .chip")).filter((button) => button.getClientRects().length);
-        return { pageX: document.documentElement.scrollWidth - innerWidth, threadX: thread.scrollWidth - thread.clientWidth, gap: thread.scrollHeight - thread.scrollTop - thread.clientHeight, buttons: buttons.map((button) => { const style = getComputedStyle(button); return { width: button.offsetWidth, height: button.offsetHeight, display: style.display, align: style.alignItems, justify: style.justifyItems }; }) };
+        return { pageX: document.documentElement.scrollWidth - innerWidth, threadX: thread.scrollWidth - thread.clientWidth, gap: thread.scrollHeight - thread.scrollTop - thread.clientHeight, buttons: buttons.map((button) => { const style = getComputedStyle(button); return { id: button.id, width: button.offsetWidth, height: button.offsetHeight, display: style.display, align: style.alignItems, justify: style.justifyItems }; }) };
       });
       expect(geometry.pageX).toBeLessThanOrEqual(1); expect(geometry.threadX).toBeLessThanOrEqual(1);
       expect(geometry.gap).toBeLessThanOrEqual(80);
@@ -91,7 +91,7 @@ test.skipIf(!browserModule)("restore blocks login, retries transient errors, and
       expect(profile.centered).toBe(true); expect(profile.frameSquare).toBe(true); expect(profile.display).toBe("grid"); expect(profile.align).toBe("center"); expect(profile.justify).toBe("center");
       if (width <= 760) {
         await owner.locator("#btnSettings").click(); expect(await owner.locator("#localeSelectSettings").isVisible()).toBe(true); expect(await owner.locator(".chat-head .locale-select").count()).toBe(0);
-        await owner.locator("#btnSettings").click(); await owner.keyboard.press("Escape");
+        await owner.locator("#btnCloseSettings").click(); await owner.locator("#chatSettings").waitFor({ state: "hidden" }); await owner.keyboard.press("Escape");
       }
       if (process.env.CHAT_UI_SCREENSHOT_DIR && round < 4) await owner.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, `restore-${width}-${locale}-${scheme}.png`), fullPage: true });
     }

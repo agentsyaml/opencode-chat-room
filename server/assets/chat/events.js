@@ -33,12 +33,20 @@ export function initEvents(app) {
     const syncComposerBlock = () => {
       const height = composer.getBoundingClientRect().height;
       if (!height || !idleComposer()) return;
-      const idle = parseFloat(getComputedStyle(root).getPropertyValue("--composer-block")) || 0;
-      if (idle && height > idle + 2) return;
       root.style.setProperty("--composer-block", `${Math.round(height)}px`);
     };
     new ResizeObserver(syncComposerBlock).observe(composer);
     syncComposerBlock();
+    window.addEventListener("resize", syncComposerBlock);
+    let lastComposerHeight = composer.getBoundingClientRect().height;
+    new ResizeObserver(() => {
+      const height = composer.getBoundingClientRect().height;
+      if (height > lastComposerHeight + 1 && followsBottom(app)) {
+        const thread = $("#thread");
+        thread.scrollTop = thread.scrollHeight;
+      }
+      lastComposerHeight = height;
+    }).observe(composer);
   }
   // Images, diagrams and attachments grow the list after the first paint and the browser
   // answers with a scroll that looks like the reader moving. Subtract the growth: only a
@@ -197,7 +205,6 @@ export function initEvents(app) {
   $("#btnLeave").addEventListener("click", () => app.leaveRoom(false));
   $("#btnDeleteRoom").addEventListener("click", () => void app.deleteRoom());
   $("#btnMembers").addEventListener("click", () => app.togglePanel("#memberPanel"));
-  $("#btnSettings").addEventListener("click", () => app.togglePanel("#chatSettings"));
   $("#btnRoomOptions").addEventListener("click", () => {
     const panel = $("#roomOptions"), open = panel.hidden;
     app.closePanels(); panel.hidden = !open;
@@ -236,6 +243,7 @@ export function initEvents(app) {
     app.autoGrow(input);
     app.updateSendState();
     app.updateDraftCount();
+    if (app.state.followBottom) { const thread = $("#thread"); if (thread) thread.scrollTop = thread.scrollHeight; }
     if (app.state.room) {
       const id = app.state.room.id;
       app.state.draftRevision.set(id, (app.state.draftRevision.get(id) || 0) + 1);
@@ -252,11 +260,18 @@ export function initEvents(app) {
     app.recomputeMention(input);
   });
   input.addEventListener("keydown", (event) => {
-    if ((event.key === "PageUp" || event.key === "PageDown")
+    if ((event.key === "Home" || event.key === "End")
         && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      input.moveCaretToLineEdge?.(event.key === "End");
+      return;
+    }
+    if ((event.key === "PageUp" || event.key === "PageDown")
+        && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       markScrollIntent();
       thread.scrollTop += (event.key === "PageDown" ? 1 : -1) * Math.max(80, thread.clientHeight * 0.9);
+      app.animateThreadJump?.(event.key === "PageDown");
       return;
     }
     handleMessageKey(event, app);
@@ -324,6 +339,23 @@ export function initEvents(app) {
     const messageButton = event.target.closest("[data-copy-message]");
     if (messageButton) void copyTextToClipboard(messageButton._copyText, true).then((copied) => app.flash(messageButton, copied ? "copiedMessage" : "copyMessageFailed"));
   });
+  $("#msgList").addEventListener("copy", (event) => {
+    // A plain browser copy of rendered messages loses the mention tokens. Rebuild
+    // them only for chips inside the copied range, so external @text stays literal.
+    const selection = getSelection(), list = $("#msgList");
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (!list.contains(range.startContainer) || !list.contains(range.endContainer)) return;
+    const fragment = range.cloneContents();
+    const chips = fragment.querySelectorAll(".mention-chip");
+    if (!chips.length) return;
+    chips.forEach((chip) => chip.replaceWith(document.createTextNode(`<at>@${chip.textContent?.slice(1) ?? ""}</at>`)));
+    const text = fragment.textContent ?? "";
+    const html = `<div data-chatroom-mentions>${text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char])}</div>`;
+    event.clipboardData?.setData("text/plain", text);
+    event.clipboardData?.setData("text/html", html);
+    event.preventDefault();
+  });
   ["#inRoomId", "#inName", "#inRoomName"].forEach((selector) => {
     $(selector).addEventListener("input", app.hideJoinError);
   });
@@ -361,7 +393,7 @@ export function initEvents(app) {
     if (event.key === "Escape" && roomRail.classList.contains("drawer-open")) { event.preventDefault(); closeRoomDrawer(); return; }
     if (event.key === "Escape" && app.mentionActive) app.closeMention();
     if (event.key === "Escape" && !$("#railRoomForm").hidden) $("#railRoomForm").hidden = true;
-    if (event.key === "Escape" && (!$("#memberPanel").hidden || !$("#chatSettings").hidden)) {
+    if (event.key === "Escape" && !$("#memberPanel").hidden) {
       app.closePanels();
       app.lastFocus?.focus();
     }
@@ -373,6 +405,7 @@ export function initEvents(app) {
       event.preventDefault();
       const step = event.key === "ArrowDown" ? 1 : -1;
       app.activateRoom(joined[(index + step + joined.length) % joined.length].id);
+      app.animateRoomSwitch?.(step);
     }
   });
 
@@ -417,7 +450,7 @@ function handleMessageKey(event, app) {
       if (event.key === "Tab") return;
     }
   }
-  if (event.key === "Enter" && !event.isComposing && event.keyCode !== 229 && (event.ctrlKey || !event.shiftKey)) {
+  if (event.key === "Enter" && !event.isComposing && event.keyCode !== 229 && (event.ctrlKey || (!event.shiftKey && !matchMedia("(pointer: coarse)").matches))) {
     event.preventDefault();
     void app.send();
   }

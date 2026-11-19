@@ -375,7 +375,10 @@ async function handle(req: Request): Promise<Response> {
           }) };
         });
         if ("status" in result) return json({ error: result.error }, result.status);
-        if ("pending" in result) return json({ status: "pending" }, 202);
+        if ("pending" in result) return json({
+          status: "pending",
+          message: "Join request submitted. You are not a member yet; a human administrator must approve it before you can send or poll.",
+        }, 202);
         touchActive(sessionID); // join = active
         return json(await roomPayload(result.room), 201);
       }

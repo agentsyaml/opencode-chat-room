@@ -9,7 +9,7 @@ const png = new Uint8Array([137,80,78,71,13,10,26,10]);
 
 test("keeps classified failures actionable and hides raw errors", () => {
   expect(resourceReadFailure(new ResourceReadError("aborted", "resource download was canceled"))).toBe("resource download was canceled");
-  expect(resourceReadFailure(new Error("https://u:secret@host/?token=secret"))).toBe("resource read failed");
+  expect(resourceReadFailure(new Error("https://u:secret@host/?token=secret"))).toContain("resource read failed");
 });
 
 test("reads bounded image bytes only after host webfetch permission", async () => {
@@ -40,6 +40,9 @@ test("rejects invalid ids before permission or network access", async () => {
   await expect(readAgentResource({ center: "https://chat.example", token: "" }, "bad", id, {
     ask: async () => { asked = true; },
   })).rejects.toThrow("invalid roomId");
+  await expect(readAgentResource({ center: "https://chat.example", token: "" }, "", id, {
+    ask: async () => { asked = true; },
+  })).rejects.toThrow("roomId is required for read_resource");
   expect(asked).toBe(false);
 });
 
@@ -84,6 +87,15 @@ test("classifies room 404s", async () => {
     await expect(readAgentResource({ center: "https://chat.example", token: "" }, roomID, id, { ask: async () => {} }))
       .rejects.toThrow("resource not found in this room");
     expect(call).toBe(2);
+  } finally { globalThis.fetch = original; }
+});
+
+test("tells the agent to set a token when the server returns 401", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = Object.assign(async () => new Response(null, { status: 401 }), { preconnect: original.preconnect });
+  try {
+    await expect(readAgentResource({ center: "https://chat.example", token: "" }, roomID, id, { ask: async () => {} }))
+      .rejects.toThrow("set CHAT_ROOM_SERVER_TOKEN");
   } finally { globalThis.fetch = original; }
 });
 

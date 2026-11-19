@@ -81,15 +81,12 @@ test.skipIf(!browserModule)("held pointer and live selection suppress follow-bot
       return Array.from(document.querySelectorAll<HTMLElement>("#msgList [data-msg-id]"))
         .find((row) => row.getBoundingClientRect().bottom > edge.top && row.querySelector(".msg-text")?.textContent?.includes("Guard line"))?.dataset.msgId || "";
     });
-    const selectPoints = await page.evaluate((id: string) => {
+    await page.evaluate((id: string) => {
       const element = document.querySelector<HTMLElement>(`#msgList [data-msg-id="${id}"] .msg-text`)!;
       const text = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode() as Text, range = document.createRange();
       range.setStart(text, 1); range.setEnd(text, Math.min(24, text.length));
-      const rect = range.getBoundingClientRect();
-      return { x1: rect.left + 1, y1: rect.top + rect.height / 2, x2: rect.right - 1, y2: rect.bottom - rect.height / 2 };
+      const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range);
     }, selectedTarget);
-    await page.mouse.move(selectPoints.x1, selectPoints.y1); await page.mouse.down();
-    await page.mouse.move(selectPoints.x2, selectPoints.y2, { steps: 12 }); await page.mouse.up();
     const selectionBefore = await metrics();
     expect(selectionBefore.selection.length).toBeGreaterThan(8);
     expect(selectionBefore.gap).toBeGreaterThan(2);

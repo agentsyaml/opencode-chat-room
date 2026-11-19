@@ -18,7 +18,7 @@ export async function runReminderTool(
   sessionID: string,
 ): Promise<string> {
   if (!opts.center) return "error: reminders require central server mode";
-  if (!args.roomId) return "error: roomId is required";
+  if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
   const root = `/rooms/${encodeURIComponent(args.roomId)}/reminders`;
   try {
     if (args.action === "reminder_list") {
@@ -26,16 +26,16 @@ export async function runReminderTool(
       return JSON.stringify(result, null, 2);
     }
     if (args.action === "reminder_create") {
-      if (!args.schedule) return "error: schedule is required";
-      if (!args.text?.trim()) return "error: text is required";
+      if (!args.schedule) return "error: schedule is required; pass {type:\"once\", at:\"ISO datetime\"} or {type:\"cron\", expression:\"5-field cron\"}";
+      if (!args.text?.trim()) return "error: text is required; pass the reminder message";
       const result = await request(opts, root, "POST", { sessionID, schedule: args.schedule, text: args.text });
       return JSON.stringify(result, null, 2);
     }
-    if (!args.reminderId) return "error: reminderId is required";
+    if (!args.reminderId) return "error: reminderId is required; run reminder_list to get it";
     const child = `${root}/${encodeURIComponent(args.reminderId)}`;
     if (args.action === "reminder_update") {
       const fields = { ...(args.schedule ? { schedule: args.schedule } : {}), ...(args.text !== undefined ? { text: args.text } : {}), ...(args.paused !== undefined ? { paused: args.paused } : {}) };
-      if (!Object.keys(fields).length) return "error: at least one of schedule, text, or paused is required";
+      if (!Object.keys(fields).length) return "error: at least one of schedule, text, or paused is required to update a reminder";
       const result = await request(opts, child, "PATCH", { sessionID, ...fields });
       return JSON.stringify(result, null, 2);
     }

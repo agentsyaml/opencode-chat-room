@@ -25,21 +25,26 @@ test.skipIf(!browserModule)("select controls keep the chevron gap equal to the t
     page.setDefaultTimeout(15000);
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
     await page.goto(`${origin}/chat`);
-    await expectSelect(page, "#localeSelectJoin", 9);
-    const joinIcon = page.locator(".locale-control .locale-icon");
+    await page.locator("#btnJoinSettings").click();
+    await page.locator("#chatSettings[open]").waitFor();
+    await expectSelect(page, "#localeSelectSettings", 9);
+    const joinIcon = page.locator("#chatSettings .locale-icon");
     await joinIcon.waitFor({ state: "visible" });
     expect(await joinIcon.getAttribute("aria-hidden")).toBe("true");
     expect(await joinIcon.evaluate((element: SVGElement) => element.tagName.toLowerCase())).toBe("svg");
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("localeSelectSettings");
+    expect(await page.locator("#localeSelectSettings").evaluate((element: HTMLElement) => getComputedStyle(element).outlineWidth)).toBe("2px");
+    await page.locator("#btnCloseSettings").click();
+    await page.locator("#chatSettings").waitFor({ state: "hidden" });
     await page.locator("#inName").fill("__Test_SelectOwner");
     await page.locator("#inRoomName").fill("__Test_SelectRoom");
     await page.locator("#btnCreate").click();
     await page.locator("#chatView").waitFor({ state: "visible" });
 
-    await page.locator("#btnSettings").click(); await page.locator("#chatSettings").waitFor({ state: "visible" });
+    await page.locator("#btnSettings").click(); await page.locator("#chatSettings[open]").waitFor();
     await expectSelect(page, "#localeSelectSettings", 9);
     await page.locator("#chatSettings .locale-icon").waitFor({ state: "visible" });
-    // The native control still focuses and changes like a select after the arrow is redrawn.
-    await page.keyboard.press("Tab");
+    // Opening the dialog focuses the language control; it still behaves like a native select.
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("localeSelectSettings");
     expect(await page.locator("#localeSelectSettings").evaluate((element: HTMLElement) => getComputedStyle(element).outlineWidth)).toBe("2px");
     await page.locator("#localeSelectSettings").selectOption("zh-CN");
@@ -48,7 +53,8 @@ test.skipIf(!browserModule)("select controls keep the chevron gap equal to the t
     await page.locator("#chatSettings .locale-icon").waitFor({ state: "visible" });
     expect(await page.locator("#chatSettings .locale-label span").textContent()).toBe("语言");
     await page.locator("#localeSelectSettings").selectOption("en");
-    await page.locator("#btnSettings").click();
+    await page.locator("#btnCloseSettings").click();
+    await page.locator("#chatSettings").waitFor({ state: "hidden" });
 
     await page.locator("#btnRoomOptions").click(); await page.locator("#btnEditRoom").click();
     await page.locator("#editRoomDialog[open]").waitFor();
@@ -72,10 +78,12 @@ test.skipIf(!browserModule)("select controls keep the chevron gap equal to the t
     // The same control stays usable and aligned inside the mobile rail drawer.
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator("#btnRoomsDrawer").click(); await page.locator("#roomRail.drawer-open").waitFor();
-    await page.locator("#btnSettings").click(); await page.locator("#chatSettings").waitFor({ state: "visible" });
+    await page.locator("#btnSettings").click(); await page.locator("#chatSettings[open]").waitFor();
     await expectSelect(page, "#localeSelectSettings", 9);
     await page.locator("#chatSettings .locale-icon").waitFor({ state: "visible" });
-    await page.locator("#btnSettings").click();
+    await page.locator("#btnCloseSettings").click();
+    await page.locator("#chatSettings").waitFor({ state: "hidden" });
+    expect(await page.locator("#btnSettings").evaluate((element: HTMLElement) => document.activeElement === element)).toBe(true);
     await page.keyboard.press("Escape"); await page.locator("#roomRail.drawer-open").waitFor({ state: "detached" });
     await page.locator("#btnRoomOptions").click(); await page.locator("#btnEditRoom").click();
     await page.locator("#editRoomDialog[open]").waitFor();

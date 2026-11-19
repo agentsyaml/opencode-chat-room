@@ -27,6 +27,6 @@ test("reminder actions use the authenticated room API and preserve provided fiel
 
 test("reminders fail explicitly outside central mode and validate required identifiers", async () => {
   expect(await runReminderTool({ center: "", token: "" }, { action: "reminder_list", roomId: "r" }, "s")).toContain("central server mode");
-  expect(await runReminderTool({ center: "http://center", token: "" }, { action: "reminder_create", roomId: "r" }, "s")).toBe("error: schedule is required");
-  expect(await runReminderTool({ center: "http://center", token: "" }, { action: "reminder_delete", roomId: "r" }, "s")).toBe("error: reminderId is required");
+  expect(await runReminderTool({ center: "http://center", token: "" }, { action: "reminder_create", roomId: "r" }, "s")).toBe("error: schedule is required; pass {type:\"once\", at:\"ISO datetime\"} or {type:\"cron\", expression:\"5-field cron\"}");
+  expect(await runReminderTool({ center: "http://center", token: "" }, { action: "reminder_delete", roomId: "r" }, "s")).toBe("error: reminderId is required; run reminder_list to get it");
 });

@@ -317,10 +317,10 @@ async function profileMenuWorks(page: any) {
   expect(await trigger.getAttribute("aria-label")).toBe("Your profile and settings"); const narrow = !(await trigger.isVisible());
   if (narrow) { await drawer.click(); await rail.waitFor({ state: "visible" }); expect(await drawer.getAttribute("aria-expanded")).toBe("true"); }
   await trigger.click(); await page.locator("#chatSettings").waitFor({ state: "visible" }); await page.waitForTimeout(220); expect(await trigger.getAttribute("aria-expanded")).toBe("true");
-  const geometry = await page.evaluate(() => { const trigger = document.querySelector<HTMLElement>("#btnSettings")!, avatar = document.querySelector<HTMLElement>("#profileAvatar")!, name = document.querySelector<HTMLElement>("#railIdentity")!, panel = document.querySelector<HTMLElement>("#chatSettings")!; const anchor = trigger.getBoundingClientRect(), box = panel.getBoundingClientRect(); return { above: box.bottom <= anchor.top && anchor.top - box.bottom < 20, bottomLeft: Math.abs(box.left - anchor.left) < 1, clamped: box.top >= 0 && box.left >= 0 && box.right <= innerWidth && box.bottom <= innerHeight, identityVisible: !!avatar.getClientRects().length && !!name.getClientRects().length && !!name.textContent?.trim() }; });
-  expect(geometry).toEqual({ above: true, bottomLeft: true, clamped: true, identityVisible: true });
+  const geometry = await page.evaluate(() => { const avatar = document.querySelector<HTMLElement>("#profileAvatar")!, name = document.querySelector<HTMLElement>("#railIdentity")!, panel = document.querySelector<HTMLDialogElement>("#chatSettings")!; const box = panel.getBoundingClientRect(); return { open: panel.open, clamped: box.top >= 0 && box.left >= 0 && box.right <= innerWidth && box.bottom <= innerHeight, identityVisible: !!avatar.getClientRects().length && !!name.getClientRects().length && !!name.textContent?.trim() }; });
+  expect(geometry).toEqual({ open: true, clamped: true, identityVisible: true });
   if (narrow) {
-    expect(await trigger.getAttribute("aria-expanded")).toBe("true"); await trigger.click(); await page.locator("#chatSettings").waitFor({ state: "hidden" });
+    expect(await trigger.getAttribute("aria-expanded")).toBe("true"); await page.locator("#btnCloseSettings").click(); await page.locator("#chatSettings").waitFor({ state: "hidden" });
     expect(await trigger.getAttribute("aria-expanded")).toBe("false"); await page.keyboard.press("Escape"); await rail.waitFor({ state: "hidden" });
     expect(await drawer.getAttribute("aria-expanded")).toBe("false"); expect(await drawer.evaluate((node: HTMLElement) => document.activeElement === node)).toBe(true);
   } else {

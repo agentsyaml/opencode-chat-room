@@ -28,7 +28,7 @@ test.skipIf(!browserModule)("receipt details float beside their trigger and rema
     await page.locator("#chatView").waitFor({ state: "visible" });
     await page.locator("#msgInput").fill("Popover anchor message");
     await page.locator("#btnSend").click();
-    const message = page.locator('[data-msg-id]').filter({ hasText: "Popover anchor message" }).last();
+    const message = page.locator('[data-msg-id]:not([data-msg-id^="pending-"])').filter({ hasText: "Popover anchor message" }).last();
     await message.waitFor();
     const id = await message.getAttribute("data-msg-id");
     const roomId = await page.evaluate(async (url: string) => (await import(url)).app.state.room.id, "/assets/chat/state.js");

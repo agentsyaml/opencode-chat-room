@@ -13,6 +13,7 @@ export function initMessages(app) {
   app.autoGrow = (textarea) => {
     const thread = $("#thread"), atBottom = Boolean(app.state.room && Math.abs(thread.scrollHeight - thread.clientHeight - thread.scrollTop) < 1);
     const scrollTop = textarea.scrollTop;
+    textarea.dataset.empty = textarea.value ? "false" : "true";
     textarea.style.overflowY = "hidden";
     const style = getComputedStyle(textarea), line = parseFloat(style.lineHeight);
     const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
@@ -124,6 +125,7 @@ export function initMessages(app) {
   const readTimestamp = (room, entry) => {
     let timestamp = entry.readTs;
     for (const message of room.messages) {
+      if (message.pending) continue;
       if (app.failedRenderIds.has(message.id)) break;
       timestamp = Math.max(timestamp, message.createdAt);
     }
@@ -216,7 +218,8 @@ export function initMessages(app) {
       renderMarkdown(body, message.text, app);
       const content = document.createElement("div");
       content.className = "msg-content";
-      content.append(body, app.createReceiptButton(message, own));
+      content.append(body);
+      if (!message.pending) content.append(app.createReceiptButton(message, own));
       row.append(meta, content);
     }
     if (message.senderId !== "system") {
@@ -242,6 +245,7 @@ export function initMessages(app) {
       copy._copyText = String(message.text ?? "");
       row.append(copy);
     }
+    if (message.pending) row.classList.add("pending");
     if (live) row.classList.add("in");
     return row;
   };
@@ -358,6 +362,15 @@ export function initMessages(app) {
     app.updateDraftCount();
     app.updateSendState();
     app.hideSendError();
+    const pending = {
+      id: `pending-${createRandomId()}`, roomId: room.id, text,
+      senderId: room.kind === "direct" ? LS.sessionID : app.state.myName,
+      senderSessionID: LS.sessionID, createdAt: Date.now(), pending: true,
+      ...(replyTarget ? { replyToMessageID: replyTarget.id } : {}),
+    };
+    room.messages.push(pending);
+    app.renderMessages(true);
+    if (followedBottom) thread.scrollTop = thread.scrollHeight;
     try {
       let updated;
       if (replyTarget?.isQuestion) { await app.answerQuestionFromReply(room.id, replyTarget.id, text); updated = app.state.rooms.get(room.id)?.room || room; }
@@ -365,13 +378,15 @@ export function initMessages(app) {
         method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, ...(replyTarget ? { replyToMessageID: replyTarget.id } : {}) }),
       });
       app.completeAttachments?.(room.id, message.ids);
+      const pendingIndex = room.messages.findIndex((item) => item.id === pending.id);
+      if (pendingIndex >= 0) room.messages.splice(pendingIndex, 1);
       if (app.state.room?.id !== room.id) return true;
       const entry = app.state.rooms.get(room.id);
       // The POST snapshot is older than anything polling received while it was
       // in flight; merge instead of dropping those messages.
       let current = updated;
       if (entry) {
-        const merged = new Map([...entry.room.messages, ...updated.messages].map((item) => [item.id, { ...item, roomId: updated.id }]));
+        const merged = new Map([...entry.room.messages, ...updated.messages].filter((item) => !item.pending).map((item) => [item.id, { ...item, roomId: updated.id }]));
         const messages = [...merged.values()].sort((a, b) => a.createdAt - b.createdAt);
         if (messages.length > LOADED_MESSAGE_LIMIT) messages.splice(0, messages.length - LOADED_MESSAGE_LIMIT);
         app.cacheRoomSoon?.(room.id);
@@ -394,6 +409,9 @@ export function initMessages(app) {
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
       return true;
     } catch (error) {
+      const pendingIndex = room.messages.findIndex((item) => item.id === pending.id);
+      if (pendingIndex >= 0) room.messages.splice(pendingIndex, 1);
+      if (app.state.room?.id === room.id) app.renderMessages(false);
       const unchanged = (app.state.draftRevision.get(room.id) || 0) === revision;
       // Someone answered the question first; retrying the answer can never succeed,
       // so keep the text as a draft instead of a failed message.

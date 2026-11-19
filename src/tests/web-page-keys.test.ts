@@ -60,6 +60,7 @@ test.skipIf(!browserModule)("PageUp and PageDown scroll the thread while the com
     expect(before.gap).toBeLessThan(8);
     await page.keyboard.press("PageUp");
     await page.waitForFunction((top: number) => document.querySelector<HTMLElement>("#thread")!.scrollTop < top - 100, before.top);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-up"))).toBe(true);
     const afterUp = await read();
     expect(afterUp.top).toBeLessThan(before.top - 100);
     expect(afterUp.value).toBe("__Test_draft");
@@ -68,10 +69,149 @@ test.skipIf(!browserModule)("PageUp and PageDown scroll the thread while the com
 
     await page.keyboard.press("PageDown");
     await page.waitForFunction((top: number) => document.querySelector<HTMLElement>("#thread")!.scrollTop > top + 100, afterUp.top);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-down"))).toBe(true);
     const afterDown = await read();
     expect(afterDown.top).toBeGreaterThan(afterUp.top + 100);
     expect(afterDown.value).toBe("__Test_draft");
     expect(afterDown.focused).toBe(true);
+
+    await page.keyboard.press("Alt+PageUp");
+    await page.waitForFunction((top: number) => document.querySelector<HTMLElement>("#thread")!.scrollTop < top - 100, afterDown.top);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-up"))).toBe(true);
+    const altUp = await read();
+    expect(altUp.value).toBe("__Test_draft");
+    expect(altUp.focused).toBe(true);
+
+    await page.keyboard.press("Alt+PageDown");
+    await page.waitForFunction((top: number) => document.querySelector<HTMLElement>("#thread")!.scrollTop > top + 100, altUp.top);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-down"))).toBe(true);
+    const altDown = await read();
+    expect(altDown.top).toBeGreaterThan(altUp.top + 100);
+    expect(altDown.value).toBe("__Test_draft");
+    expect(altDown.focused).toBe(true);
+
+    // Home must not land inside a non-editable mention chip, where the caret is invisible.
+    await page.locator("#msgInput").fill("@a");
+    await page.locator("#mentionPicker").waitFor({ state: "visible" });
+    await page.keyboard.press("Enter");
+    await page.keyboard.type(" tail");
+    await page.keyboard.press("Home");
+    const caret = await page.evaluate(() => {
+      const selection = getSelection();
+      return {
+        active: document.activeElement?.id,
+        type: selection?.anchorNode?.nodeType,
+        offset: selection?.anchorOffset,
+        previous: (selection?.anchorNode as ChildNode | null)?.previousSibling?.nodeName,
+        length: selection?.anchorNode?.textContent?.length,
+        height: selection?.getRangeAt(0).getBoundingClientRect().height,
+      };
+    });
+    expect(caret).toMatchObject({ active: "msgInput", type: 3, offset: 0, previous: "SPAN", length: 5 });
+    expect(caret.height).toBeGreaterThan(0);
+    await page.keyboard.press("End");
+    const lineEnd = await page.evaluate(() => {
+      const selection = getSelection();
+      return { active: document.activeElement?.id, type: selection?.anchorNode?.nodeType };
+    });
+    expect(lineEnd).toEqual({ active: "msgInput", type: 3 });
+    await page.locator("#msgInput .editor-mention").click();
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("msgInput");
+    await page.keyboard.press("Backspace");
+    expect(await page.locator("#msgInput .editor-mention").count()).toBe(0);
+
+    // Mobile keyboards can emit beforeinput without a usable Backspace keydown.
+    await page.locator("#msgInput").fill("@a");
+    await page.locator("#mentionPicker").waitFor({ state: "visible" });
+    await page.keyboard.press("Enter");
+    await page.evaluate(() => {
+      document.querySelector("#msgInput")!.dispatchEvent(new InputEvent("beforeinput", {
+        inputType: "deleteContentBackward", bubbles: true, cancelable: true,
+      }));
+    });
+    expect(await page.locator("#msgInput .editor-mention").count()).toBe(0);
+
+    // Pasting multi-line text must stay plain text and must not break the
+    // mention range: a leftover trigger @ used to survive the insertion.
+    const pasted = "Excel 已完成文件级验证和修复。此工作簿的某些部分可能已被修复或丢弃。\n已修复的记录: /xl/worksheets/sheet1.xml 部分的 字符串属性";
+    await page.evaluate((text: string) => {
+      const editor = document.querySelector<HTMLElement>("#msgInput")!;
+      editor.focus();
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      editor.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, pasted);
+    await page.waitForFunction((text: string) => (document.querySelector("#msgInput") as any).value === text, pasted);
+    expect(await page.locator("#msgInput b, #msgInput i, #msgInput u, #msgInput a, #msgInput font, #msgInput > div").count()).toBe(0);
+    await page.locator("#msgInput").focus();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Backspace");
+    expect(await page.evaluate(() => (document.querySelector("#msgInput") as any).value)).toBe(pasted.slice(0, -1));
+    await page.keyboard.insertText(pasted.slice(-1));
+    expect(await page.evaluate(() => (document.querySelector("#msgInput") as any).value)).toBe(pasted);
+    await page.keyboard.type(" @a");
+    await page.locator("#mentionPicker").waitFor({ state: "visible" });
+    await page.keyboard.press("Enter");
+    expect(await page.evaluate(() => (document.querySelector("#msgInput") as any).value)).toBe(`${pasted} <at>@all</at>`);
+
+    // Selecting a mention from an empty trigger, then pasting after it, must not
+    // leave the typed trigger behind.
+    await page.evaluate(() => { (document.querySelector("#msgInput") as any).value = ""; });
+    await page.locator("#msgInput").focus();
+    await page.keyboard.type("@");
+    await page.locator("#mentionPicker").waitFor({ state: "visible" });
+    await page.locator(".mention-opt").first().click();
+    expect(await page.evaluate(() => (document.querySelector("#msgInput") as any).value)).toBe("<at>@all</at>");
+    expect(await page.evaluate(() => {
+      const editor = document.querySelector<HTMLElement>("#msgInput")!;
+      return { empty: editor.dataset.empty, placeholder: getComputedStyle(editor, "::before").content };
+    })).toMatchObject({ empty: "false", placeholder: "none" });
+    await page.evaluate((text: string) => {
+      const editor = document.querySelector<HTMLElement>("#msgInput")!;
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      editor.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, pasted);
+    expect(await page.evaluate(() => (document.querySelector("#msgInput") as any).value)).toBe(`<at>@all</at>${pasted}`);
+
+    // The deployed 0.6.9 failure pasted first, moved Home, then inserted a
+    // mention at the line start; the old block DOM left the trigger behind.
+    await page.evaluate(() => { (document.querySelector("#msgInput") as any).value = ""; });
+    await page.locator("#msgInput").focus();
+    await page.evaluate((text: string) => {
+      const editor = document.querySelector<HTMLElement>("#msgInput")!;
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      editor.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, pasted);
+    await page.evaluate(() => {
+      const editor = document.querySelector<HTMLElement & { setCaret(offset: number): void }>("#msgInput")!;
+      editor.focus();
+      editor.setCaret(0);
+    });
+    await page.keyboard.type("@");
+    await page.locator("#mentionPicker").waitFor({ state: "visible" });
+    await page.locator(".mention-opt").first().click();
+    expect(await page.evaluate(() => (document.querySelector("#msgInput") as any).value)).toBe(`<at>@all</at>${pasted}`);
+    expect(await page.evaluate(() => document.querySelectorAll("#msgInput div").length)).toBe(0);
+
+    // A draft ending in a newline has a text node plus one <br>; the old
+    // :has(> br:only-child) placeholder rule ignored the text and overlapped it.
+    await page.evaluate(async (modulePath: string) => {
+      const { setEditorText } = await import(modulePath);
+      setEditorText(document.querySelector("#msgInput"), "draft\n");
+    }, "/assets/chat/editor.js");
+    const withNewline = await page.evaluate(() => {
+      const editor = document.querySelector<HTMLElement>("#msgInput")!;
+      return { html: editor.innerHTML, empty: editor.dataset.empty, placeholder: getComputedStyle(editor, "::before").content };
+    });
+    expect(withNewline.html).toBe("draft<br>");
+    expect(withNewline).toMatchObject({ empty: "false", placeholder: "none" });
+    await page.evaluate(async (modulePath: string) => {
+      const { setEditorText } = await import(modulePath);
+      setEditorText(document.querySelector("#msgInput"), "");
+    }, "/assets/chat/editor.js");
+    expect(await page.evaluate(() => document.querySelector<HTMLElement>("#msgInput")!.dataset.empty)).toBe("true");
   } finally {
     await browser?.close();
     server.kill("SIGTERM");

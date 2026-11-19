@@ -29,7 +29,7 @@ test("standalone tool validates writes and never joins rooms", async () => {
   expect(await runAnnouncementTool({ action: "announcement_write", roomId: roomID, announcementName: "x", content: 8 as never }, "outsider")).toContain("content");
   expect(await runAnnouncementTool({ action: "announcement_write", roomId: roomID, announcementName: "x".repeat(65), content: "ok" }, "outsider")).toContain("name");
   expect(await runAnnouncementTool({ action: "announcement_write", roomId: roomID, announcementName: "x", content: "😀".repeat(5001) }, "outsider")).toContain("content");
-  expect(await runAnnouncementTool({ action: "announcement_write", roomId: roomID, announcementName: "x", content: "ok" }, "outsider")).toBe("error: not joined");
+  expect(await runAnnouncementTool({ action: "announcement_write", roomId: roomID, announcementName: "x", content: "ok" }, "outsider")).toBe("error: not joined; call join for this room first, and wait for approval if required");
   expect(await store.loadRegistry()).not.toHaveProperty(roomID);
   expect(await runAnnouncementTool({ action: "announcement_write", roomId: memberRoom, announcementName: "x", content: "ok" }, "member")).toBe("announcement saved: x");
   expect(await runAnnouncementTool({ action: "announcement_read", roomId: memberRoom, announcementName: "x" }, "outsider")).toContain("ok");

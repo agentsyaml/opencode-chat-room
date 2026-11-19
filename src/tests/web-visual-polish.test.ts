@@ -44,6 +44,7 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
     const samples: unknown[] = [], sizes: Array<[number, number]> = [[188, 406], [250, 541], [300, 650], [320, 720], [375, 812], [390, 844], [768, 900], [1440, 900]];
     for (const [width, height] of sizes) {
       await page.setViewportSize({ width, height });
+      await page.waitForFunction(() => Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-height")) - innerHeight) < 1);
       for (const theme of ["light", "dark"] as const) {
         await page.emulateMedia({ colorScheme: theme });
         for (const locale of ["en", "zh-CN"] as const) {

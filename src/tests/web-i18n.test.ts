@@ -62,7 +62,7 @@ test.skipIf(!browserModule)("system events translate in messages and room previe
     const literal = page.locator("#msgList .msg.own .msg-text").filter({ hasText: "Alex was removed from the room" }).last();
     await literal.waitFor();
     expect((await literal.textContent())?.trimEnd()).toBe("Alex was removed from the room");
-    expect(await preview.textContent()).toBe("Alex was removed from the room");
+    expect(await expectText(page, "Alex was removed from the room", roomId)).toBe("Alex was removed from the room");
     await page.screenshot({ path: path.join(artifactDir, "chat-system-events-zh.png"), fullPage: true });
     await writeFile(path.join(artifactDir, "chat-system-events-metrics.json"), JSON.stringify({ joinPreviewZh, leavePreviewZh, removedPreviewZh, removedPreviewEn, userLiteralUntranslated: await literal.textContent(), previewUntranslated: await preview.textContent() }, null, 2));
     await page.context().close();

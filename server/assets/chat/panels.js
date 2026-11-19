@@ -4,7 +4,6 @@ export function initPanels(app) {
   app.closePanels = () => {
     document.querySelectorAll(".panel").forEach((panel) => { panel.hidden = true; });
     $("#btnMembers").setAttribute("aria-expanded", "false");
-    $("#btnSettings").setAttribute("aria-expanded", "false");
     $("#btnRoomOptions").setAttribute("aria-expanded", "false");
   };
   app.togglePanel = (selector) => {
@@ -25,13 +24,5 @@ export function initPanels(app) {
     const box = $("#tokenBox");
     if (!box.open) box.showModal();
     $("#inToken").focus();
-  };
-  app.openChatSettings = () => {
-    app.closePanels();
-    app.lastFocus = $("#btnSettings");
-    $("#chatSettings").hidden = false;
-    $("#btnSettings").setAttribute("aria-expanded", "true");
-    $("#tokenHint").hidden = false;
-    $("#inTokenChat").focus();
   };
 }

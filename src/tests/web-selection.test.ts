@@ -54,7 +54,7 @@ test.skipIf(!browserModule)("browser selects own and peer message text", async (
     expect(await page.locator("#thread").evaluate((node: HTMLElement) => node.scrollTop)).toBe(heldTop);
     await page.evaluate(() => document.querySelector('[data-msg-id="gesture-probe"]')!.remove());
     await page.mouse.up();
-    const codeSelection = await dragSelect(page, ".msg.own .msg-text pre code", 3, 35);
+    const codeSelection = await dragSelect(page, ".msg.own .msg-text pre code", 3, 28);
     const selectedBeforePoll = await dragSelect(page, `[data-msg-id]:has(.msg-text:has-text("OWN-LINE-0")) .msg-text`, 90, 220);
     const peerSession = `selection-peer-${Date.now()}`;
     await api(origin, `/rooms/${roomId}/join`, "POST", { sessionID: peerSession, participantId: "Selection peer", participantName: "Selection peer" });
@@ -239,6 +239,8 @@ async function snapshotWindow(page: any, id: string) {
 async function dragSelect(page: any, selector: string, start: number, end: number) {
   const target = page.locator(selector).first();
   await target.scrollIntoViewIfNeeded();
+  // A late footer resize can shift rows after scrollIntoView resolves.
+  await page.waitForTimeout(350);
   const points = await target.evaluate((element: HTMLElement, bounds: { start: number; end: number }) => {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), nodes: Text[] = [];
     while (walker.nextNode()) nodes.push(walker.currentNode as Text);

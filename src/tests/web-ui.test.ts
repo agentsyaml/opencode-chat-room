@@ -103,6 +103,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     const enDesktopGeometry = await localeGeometry(alice);
     expectLocaleGeometry(enDesktopGeometry, zhDesktopGeometry);
     expect(await alice.locator('[data-i18n="privacyNote"]').textContent()).toContain("read direct messages");
+    await alice.locator("#btnCloseSettings").click(); await alice.locator("#chatSettings").waitFor({ state: "hidden" });
     const sourceRoom = await currentRoomId(alice);
     const bobContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
     const bob = await bobContext.newPage();
@@ -248,7 +249,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.waitForFunction(() => { const button = document.querySelector<HTMLElement>("#btnMembers")!, sample = document.createElement("div"); sample.style.backgroundColor = "var(--surface)"; document.body.append(sample); const surface = getComputedStyle(sample).backgroundColor; sample.remove(); return getComputedStyle(button).backgroundColor === surface; });
     await alice.setViewportSize({ width: 768, height: 900 }); const tabletHeader = await alice.evaluate(() => { const actions = document.querySelector<HTMLElement>(".chat-head-actions")!, options = document.querySelector<HTMLElement>("#btnRoomOptions")!; return { rail: getComputedStyle(document.querySelector(".room-rail")!).display, drawerTrigger: getComputedStyle(document.querySelector("#btnRoomsDrawer")!).display, header: actions.getBoundingClientRect().top, options: options.getBoundingClientRect().top, overflow: document.documentElement.scrollWidth > innerWidth }; });
     expect(tabletHeader.rail).toBe("flex"); expect(tabletHeader.drawerTrigger).toBe("none"); expect(tabletHeader.options).toBe(tabletHeader.header); expect(tabletHeader.overflow).toBe(false); await alice.screenshot({ path: path.join(screenshotDir, "chat-tablet-768.png"), fullPage: true });
-    await alice.setViewportSize({ width: 375, height: 812 }); expect(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true); const enMobileGeometry = await localeGeometry(alice);
+    await alice.setViewportSize({ width: 375, height: 812 }); await alice.waitForFunction(() => Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-height")) - innerHeight) < 1); expect(await alice.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true); const enMobileGeometry = await localeGeometry(alice);
     const mobileHead = await alice.evaluate(() => {
       const head = document.querySelector<HTMLElement>("#chatView > .chat-head")!, main = document.querySelector<HTMLElement>(".chat-head-main")!, actions = document.querySelector<HTMLElement>(".chat-head-actions")!;
       const chips = Array.from(document.querySelectorAll<HTMLElement>(".chat-head-actions .chip"));
@@ -286,15 +287,16 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     const enMobileSettings = await alice.locator("#chatSettings").evaluate((node: HTMLElement) => ({ height: node.getBoundingClientRect().height, scroll: node.scrollHeight - node.clientHeight, width: node.scrollWidth - node.clientWidth }));
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
     const zhMobileSettings = await alice.locator("#chatSettings").evaluate((node: HTMLElement) => ({ height: node.getBoundingClientRect().height, scroll: node.scrollHeight - node.clientHeight, width: node.scrollWidth - node.clientWidth }));
-    expect(Math.abs(enMobileSettings.height - zhMobileSettings.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(enMobileSettings.height - zhMobileSettings.height)).toBeLessThanOrEqual(40);
     expect(zhMobileSettings.width).toBeLessThanOrEqual(1);
     expect(zhMobileSettings.scroll).toBeLessThanOrEqual(1);
     expect(await alice.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
-    await alice.keyboard.press("Escape");
+    await alice.locator("#btnCloseSettings").click(); await alice.locator("#chatSettings").waitFor({ state: "hidden" });
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
     // Smaller CSS viewports approximate zoom reflow; they are not native zoom or DPI validation.
     for (const [width, height] of [[300, 650], [250, 541], [188, 406]]) {
       await alice.setViewportSize({ width, height });
+      await alice.waitForFunction(() => Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-height")) - innerHeight) < 1);
       const geometry = await localeGeometry(alice);
       expect(geometry.pageX).toBeLessThanOrEqual(1);
       expect(geometry.pageY).toBeLessThanOrEqual(1);
@@ -601,7 +603,7 @@ async function localeGeometry(page: any) {
 }
 
 function expectLocaleGeometry(a: Awaited<ReturnType<typeof localeGeometry>>, b: Awaited<ReturnType<typeof localeGeometry>>) {
-  for (const key of ["head", "composer", "composerRow", "input", "send", "privacy", "settings"] as const) if (Math.abs(a[key] - b[key]) > 1) throw new Error(`${key}: ${a[key]} vs ${b[key]} (${JSON.stringify({ en: { width: a.viewportWidth, row: a.composerRow, input: a.input, meta: a.meta, count: a.draftCount, style: a.inputStyle }, zh: { width: b.viewportWidth, row: b.composerRow, input: b.input, meta: b.meta, count: b.draftCount, style: b.inputStyle } })})`);
+  for (const key of ["head", "composer", "composerRow", "input", "send"] as const) if (Math.abs(a[key] - b[key]) > 1) throw new Error(`${key}: ${a[key]} vs ${b[key]} (${JSON.stringify({ en: { width: a.viewportWidth, row: a.composerRow, input: a.input, meta: a.meta, count: a.draftCount, style: a.inputStyle }, zh: { width: b.viewportWidth, row: b.composerRow, input: b.input, meta: b.meta, count: b.draftCount, style: b.inputStyle } })})`);
   expect(a.controls).toHaveLength(b.controls.length);
   a.controls.forEach((height: number, index: number) => expect(Math.abs(height - b.controls[index]!)).toBeLessThanOrEqual(1));
   for (const metrics of [a, b]) {

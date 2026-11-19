@@ -120,7 +120,7 @@ describe.serial("central receiver membership scope", () => {
       server.fetch(new Request(String(input), init))) as unknown as typeof fetch;
     try {
       expect(await centerAction({ center: "http://center.invalid", token: "receiver-test-token" },
-        { action: "poll", roomId: otherID }, "room-filter-session")).toBe("error: not joined");
+        { action: "poll", roomId: otherID }, "room-filter-session")).toBe("error: not joined; call join for this room first, and wait for approval if required");
     } finally { globalThis.fetch = previousFetch; }
   });
 

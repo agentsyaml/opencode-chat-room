@@ -32,7 +32,7 @@ function bindMessageActions(app) {
   const render = app.renderMessage;
   app.renderMessage = (message, live) => {
     const row = render(message, live);
-    if (message.senderId === "system") return row;
+    if (message.senderId === "system" || message.pending) return row;
     if (message.answerToMessageID) row.querySelector(".msg-meta")?.after(quoteButton(message, app));
     const copy = row.querySelector("[data-copy-message]");
     if (copy) {

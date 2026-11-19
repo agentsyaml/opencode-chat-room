@@ -4,15 +4,15 @@ import { isOwnMessage } from "./messages.js";
 import { isRoomAdmin } from "./admin-badge.js";
 import { formatSystemMessage, setRoomPreview } from "./system-messages.js";
 
-const RECALL_ICON = '<svg class="message-recall-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 11.5a8 8 0 0 1-8 8H8l-4 2.2V18a8 8 0 0 1 8-14.5 8 8 0 0 1 8.5 8Z"/><path d="m9.5 8.5 5 5m0-5-5 5"/></svg>';
-const RECALLED_ICON = '<svg class="recalled-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 11.5a8 8 0 0 1-8 8H8l-4 2.2V18a8 8 0 0 1 8-14.5 8 8 0 0 1 8.5 8Z"/><path d="m9.5 8.5 5 5m0-5-5 5"/></svg>';
+const RECALL_ICON = '<svg class="message-recall-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg>';
+const RECALLED_ICON = '<svg class="recalled-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg>';
 
 // Recall is a soft hide: the server keeps the text and members may reveal it.
 export function initRecall(app) {
   const $ = app.$, base = app.renderMessage;
 
   app.canRecallMessage = (message) => {
-    if (!message || message.recalledAt) return false;
+    if (!message || message.recalledAt || message.pending) return false;
     const self = app.state.memberSessions.get(app.state.room?.id)?.find((member) => member.sessionID === LS.sessionID);
     // Member data may not have loaded yet; the server re-checks the real membership.
     const humanAdmin = (!self || self.type === "human") && isRoomAdmin(app);

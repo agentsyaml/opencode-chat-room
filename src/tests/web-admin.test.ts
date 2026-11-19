@@ -203,6 +203,7 @@ test.skipIf(!browserModule)("user navigation supersedes room restoration", async
     releaseGroupMembers(); await groupDone; await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     expect(await page.evaluate(() => sessionStorage.getItem("chat.roomId"))).not.toBe(activeRoom);
     expect(await page.evaluate((id: string) => JSON.parse(sessionStorage.getItem("chat.joinedRoomIds") || "[]").includes(id), activeRoom)).toBe(false);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
     await context.close();
   } finally { releaseMembers(); releaseCreate(); releaseActiveMembers(); releaseJoin(); await browser?.close(); server.kill(); await rm(stateDir, { recursive: true, force: true }); }
 }, 90000);

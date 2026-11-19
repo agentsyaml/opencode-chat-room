@@ -9,7 +9,7 @@
   }
   @media (max-width: 520px) {
     .join-head { grid-template-columns: minmax(0, 1fr); }
-    .join-head .locale-control { grid-column: 1; grid-row: 2; justify-self: end; }
+    .join-head .join-settings { grid-column: 1; grid-row: 2; justify-self: end; }
     .join-head .tagline { grid-row: 3; }
   }
   /* The three setup cards stack below the masthead; rooms use two columns until phones. */
@@ -182,7 +182,7 @@
     #roomListChat .room-row { height: auto; padding: 10px 12px; }
     #roomListChat .r-meta { font-size: 12px; }
     #roomListChat .r-preview { display: block; }
-    #chatView > .chat-head { grid-column: 1; grid-row: 1; flex-wrap: wrap; align-items: center; padding: 6px 10px; gap: 4px 8px; }
+    #chatView > .chat-head { grid-column: 1; grid-row: 1; flex-wrap: wrap; align-items: center; padding: calc(6px + env(safe-area-inset-top)) 10px 6px; gap: 4px 8px; }
     #chatView > .conn-bar { grid-column: 1; grid-row: 2; }
     #chatView > .msg-scroll { grid-column: 1; grid-row: 3; }
     #chatView > .composer { grid-column: 1; grid-row: 4; }
@@ -208,7 +208,7 @@
   @media (max-width: 480px) {
     .chat-head-main { flex-basis: 100%; }
     .chat-head-actions { flex-basis: 100%; margin-left: 0; }
-    #msgInput:placeholder-shown { min-height: calc(2.9em + 20px); }
+    #msgInput[data-empty="true"] { min-height: calc(2.9em + 20px); }
   }
   @media (max-width: 420px) {
     #chatView > .chat-head { align-items: center; }
@@ -222,7 +222,6 @@
     #btnRoomsDrawer { width: 36px; height: 36px; }
   }
   @media (max-width: 260px) {
-    #msgInput:placeholder-shown { min-height: calc(7.25em + 20px); }
     .composer-meta { min-height: 3.6em; }
   }
   @media (max-width: 220px) {
@@ -233,5 +232,4 @@
   @media (max-width: 900px) {
     #btnMembers { position: relative; }
     #joinRequestBadge { position: absolute; top: -5px; right: -5px; margin: 0; font-size: 10px; }
-    .join-request-badge-word { display: none; }
   }

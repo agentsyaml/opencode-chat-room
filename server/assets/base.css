@@ -24,27 +24,6 @@
     --shadow: 0 2px 5px rgb(34 53 47 / .05), 0 18px 44px rgb(34 53 47 / .09);
   }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #111b19;
-      --surface: #182522;
-      --surface-2: #202f2b;
-      --ink: #edf2e9;
-      --ink-2: #c6d1c9;
-      --ink-3: #a6b3aa;
-      --line: #344640;
-      --accent: #8ac9aa;
-      --accent-ink: #14251e;
-      --accent-soft: #263d34;
-      --danger: #ef9580;
-      --danger-soft: #3a2924;
-      --warning: #d9a441;
-      --warning-ink: #241a09;
-      --mention-blue: #8bc8c2;
-      --shadow: 0 2px 6px rgb(0 0 0 / .22), 0 18px 44px rgb(0 0 0 / .32);
-    }
-  }
-
   html, body { height: 100%; }
   body {
     margin: 0;
@@ -63,7 +42,7 @@
   #app {
     max-width: 760px;
     height: 100vh;
-    height: 100dvh;
+    height: var(--app-height, 100dvh);
     margin: 0 auto;
     display: flex;
     flex-direction: column;
@@ -93,7 +72,6 @@
   .join-shell { display: grid; gap: 22px; width: min(1080px, 100%); margin: auto; align-content: start; }
   .join-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 24px; align-items: start; padding-bottom: 20px; border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent); }
   .join-head .wordmark-row { grid-column: 1; grid-row: 1; align-self: center; }
-  .join-head .locale-control { grid-column: 2; grid-row: 1; margin: 0; }
   .join-head .tagline { grid-column: 1 / -1; grid-row: 2; max-width: 62ch; margin: 0; }
   .join-entries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
   #createForm { grid-column: 1 / -1; }
@@ -137,9 +115,6 @@
     background-position: right var(--select-pad) center;
     background-repeat: no-repeat;
     background-size: 12px 8px;
-  }
-  @media (prefers-color-scheme: dark) {
-    select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.2 1.6 6 6.4l4.8-4.8' fill='none' stroke='%23a6b3aa' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
   }
   @media (forced-colors: active) {
     select { appearance: auto; padding-right: var(--select-pad); background-image: none; }
@@ -257,6 +232,8 @@
     #announcementDialog .admin-dialog-head h2 { font-size: 21px; }
   }
   .danger-text { color: var(--danger) !important; }
+  .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .btn.danger:hover { filter: brightness(.94); }
   .announcement-content { white-space: pre-wrap; overflow-wrap: anywhere; }
 
   .panel.reminder-panel { width: min(410px, calc(100vw - 32px)); max-height: min(72dvh, 640px); overflow: auto; }
@@ -281,27 +258,7 @@
   .key-dialog .hint { margin: 0 0 14px; }
   .key-actions { display: flex; align-items: center; gap: 8px; }
 
-  /* Keyboard help: a quiet keycap trigger, a cheat sheet, and inline hints. */
-  .keys-hint {
-    display: inline-flex;
-    align-items: center;
-    align-self: center;
-    gap: 6px;
-    min-height: 28px;
-    padding: 2px 8px 2px 4px;
-    border: 1px solid transparent;
-    border-radius: 999px;
-    color: var(--ink-3);
-    background: transparent;
-    font: inherit;
-    font-size: 11.5px;
-    font-weight: 600;
-    line-height: 1;
-    cursor: pointer;
-    transition: color .14s, border-color .14s, background .14s;
-  }
-  .keys-hint:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: var(--accent-soft); }
-  .keys-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Keyboard help: a cheat sheet opened with Alt+/. */
   .keys-key {
     display: inline-grid;
     place-items: center;
@@ -319,7 +276,7 @@
   }
   .keys-combo { display: inline-flex; align-items: center; gap: 3px; flex: none; }
   .keys-sep { color: var(--ink-3); font-size: 10px; }
-  .composer-keys { margin-right: auto; }
+
 
   .keys-dialog {
     width: min(520px, calc(100vw - 28px));
@@ -345,8 +302,6 @@
   .keys-list li:first-child { border-top: 0; }
   .keys-list li > span:last-child { color: var(--ink-2); text-align: right; }
   @media (max-width: 560px) {
-    .keys-hint .keys-label { display: none; }
-    .keys-hint { padding: 2px; }
     .keys-dialog { padding: 18px; }
     .keys-dialog-head h2 { font-size: 21px; }
   }

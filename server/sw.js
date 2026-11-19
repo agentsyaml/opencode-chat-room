@@ -4,10 +4,13 @@ const CACHE = `oc-chat-${VERSION}`;
 const SHELL = "/chat";
 const STATIC = [
   "/assets/base.css",
+  "/assets/settings.css",
   "/assets/conversation.css",
   "/assets/recall.css",
   "/assets/attachments.css",
   "/assets/responsive.css",
+  "/assets/code-highlight.css",
+  "/assets/highlight-10.7.3.min.js",
   "/assets/icons/icon-192.png",
   "/assets/icons/icon-512.png",
   "/manifest.webmanifest",

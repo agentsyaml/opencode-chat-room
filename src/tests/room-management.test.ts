@@ -185,8 +185,9 @@ describe.serial("shared-token room management", () => {
   test("local and central room tools reject unnamed joins before making requests", async () => {
     const [{ server: localPlugin }, { centerAction }] = await Promise.all([import("../../plugin"), import("../center/center-client.ts")]);
     const local = await localPlugin({ serverUrl: "", directory: dir } as never) as unknown as { tool: { room: { execute(args: unknown, context: unknown): Promise<string> } } };
-    expect(await local.tool.room.execute({ action: "join", roomId: "room" }, { sessionID: "unnamed" })).toBe("error: name is required to join a room");
-    expect(await centerAction({ center: "http://unused.invalid", token: "" }, { action: "join", roomId: "room" }, "unnamed")).toBe("error: name is required to join a room");
+    expect(await local.tool.room.execute({ action: "join", roomId: "room" }, { sessionID: "unnamed" })).toBe("error: name is required to join a room; pass your participant display name");
+    expect(await centerAction({ center: "http://unused.invalid", token: "" }, { action: "join", roomId: "room" }, "unnamed")).toBe("error: name is required to join a room; pass your participant display name");
+    expect(await local.tool.room.execute({ action: "members", roomId: "missing" }, { sessionID: "unnamed" })).toBe("error: room not found: missing; run room action list to get a valid room UUID");
   });
 
   test("creates one persistent direct conversation between session IDs", async () => {

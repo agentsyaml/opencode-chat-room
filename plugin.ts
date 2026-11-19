@@ -61,7 +61,7 @@ async function withRooms<T>(
       return fn(svc, registry);
     } catch (err) {
       if (err instanceof RoomError) {
-        return `error: ${err.message}` as unknown as T;
+        return `error: ${actionableError(err)}` as unknown as T;
       }
       throw err;
     }
@@ -246,24 +246,44 @@ export async function pollKnownSessions(
 
 const READ_ONLY_ACTIONS = new Set(["list", "members", "poll", "join_status", "announcement_list", "announcement_read"]);
 
+function actionableError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = (error as { status?: unknown })?.status;
+  if (/^room not found/i.test(message)) return `${message}; run room action list to get a valid room UUID`;
+  if (/^not joined/i.test(message)) return `${message}; call join for this room first, and wait for approval if required`;
+  if (message === "EMPTY_MESSAGE" || /message text is empty/i.test(message)) return "message text is empty; pass a non-empty text body";
+  if (message === "NOT_OWNER") return "only the room owner can do this; ask the room owner or a room administrator";
+  if (message === "DIRECT_ROOM_FULL") return "this direct room is limited to its two participants; create or join another room";
+  if (status === 401 || message === "unauthorized") return `${message === "unauthorized" ? "unauthorized" : message}; set CHAT_ROOM_SERVER_TOKEN to the server access token, then retry`;
+  if (status === 403 || message === "forbidden") return `${message === "forbidden" ? "forbidden" : message}; check that you joined this room and have permission for this action`;
+  if (typeof status === "number" && status >= 500) return `${message}; the center failed to handle the request, retry later and report the server log`;
+  if ((error as { name?: unknown })?.name === "TimeoutError" || /timed? ?out|aborted/i.test(message)) {
+    return "center request timed out; check CHAT_ROOM_SERVER_URL and network, then retry";
+  }
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(message)) {
+    return "could not reach the center; check CHAT_ROOM_SERVER_URL and that the server is running";
+  }
+  return message;
+}
+
 export const roomArgs = z.object({
   action: z.enum(["create", "join", "join_status", "leave", "list", "send", "poll", "recall", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete"]),
   name: z.string().max(64).optional().describe("For join: your own participant display name, NOT the room name (required). For create: the new room name."),
-  roomId: z.string().optional(),
-  messageId: z.string().optional().describe("For recall: the full message ID to withdraw; agents recall their own messages, admins any message."),
-  resourceId: z.string().optional(),
-  filePath: z.string().optional().describe("Local regular file to upload; central mode only; requires host read permission."),
-  text: z.string().max(5000).optional(),
-  isQuestion: z.boolean().optional(),
-  announcementName: z.string().optional().describe("Name of a room announcement; distinct from participant or room name."),
-  content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters."),
-  reminderId: z.string().optional(),
+  roomId: z.string().optional().describe("Room UUID, not the room name. Required for resource actions and every room-scoped action."),
+  messageId: z.string().optional().describe("For recall: the full message ID returned by send or poll; required for recall."),
+  resourceId: z.string().optional().describe("Resource UUID returned by upload_resource. read_resource and delete_resource also require roomId."),
+  filePath: z.string().optional().describe("Absolute path to a regular local file to upload; central mode only; requires host read permission."),
+  text: z.string().max(5000).optional().describe("Message text, at most 5000 characters; required for send."),
+  isQuestion: z.boolean().optional().describe("For send: mark the message as a question awaiting an answer."),
+  announcementName: z.string().optional().describe("Exact announcement name from announcement_list; distinct from participant or room name."),
+  content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters; required for announcement_write."),
+  reminderId: z.string().optional().describe("Reminder UUID from reminder_list; required for reminder_update and reminder_delete."),
   schedule: z.discriminatedUnion("type", [z.object({ type: z.literal("once"), at: z.string(), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() }), z.object({ type: z.literal("cron"), expression: z.string().regex(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() })]).optional(),
   paused: z.boolean().optional(),
   joinPolicy: z.enum(["open", "approval"]).optional().describe("For create: \"approval\" holds new identities as pending until a human administrator approves them; central mode only."),
 }).superRefine((args, ctx) => {
   if (args.action === "join" && !args.name?.trim()) {
-    ctx.addIssue({ code: "custom", path: ["name"], message: "name is required to join a room" });
+    ctx.addIssue({ code: "custom", path: ["name"], message: "name is required to join a room; pass your participant display name" });
   }
 });
 type RoomArguments = z.infer<typeof roomArgs>;
@@ -272,7 +292,7 @@ const roomExecute = async (
   args: RoomArguments,
   context: V1ToolContext & { signal?: AbortSignal },
 ) => {
-    if (args.action === "join" && !args.name?.trim()) return "error: name is required to join a room";
+    if (args.action === "join" && !args.name?.trim()) return "error: name is required to join a room; pass your participant display name";
     const runtime = currentRuntime();
     if (args.action === "reminder_list" || args.action === "reminder_create" || args.action === "reminder_update" || args.action === "reminder_delete") {
       return await runReminderTool(runtime.center, args, context.sessionID);
@@ -280,6 +300,8 @@ const roomExecute = async (
     if (args.action === "upload_resource") return uploadAgentResource(runtime.center, args.roomId ?? "", args.filePath ?? "", context.sessionID, context);
     if (args.action === "delete_resource") return deleteAgentResource(runtime.center, args.roomId ?? "", args.resourceId ?? "", context.sessionID);
     if (args.action === "read_resource") {
+      if (!args.roomId) return "error: roomId is required for read_resource; use the room UUID, not the room name";
+      if (!args.resourceId) return "error: resourceId is required for read_resource; use the resource UUID returned by upload_resource";
       try {
         if (!context.ask) return "error: host webfetch permission is unavailable";
         return await readAgentResource(runtime.center, args.roomId ?? "", args.resourceId ?? "", context, context.abort ?? context.signal);
@@ -302,14 +324,14 @@ const roomExecute = async (
         }, context.sessionID);
       }
       if (args.action === "recall") {
-        if (!args.roomId) return "error: roomId is required";
-        if (!args.messageId) return "error: messageId is required";
+        if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
+        if (!args.messageId) return "error: messageId is required; use the full message ID returned by send or poll";
         try {
           const recalled = await recallMessage(args.roomId, args.messageId, context.sessionID);
           switch (recalled.status) {
             case "ok": return `recalled message ${recalled.messageID}`;
             case "missing": return `error: message not found: ${args.messageId}`;
-            case "member": return "error: not joined";
+            case "member": return "error: not joined; call join for this room first, and wait for approval if required";
             case "forbidden": return "error: only the sender or a room admin can recall this message";
           }
         } catch (err) {
@@ -351,7 +373,7 @@ const roomExecute = async (
         switch (args.action) {
           case "create": {
             if (!args.name?.trim()) {
-              return "error: name is required";
+              return "error: name is required for create; pass the new room name";
             }
             if (args.joinPolicy === "approval") {
               return "error: joinPolicy \"approval\" requires central mode (set CHAT_ROOM_SERVER_URL); local rooms are always open";
@@ -362,7 +384,7 @@ const roomExecute = async (
           }
           case "join": {
             if (!args.roomId) {
-              return "error: roomId is required";
+              return "error: roomId is required; use a room UUID from the room list, not the room name";
             }
             const me = identity(args.name!.trim());
             // ponytail: F5 — re-join under a new name retires the old
@@ -390,7 +412,7 @@ const roomExecute = async (
           }
           case "leave": {
             if (!args.roomId) {
-              return "error: roomId is required";
+              return "error: roomId is required; use a room UUID from the room list, not the room name";
             }
             // ponytail: ora-2 M2 — mirror the join guard: if another session
             // still holds this name, remove only the registry entry, not the
@@ -419,7 +441,7 @@ const roomExecute = async (
           }
           case "members": {
             if (!args.roomId) {
-              return "error: roomId is required";
+              return "error: roomId is required; use a room UUID from the room list, not the room name";
             }
             const members = svc.getParticipants(args.roomId);
             return members.length > 0
@@ -428,7 +450,7 @@ const roomExecute = async (
           }
           case "join_status": {
             if (!args.roomId) {
-              return "error: roomId is required";
+              return "error: roomId is required; use a room UUID from the room list, not the room name";
             }
             return registry[args.roomId]?.[context.sessionID]
               ? `joined room ${args.roomId}`
@@ -436,10 +458,10 @@ const roomExecute = async (
           }
           case "send": {
             if (!args.roomId) {
-              return "error: roomId is required";
+              return "error: roomId is required; use a room UUID from the room list, not the room name";
             }
             if (!args.text?.trim()) {
-              return "error: text is required";
+              return "error: text is required; pass a non-empty message body";
             }
             const msg = svc.sendMessage(
               args.roomId,
@@ -454,16 +476,16 @@ const roomExecute = async (
           }
           case "poll": {
             if (!args.roomId) {
-              return "error: roomId is required";
+              return "error: roomId is required; use a room UUID from the room list, not the room name";
             }
             // ponytail: gate on registry entry (session granularity) — a
             // participant-id check would pass for any session sharing the
             // same host identity
             if (!pollEntry) {
-              return "error: not joined";
+              return "error: not joined; call join for this room first, and wait for approval if required";
             }
             if (!svc.containsParticipant(args.roomId, selfName)) {
-              return "error: not joined";
+              return "error: not joined; call join for this room first, and wait for approval if required";
             }
             // ponytail: only messages newer than this session's last read (or
             // last successful push) — queue-notified messages don't repeat
@@ -496,11 +518,11 @@ const roomExecute = async (
       }
       return result;
     } catch (err) {
-      return `error: ${err instanceof Error ? err.message : String(err)}`;
+      return `error: ${actionableError(err)}`;
     }
 };
 const room = tool({
-  description: "Chat room operations: create, join, leave and list rooms; send, poll and recall messages; list members and announcements; manage reminders. Sent and polled messages carry full message IDs; recall takes roomId plus messageId and withdraws the message for everyone (agents their own, room admins any). Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads. Room joinPolicy \"approval\" makes join a pending request: you are not a member while pending, never claim otherwise, and use join_status to check whether a human administrator approved it.",
+  description: "Chat room operations: create, join, leave and list rooms; send, poll and recall messages; list members and announcements; manage reminders. Sent and polled messages carry full message IDs; recall takes roomId plus messageId and withdraws the message for everyone (agents their own, room admins any). Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. Resource actions need both roomId (the room UUID) and resourceId (the UUID in the marker); the marker alone does not identify the room. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads. Room joinPolicy \"approval\" makes join a pending request: you are not a member while pending, never claim otherwise, and use join_status to check whether a human administrator approved it.",
   args: roomArgs.shape,
   execute: roomExecute,
 });

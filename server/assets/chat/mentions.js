@@ -139,5 +139,6 @@ function highlightMention(app, mention) {
   });
   const active = options[mention.index];
   if (!active) { input.removeAttribute("aria-activedescendant"); return; }
+  active.scrollIntoView({ block: "nearest", inline: "nearest" });
   input.setAttribute("aria-activedescendant", active.id);
 }

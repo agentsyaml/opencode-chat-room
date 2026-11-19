@@ -183,7 +183,7 @@ function visibleMessageIDs(app) {
   return Array.from(thread.querySelectorAll("[data-msg-id]")).filter((row) => {
     const rect = row.getBoundingClientRect();
     return rect.bottom > top && rect.top < bottom && !overlays.some((overlay) => rect.left < overlay.right && rect.right > overlay.left && rect.top < overlay.bottom && rect.bottom > overlay.top);
-  }).map((row) => row.dataset.msgId).filter(Boolean);
+  }).map((row) => row.dataset.msgId).filter((id) => Boolean(id) && !id.startsWith("pending-"));
 }
 
 function acknowledgedMessages(app, key, set, ids) {

@@ -5,6 +5,7 @@ const mentionPattern = /<at>@([^<]+)<\/at>/g;
 const resourcePattern = /\[\[resource:([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})\]\]/gi;
 let mermaidReady = false;
 const previewUrls = new Map();
+const svgNamespace = "http://www.w3.org/2000/svg";
 let previewObserver;
 
 export function renderMarkdown(root, text, app) {
@@ -38,12 +39,111 @@ export function renderMarkdown(root, text, app) {
     link.rel = "noopener noreferrer";
   });
   fragment.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.disabled = true; });
+  for (const code of fragment.querySelectorAll("pre > code")) decorateCodeBlock(code, app);
   root.appendChild(fragment);
   for (let i = 0; i < diagramNodes.length; i++) {
     const source = diagrams.get(`CHATDIAGRAM${nonce}${i}END`);
     if (!isUnsafeDiagram(source)) void renderDiagram(diagramNodes[i], source, app);
   }
   for (const resource of resources) void loadResourceCard(resource.card, resource.roomId, app);
+}
+
+function decorateCodeBlock(code, app) {
+  const pre = code.parentElement;
+  if (!pre || pre.closest(".mermaid-diagram") || pre.parentElement?.classList.contains("code-block")) return;
+  highlightCode(code);
+  const block = document.createElement("div");
+  block.className = "code-block";
+  pre.replaceWith(block);
+  block.append(pre, codeToolbar(code, pre, block, app));
+}
+
+function highlightCode(code) {
+  const language = (/language-(\S+)/.exec(code.className) || [])[1]?.toLowerCase();
+  if (!language || language === "mermaid" || !window.hljs?.getLanguage?.(language)) return;
+  try {
+    const markup = window.hljs.highlight(code.textContent, { language }).value;
+    const fragment = window.DOMPurify.sanitize(markup, { RETURN_DOM_FRAGMENT: true, ALLOWED_TAGS: ["span"], ALLOWED_ATTR: ["class"] });
+    code.replaceChildren(fragment);
+    code.classList.add("hljs");
+  } catch { /* Keep the escaped text when a grammar rejects its input. */ }
+}
+
+function codeToolbar(code, pre, block, app) {
+  const toolbar = document.createElement("div");
+  toolbar.className = "code-toolbar";
+  const wrap = codeToolButton("code-wrap-toggle", "wrapCode", app, wrapIcon());
+  wrap.setAttribute("aria-pressed", "false");
+  wrap.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const wrapped = !block.classList.contains("is-wrapped");
+    if (wrapped) block._codeScrollLeft = pre.scrollLeft;
+    block.classList.toggle("is-wrapped", wrapped);
+    wrap.setAttribute("aria-pressed", String(wrapped));
+    pre.scrollLeft = wrapped ? 0 : block._codeScrollLeft || 0;
+  });
+  const copy = codeToolButton("code-copy-button", "copyMessage", app, copyIcon(), checkIcon());
+  copy.addEventListener("click", (event) => { event.stopPropagation(); void copyCode(copy, code, app); });
+  toolbar.append(wrap, copy);
+  return toolbar;
+}
+
+function codeToolButton(className, key, app, ...icons) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `code-tool-button ${className}`;
+  button.setAttribute("aria-label", app.t(key));
+  button.title = app.t(key);
+  button.dataset.i18nAriaLabel = key;
+  button.dataset.i18nTitle = key;
+  button.append(...icons);
+  return button;
+}
+
+function codeIcon(className, shapes) {
+  const svg = document.createElementNS(svgNamespace, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("code-tool-icon", className);
+  for (const [tag, attributes] of shapes) {
+    const node = document.createElementNS(svgNamespace, tag);
+    for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+    svg.append(node);
+  }
+  return svg;
+}
+
+function wrapIcon() {
+  return codeIcon("code-wrap-icon", [
+    ["path", { d: "M4 5h16M4 11h13a3.5 3.5 0 0 1 0 7h-4M4 18h5" }],
+    ["path", { d: "m8 16-3 3 3 3" }],
+  ]);
+}
+
+function copyIcon() {
+  return codeIcon("code-copy-icon", [
+    ["rect", { x: "4", y: "3", width: "13", height: "15", rx: "2" }],
+    ["rect", { x: "8", y: "7", width: "12", height: "14", rx: "2" }],
+  ]);
+}
+
+function checkIcon() {
+  return codeIcon("code-check-icon", [["path", { d: "m5 12 4.5 4.5L19 7" }]]);
+}
+
+async function copyCode(button, code, app) {
+  const copied = await copyTextToClipboard(code.textContent);
+  clearTimeout(button._feedbackTimer);
+  button.classList.toggle("is-copied", copied);
+  button.classList.toggle("is-copy-failed", !copied);
+  const key = copied ? "copiedMessage" : "copyMessageFailed";
+  button.setAttribute("aria-label", app.t(key));
+  button.title = app.t(key);
+  button._feedbackTimer = setTimeout(() => {
+    button.classList.remove("is-copied", "is-copy-failed");
+    button.setAttribute("aria-label", app.t("copyMessage"));
+    button.title = app.t("copyMessage");
+  }, 1600);
 }
 
 async function initializeMermaid() {
