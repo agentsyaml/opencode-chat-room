@@ -270,8 +270,9 @@ export function initEvents(app) {
         && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       markScrollIntent();
-      thread.scrollTop += (event.key === "PageDown" ? 1 : -1) * Math.max(80, thread.clientHeight * 0.9);
-      app.animateThreadJump?.(event.key === "PageDown");
+      const delta = (event.key === "PageDown" ? 1 : -1) * Math.max(80, thread.clientHeight * 0.9);
+      if (app.animateThreadScrollBy) app.animateThreadScrollBy(delta);
+      else thread.scrollTop += delta;
       return;
     }
     handleMessageKey(event, app);

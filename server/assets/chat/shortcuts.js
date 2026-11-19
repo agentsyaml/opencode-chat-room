@@ -26,6 +26,44 @@ export function initShortcuts(app) {
   app.$("#btnShortcuts")?.addEventListener("click", openSheet);
   app.$("#btnCloseShortcuts")?.addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => requestAnimationFrame(() => app.focusComposer?.()));
+  let scrollFrame = 0;
+  let scrollGeneration = 0;
+  const cancelScroll = () => {
+    cancelAnimationFrame(scrollFrame);
+    scrollFrame = 0;
+    scrollGeneration++;
+  };
+  const animateScroll = (target) => {
+    if (!thread) return 0;
+    cancelScroll();
+    const generation = scrollGeneration;
+    const max = Math.max(0, thread.scrollHeight - thread.clientHeight);
+    const end = Math.max(0, Math.min(max, target));
+    const start = thread.scrollTop;
+    const distance = end - start;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || Math.abs(distance) < 2) {
+      thread.scrollTop = end;
+      return 0;
+    }
+    const duration = Math.min(300, Math.max(140, Math.abs(distance) * 0.3));
+    const started = performance.now();
+    const step = (now) => {
+      // A room switch, history prepend, or manual scroll wins.
+      if (generation !== scrollGeneration) return;
+      const progress = Math.min(1, (now - started) / duration);
+      thread.scrollTop = start + distance * (1 - Math.pow(1 - progress, 3));
+      if (progress < 1) scrollFrame = requestAnimationFrame(step);
+    };
+    scrollFrame = requestAnimationFrame(step);
+    return duration;
+  };
+  app.cancelThreadScrollAnimation = cancelScroll;
+  thread?.addEventListener("wheel", cancelScroll, { passive: true });
+  thread?.addEventListener("touchmove", cancelScroll, { passive: true });
+  thread?.addEventListener("pointerdown", cancelScroll, { passive: true });
+  app.animateThreadScrollTo = animateScroll;
+  app.animateThreadScrollBy = (delta) => animateScroll((thread?.scrollTop ?? 0) + delta);
   const scrollToEdge = (bottom) => {
     if (!thread) return;
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -33,17 +71,9 @@ export function initShortcuts(app) {
     if (!bottom) {
       app.state.jumpToLoadedTop = true;
       clearTimeout(app.state.jumpToLoadedTopTimer);
-      app.state.jumpToLoadedTopTimer = setTimeout(() => { app.state.jumpToLoadedTop = false; }, reduced ? 100 : 800);
+      app.state.jumpToLoadedTopTimer = setTimeout(() => { app.state.jumpToLoadedTop = false; }, reduced ? 150 : 800);
     }
-    thread.scrollTop = bottom ? thread.scrollHeight : 0;
-    app.animateThreadJump?.(bottom);
-  };
-  app.animateThreadJump = (bottom) => {
-    const list = app.$("#msgList");
-    if (!list) return;
-    list.classList.remove("thread-jump-up", "thread-jump-down");
-    void list.offsetWidth;
-    list.classList.add(bottom ? "thread-jump-down" : "thread-jump-up");
+    animateScroll(bottom ? thread.scrollHeight : 0);
   };
   app.animateRoomSwitch = (direction) => {
     const list = app.$("#msgList");

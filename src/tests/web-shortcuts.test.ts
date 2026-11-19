@@ -118,14 +118,16 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     await page.locator("#msgInput").click();
     await page.keyboard.press("Alt+Home");
     await page.waitForFunction(() => (document.querySelector("#thread")?.scrollTop ?? 1) < 2);
-    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-up"))).toBe(true);
+    await page.waitForTimeout(350);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.className.includes("thread-jump"))).toBe(false);
     expect(await page.locator("#shortcutsDialog").isVisible()).toBe(false);
     await page.keyboard.press("Alt+End");
     await page.waitForFunction(() => {
       const thread = document.querySelector("#thread")!;
       return Math.abs(thread.scrollHeight - thread.clientHeight - thread.scrollTop) < 2;
     });
-    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-down"))).toBe(true);
+    await page.waitForTimeout(350);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.className.includes("thread-jump"))).toBe(false);
     expect(await page.locator("#shortcutsDialog").isVisible()).toBe(false);
     // Ctrl, Meta and Shift keep the browser's own Home/End meaning.
     for (const combo of ["Control+Home", "Meta+Home", "Alt+Shift+Home", "Control+Alt+Home", "Meta+Alt+Home"]) {

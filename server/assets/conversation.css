@@ -510,8 +510,3 @@
 @keyframes room-switch-prev { from { opacity: 0; transform: translateY(-8px); } }
 #msgList.room-switch-next { animation: room-switch-next .22s ease-out; }
 #msgList.room-switch-prev { animation: room-switch-prev .22s ease-out; }
-
-@keyframes thread-jump-up { from { opacity: .45; transform: translateY(6px); } }
-@keyframes thread-jump-down { from { opacity: .45; transform: translateY(-6px); } }
-#msgList.thread-jump-up { animation: thread-jump-up .18s ease-out; }
-#msgList.thread-jump-down { animation: thread-jump-down .18s ease-out; }

@@ -185,7 +185,11 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     await page.reload(); await page.locator("#chatView").waitFor({ state: "visible" });
     await page.waitForFunction((name: string) => document.querySelector("#roomName")?.textContent === name, "__Test_ComposerSizing");
     await frame(page);
-    // Reopening always shows the newest messages.
+    // Reopening always shows the newest messages; late layout can take another frame.
+    await page.waitForFunction(() => {
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      return thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 2;
+    });
     expect(await page.locator("#thread").evaluate((node: HTMLElement) => node.scrollHeight - node.scrollTop - node.clientHeight)).toBeLessThanOrEqual(2);
     expect(await measure(input)).toMatchObject({ overflow: "auto", fits: false });
     const otherPosition = await page.evaluate(async ({ url, id }: { url: string; id: string }) => (await import(url)).app.state.positions.get(id), { url: "/assets/chat/state.js", id: otherRoomId });

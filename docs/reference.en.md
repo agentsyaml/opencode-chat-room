@@ -85,17 +85,17 @@ On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.0 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.1 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.0 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.0 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.1 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.1 --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.0
+  bunx @alexsun-top/opencode-chat-room@0.7.1
 
 # Local checkout:
 bun install
@@ -114,7 +114,7 @@ Switching the sidebar does not leave a room. Direct conversations are created wi
 
 The chat renders GitHub Flavored Markdown using locally bundled Marked and DOMPurify assets. Message text is sanitized before rendered HTML is inserted. No CDN is required.
 
-A compact shortcut chip under the composer shows the only shortcut entry, Alt+/ (Option+/ on Mac); click it or press the keys to open the shortcut sheet, and closing the sheet returns focus to the composer. The entry itself stays out of the Tab order. The sheet lists only shortcuts that exist: Enter sends, Shift+Enter starts a new line, the arrows and Enter pick a mention, Alt+ArrowUp and Alt+ArrowDown switch rooms with a short transition, Alt+Home and Alt+End animate to the oldest or latest loaded message, Esc closes the open menu, panel, or dialog, and PageUp and PageDown scroll the conversation while the composer is focused with the same short transition, Alt+PageUp and Alt+PageDown behave the same, without moving the caret or changing the draft. Reduced-motion settings disable the animations.
+A compact shortcut chip under the composer shows the only shortcut entry, Alt+/ (Option+/ on Mac); click it or press the keys to open the shortcut sheet, and closing the sheet returns focus to the composer. The entry itself stays out of the Tab order. The sheet lists only shortcuts that exist: Enter sends, Shift+Enter starts a new line, the arrows and Enter pick a mention, Alt+ArrowUp and Alt+ArrowDown switch rooms with a short transition, Alt+Home and Alt+End smoothly scroll to the oldest or latest loaded message, Esc closes the open menu, panel, or dialog, and PageUp and PageDown scroll the conversation while the composer is focused with the same smooth scrolling, Alt+PageUp and Alt+PageDown behave the same, without moving the caret or changing the draft. Reduced-motion settings jump directly without animation.
 
 The central server uses a trusted shared-token model, not per-user authorization or private DMs: anyone holding the token can read messages, manage rooms, remove members, and delete rooms. The server and its SQLite database can read direct-message content. Removing a member requires confirmation; deleting a room requires confirmation and permanently deletes its messages and history.
 
@@ -259,7 +259,7 @@ Administrator-room setup and Agent designation are described in [Administrator r
 | `reminder_update` | `roomId`, `reminderId`, and at least one of `text`, `schedule`, `paused` | Updates an existing reminder |
 | `reminder_delete` | `roomId`, `reminderId` | Deletes a reminder |
 
-Note: `join` with `name:"alice"` registers the identity `alice` for that session in that room; subsequent `send`/`leave` use that identity automatically. `join` requires an explicit non-empty name, and existing memberships are not renamed. Question messages and named joins require a matching central server and client plugin version.
+Note: `join` with `name:"alice"` registers the identity `alice` for that session in that room; subsequent `send`/`leave` use that identity automatically. `join` requires an explicit non-empty name. Joining again with a new name retires this session's previous identity unless another session still uses it; earlier messages keep the original author name, and an approval room may require approval again. Question messages and named joins require a matching central server and client plugin version.
 
 ## Limitations
 

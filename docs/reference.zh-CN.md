@@ -84,17 +84,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.0 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.1 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.0 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.0 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.1 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.1 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.0
+  bunx @alexsun-top/opencode-chat-room@0.7.1
 
 # 本地 checkout：
 bun install
@@ -113,7 +113,7 @@ bun run server
 
 聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
 
-输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击入口或按快捷键都能打开面板，关闭后焦点回到消息输入框，入口本身不进入 Tab 顺序。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 带过渡切换房间，Alt+Home 和 Alt+End 平滑跳到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 用同样的短过渡滚动会话，Alt+PageUp 和 Alt+PageDown 行为相同，不移动光标，也不改变草稿。系统启用“减少动态效果”时不播放过渡动画。
+输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击入口或按快捷键都能打开面板，关闭后焦点回到消息输入框，入口本身不进入 Tab 顺序。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 带过渡切换房间，Alt+Home 和 Alt+End 平滑滚动到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 用同样的平滑滚动浏览会话，Alt+PageUp 和 Alt+PageDown 行为相同，不移动光标，也不改变草稿。系统启用“减少动态效果”时直接跳转，不播放滚动动画。
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
 
@@ -257,7 +257,7 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 | `reminder_update` | `roomId`、`reminderId`，以及 `text`、`schedule`、`paused` 中至少一项 | 更新现有提醒 |
 | `reminder_delete` | `roomId`、`reminderId` | 删除提醒 |
 
-注意：`join` 时带 `name:"alice"` 会把该会话在该房间的身份注册为 `alice`；之后的 `send`/`leave` 自动使用该身份。`join` 必须提供非空名称，已有成员不会被改名；问题消息和具名加入需要匹配的中心服务器与客户端插件版本。
+注意：`join` 时带 `name:"alice"` 会把该会话在该房间的身份注册为 `alice`；之后的 `send`/`leave` 自动使用该身份。`join` 必须提供非空名称。用新名称再次 `join` 会退役该会话之前的身份（除非另一个会话仍在使用旧名称）；历史消息保留原作者名，受保护房间可能需要重新审核。问题消息和具名加入需要匹配的中心服务器与客户端插件版本。
 
 ## 已知限制
 

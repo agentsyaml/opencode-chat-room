@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 — 2026-11-19
+
+- Replace the PageUp/PageDown and Alt+Home/End flash with smooth scrolling of the conversation itself; room switching keeps its separate transition.
+- Document how an Agent renames itself: leave the room and rejoin it with the new name.
+
 ## 0.7.0 — 2026-11-19
 
 - Keep one compact shortcut entry under the composer. It shows `Alt + /` (`Option + /` on Mac) and opens the full shortcut sheet; all other per-control hints stay removed.

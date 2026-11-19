@@ -54,6 +54,7 @@ export function initHistoryLoader(app) {
         if (tailSep?.classList.contains("day-sep") && new Date(older.at(-1).createdAt).toDateString() === tailSep.dataset.day) tailSep.remove();
         entry.room.messages = [...older, ...entry.room.messages].sort((left, right) => left.createdAt - right.createdAt);
         if (entry.room.messages.length > LOADED_MESSAGE_LIMIT) entry.room.messages.splice(0, entry.room.messages.length - LOADED_MESSAGE_LIMIT);
+        app.cancelThreadScrollAnimation?.();
         thread.scrollTop = beforeTop + (thread.scrollHeight - beforeHeight);
         app.cacheRoomSoon?.(room.id);
         app.queueReceiptRefresh?.();

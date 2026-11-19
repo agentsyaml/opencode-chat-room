@@ -60,7 +60,8 @@ test.skipIf(!browserModule)("PageUp and PageDown scroll the thread while the com
     expect(before.gap).toBeLessThan(8);
     await page.keyboard.press("PageUp");
     await page.waitForFunction((top: number) => document.querySelector<HTMLElement>("#thread")!.scrollTop < top - 100, before.top);
-    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-up"))).toBe(true);
+    await page.waitForTimeout(350);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-up"))).toBe(false);
     const afterUp = await read();
     expect(afterUp.top).toBeLessThan(before.top - 100);
     expect(afterUp.value).toBe("__Test_draft");
@@ -69,7 +70,8 @@ test.skipIf(!browserModule)("PageUp and PageDown scroll the thread while the com
 
     await page.keyboard.press("PageDown");
     await page.waitForFunction((top: number) => document.querySelector<HTMLElement>("#thread")!.scrollTop > top + 100, afterUp.top);
-    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-down"))).toBe(true);
+    await page.waitForTimeout(350);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-down"))).toBe(false);
     const afterDown = await read();
     expect(afterDown.top).toBeGreaterThan(afterUp.top + 100);
     expect(afterDown.value).toBe("__Test_draft");
@@ -77,18 +79,65 @@ test.skipIf(!browserModule)("PageUp and PageDown scroll the thread while the com
 
     await page.keyboard.press("Alt+PageUp");
     await page.waitForFunction((top: number) => document.querySelector<HTMLElement>("#thread")!.scrollTop < top - 100, afterDown.top);
-    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-up"))).toBe(true);
+    await page.waitForTimeout(350);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-up"))).toBe(false);
     const altUp = await read();
     expect(altUp.value).toBe("__Test_draft");
     expect(altUp.focused).toBe(true);
 
     await page.keyboard.press("Alt+PageDown");
     await page.waitForFunction((top: number) => document.querySelector<HTMLElement>("#thread")!.scrollTop > top + 100, altUp.top);
-    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-down"))).toBe(true);
+    await page.waitForTimeout(350);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.classList.contains("thread-jump-down"))).toBe(false);
     const altDown = await read();
     expect(altDown.top).toBeGreaterThan(altUp.top + 100);
     expect(altDown.value).toBe("__Test_draft");
     expect(altDown.focused).toBe(true);
+
+    // Conversation jumps animate the scroll position itself, with no flash.
+    const animation = await page.evaluate(async (modulePath: string) => {
+      const { app } = await import(modulePath);
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      thread.scrollTop = thread.scrollHeight;
+      const start = thread.scrollTop;
+      const samples: number[] = [];
+      app.animateThreadScrollTo(0);
+      for (let index = 0; index < 4; index++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        samples.push(thread.scrollTop);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return { start, samples, end: thread.scrollTop };
+    }, "/assets/chat/state.js");
+    expect(animation.samples.some((top: number) => top > 0 && top < animation.start)).toBe(true);
+    expect(animation.end).toBeLessThan(2);
+    expect(await page.locator("#msgList").evaluate((node: Element) => node.className.includes("thread-jump"))).toBe(false);
+
+    // A wheel scroll cancels a running animation instead of fighting it.
+    const cancelled = await page.evaluate(async (modulePath: string) => {
+      const { app } = await import(modulePath);
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      thread.scrollTop = thread.scrollHeight;
+      app.animateThreadScrollTo(0);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      thread.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }));
+      thread.scrollTop = 200;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return thread.scrollTop;
+    }, "/assets/chat/state.js");
+    expect(cancelled).toBe(200);
+
+    // Reduced motion jumps directly instead of animating.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const reduced = await page.evaluate(async (modulePath: string) => {
+      const { app } = await import(modulePath);
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      thread.scrollTop = thread.scrollHeight;
+      app.animateThreadScrollTo(0);
+      return thread.scrollTop;
+    }, "/assets/chat/state.js");
+    expect(reduced).toBeLessThan(2);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
 
     // Home must not land inside a non-editable mention chip, where the caret is invisible.
     await page.locator("#msgInput").fill("@a");

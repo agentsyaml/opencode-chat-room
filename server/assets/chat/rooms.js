@@ -122,6 +122,7 @@ export function initRooms(app) {
     const entry = app.state.rooms.get(roomId);
     if (!entry) return;
     if (app.state.room?.id === roomId) return;
+    app.cancelThreadScrollAnimation?.();
     if (!preserveRoomListGeneration) invalidateRoomList();
     if (app.state.room) {
       app.saveDraft(app.state.room.id, $("#msgInput").draftValue);
