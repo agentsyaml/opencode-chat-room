@@ -108,16 +108,28 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     }, "/assets/chat/state.js");
     await page.waitForFunction(() => document.querySelectorAll("#roomListChat .room-row").length >= 2 && document.querySelector("#roomListChat .room-row.selected"));
     const beforeSwitch = await page.locator("#roomListChat .room-row.selected").getAttribute("data-room-id");
+    await page.evaluate(() => {
+      const list = document.querySelector("#roomListChat");
+      (window as any).__roomSwitchMotion = null;
+      const observer = new MutationObserver(() => {
+        const row = list?.querySelector(".room-row.room-switch-enter") as HTMLElement | null;
+        if (!row) return;
+        (window as any).__roomSwitchMotion = {
+          className: row.className,
+          animation: getComputedStyle(row).animationName,
+        };
+        observer.disconnect();
+      });
+      if (list) observer.observe(list, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+    });
     await page.locator("#msgInput").click();
     await page.keyboard.press("Alt+ArrowDown");
     await page.waitForFunction((previous: string) => {
       const row = document.querySelector("#roomListChat .room-row.selected") as HTMLElement | null;
       return Boolean(row && row.dataset.roomId !== previous);
     }, beforeSwitch);
-    const switchMotion = await page.locator("#roomListChat .room-row.selected").evaluate((row: Element) => ({
-      className: (row as HTMLElement).className,
-      animation: getComputedStyle(row).animationName,
-    }));
+    await page.waitForFunction(() => Boolean((window as any).__roomSwitchMotion));
+    const switchMotion = await page.evaluate(() => (window as any).__roomSwitchMotion as { className: string; animation: string });
     expect(switchMotion.className).toContain("room-switch-enter");
     expect(switchMotion.animation).toBe("room-switch-row");
     expect(await page.locator("#msgList").evaluate((list: Element) => ({
