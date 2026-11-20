@@ -19,7 +19,7 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
   try {
     await waitForServer(origin);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
-    const page = await browser.newPage({ viewport: { width: 390, height: 600 } });
+    const page = await browser.newPage({ viewport: { width: 390, height: 600 }, reducedMotion: "no-preference" });
     const pageErrors: string[] = [];
     page.on("pageerror", (error: Error) => pageErrors.push(error.message));
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
