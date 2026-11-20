@@ -94,6 +94,42 @@ test.skipIf(!browserModule)("PageUp and PageDown scroll the thread while the com
     expect(altDown.value).toBe("__Test_draft");
     expect(altDown.focused).toBe(true);
 
+    // Page distance is configurable and animated; repeated presses extend the
+    // same target instead of restarting the animation.
+    await page.evaluate(async (modulePath: string) => {
+      const { app } = await import(modulePath);
+      app.LS.pageStep = 50;
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      thread.scrollTop = thread.clientHeight * 3;
+    }, "/assets/chat/state.js");
+    const singleStart = await page.evaluate(() => document.querySelector<HTMLElement>("#thread")!.scrollTop);
+    await page.keyboard.press("PageDown");
+    await page.waitForTimeout(80);
+    const singleMid = await page.evaluate(() => document.querySelector<HTMLElement>("#thread")!.scrollTop);
+    await page.waitForTimeout(600);
+    const single = await page.evaluate(() => {
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      return { top: thread.scrollTop, page: thread.clientHeight };
+    });
+    expect(singleMid).toBeGreaterThan(singleStart);
+    expect(singleMid).toBeLessThan(single.top - 10);
+    expect(Math.abs(single.top - singleStart - single.page * 0.5)).toBeLessThan(24);
+
+    await page.evaluate(async (modulePath: string) => {
+      const { app } = await import(modulePath);
+      app.LS.pageStep = 90;
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      thread.scrollTop = thread.clientHeight * 0.5;
+    }, "/assets/chat/state.js");
+    const rapidStart = await page.evaluate(() => {
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      return { top: thread.scrollTop, page: thread.clientHeight };
+    });
+    for (let index = 0; index < 5; index++) await page.keyboard.press("PageDown");
+    await page.waitForTimeout(700);
+    const rapidTop = await page.evaluate(() => document.querySelector<HTMLElement>("#thread")!.scrollTop);
+    expect(rapidTop - rapidStart.top).toBeGreaterThan(rapidStart.page * 3.5);
+
     // Conversation jumps animate the scroll position itself, with no flash.
     const animation = await page.evaluate(async (modulePath: string) => {
       const { app } = await import(modulePath);

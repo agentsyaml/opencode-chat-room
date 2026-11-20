@@ -37,11 +37,12 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     expect(await page.locator("#shortcutsHeading").textContent()).toBe("Keyboard shortcuts");
     const rows: string[][] = await page.locator("#shortcutsDialog .keys-list li").evaluateAll((items: Element[]) =>
       items.map((item) => Array.from(item.querySelectorAll("kbd")).map((key) => key.textContent ?? "")));
-    expect(rows.length).toBe(7);
+    expect(rows.length).toBe(8);
     expect(rows).toContainEqual(["Enter"]);
     expect(rows).toContainEqual(["Shift", "Enter"]);
     expect(rows).toContainEqual(["↑", "↓", "Enter"]);
     expect(rows).toContainEqual([modifier, "↑", "↓"]);
+    expect(rows).toContainEqual([modifier, "1–9"]);
     expect(rows).toContainEqual([modifier, "Home", "End"]);
     expect(rows).toContainEqual(["PageUp", "PageDown"]);
     expect(rows).toContainEqual(["Esc"]);
@@ -98,6 +99,70 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     await page.keyboard.press("Escape");
     await page.locator("#shortcutsDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
+
+    // Alt+Arrow keeps the motion in the room list and never animates the thread.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.evaluate(async (modulePath: string) => {
+      const { app } = await import(modulePath);
+      await app.createRoom({ name: "Shortcut tester", roomName: "__Test_Second", joinPolicy: "open", fromChat: true });
+    }, "/assets/chat/state.js");
+    await page.waitForFunction(() => document.querySelectorAll("#roomListChat .room-row").length >= 2 && document.querySelector("#roomListChat .room-row.selected"));
+    const beforeSwitch = await page.locator("#roomListChat .room-row.selected").getAttribute("data-room-id");
+    await page.locator("#msgInput").click();
+    await page.keyboard.press("Alt+ArrowDown");
+    await page.waitForFunction((previous: string) => {
+      const row = document.querySelector("#roomListChat .room-row.selected") as HTMLElement | null;
+      return Boolean(row && row.dataset.roomId !== previous);
+    }, beforeSwitch);
+    const switchMotion = await page.locator("#roomListChat .room-row.selected").evaluate((row: Element) => ({
+      className: (row as HTMLElement).className,
+      animation: getComputedStyle(row).animationName,
+    }));
+    expect(switchMotion.className).toContain("room-switch-enter");
+    expect(switchMotion.animation).toBe("room-switch-row");
+    expect(await page.locator("#msgList").evaluate((list: Element) => ({
+      className: (list as HTMLElement).className,
+      animation: getComputedStyle(list).animationName,
+    }))).toEqual({ className: "", animation: "none" });
+
+    // Alt+1…9 selects joined rooms in the same order as the rail.
+    const joinedIds = await page.locator("#roomListChat .room-row.joined").evaluateAll((rows: Element[]) =>
+      rows.map((row) => (row as HTMLElement).dataset.roomId ?? ""));
+    expect(joinedIds.length).toBe(2);
+    const selectedId = () => page.locator("#roomListChat .room-row.selected").getAttribute("data-room-id");
+    await page.locator("#msgInput").click();
+    await page.keyboard.press("Alt+Digit1");
+    await page.waitForFunction((id: string) => (document.querySelector("#roomListChat .room-row.selected") as HTMLElement | null)?.dataset.roomId === id, joinedIds[0]);
+    expect(await selectedId()).toBe(joinedIds[0]);
+    await page.keyboard.press("Alt+Digit2");
+    await page.waitForFunction((id: string) => (document.querySelector("#roomListChat .room-row.selected") as HTMLElement | null)?.dataset.roomId === id, joinedIds[1]);
+    expect(await selectedId()).toBe(joinedIds[1]);
+    await page.keyboard.press("Control+Alt+Digit1");
+    await page.waitForTimeout(100);
+    expect(await selectedId()).toBe(joinedIds[1]);
+
+    // The content transition is opt-in and follows the same direction.
+    await page.evaluate(async (modulePath: string) => {
+      const { app } = await import(modulePath);
+      app.LS.contentTransition = true;
+    }, "/assets/chat/state.js");
+    const seen = page.evaluate(() => new Promise<string[]>((resolve) => {
+      const list = document.querySelector("#msgList");
+      if (!list) return resolve([]);
+      const classes: string[] = [];
+      const observer = new MutationObserver(() => {
+        if (list.classList.contains("room-content-out-next") && !classes.includes("out")) classes.push("out");
+        if (list.classList.contains("room-content-in-next") && !classes.includes("in")) classes.push("in");
+        if (classes.length === 2) { observer.disconnect(); resolve(classes); }
+      });
+      observer.observe(list, { attributes: true, attributeFilter: ["class"] });
+      setTimeout(() => { observer.disconnect(); resolve(classes); }, 2000);
+    }));
+    await page.locator("#msgInput").click();
+    await page.keyboard.press("Alt+ArrowDown");
+    expect(await seen).toEqual(["out", "in"]);
+    await page.waitForFunction(() => !document.querySelector("#msgList")?.classList.contains("room-content-in-next"));
+    expect(await page.locator("#msgList").evaluate((list: Element) => getComputedStyle(list).animationName)).toBe("none");
 
     // A direct browser copy of rendered text keeps mention chips as source tokens.
     await page.locator("#msgInput").fill("ping <at>@Shortcut tester</at> now");

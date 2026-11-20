@@ -108,6 +108,7 @@ export function initQuestions(app) {
     input.setAttribute("aria-placeholder", app.t("answerPlaceholder"));
     input.setAttribute("aria-label", app.t("answerPlaceholder"));
     installEditor(input);
+    input.isKnownMention = (name) => app.mentionExists(name);
     const key = `${roomId}\0${question.id}`;
     input.draftValue = drafts.has(key) ? drafts.get(key) : questionAuthorMention(question, roomId, app);
     input.dataset.empty = input.value ? "false" : "true";

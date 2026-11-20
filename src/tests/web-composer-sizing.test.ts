@@ -38,6 +38,12 @@ test.skipIf(!browserModule)("message composer grows to five wrapped lines before
     expect(await page.locator("#btnRoomsDrawer").isVisible()).toBe(false);
     expect(await metaRow(page)).toBe(true);
     expect(await measure(input)).toMatchObject({ overflow: "hidden", fits: true });
+    const foot = page.locator("#roomRail .rail-foot"), idleFoot = await foot.boundingBox();
+    await input.fill("\n\n\n\n\n");
+    await page.waitForTimeout(120);
+    expect((await input.boundingBox())!.height).toBeGreaterThan(50);
+    expect(await foot.boundingBox()).toEqual(idleFoot);
+    await input.fill("");
     await input.fill("one line");
     expect(await measure(input)).toMatchObject({ overflow: "hidden", fits: true });
     await input.fill("1\n2\n3\n4\n5");

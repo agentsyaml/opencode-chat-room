@@ -101,6 +101,7 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     expect(Object.entries(contrast).filter(([, ratio]) => Number(ratio) < 4.5)).toEqual([]);
 
     const toolbar = first.locator(".code-toolbar");
+    expect(await toolbar.evaluate((node: Element) => getComputedStyle(node).transitionDuration)).toBe("0.14s");
     expect(await toolbar.locator("button").count()).toBe(2);
     const iconOnly = await toolbar.locator("button").evaluateAll((buttons: Element[]) => buttons.map((button) => ({
       text: button.textContent?.trim(), icon: Boolean(button.querySelector("svg")),
@@ -139,7 +140,12 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     expect(await wrap.getAttribute("aria-pressed")).toBe("false");
     expect(await whiteSpace()).toBe("pre");
     expect(await pre.evaluate((node: HTMLElement) => node.scrollLeft)).toBe(40);
+    // Clicking a control must not pin the toolbar open after the pointer leaves.
+    await page.mouse.move(4, 4);
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-toolbar")!).opacity === "0");
 
+    await first.hover();
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-toolbar")!).opacity === "1");
     await page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (value: string) => { (window as any).__copiedCode = value; } } });
     });

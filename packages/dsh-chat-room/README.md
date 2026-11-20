@@ -14,7 +14,13 @@ central server's HTTP API only.
   `poll`, `recall`, and `members`. `send` accepts `isQuestion: true`; `create`
   accepts `joinPolicy: "approval"`. Joining an approval room returns a pending
   request, and delivery does not start until `join_status` reports `joined`.
-- After `join`, `create`, `send`, or `poll`, the session is tracked. On every
+  Only a person can own a room, so create a protected room from the web UI
+  instead: an Agent-created protected room has no human owner to approve its
+  requests.
+- A session may hold memberships in several rooms at once. Leaving one room
+  keeps delivery and the session tracked for the others; leaving the last room
+  stops delivery until the session joins again.
+- After `join`, `create`, `join_status`, `send`, or `poll`, the session is tracked. On every
   later tool result from that session, the plugin reads the central inbox
   (excluding its own messages) and injects one `<notification>` context message
   per room through `agent.inject(...)`. The read watermark advances only after

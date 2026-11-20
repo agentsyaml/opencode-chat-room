@@ -204,12 +204,15 @@ export function initRooms(app) {
     const name = pending?.name || (fromChat ? app.state.myName : $("#inName").value.trim()) || LS.name || app.t("guest");
     const roomName = pending?.roomName || $(fromChat ? "#inRoomNameChat" : "#inRoomName").value.trim();
     const joinPolicy = pending?.joinPolicy ?? ((fromChat ? $("#inApprovalRequiredChat").checked : $("#inApprovalRequired").checked) ? "approval" : "open");
-    if (!roomName) return fromChat ? app.showSendError("roomNameRequired") : app.showJoinError("roomNameRequired");
+    if (!roomName) {
+      if (!fromChat) return app.showJoinError("roomNameRequired");
+      app.showCreateRoomError("roomNameRequired"); $("#inRoomNameChat").focus(); return;
+    }
     const intent = ++app.state.navigationGeneration; invalidateRoomList();
     app.setJoinBusy(true);
     app.hideJoinError();
     app.state.pendingAction = null;
-    if (fromChat) $("#btnCreateChatRoom").disabled = true;
+    if (fromChat) { app.hideCreateRoomError(); $("#btnCreateChatRoom").disabled = true; }
     try {
       const room = await app.api("/rooms", {
         method: "POST",
@@ -219,18 +222,18 @@ export function initRooms(app) {
       LS.name = name;
       $("#inApprovalRequired").checked = false;
       $("#inApprovalRequiredChat").checked = false;
-      if (fromChat) {
-        $("#inRoomNameChat").value = "";
-        $("#railRoomForm").hidden = true;
-      }
+      if (fromChat) { $("#inRoomNameChat").value = ""; app.closeCreateRoomDialog(false); }
       app.enterRoom(room, name, intent);
     } catch (error) {
       if (error.status === 401) {
         app.state.pendingAction = { type: "create", name, roomName, fromChat, joinPolicy };
-        if (fromChat) { app.openChatSettings(); app.showSendError("sendAuth"); }
+        if (fromChat) { app.closeCreateRoomDialog(false); app.openChatSettings(); app.showSendError("sendAuth"); }
         else { app.openTokenBox(); app.showJoinError("authRetry"); }
-      } else if (fromChat) { app.showSendError("sendFailed", { message: error.message }); void app.refreshRoomList(); }
-      else { app.showJoinError("createFailed", { message: error.message }); void app.refreshRoomList(); }
+      } else if (fromChat) {
+        if ($("#createRoomDialog")?.open) app.showCreateRoomError("createFailed", { message: error.message });
+        else app.showSendError("createFailed", { message: error.message });
+        void app.refreshRoomList();
+      } else { app.showJoinError("createFailed", { message: error.message }); void app.refreshRoomList(); }
     } finally {
       app.setJoinBusy(false);
       $("#btnCreateChatRoom").disabled = false;

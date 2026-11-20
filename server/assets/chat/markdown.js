@@ -76,6 +76,8 @@ function codeToolbar(code, pre, block, app) {
   wrap.setAttribute("aria-pressed", "false");
   wrap.addEventListener("click", (event) => {
     event.stopPropagation();
+    // A pointer click should not pin the toolbar open; hovering is enough.
+    if (event.detail > 0) wrap.blur();
     const wrapped = !block.classList.contains("is-wrapped");
     if (wrapped) block._codeScrollLeft = pre.scrollLeft;
     block.classList.toggle("is-wrapped", wrapped);
@@ -83,7 +85,11 @@ function codeToolbar(code, pre, block, app) {
     pre.scrollLeft = wrapped ? 0 : block._codeScrollLeft || 0;
   });
   const copy = codeToolButton("code-copy-button", "copyMessage", app, copyIcon(), checkIcon());
-  copy.addEventListener("click", (event) => { event.stopPropagation(); void copyCode(copy, code, app); });
+  copy.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (event.detail > 0) copy.blur();
+    void copyCode(copy, code, app);
+  });
   toolbar.append(wrap, copy);
   return toolbar;
 }

@@ -27,7 +27,9 @@ export function initEvents(app) {
   if (composer) {
     const root = document.documentElement, editor = app.$("#msgInput");
     // A restored draft or staged files must not become the idle height people see on load.
-    const idleComposer = () => !editor?.textContent?.trim()
+    // Newline-only drafts are real drafts too: `trim()` would hide them and let the
+    // footer stretch with the composer.
+    const idleComposer = () => editor?.dataset.empty === "true"
       && !["#joinNotice", "#sendError", "#replyPreview", "#mentionPicker", "#attachmentTray"].some((selector) => { const node = app.$(selector); return node && !node.hidden; })
       && !composer.querySelector(".failed-messages:not([hidden])");
     const syncComposerBlock = () => {
@@ -228,11 +230,7 @@ export function initEvents(app) {
     try { sessionStorage.setItem("chat.keyPromptDismissed", "1"); } catch { /* Storage may be blocked. */ }
   });
   $("#btnRefreshRooms").addEventListener("click", () => void app.refreshRoomList());
-  $("#btnNewRoom").addEventListener("click", () => {
-    const form = $("#railRoomForm");
-    form.hidden = !form.hidden;
-    if (!form.hidden) $("#inRoomNameChat").focus();
-  });
+  $("#btnNewRoom").addEventListener("click", () => app.openCreateRoomDialog());
   $("#railRoomForm").addEventListener("submit", (event) => { event.preventDefault(); void app.createRoom(); });
   $("#inRoomNameChat").addEventListener("input", app.hideSendError);
 
@@ -277,7 +275,10 @@ export function initEvents(app) {
         && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       markScrollIntent();
-      const delta = (event.key === "PageDown" ? 1 : -1) * Math.max(80, thread.clientHeight * 0.9);
+      const step = Number(app.LS.pageStep) || 90;
+      const delta = (event.key === "PageDown" ? 1 : -1) * Math.max(40, thread.clientHeight * step / 100);
+      // Repeated Page keys extend the same target, so holding them scrolls
+      // steadily instead of restarting the animation from zero each time.
       if (app.animateThreadScrollBy) app.animateThreadScrollBy(delta);
       else thread.scrollTop += delta;
       return;
@@ -347,17 +348,25 @@ export function initEvents(app) {
     const messageButton = event.target.closest("[data-copy-message]");
     if (messageButton) void copyTextToClipboard(messageButton._copyText, true).then((copied) => app.flash(messageButton, copied ? "copiedMessage" : "copyMessageFailed"));
   });
-  $("#msgList").addEventListener("copy", (event) => {
-    // A plain browser copy of rendered messages loses the mention tokens. Rebuild
-    // them only for chips inside the copied range, so external @text stays literal.
-    const selection = getSelection(), list = $("#msgList");
+  document.addEventListener("copy", (event) => {
+    // A plain browser copy of rendered mentions loses their tokens. Rebuild them
+    // for any mention chip in the selection, including a double-clicked chip.
+    if (event.defaultPrevented) return;
+    const selection = getSelection();
     if (!selection || selection.isCollapsed || !selection.rangeCount) return;
     const range = selection.getRangeAt(0);
-    if (!list.contains(range.startContainer) || !list.contains(range.endContainer)) return;
-    const fragment = range.cloneContents();
-    const chips = fragment.querySelectorAll(".mention-chip");
+    const chips = [...document.querySelectorAll(".mention-chip")].filter((chip) => range.intersectsNode(chip));
     if (!chips.length) return;
-    chips.forEach((chip) => chip.replaceWith(document.createTextNode(`<at>@${chip.textContent?.slice(1) ?? ""}</at>`)));
+    // Extend a partial chip selection to its whole chip so the token can be rebuilt.
+    const copyRange = range.cloneRange();
+    const startChip = chips.find((chip) => chip.contains(copyRange.startContainer));
+    const endChip = chips.find((chip) => chip.contains(copyRange.endContainer));
+    if (startChip) copyRange.setStartBefore(startChip);
+    if (endChip) copyRange.setEndAfter(endChip);
+    const fragment = copyRange.cloneContents();
+    const selectedChips = fragment.querySelectorAll(".mention-chip");
+    if (!selectedChips.length) return;
+    selectedChips.forEach((chip) => chip.replaceWith(document.createTextNode(`<at>@${chip.textContent?.slice(1) ?? ""}</at>`)));
     const text = fragment.textContent ?? "";
     const html = `<div data-chatroom-mentions>${text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char])}</div>`;
     event.clipboardData?.setData("text/plain", text);
@@ -388,19 +397,17 @@ export function initEvents(app) {
     }
     if (app.mentionActive && !event.target.closest("#mentionPicker")) app.closeMention();
     if (!event.target.closest(".anchor, dialog")) app.closePanels();
-    if (!event.target.closest("#railRoomForm, #btnNewRoom")) $("#railRoomForm").hidden = true;
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Tab" && roomRail.classList.contains("drawer-open")) {
+    if (event.key === "Tab" && roomRail.classList.contains("drawer-open") && !document.querySelector("dialog[open]")) {
       const stops = [...roomRail.querySelectorAll("button:not(:disabled), input:not(:disabled)")].filter((node) => node.getClientRects().length);
       const first = stops[0], last = stops.at(-1);
       if (!roomRail.contains(document.activeElement)) { event.preventDefault(); first?.focus(); }
       else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }
-    if (event.key === "Escape" && roomRail.classList.contains("drawer-open")) { event.preventDefault(); closeRoomDrawer(); return; }
+    if (event.key === "Escape" && roomRail.classList.contains("drawer-open") && !document.querySelector("dialog[open]")) { event.preventDefault(); closeRoomDrawer(); return; }
     if (event.key === "Escape" && app.mentionActive) app.closeMention();
-    if (event.key === "Escape" && !$("#railRoomForm").hidden) $("#railRoomForm").hidden = true;
     if (event.key === "Escape" && !$("#memberPanel").hidden) {
       app.closePanels();
       app.lastFocus?.focus();
@@ -412,8 +419,9 @@ export function initEvents(app) {
       if (event.defaultPrevented || joined.length < 2 || index < 0 || document.querySelector("dialog[open]")) return;
       event.preventDefault();
       const step = event.key === "ArrowDown" ? 1 : -1;
-      app.activateRoom(joined[(index + step + joined.length) % joined.length].id);
-      app.animateRoomSwitch?.(step);
+      const nextRoom = joined[(index + step + joined.length) % joined.length];
+      if (app.switchRoom) app.switchRoom(nextRoom.id, step);
+      else { app.activateRoom(nextRoom.id); app.animateRoomSwitch?.(step); }
     }
   });
 
@@ -435,6 +443,8 @@ function saveAccessToken(button, app) {
   if (LS.token) {
     app.hideJoinError();
     app.hideSendError();
+    const tokenHint = document.getElementById("tokenHint");
+    if (tokenHint) tokenHint.hidden = true;
   }
   // The key prompt is a one-time visit: a stored key gets out of the way again.
   if (LS.token) document.getElementById("tokenBox")?.close();

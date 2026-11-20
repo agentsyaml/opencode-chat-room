@@ -9,6 +9,7 @@ import { initMessagePolling } from "./message-polling.js";
 export function initMessages(app) {
   const $ = app.$;
   installEditor($("#msgInput"));
+  $("#msgInput").isKnownMention = (name) => app.mentionExists(name);
 
   app.autoGrow = (textarea) => {
     const thread = $("#thread"), atBottom = Boolean(app.state.room && Math.abs(thread.scrollHeight - thread.clientHeight - thread.scrollTop) < 1);

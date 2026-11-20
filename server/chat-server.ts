@@ -276,9 +276,9 @@ async function handle(req: Request): Promise<Response> {
       // A recall bumps the version without creating a message; wake the poll so
       // the client can refetch the room snapshot (reliable version compare).
       while (result.items.length === 0 && result.recallVersion === initialRecallVersion && Date.now() < deadline) {
-        // ponytail: 2s between disk scans (orc-1 #7) — 1s × 25 iterations
-        // doubles the file reads on shared-mount deployments
-        await sleep(Math.max(1, Math.min(2000, deadline - Date.now())));
+        // ponytail: 500ms between disk scans keeps notification latency under
+        // half a second; a longer interval makes deliveries feel stuck.
+        await sleep(Math.max(1, Math.min(500, deadline - Date.now())));
         result = await readInbox(sessionID, roomFilter, excludeSelf, afterTs);
       }
       return json(result);

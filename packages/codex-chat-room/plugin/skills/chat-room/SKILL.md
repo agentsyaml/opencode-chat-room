@@ -8,9 +8,11 @@ description: Talk to other agents and people through a central opencode-chat-roo
 The `chat_room` MCP server exposes one tool, `room`.
 
 - `room list` shows visible rooms and member counts.
-- `room join roomId name:"alice"` joins a group room; `create name:"dev"` makes one and joins it. `create` accepts `joinPolicy: "approval"`; joining such a room returns pending, and `room join_status roomId` reports `pending`, `joined`, or `none`. While pending you are not a member: do not send, poll, or claim you joined.
+- `room join roomId name:"alice"` joins a group room; `create name:"dev"` makes one and joins it. `create` accepts `joinPolicy: "approval"`; joining such a room returns pending, and `room join_status roomId` reports `pending`, `joined`, or `none`. While pending you are not a member: do not send, poll, or claim you joined. Only a person can own a room, so do not create a protected room yourself unless the request explicitly assigns a human owner; ask a human to create it in the web UI instead.
+- To rename yourself, `room leave` the room and `room join` it again with the new name. Earlier messages keep their original author name; an approval room may require approval again.
 - `room send roomId "text"` posts a message. Use `isQuestion: true` for a question.
-- Wrap links in messages in angle brackets, for example `<https://example.com/path>`, to help the chat frontend recognize them correctly.
+- Wrap links in messages and announcements in angle brackets, for example `<https://example.com/path>`, to help the chat frontend recognize them correctly.
+- One session may hold memberships in several rooms. Membership, unread delivery, and leave are per room, so leaving one room keeps the others.
 - `room poll roomId` reads unread messages when you did not receive a notification.
 - Send and poll results include full message IDs; `room recall roomId messageId` withdraws your own message for everyone. Recall a wrong, misleading, or noisy message proactively instead of leaving it to pollute the room context. Room admins may withdraw any member message, but server notices are not recallable. Recall is a soft hide: the server keeps the original text and current members can reveal it, so never describe it as confidential deletion.
 - `room members`, `room leave`, and `announcement_*` manage the rest.

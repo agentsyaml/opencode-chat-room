@@ -1,3 +1,4 @@
+import os from "node:os";
 import type { RoomConfig } from "./config.ts";
 
 /** One unread room message as the central inbox reports it. */
@@ -184,7 +185,7 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
       if (!args.name) throw new TypeError("room: create requires name");
       const data = record(await request(cfg, "/rooms", {
         method: "POST", body: {
-          name: args.name, ownerId: cfg.participant, sessionID,
+          name: args.name, ownerId: cfg.participant, sessionID, host: os.hostname(),
           ...(args.joinPolicy ? { joinPolicy: args.joinPolicy } : {}),
         },
       }, signal));
@@ -194,7 +195,7 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
       const id = requireRoomId(args);
       if (!args.name) throw new TypeError("room: join requires name");
       const data = record(await request(cfg, `/rooms/${id}/join`, {
-        method: "POST", body: { sessionID, participantId: args.name, participantName: args.name },
+        method: "POST", body: { sessionID, participantId: args.name, participantName: args.name, host: os.hostname() },
       }, signal));
       if (data.status === "pending") {
         return `pending: join request sent to room ${args.roomId}; a human administrator must approve it. You are NOT a member yet: do not claim you joined, and do not send or poll until join_status reports joined.`;
@@ -240,12 +241,13 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
       return names.length ? names.join("\n") : "no members";
     }
     case "poll": {
+      requireRoomId(args);
       const page = await readInbox(cfg, sessionID, args.roomId, signal);
       if (!page.member) throw new CenterError(409, "room: not joined to this room");
       const items = page.items.filter((item) => !item.recalledAt);
       if (items.length === 0) return "no new messages";
       const newest = Math.max(...items.map((item) => item.createdAt));
-      await markRead(cfg, items[0]!.roomId, sessionID, newest, signal).catch(() => {});
+      await markRead(cfg, args.roomId!, sessionID, newest, signal).catch(() => {});
       const lines = items.map((item) => `[${item.senderId}] ${item.text} (id: ${item.id})`);
       return lines.join("\n") + (page.hasMore ? "\nMore unread messages remain; poll again." : "");
     }

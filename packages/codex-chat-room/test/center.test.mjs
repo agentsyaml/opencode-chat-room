@@ -108,3 +108,23 @@ test("members, leave and announcements use the central routes", async () => {
     await center.close();
   }
 });
+
+test("pending join reports that the session is not a member yet", async () => {
+  const center = await startCenter(({ method, path }) => {
+    if (method === "POST" && path === "/rooms/r1/join") return [202, { status: "pending", message: "Join request submitted." }];
+    if (method === "GET" && path === "/rooms/r1/join-requests/status") return [200, { status: "pending" }];
+    return undefined;
+  });
+  try {
+    const cfg = { url: center.url, token: "" };
+    const joined = await centerAction(cfg, { action: "join", roomId: "r1", name: "alice" }, "codex:t1");
+    assert.match(joined, /^pending:/);
+    assert.match(joined, /NOT a member yet/);
+    assert.doesNotMatch(joined, /Room r1/);
+    const status = await centerAction(cfg, { action: "join_status", roomId: "r1" }, "codex:t1");
+    assert.match(status, /^pending:/);
+    assert.match(status, /NOT a member yet/);
+  } finally {
+    await center.close();
+  }
+});

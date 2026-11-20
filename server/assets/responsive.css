@@ -71,13 +71,57 @@
   /* The rail footer keeps the empty composer's height so the divider lines meet when
      idle. Files or wrapped lines grow only the composer, never this footer. */
   .rail-foot { display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 8px; margin-top: auto; min-height: var(--composer-block, 104px); padding: 12px 4px 14px; border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent); font-size: 12px; color: var(--ink-3); }
-  /* On short windows the composer-sized footer would squeeze the room list. */
+  /* On short windows the rail must fit its grid cell; the room list keeps one full row. */
   @media (max-height: 560px) {
-    .rail-foot { min-height: 0; padding-block: 8px; }
-    .rail-brand { margin-bottom: 14px; }
-    .rail-label { margin-bottom: 6px; }
+    body:has(#joinNotice:not([hidden])) #roomRail .rail-foot { min-height: 78px; }
+    #roomRail .rail-brand { margin-bottom: 14px; }
+    #roomRail .rail-label { margin-bottom: 6px; }
     #roomListChat .room-row { gap: 1px; padding: 5px 9px; }
     #roomListChat .r-kind:empty, #roomListChat .r-meta, #roomListChat .r-preview { display: none; }
+  }
+  @media (max-height: 400px) {
+    #chatView { margin: 10px auto; height: calc(100% - 20px); }
+    #chatView > .chat-head { padding: 8px 16px; gap: 6px 12px; }
+    .chat-head .room-description, .chat-head .room-meta { display: none; }
+    .chat-head-main h1 { font-size: 18px; }
+    .composer { gap: 6px; padding: 6px 10px calc(6px + env(safe-area-inset-bottom)); }
+    .join-notice { padding: 5px 8px; gap: 4px 8px; font-size: 11.5px; }
+    .join-notice .btn { min-height: 28px; padding: 3px 9px; font-size: 11px; }
+    #msgInput { padding: 7px 10px; }
+    #chatView #msgInput[data-empty="true"] { height: 38px !important; }
+    #chatView #msgInput[data-empty="true"]::before { inset: 8px 10px auto; }
+    .composer-meta .draft-count { display: none; }
+    #btnSend { padding: 8px 15px; }
+    #roomRail { padding-top: 12px; }
+    #roomRail .rail-brand { margin-bottom: 10px; }
+    #roomRail .rail-foot { padding: 5px 4px 6px; }
+    #roomListChat .room-row { min-width: 0; min-height: 0; }
+    #roomListChat .r-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #roomListChat .r-status { display: none; }
+  }
+  @media (max-height: 300px) {
+    #roomRail { padding-top: 8px; }
+    #roomRail .rail-brand { display: none; }
+  }
+  @media (max-height: 220px) {
+    #roomRail { padding-top: 8px; }
+    #roomRail .rail-brand { display: none; }
+    #chatView > .chat-head { padding: 4px 12px; }
+    .chat-head-main h1 { font-size: 16px; }
+    .composer { gap: 4px; padding: 4px 8px calc(4px + env(safe-area-inset-bottom)); }
+    #chatView #msgInput[data-empty="true"] { height: 32px !important; }
+    #chatView #msgInput[data-empty="true"]::before { inset: 4px 10px auto; }
+    #roomRail .rail-foot { padding: 0 4px; }
+    #btnSend { padding: 6px 12px; }
+  }
+  @media (max-height: 200px) {
+    #roomRail .rail-label { display: none; }
+  }
+  @media (max-height: 160px) {
+    #roomRail .rail-label { display: none; }
+    #roomListChat .room-row { padding-block: 3px; }
+    .join-notice { padding: 3px 6px; }
+    .join-notice .btn { min-height: 24px; padding: 2px 7px; }
   }
   .rail-foot .anchor { width: 100%; }
   .user-menu-trigger { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 7px; border: 1px solid transparent; border-radius: 12px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; transition: border-color .16s, background .16s, box-shadow .16s; }

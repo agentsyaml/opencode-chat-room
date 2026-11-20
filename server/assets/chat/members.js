@@ -11,6 +11,8 @@ export function initMembers(app) {
       .map((person) => person.name));
   };
 
+  app.mentionExists = (name) => name === "all" || name === app.state.myName || app.mentionNames().has(name);
+
   app.renderMembers = () => {
     const people = app.state.room?.participants || [];
     app.setText($("#btnMembers .action-label"), "membersCount", { count: people.length });

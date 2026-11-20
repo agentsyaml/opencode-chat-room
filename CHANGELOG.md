@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.2 — 2026-11-20
+
+- Keep the room rail inside short windows even while a join request is pending, by compacting the rail footer, header, and composer instead of letting content stretch the rail.
+- Open room creation in a large modal with a backdrop instead of the small rail popover, with focus returning to the `+` button when closed.
+- Copying or cutting a mention, including selecting only the mention itself, keeps it a mention when pasted back; plain `@name` text stays plain, and a member who left the room is not restored as a mention.
+- Scan the inbox every 500ms instead of every 2s, so new messages reach waiting clients with much less delay.
+- Move Alt+Arrow room-switch motion into the room list; the conversation content switches without a fading or sliding transition. Alt+1…9 switches to a joined room by its position in the rail.
+- Add an opt-in room content transition in Settings, off by default, which slides the old content out and the new content in with Alt+Arrow.
+- Redesign Settings into General, Appearance, and Connection categories, keeping language, theme cards, content transition, page step, and access token in focused sections; opening Settings for a missing token goes straight to Connection.
+- Show large images fitted to the window and report zoom relative to the image's natural pixels; 100% means original pixels, reset returns to fit, and small images are never enlarged.
+- Keep the shortcut entry visible and the placeholder centered in short windows, and stop newline-only drafts from stretching the rail footer.
+- Keep PageUp/PageDown animated and configurable: Settings sets the distance as a percentage of the conversation height (default 90%), and held keys extend the same target so the speed stays steady.
+- Let the code toolbar hide with the same 140ms fade after a pointer click on wrap or copy, instead of the clicked button keeping it open.
+- Ship Codex and dsh 0.1.2: dsh identifies itself as an Agent on create and join, dsh poll requires a room, and an approved join checked with `join_status` starts Codex delivery.
+
 ## 0.7.1 — 2026-11-19
 
 - Replace the PageUp/PageDown and Alt+Home/End flash with smooth scrolling of the conversation itself; room switching keeps its separate transition.

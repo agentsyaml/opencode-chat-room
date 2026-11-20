@@ -153,16 +153,20 @@
   }
   #msgList { width: min(100%, 940px); list-style: none; margin: 0 auto; padding: 0; }
 
-  .thread, #roomList, #memberList {
+  .thread, #roomList, #roomListChat, #memberList {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, var(--ink-3) 40%, transparent) transparent;
+    scrollbar-color: color-mix(in srgb, var(--ink-3) 26%, transparent) transparent;
   }
-  .thread::-webkit-scrollbar, #roomList::-webkit-scrollbar, #memberList::-webkit-scrollbar { width: 8px; }
-  .thread::-webkit-scrollbar-thumb, #roomList::-webkit-scrollbar-thumb, #memberList::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--ink-3) 40%, transparent);
-    border-radius: 4px;
+  .thread::-webkit-scrollbar, #roomList::-webkit-scrollbar, #roomListChat::-webkit-scrollbar, #memberList::-webkit-scrollbar { width: 6px; }
+  .thread::-webkit-scrollbar-thumb, #roomList::-webkit-scrollbar-thumb, #roomListChat::-webkit-scrollbar-thumb, #memberList::-webkit-scrollbar-thumb {
+    min-height: 32px;
+    background: color-mix(in srgb, var(--ink-3) 26%, transparent);
+    border-radius: 3px;
   }
-  .thread::-webkit-scrollbar-track { background: transparent; }
+  .thread::-webkit-scrollbar-thumb:hover, #roomList::-webkit-scrollbar-thumb:hover, #roomListChat::-webkit-scrollbar-thumb:hover, #memberList::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--ink-3) 45%, transparent);
+  }
+  .thread::-webkit-scrollbar-track, #roomList::-webkit-scrollbar-track, #roomListChat::-webkit-scrollbar-track, #memberList::-webkit-scrollbar-track { background: transparent; }
 
   .jump {
     position: absolute;
@@ -296,10 +300,10 @@
   .close-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }
   .reader-panel .receipt-reader-list li { display: grid; gap: 3px; padding: 10px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
   .image-dialog { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 20px; overflow: hidden; border: 0; background: transparent; }
-  .image-dialog[open] { display: grid; place-items: center; }
+  .image-dialog[open] { display: flex; align-items: center; justify-content: center; }
   .image-dialog::backdrop { background: rgb(9 16 22 / .84); backdrop-filter: blur(3px); }
-  .image-dialog img { display: block; max-width: 100%; max-height: calc(100dvh - 40px); width: auto; height: auto; object-fit: contain; border-radius: 8px; animation: image-zoom-in .16s ease both; }
-  @keyframes image-zoom-in { from { opacity: 0; transform: scale(.97); } }
+  .image-dialog img { display: block; width: auto; height: auto; max-width: none; max-height: none; object-fit: contain; transform-origin: center; border-radius: 8px; animation: image-zoom-in .16s ease both; }
+  @keyframes image-zoom-in { from { opacity: 0; } }
   .image-dialog-close { position: fixed; z-index: 2; top: 14px; right: 14px; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid rgb(255 255 255 / .34); border-radius: 50%; color: #fff; background: rgb(9 16 22 / .58); font: inherit; line-height: 1; cursor: pointer; }
   .image-dialog-close .close-icon { width: 22px; height: 22px; }
   .image-dialog-close:hover, .image-dialog-close:focus-visible { background: rgb(9 16 22 / .82); outline: 2px solid #fff; outline-offset: 2px; }
@@ -506,7 +510,11 @@
   .failed-message button { flex: none; border: 1px solid var(--line); border-radius: 7px; padding: 4px 8px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12px; cursor: pointer; }
   .failed-message button:disabled { opacity: .5; cursor: default; }
 
-@keyframes room-switch-next { from { opacity: 0; transform: translateY(8px); } }
-@keyframes room-switch-prev { from { opacity: 0; transform: translateY(-8px); } }
-#msgList.room-switch-next { animation: room-switch-next .22s ease-out; }
-#msgList.room-switch-prev { animation: room-switch-prev .22s ease-out; }
+@keyframes room-content-out-next { to { opacity: 0; transform: translateY(-14px); } }
+@keyframes room-content-out-prev { to { opacity: 0; transform: translateY(14px); } }
+@keyframes room-content-in-next { from { opacity: 0; transform: translateY(14px); } }
+@keyframes room-content-in-prev { from { opacity: 0; transform: translateY(-14px); } }
+#msgList.room-content-out-next { animation: room-content-out-next .14s ease-in both; }
+#msgList.room-content-out-prev { animation: room-content-out-prev .14s ease-in both; }
+#msgList.room-content-in-next { animation: room-content-in-next .2s ease-out both; }
+#msgList.room-content-in-prev { animation: room-content-in-prev .2s ease-out both; }

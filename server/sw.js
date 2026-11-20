@@ -10,6 +10,7 @@ const STATIC = [
   "/assets/attachments.css",
   "/assets/responsive.css",
   "/assets/code-highlight.css",
+  "/assets/room-create.css",
   "/assets/highlight-10.7.3.min.js",
   "/assets/icons/icon-192.png",
   "/assets/icons/icon-512.png",

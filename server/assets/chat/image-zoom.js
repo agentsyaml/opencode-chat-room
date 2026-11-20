@@ -3,47 +3,72 @@
 export function initImageZoom(app) {
   const dialog = app.$("#imageDialog"), preview = app.$("#imageDialogImage");
   const zoomLevel = app.$("#zoomLevel"), zoomOut = app.$("#btnZoomOut"), zoomIn = app.$("#btnZoomIn"), zoomReset = app.$("#btnZoomReset");
-  const MIN = 1, MAX = 4, STEP = 1.25;
-  let trigger = null, scale = 1, panX = 0, panY = 0, drag = null;
+  const MAX = 4, STEP = 1.25;
+  let trigger = null, scale = 1, fitScale = 1, pendingFit = false, panX = 0, panY = 0, drag = null;
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const imageOf = (node) => node?.closest?.("#msgList img, #attachmentList img");
-  function limits() {
+  function fitLimit() {
     const style = getComputedStyle(dialog);
     const width = dialog.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     const height = dialog.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-    return { x: Math.max(0, (preview.offsetWidth * scale - width) / 2), y: Math.max(0, (preview.offsetHeight * scale - height) / 2) };
+    if (!preview.naturalWidth || !preview.naturalHeight) return 1;
+    return Math.min(1, width / preview.naturalWidth, height / preview.naturalHeight);
+  }
+  function limits() {
+    const style = getComputedStyle(dialog);
+    const box = dialog.getBoundingClientRect();
+    const left = box.left + parseFloat(style.paddingLeft), right = box.right - parseFloat(style.paddingRight);
+    const top = box.top + parseFloat(style.paddingTop), bottom = box.bottom - parseFloat(style.paddingBottom);
+    // Flex centering keeps an oversized image centered, so its untransformed
+    // layout box may start outside the dialog; offsetLeft still gives that
+    // position, while the live rect reflects the current scale and pan.
+    const layoutLeft = box.left + parseFloat(style.borderLeftWidth) + preview.offsetLeft;
+    const layoutTop = box.top + parseFloat(style.borderTopWidth) + preview.offsetTop;
+    const scaledWidth = preview.offsetWidth * scale, scaledHeight = preview.offsetHeight * scale;
+    const baseLeft = layoutLeft + preview.offsetWidth / 2 - scaledWidth / 2;
+    const baseTop = layoutTop + preview.offsetHeight / 2 - scaledHeight / 2;
+    const fitsX = scaledWidth <= right - left, fitsY = scaledHeight <= bottom - top;
+    const minX = fitsX ? 0 : right - baseLeft - scaledWidth;
+    const maxX = fitsX ? 0 : left - baseLeft;
+    const minY = fitsY ? 0 : bottom - baseTop - scaledHeight;
+    const maxY = fitsY ? 0 : top - baseTop;
+    return { minX, maxX, minY, maxY, x: maxX - minX, y: maxY - minY };
   }
   function apply() {
     const limit = limits();
-    panX = clamp(panX, -limit.x, limit.x); panY = clamp(panY, -limit.y, limit.y);
-    preview.style.transform = scale > 1 ? `translate3d(${panX}px, ${panY}px, 0) scale(${scale})` : "";
-    preview.classList.toggle("is-zoomed", scale > 1);
+    panX = clamp(panX, limit.minX, limit.maxX); panY = clamp(panY, limit.minY, limit.maxY);
+    preview.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${scale})`;
+    preview.classList.toggle("is-zoomed", limit.x > 0 || limit.y > 0);
     if (zoomLevel) zoomLevel.textContent = `${Math.round(scale * 100)}%`;
-    if (zoomOut) zoomOut.disabled = scale <= MIN + .001;
+    if (zoomOut) zoomOut.disabled = scale <= fitScale + .001;
     if (zoomIn) zoomIn.disabled = scale >= MAX - .001;
   }
   function zoomTo(next, x = innerWidth / 2, y = innerHeight / 2) {
-    const target = clamp(next, MIN, MAX);
+    const target = clamp(next, fitScale, MAX);
     if (Math.abs(target - scale) < .001) return apply();
     // Keep the point under the pointer fixed while scaling.
     const dx = x - innerWidth / 2, dy = y - innerHeight / 2, ratio = target / scale;
     panX = dx - ratio * (dx - panX); panY = dy - ratio * (dy - panY);
     scale = target;
-    if (scale <= 1) { scale = 1; panX = 0; panY = 0; }
+    if (scale <= fitScale + .001) { scale = fitScale; panX = 0; panY = 0; }
     preview.style.animation = "none";
     apply();
   }
   const zoomBy = (factor) => zoomTo(scale * factor);
-  const resetZoom = () => { scale = 1; panX = 0; panY = 0; apply(); };
+  function resetZoom() {
+    fitScale = fitLimit(); scale = fitScale; pendingFit = false; panX = 0; panY = 0; apply();
+  }
   function open(image) {
     if (!image || !dialog) return;
     trigger = image;
+    dialog.showModal();
     // Reuse the URL the list already loaded, so the overlay costs no second download.
     preview.src = image.currentSrc || image.src;
     preview.alt = image.alt || "";
     preview.style.animation = "";
-    resetZoom();
-    dialog.showModal();
+    scale = 1; panX = 0; panY = 0; fitScale = fitLimit();
+    pendingFit = !(preview.complete && preview.naturalWidth);
+    if (pendingFit) apply(); else resetZoom();
   }
   const close = () => { if (dialog.open) dialog.close(); };
   // A click that focuses the image makes the browser scroll it into view; the
@@ -80,7 +105,7 @@ export function initImageZoom(app) {
     if (event.key === "+" || event.key === "=") { event.preventDefault(); zoomBy(STEP); }
     else if (event.key === "-" || event.key === "_") { event.preventDefault(); zoomBy(1 / STEP); }
     else if (event.key === "0") { event.preventDefault(); resetZoom(); }
-    else if (scale > 1 && event.key.startsWith("Arrow")) {
+    else if ((limits().x > 0 || limits().y > 0) && event.key.startsWith("Arrow")) {
       event.preventDefault();
       const step = event.shiftKey ? 120 : 40;
       if (event.key === "ArrowLeft") panX += step;
@@ -93,12 +118,20 @@ export function initImageZoom(app) {
   zoomIn?.addEventListener("click", () => zoomBy(STEP));
   zoomOut?.addEventListener("click", () => zoomBy(1 / STEP));
   zoomReset?.addEventListener("click", resetZoom);
-  window.addEventListener("resize", () => { if (dialog.open) apply(); });
+  window.addEventListener("resize", () => {
+    if (!dialog.open) return;
+    const wasFit = Math.abs(scale - fitScale) < .001;
+    fitScale = fitLimit();
+    if (wasFit) { scale = fitScale; panX = 0; panY = 0; }
+    else scale = Math.max(scale, fitScale);
+    apply();
+  });
+  preview.addEventListener("load", () => { if (dialog.open && pendingFit) resetZoom(); });
   // Pointer dragging pans the zoomed image; the tool buttons are the touch and
   // keyboard alternative for changing the scale, and arrow keys pan to the edges.
   preview.draggable = false;
   preview.addEventListener("pointerdown", (event) => {
-    if (scale <= 1 || event.button !== 0) return;
+    if ((limits().x <= 0 && limits().y <= 0) || event.button !== 0) return;
     drag = { id: event.pointerId, x: event.clientX, y: event.clientY, panX, panY };
     preview.setPointerCapture(event.pointerId);
     preview.classList.add("is-dragging");

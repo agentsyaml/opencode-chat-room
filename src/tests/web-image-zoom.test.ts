@@ -10,7 +10,8 @@ import path from "node:path";
 
 const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
 const token = "chat-image-zoom-test-token";
-const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600"><rect width="900" height="600" fill="#22695c"/></svg>');
+const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1600"><rect width="2400" height="1600" fill="#22695c"/></svg>');
+const smallSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#7c4dff"/></svg>');
 
 test.skipIf(!browserModule)("clicking a message image opens the overlay, zooms with the wheel, and closes without moving the thread", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
@@ -25,6 +26,7 @@ test.skipIf(!browserModule)("clicking a message image opens the overlay, zooms w
     page.setDefaultTimeout(15000);
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
     await page.route(`${origin}/zoom.svg`, (route: any) => route.fulfill({ status: 200, contentType: "image/svg+xml", body: svg }));
+    await page.route(`${origin}/small.svg`, (route: any) => route.fulfill({ status: 200, contentType: "image/svg+xml", body: smallSvg }));
     await page.goto(`${origin}/chat`);
     await page.locator("#inName").fill("__Test_ZoomOwner");
     await page.locator("#inRoomName").fill("__Test_ZoomRoom");
@@ -36,19 +38,20 @@ test.skipIf(!browserModule)("clicking a message image opens the overlay, zooms w
     }, "/assets/chat/state.js");
     for (let index = 0; index < 10; index++) await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: room.sessionID, text: `__Test_zoom_filler ${index}\n${"Filler line for height.\n".repeat(3)}` });
     await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: room.sessionID, text: `__Test_zoom_image\n\n![zoom](${origin}/zoom.svg)` });
-    await page.locator("#msgList img").waitFor();
+    await api(origin, `/rooms/${room.id}/messages`, "POST", { sessionID: room.sessionID, text: `__Test_zoom_small\n\n![small](${origin}/small.svg)` });
+    await page.locator("#msgList img").first().waitFor();
     await page.waitForFunction(() => { const img = document.querySelector<HTMLImageElement>("#msgList img"); return Boolean(img?.complete && img.naturalWidth); });
     const scrollTop = () => page.evaluate(() => document.querySelector<HTMLElement>("#thread")!.scrollTop);
     // One click anywhere in the thread can make the app re-anchor its read receipts;
     // take that first hit, then measure whether the overlay itself moves anything.
-    await page.locator("#msgList img").click();
+    await page.locator("#msgList img").first().click();
     await page.locator("#imageDialog[open]").waitFor();
     await page.keyboard.press("Escape");
     await page.locator("#imageDialog").waitFor({ state: "hidden" });
     await page.waitForTimeout(400);
-    const before = { scrollTop: await scrollTop(), src: await page.locator("#msgList img").evaluate((img: HTMLImageElement) => img.currentSrc) };
+    const before = { scrollTop: await scrollTop(), src: await page.locator("#msgList img").first().evaluate((img: HTMLImageElement) => img.currentSrc) };
     expect(before.scrollTop).toBeGreaterThan(0);
-    await page.locator("#msgList img").click();
+    await page.locator("#msgList img").first().click();
     await page.locator("#imageDialog[open]").waitFor();
     const opened = await page.evaluate(() => {
       const image = document.querySelector<HTMLImageElement>("#imageDialogImage")!;
@@ -60,31 +63,42 @@ test.skipIf(!browserModule)("clicking a message image opens the overlay, zooms w
     expect(opened.closeLabel).toBe("Close");
     expect(opened.focus).toBe("btnCloseImage");
     const zoomLevel = () => page.locator("#zoomLevel").textContent();
-    expect(await zoomLevel()).toBe("100%");
+    const fit = "51%";
+    expect(await zoomLevel()).toBe(fit);
     await page.locator("#imageDialogImage").hover();
     await page.mouse.wheel(0, -240);
     await page.waitForTimeout(80);
-    expect(Number((await zoomLevel())!.replace("%", ""))).toBeGreaterThan(100);
+    expect(Number((await zoomLevel())!.replace("%", ""))).toBeGreaterThan(51);
     expect(await scrollTop()).toBe(before.scrollTop);
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnCloseImage");
     for (let index = 0; index < 12; index++) await page.mouse.wheel(0, -500);
     expect(await zoomLevel()).toBe("400%");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight && scrollY === 0)).toBe(true);
     const imageBox = () => page.locator("#imageDialogImage").evaluate((element: HTMLImageElement) => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right }; });
-    for (let index = 0; index < 12; index++) await page.keyboard.press("Shift+ArrowLeft");
-    expect(Math.abs((await imageBox()).left - 20)).toBeLessThanOrEqual(2);
-    for (let index = 0; index < 24; index++) await page.keyboard.press("Shift+ArrowRight");
-    expect(Math.abs((await imageBox()).right - 1260)).toBeLessThanOrEqual(2);
+    for (let index = 0; index < 40; index++) await page.keyboard.press("Shift+ArrowLeft");
+    const leftBox = await imageBox();
+    expect(Math.abs(leftBox.left - 20)).toBeLessThanOrEqual(2);
+    for (let index = 0; index < 80; index++) await page.keyboard.press("Shift+ArrowRight");
+    const rightBox = await imageBox();
+    expect(Math.abs(rightBox.right - 1260)).toBeLessThanOrEqual(2);
     await page.locator("#btnZoomReset").click();
-    expect(await zoomLevel()).toBe("100%");
+    expect(await zoomLevel()).toBe(fit);
     await page.keyboard.press("+");
-    expect(await zoomLevel()).toBe("125%");
+    expect(Number((await zoomLevel())!.replace("%", ""))).toBeGreaterThan(51);
     await page.keyboard.press("Escape");
     await page.locator("#imageDialog").waitFor({ state: "hidden" });
     const closed = await page.evaluate(() => ({ scrollTop: document.querySelector<HTMLElement>("#thread")!.scrollTop, focusTag: document.activeElement?.tagName }));
     expect(closed.scrollTop).toBe(before.scrollTop);
     expect(closed.focusTag).toBe("IMG");
-    await page.locator("#msgList img").click();
+    await page.locator("#msgList img").first().click();
+    await page.locator("#imageDialog[open]").waitFor();
+    expect(await page.locator("#zoomLevel").textContent()).toBe(fit);
+    await page.keyboard.press("Escape");
+    await page.locator("#imageDialog").waitFor({ state: "hidden" });
+    // A small image is never upscaled: its natural pixels are already 100%.
+    const small = page.locator("#msgList img").last();
+    await small.scrollIntoViewIfNeeded();
+    await small.click();
     await page.locator("#imageDialog[open]").waitFor();
     expect(await page.locator("#zoomLevel").textContent()).toBe("100%");
     await page.keyboard.press("Escape");
