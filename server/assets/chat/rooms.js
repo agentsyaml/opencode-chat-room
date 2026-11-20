@@ -154,12 +154,16 @@ export function initRooms(app) {
     $("#msgInput").draftValue = app.state.drafts.get(roomId) || ""; app.renderReplyPreview?.();
     app.renderFailedMessages();
     app.autoGrow($("#msgInput"));
-    // A restored draft can resize the composer after the initial bottom pin.
-    requestAnimationFrame(() => {
+    // A restored draft and late layout can resize the composer after the initial bottom
+    // pin. Keep following for a few frames instead of sampling one fragile moment.
+    let settleFrames = 0;
+    const settleBottom = () => {
       if (app.state.room?.id !== roomId || !app.state.followBottom) return;
       const thread = $("#thread");
       if (thread.scrollHeight - thread.scrollTop - thread.clientHeight > 1) thread.scrollTop = thread.scrollHeight;
-    });
+      if (++settleFrames < 30) requestAnimationFrame(settleBottom);
+    };
+    requestAnimationFrame(settleBottom);
     app.updateDraftCount();
     app.updateSendState();
     app.hideSendError();

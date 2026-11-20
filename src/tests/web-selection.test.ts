@@ -110,7 +110,8 @@ async function useAssetFixture(page: any, fixture?: string) {
 async function send(page: any, text: string, renderedText = text.slice(0, 24)) {
   await page.locator("#msgInput").fill(text);
   await page.locator("#btnSend").click();
-  await page.locator("#msgList .msg-text").filter({ hasText: renderedText }).waitFor();
+  // Wait for the confirmed row; the optimistic pending row can be replaced under the next drag.
+  await page.locator('#msgList [data-msg-id]:not([data-msg-id^="pending-"]) .msg-text').filter({ hasText: renderedText }).waitFor();
 }
 
 async function selectionWindowShifts(page: any, origin: string, roomId: string, sessionID: string, peerID: string, targetID: string, artifactDir: string) {
@@ -267,7 +268,9 @@ async function dragSelect(page: any, selector: string, start: number, end: numbe
       if (node.tagName === "BODY") break;
     }
     const thread = element.closest<HTMLElement>("#thread")!, edge = thread.getBoundingClientRect();
-    const top = edge.top + thread.clientTop + 4, bottom = edge.bottom - thread.clientTop - 4;
+    // Keep the drag away from the container edge; starting inside the native
+    // selection auto-scroll zone makes Chromium scroll the thread to the top.
+    const top = edge.top + thread.clientTop + 32, bottom = edge.bottom - thread.clientTop - 4;
     let first = point(bounds.start, false), last = point(bounds.end, true);
     if (Math.min(first.y, last.y) < top) thread.scrollTop += Math.min(first.y, last.y) - top;
     first = point(bounds.start, false); last = point(bounds.end, true);
