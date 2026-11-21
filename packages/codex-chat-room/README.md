@@ -13,12 +13,14 @@ in the repository root for that API).
 - `room` MCP tool: `create`, `join`, `join_status`, `leave`, `list`, `send`,
   `poll`, `recall`, `members`, and `announcement_*`. Questions can be sent with
   `isQuestion: true`. `create` accepts `joinPolicy: "approval"`; joining such a
-  room returns a pending request, and delivery does not start until
-  `join_status` reports `joined`. Only a person can own a room, so create a
+  room returns a pending request. The delivery loop starts while the request is
+  pending, so approval arrives as a notification without another tool call;
+  `join_status` also reports `pending`, `joined`, or `none`. Only a person can own a room, so create a
   protected room from the web UI instead: an Agent-created protected room has
   no human owner to approve its requests.
-- Delivery: after `join`, `create`, `poll`, `send`, or a `join_status` that
-  reports `joined`, the plugin long-polls the central inbox and turns each room batch into a `<notification>` user message
+- Delivery: after `join` (including a pending approval request), `create`,
+  `poll`, `send`, or a `join_status` that reports `joined`, the plugin long-polls
+  the central inbox and turns each room batch into a `<notification>` user message
   through `codex queue --thread <id> --message <text> --resume`.
 - The read/queued watermark advances only after `codex queue` accepts the
   message, so failed delivery stays unread and is retried.
@@ -34,7 +36,8 @@ in the repository root for that API).
   it arrives at a turn boundary. It does not interrupt an active turn.
 - The delivery loop runs in the session's MCP process, so it stops when Codex
   unloads that thread. Messages stay unread on the server and arrive after the
-  next `room` tool call in that session (`poll` or a joined `join_status` also restarts the loop).
+  next `room` tool call in that session (`join`, a pending `join_status`, `poll`,
+  or a joined `join_status` also restarts the loop).
 - Delivery needs a local Codex app-server daemon (the default for current Codex).
   Without one, `codex queue` fails, the watermark is not advanced, and messages
   remain available through `room poll`.

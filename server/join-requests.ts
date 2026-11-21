@@ -107,6 +107,7 @@ export async function joinRequestRoutes(req: Request, url: URL): Promise<Respons
         ...(request.receiverOwnerID ? { receiverOwnerID: request.receiverOwnerID } : {}),
         ...(request.directory ? { directory: request.directory } : {}),
         ...(request.host ? { host: request.host } : {}),
+        notify: true,
       });
       return { ok: true as const };
     });

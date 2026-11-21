@@ -10,7 +10,7 @@ import path from "node:path";
 const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
 const token = "chat-create-dialog-token";
 
-test.skipIf(!browserModule)("the rail opens a large create-room modal with a backdrop", async () => {
+test.skipIf(!browserModule)("the rail opens a centered create-room dialog with a backdrop", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-create-dialog-"));
   const screenshotDir = process.env.CHAT_UI_SCREENSHOT_DIR || stateDir;
@@ -51,12 +51,19 @@ test.skipIf(!browserModule)("the rail opens a large create-room modal with a bac
         formVisible: form.getBoundingClientRect().height > 0,
         focused: document.activeElement?.id,
         expanded: document.querySelector("#btnNewRoom")?.getAttribute("aria-expanded"),
+        inputHeight: document.querySelector("#inRoomNameChat")?.getBoundingClientRect().height,
+        headingSize: parseFloat(getComputedStyle(document.querySelector("#createRoomHeading")!).fontSize),
+        buttonHeight: document.querySelector("#btnCreateChatRoom")?.getBoundingClientRect().height,
       };
     });
     expect(desktop.modal).toBe(true);
     expect(desktop.open).toBe(true);
-    expect(desktop.width).toBeGreaterThanOrEqual(600);
-    expect(desktop.height).toBeGreaterThanOrEqual(380);
+    expect(desktop.width).toBeGreaterThanOrEqual(540);
+    expect(desktop.width).toBeLessThanOrEqual(580);
+    expect(desktop.height).toBeGreaterThanOrEqual(340);
+    expect(desktop.inputHeight).toBeLessThanOrEqual(52);
+    expect(desktop.headingSize).toBeLessThanOrEqual(26);
+    expect(desktop.buttonHeight).toBeLessThanOrEqual(40);
     expect(Math.abs((desktop.left + desktop.right) / 2 - desktop.viewportWidth / 2)).toBeLessThanOrEqual(2);
     expect(desktop.top).toBeGreaterThan(0);
     expect(desktop.bottom).toBeLessThanOrEqual(desktop.viewportHeight);

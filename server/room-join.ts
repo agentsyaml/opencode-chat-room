@@ -11,6 +11,7 @@ export type JoinMember = {
   receiverOwnerID?: string;
   directory?: string;
   host?: string;
+  notify?: boolean;
 };
 
 // Shared by the join endpoint and approved join requests so an approved member
@@ -33,7 +34,7 @@ export function joinRoomMember(svc: RoomService, registry: Registry, roomId: str
     for (const [sid, entry] of Object.entries(regRoom)) if (sid !== member.sessionID && entry.name === member.name) delete regRoom[sid];
   }
   svc.joinRoom(roomId, { id: participantId, name: member.name });
-  if (!already) svc.addEvent(roomId, `${member.name} joined the room`);
+  const event = already ? undefined : svc.addEvent(roomId, `${member.name} joined the room`);
   const latestMessageTs = svc.getMessages(roomId).at(-1)?.createdAt ?? 0;
   regRoom[member.sessionID] = {
     serverUrl: "",
@@ -45,7 +46,11 @@ export function joinRoomMember(svc: RoomService, registry: Registry, roomId: str
     directory: member.directory || undefined,
     host: member.host ?? "",
     lastQueuedTs: regRoom[member.sessionID]?.lastQueuedTs,
-    lastReadTs: regRoom[member.sessionID]?.lastReadTs ?? Math.max(Date.now(), latestMessageTs),
+    // An approved applicant must see the join event as unread; a normal join
+    // stays quiet so joining does not create a phantom notification.
+    lastReadTs: regRoom[member.sessionID]?.lastReadTs ?? (
+      member.notify && event ? event.createdAt - 1 : Math.max(Date.now(), latestMessageTs)
+    ),
   };
   // An ownerless room is claimed by the first person who arrives; agents never are.
   const joinedRoom = svc.getRoom(roomId);

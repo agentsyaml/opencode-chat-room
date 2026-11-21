@@ -76,10 +76,37 @@ if (process.env.CHAT_ROOM_JOIN_APPROVAL_CHILD !== "1") {
   };
 
   describe.serial("join approval", () => {
+    test("exposes join_status on both OpenCode room schemas", async () => {
+      const { roomArgs } = await import("../../plugin");
+      const { roomSchema } = await import("../runtime/v2-plugin.ts");
+      for (const schema of [roomArgs, roomSchema()]) {
+        expect(schema.safeParse({ action: "join_status", roomId: "room-1" }).success).toBe(true);
+      }
+    });
+
+    test("exposes an approved V2 session to its receiver owner", async () => {
+      const ownerID = "123e4567-e89b-42d3-a456-426614174000";
+      const room = await createRoom("approval-v2", "approval");
+      expect((await join(room.id, "v2-session", "v2-agent", { protocol: "v2", receiverOwnerID: ownerID })).status).toBe(202);
+      expect((await call(`/rooms/${room.id}/join-requests/v2-session/approve`, "POST", { sessionID: "owner-session" })).status).toBe(200);
+      const memberships = await (await call(`/receiver/memberships?ownerID=${ownerID}`)).json() as { sessionIDs: string[] };
+      expect(memberships.sessionIDs).toContain("v2-session");
+      const inbox = await (await call(`/inbox?sessionID=v2-session&roomId=${room.id}&excludeSelf=1&timeout=0`)).json() as {
+        member: boolean;
+        items: Array<{ text: string }>;
+      };
+      expect(inbox.member).toBe(true);
+      expect(inbox.items).toContainEqual(expect.objectContaining({ text: "v2-agent joined the room" }));
+    });
+
     test("keeps rooms without a policy open and persists the approval policy", async () => {
       const legacy = await createRoom("legacy-open");
       expect(legacy.joinPolicy).toBe("open");
       expect((await join(legacy.id, "bob", "bob")).status).toBe(201);
+      const inbox = await (await call(`/inbox?sessionID=bob&roomId=${legacy.id}&excludeSelf=1&timeout=0`)).json() as {
+        items: Array<{ text: string }>;
+      };
+      expect(inbox.items.some((item) => item.text === "bob joined the room")).toBe(false);
 
       const guarded = await createRoom("guarded", "approval");
       expect(guarded.joinPolicy).toBe("approval");
@@ -119,6 +146,12 @@ if (process.env.CHAT_ROOM_JOIN_APPROVAL_CHILD !== "1") {
       }));
       expect(approvedState.participants).toEqual(["bob", "owner"]);
       expect(approvedState.membership).toEqual(expect.any(String));
+      const inbox = await (await call(`/inbox?sessionID=bob-session&roomId=${room.id}&excludeSelf=1&timeout=0`)).json() as {
+        member: boolean;
+        items: Array<{ text: string }>;
+      };
+      expect(inbox.member).toBe(true);
+      expect(inbox.items).toContainEqual(expect.objectContaining({ text: "bob joined the room" }));
       expect((await join(room.id, "bob-session", "bob")).status).toBe(201);
       expect(await requestsOf(room.id, "owner-session")).toEqual({ requests: [] });
     });

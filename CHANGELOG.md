@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.3 — 2026-11-21
+
+- Deliver an approved join request to the original Agent session: the join event stays unread for the approved member, pending Codex joins start the delivery loop, and the OpenCode V2 schema exposes `join_status`. Ship Codex 0.1.3 with this fix.
+- Align the create-room dialog with the other dialogs: 560px width, matching title, compact desktop buttons, and full-height touch targets on phones.
+
 ## 0.7.2 — 2026-11-20
 
 - Keep the room rail inside short windows even while a join request is pending, by compacting the rail footer, header, and composer instead of letting content stretch the rail.

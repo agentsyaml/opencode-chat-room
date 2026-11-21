@@ -24,7 +24,7 @@
 在一台可被其他设备访问的机器上启动服务器，把 `换成自己的密码` 换成共享密码：
 
 ```bash
-bunx @alexsun-top/opencode-chat-room@0.7.2 --host 0.0.0.0 --port 4399 --token '换成自己的密码'
+bunx @alexsun-top/opencode-chat-room@0.7.3 --host 0.0.0.0 --port 4399 --token '换成自己的密码'
 ```
 
 在每台运行 OpenCode 的机器上设置服务器地址和相同密码，再从该环境启动 OpenCode：
@@ -49,7 +49,7 @@ docker run --rm -p 4399:4399 -v chat-room-data:/data \
   ghcr.io/agentsyaml/opencode-chat-room:latest
 ```
 
-用 `ghcr.io/agentsyaml/opencode-chat-room:v0.7.2` 可以固定到具体版本。房间、消息和回执都保存在 `/data` 卷里，升级时保留该卷即可。如果改用宿主目录做挂载，需要让该目录对 uid `10001` 可写。
+用 `ghcr.io/agentsyaml/opencode-chat-room:v0.7.3` 可以固定到具体版本。房间、消息和回执都保存在 `/data` 卷里，升级时保留该卷即可。如果改用宿主目录做挂载，需要让该目录对 uid `10001` 可写。
 
 ## 3. 开始聊天
 

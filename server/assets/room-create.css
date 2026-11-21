@@ -1,18 +1,18 @@
 /* The rail "+" opens this modal instead of a small popover: one clear surface
    with a backdrop, sized for desktop and near full width on phones. */
 #createRoomDialog {
-  width: min(640px, calc(100vw - 40px));
+  width: min(560px, calc(100vw - 32px));
   max-width: none;
-  max-height: min(calc(100dvh - 40px), 760px);
-  padding: 30px 32px 26px;
+  max-height: 90dvh;
+  padding: 24px;
   overflow: auto;
   color: var(--ink);
   background:
-    radial-gradient(440px 260px at 100% 0%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 72%),
-    linear-gradient(155deg, var(--surface), color-mix(in srgb, var(--accent-soft) 22%, var(--surface)));
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
-  border-radius: 24px;
-  box-shadow: 0 32px 100px rgb(10 25 20 / .28);
+    radial-gradient(360px 200px at 100% 0%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 72%),
+    linear-gradient(155deg, var(--surface), color-mix(in srgb, var(--accent-soft) 18%, var(--surface)));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+  border-radius: 20px;
+  box-shadow: 0 24px 80px rgb(10 25 20 / .22);
 }
 #createRoomDialog::backdrop {
   background:
@@ -25,62 +25,61 @@
 @keyframes create-room-enter { from { opacity: 0; transform: translateY(12px) scale(.985); } }
 @keyframes create-room-backdrop { from { opacity: 0; } }
 
-.create-room-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: start; }
+.create-room-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: start; }
 .create-room-mark {
   display: grid;
   place-items: center;
-  width: 46px;
-  height: 46px;
-  border-radius: 14px 14px 14px 6px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px 12px 12px 5px;
   color: var(--accent-ink);
   background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 80%, #18382f), var(--accent));
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 24%, transparent);
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--accent) 22%, transparent);
 }
-.create-room-mark svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.9; }
-.create-room-eyebrow { margin: 3px 0 1px; color: var(--ink-3); font-size: 10.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
-.create-room-heading h2 { margin: 0; font-family: var(--font-display); font-size: 30px; font-weight: 600; letter-spacing: -.03em; line-height: 1.12; }
-.create-room-head .reader-close { margin: -8px -10px 0 0; }
-.create-room-hint { max-width: 46ch; margin: 14px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.55; }
+.create-room-mark svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.9; }
+.create-room-eyebrow { margin: 2px 0 0; color: var(--ink-3); font-size: 10px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
+.create-room-heading h2 { margin: 0; font-family: var(--font-display); font-size: 25px; font-weight: 600; letter-spacing: -.02em; line-height: 1.16; }
+.create-room-head .reader-close { margin: -6px -6px 0 0; }
+.create-room-hint { max-width: 46ch; margin: 10px 0 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; }
 
-.create-room-form { margin-top: 24px; }
-.create-room-input { min-height: 50px; padding: 12px 14px; font-size: 17px; }
+.create-room-form { margin-top: 18px; }
 .create-room-policy {
-  margin-top: 16px;
-  padding: 14px 16px;
+  margin-top: 14px;
+  padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--line));
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--accent-soft) 46%, var(--surface));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface));
 }
 .create-room-policy .join-policy { margin: 0; }
-.create-room-policy .join-policy-label { font-size: 14px; }
-.create-room-policy-hint { margin: 7px 0 0 43px; line-height: 1.45; }
-.create-room-error { margin: 16px 0 0; }
+.create-room-policy .join-policy-label { font-size: 13.5px; }
+.create-room-policy-hint { margin: 6px 0 0 41px; line-height: 1.4; }
+.create-room-error { margin: 12px 0 0; }
 .create-room-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 22px;
-  padding-top: 18px;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
   border-top: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
 }
-.create-room-actions .btn { min-width: 126px; }
+.create-room-actions .btn { min-width: 104px; }
 
 @media (max-width: 640px) {
   #createRoomDialog {
     width: calc(100vw - 20px);
     max-height: calc(100dvh - 20px);
-    padding: 20px 18px 18px;
-    border-radius: 20px;
+    padding: 18px 16px 16px;
+    border-radius: 16px;
   }
-  .create-room-head { gap: 12px; }
-  .create-room-mark { width: 40px; height: 40px; border-radius: 12px 12px 12px 5px; }
-  .create-room-mark svg { width: 19px; height: 19px; }
-  .create-room-heading h2 { font-size: 24px; }
-  .create-room-head .reader-close { margin: -4px -6px 0 0; }
-  .create-room-hint { margin-top: 12px; font-size: 13.5px; }
-  .create-room-form { margin-top: 18px; }
-  .create-room-policy { padding: 12px 13px; }
+  .create-room-head { gap: 10px; }
+  .create-room-mark { width: 34px; height: 34px; border-radius: 10px 10px 10px 4px; }
+  .create-room-mark svg { width: 17px; height: 17px; }
+  .create-room-heading h2 { font-size: 22px; }
+  .create-room-head .reader-close { margin: -4px -4px 0 0; }
+  .create-room-hint { margin-top: 9px; font-size: 13px; }
+  .create-room-form { margin-top: 16px; }
+  .create-room-policy { padding: 11px 12px; }
   .create-room-policy-hint { margin-left: 0; }
-  .create-room-actions { flex-direction: column-reverse; margin-top: 18px; padding-top: 16px; }
-  .create-room-actions .btn { width: 100%; min-height: 46px; }
+  .create-room-actions { flex-direction: column-reverse; margin-top: 16px; padding-top: 14px; }
+  .create-room-actions .btn { width: 100%; min-height: 44px; }
 }

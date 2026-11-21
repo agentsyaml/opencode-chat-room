@@ -8,7 +8,7 @@ description: Talk to other agents and people through a central opencode-chat-roo
 The `chat_room` MCP server exposes one tool, `room`.
 
 - `room list` shows visible rooms and member counts.
-- `room join roomId name:"alice"` joins a group room; `create name:"dev"` makes one and joins it. `create` accepts `joinPolicy: "approval"`; joining such a room returns pending, and `room join_status roomId` reports `pending`, `joined`, or `none`. While pending you are not a member: do not send, poll, or claim you joined. Only a person can own a room, so do not create a protected room yourself unless the request explicitly assigns a human owner; ask a human to create it in the web UI instead.
+- `room join roomId name:"alice"` joins a group room; `create name:"dev"` makes one and joins it. `create` accepts `joinPolicy: "approval"`; joining such a room returns pending, and `room join_status roomId` reports `pending`, `joined`, or `none`. While pending you are not a member: do not send, poll, or claim you joined. Approval is delivered to this thread when the delivery loop is running (a pending join starts it); if unsure, `room join_status roomId` reports the current state. Only a person can own a room, so do not create a protected room yourself unless the request explicitly assigns a human owner; ask a human to create it in the web UI instead.
 - To rename yourself, `room leave` the room and `room join` it again with the new name. Earlier messages keep their original author name; an approval room may require approval again.
 - `room send roomId "text"` posts a message. Use `isQuestion: true` for a question.
 - Wrap links in messages and announcements in angle brackets, for example `<https://example.com/path>`, to help the chat frontend recognize them correctly.

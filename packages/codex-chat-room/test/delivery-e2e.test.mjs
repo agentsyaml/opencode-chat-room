@@ -64,17 +64,22 @@ test("a joined session receives a queued Codex message and advances the watermar
   }
 });
 
-test("join_status for an approved pending join starts delivery", async () => {
+test("an approved pending join reaches its Codex thread without join_status", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "codex-chat-room-"));
   const argvFile = path.join(dir, "argv.txt");
   const bin = path.join(dir, "fake-codex.sh");
   await writeFile(bin, `#!/bin/sh\nprintf '%s\\0' "$@" > ${JSON.stringify(argvFile)}\nexit 0\n`, { mode: 0o755 });
+  let approved = false;
   const center = await startCenter(({ method, path: route }) => {
     if (method === "POST" && route === "/rooms/r1/join") return [202, { status: "pending" }];
-    if (method === "GET" && route === "/rooms/r1/join-requests/status") return [200, { status: "joined" }];
-    if (method === "GET" && route === "/inbox") return [200, { member: true, hasMore: false, queuedTs: {}, items: [
-      { id: "m1", roomId: "r1", roomName: "dev", roomKind: "group", senderId: "alice", text: "approved", createdAt: 600 },
-    ] }];
+    if (method === "GET" && route === "/inbox") {
+      // The first poll runs while the request is pending; the next one sees the
+      // approval event that the server now leaves unread for this session.
+      if (!approved) { approved = true; return [200, { member: false, hasMore: false, queuedTs: {}, items: [] }]; }
+      return [200, { member: true, hasMore: false, queuedTs: {}, items: [
+        { id: "m1", roomId: "r1", roomName: "dev", roomKind: "group", senderId: "system", text: "alice joined the room", createdAt: 600 },
+      ] }];
+    }
     if (method === "POST" && route === "/queued") return [200, { ok: true }];
     return undefined;
   });
@@ -89,15 +94,12 @@ test("join_status for an approved pending join starts delivery", async () => {
   })}\n`);
   try {
     call(1, { action: "join", roomId: "r1", name: "alice" });
-    await sleep(200);
-    assert.equal(await readFile(argvFile, "utf8").catch(() => ""), "");
-    call(2, { action: "join_status", roomId: "r1" });
     let argv = "";
     for (let i = 0; i < 100 && !argv; i++) {
       await sleep(50);
       argv = await readFile(argvFile, "utf8").catch(() => "");
     }
-    assert.match(argv, /approved/);
+    assert.match(argv, /alice joined the room/);
   } finally {
     child.kill();
     await center.close();

@@ -84,17 +84,17 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.2 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.3 -- opencode-chat-room --help
 
 # 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.2 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.2 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.3 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.3 --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.2
+  bunx @alexsun-top/opencode-chat-room@0.7.3
 
 # 本地 checkout：
 bun install
@@ -107,7 +107,7 @@ bun run server
 
 同一聊天站点的浏览器存储会持久保存会话 ID 和昵称，供多个标签页及浏览器重启后共用。旧配置首次迁移时，由第一个打开的标签页沿用原标签页 ID；其他标签页加载或重新加载后采用共享身份。这不是账户或登录。清除站点存储、使用无痕窗口或切换浏览器配置文件都会创建新身份；若本地存储和标签页存储都被阻止，身份只在当前页面内存中有效。若另一个标签页更改了共享身份，旧标签页会停止发送请求并提示重新加载。
 
-每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。发送后消息会立即以浅色预览显示，服务器确认后恢复正常；发送失败会移除预览并保留重试入口。Home 和 End 会把光标放在提及块旁的可编辑文本中，点击提及块会把光标放在块后，按 Backspace 可删除。复制或剪切提及会保留其标记（只选中提及本身也一样），粘贴后仍恢复为提及块；普通 `@名字` 文本保持纯文本，已不在房间中的成员也不会被恢复成提及。窗口较矮时，左侧栏会压缩底部和房间行，让房间列表保持可用，而不是被聊天内容撑大。左侧栏的 `+` 会打开带遮罩的大弹窗，内含房间名和加入审核开关；取消、Esc 或点击遮罩都会关闭弹窗，并把焦点还给 `+`。
+每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。发送后消息会立即以浅色预览显示，服务器确认后恢复正常；发送失败会移除预览并保留重试入口。Home 和 End 会把光标放在提及块旁的可编辑文本中，点击提及块会把光标放在块后，按 Backspace 可删除。复制或剪切提及会保留其标记（只选中提及本身也一样），粘贴后仍恢复为提及块；普通 `@名字` 文本保持纯文本，已不在房间中的成员也不会被恢复成提及。窗口较矮时，左侧栏会压缩底部和房间行，让房间列表保持可用，而不是被聊天内容撑大。左侧栏的 `+` 会打开带遮罩的居中弹窗，内含房间名和加入审核开关；取消、Esc 或点击遮罩都会关闭弹窗，并把焦点还给 `+`。
 
 侧栏切换只切换当前视图，不会离开房间。私聊由成员列表中选中的已注册会话创建。系统加入、离开、移除事件及房间预览会使用当前语言；普通用户消息不会被翻译。
 
@@ -121,7 +121,7 @@ bun run server
 
 群组房间可以要求新身份先通过审核才能加入。创建房间时传入 `joinPolicy: "approval"`，或之后在房间的“编辑房间”对话框中切换；默认值为 `"open"`。人类创建者作为 owner 立即加入。只有人类可以拥有房间，因此请从网页或另一个人工会话创建审核房间；由 Agent 创建的审核房间没有人类 owner，无法审核加入申请。在审核房间中，其他人类或 Agent 调用 join 只会生成待审请求，不会成为成员：没有成员身份，也不会收到 inbox 投递；在获批前，网页无法打开房间、发送消息或轮询。在网页房间列表中点击审核房间会先弹出确认，取消则不会发送申请。使用房间内已存在的名称加入会返回 HTTP 409。待审核的 join 会返回 HTTP 202，响应体为 `{ status: "pending", message: "…" }`；应展示这条 message，而不是把它当作加入成功。
 
-房间 owner 和受托的人类管理员可以列出、批准或拒绝全部待审请求。被指定的管理 Agent 只能列出并处理 Agent 的请求，不能批准人类请求。批准时按请求中记录的身份原子地创建成员关系；拒绝会删除该请求，申请人可以重新申请。待审请求不会自动过期：在被批准、拒绝、申请人主动取消或房间改为开放前会一直保留。把策略切回 `"open"` 会清空待审请求。批准不会主动推送给申请人：网页轮询状态接口，Agent 使用 `join_status` 查询。网页的“取消申请”按钮会通过下面的 DELETE 接口撤回待审请求。私聊不受影响。
+房间 owner 和受托的人类管理员可以列出、批准或拒绝全部待审请求。被指定的管理 Agent 只能列出并处理 Agent 的请求，不能批准人类请求。批准时按请求中记录的身份原子地创建成员关系；拒绝会删除该请求，申请人可以重新申请。待审请求不会自动过期：在被批准、拒绝、申请人主动取消或房间改为开放前会一直保留。把策略切回 `"open"` 会清空待审请求。批准后，申请人的入房事件保持未读，因此具备后台投递的 Agent 客户端会在原会话上下文中收到通知；网页轮询状态接口，没有后台投递的客户端使用 `join_status` 查询。网页的“取消申请”按钮会通过下面的 DELETE 接口撤回待审请求。私聊不受影响。
 
 HTTP：`GET /rooms/:roomId/join-requests?sessionID=…` 供人类管理员列出全部请求，或供被指定的管理 Agent 列出 Agent 请求；`POST /rooms/:roomId/join-requests/:requestSessionID/approve` 与 `.../deny` 接受 `{ sessionID }`；`DELETE /rooms/:roomId/join-requests?sessionID=…` 供申请人撤回自己的请求；`GET /rooms/:roomId/join-requests/status?sessionID=…` 为申请人返回 `pending`、`joined` 或 `none`。管理 Agent 使用 `admin` 工具的 `admin_join_requests`、`admin_approve_join` 和 `admin_deny_join` 操作。
 

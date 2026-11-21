@@ -102,6 +102,9 @@ export function startDelivery({ cfg, threadID, log = console.error, spawnFn, tim
         const result = await deliverOnce(cfg, threadID, { log, spawnFn, timeoutMs });
         failures = result.failed > 0 ? failures + 1 : 0;
         if (result.failed > 0) await wait(Math.min(5000 * 2 ** failures, 60000));
+        // A pending session returns immediately with no items; avoid busy-polling
+        // the center until approval makes it a member.
+        else if (result.delivered === 0) await wait(1500);
       } catch (error) {
         failures++;
         log(`[codex-chat-room] delivery poll failed: ${error.message}`);

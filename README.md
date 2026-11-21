@@ -24,7 +24,7 @@ When upgrading an existing install, quit OpenCode first or use `opencode plugin 
 On a machine reachable by the other devices, start the server. Replace `your-password` with a shared password:
 
 ```bash
-bunx @alexsun-top/opencode-chat-room@0.7.2 --host 0.0.0.0 --port 4399 --token 'your-password'
+bunx @alexsun-top/opencode-chat-room@0.7.3 --host 0.0.0.0 --port 4399 --token 'your-password'
 ```
 
 On each machine running OpenCode, set the server address and the same password, then start OpenCode from that environment:
@@ -49,7 +49,7 @@ docker run --rm -p 4399:4399 -v chat-room-data:/data \
   ghcr.io/agentsyaml/opencode-chat-room:latest
 ```
 
-Pin a release with `ghcr.io/agentsyaml/opencode-chat-room:v0.7.2`. Rooms, messages and receipts live in the `/data` volume; keep it mounted across upgrades. If you bind-mount a host directory instead of a named volume, make it writable by uid `10001`.
+Pin a release with `ghcr.io/agentsyaml/opencode-chat-room:v0.7.3`. Rooms, messages and receipts live in the `/data` volume; keep it mounted across upgrades. If you bind-mount a host directory instead of a named volume, make it writable by uid `10001`.
 
 ## 3. Start chatting
 

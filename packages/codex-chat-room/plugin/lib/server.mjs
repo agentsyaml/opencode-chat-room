@@ -69,9 +69,12 @@ export function startServer(options = {}) {
     }
     const sessionID = sessionIDFor(threadID);
     const text = await centerAction(cfg, args, sessionID);
+    // A pending join is not membership, but its delivery loop is how the
+    // approval event reaches this Codex thread once an administrator acts.
     const active = args.action === "create" || args.action === "join" || args.action === "poll" || args.action === "send"
-      || (args.action === "join_status" && text.startsWith("joined"));
-    if (active && !text.startsWith("error:") && !text.startsWith("pending:")) ensureDelivery(threadID);
+      || (args.action === "join_status" && text.startsWith("joined"))
+      || text.startsWith("pending:");
+    if (active && !text.startsWith("error:")) ensureDelivery(threadID);
     return text;
   };
 
@@ -84,7 +87,7 @@ export function startServer(options = {}) {
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
           capabilities: { tools: {} },
-          serverInfo: { name: "chat_room", version: "0.1.2" },
+          serverInfo: { name: "chat_room", version: "0.1.3" },
           instructions: INSTRUCTIONS,
         },
       });
