@@ -6,11 +6,17 @@ export function initEvents(app) {
   const $ = app.$;
   // Thread clicks land on non-focusable nodes, so the browser drops focus to BODY
   // and the next keystroke is lost. Returning it to the composer matches chat UX.
+  app.focusChatComposer = ({ force = false } = {}) => {
+    const editor = $("#msgInput");
+    if (matchMedia("(max-width: 760px)").matches || document.querySelector("dialog[open]")) return false;
+    if ($("#chatView").hidden || editor.contentEditable !== "true" || !editor.getClientRects().length) return false;
+    if (roomRail.classList.contains("drawer-open")) return false;
+    if (!force && (document.activeElement !== document.body || window.getSelection()?.toString())) return false;
+    editor.focus({ preventScroll: true });
+    return true;
+  };
   app.focusComposer = () => {
-    if (matchMedia("(max-width: 760px)").matches || document.querySelector("dialog[open]")) return;
-    if ($("#chatView").hidden || $("#msgInput").contentEditable !== "true") return;
-    if (document.activeElement !== document.body || window.getSelection()?.toString()) return;
-    $("#msgInput").focus({ preventScroll: true });
+    app.focusChatComposer();
   };
   document.addEventListener("click", () => requestAnimationFrame(() => app.focusComposer?.()));
   // Mobile panels sit below the header, whose height depends on the title and locale.
@@ -211,7 +217,7 @@ export function initEvents(app) {
   $("#btnSend").addEventListener("click", () => void app.send());
   $("#btnJump").addEventListener("click", app.jumpToBottom);
   $("#btnCopyId").addEventListener("click", () => void app.copyRoomId());
-  $("#btnLeave").addEventListener("click", () => app.leaveRoom(false));
+  $("#btnLeave").addEventListener("click", () => { app.closePanels(); void app.leaveRoom(false); });
   $("#btnDeleteRoom").addEventListener("click", () => void app.deleteRoom());
   $("#btnMembers").addEventListener("click", () => app.togglePanel("#memberPanel"));
   $("#btnRoomOptions").addEventListener("click", () => {
@@ -324,8 +330,13 @@ export function initEvents(app) {
       // baseline here would make that growth look like no growth at all.
       // Only a scroll the reader started ends following; layout shifts do not.
       const gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
-      if (gap <= 80) app.state.followBottom = true;
-      else if (performance.now() <= app.state.userScrollIntentUntil) app.state.followBottom = false;
+      if (gap <= 80) {
+        app.state.followBottom = true;
+        if (app.state.focusMessageId && performance.now() > (app.state.focusHoldUntil || 0)) {
+          app.state.focusMessageId = null;
+          app.rerenderMessages?.();
+        }
+      } else if (performance.now() <= app.state.userScrollIntentUntil) app.state.followBottom = false;
     }
     if (!adjusting || performance.now() <= app.state.userScrollIntentUntil) captureReadingPosition();
     if (!adjusting && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80) void app.markActiveRoomRead(performance.now() <= app.state.userScrollIntentUntil);
@@ -398,7 +409,17 @@ export function initEvents(app) {
     if (app.mentionActive && !event.target.closest("#mentionPicker")) app.closeMention();
     if (!event.target.closest(".anchor, dialog")) app.closePanels();
   });
+  let lastEscapeAt = -Infinity;
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !event.repeat && !event.defaultPrevented
+        && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      const overlay = Boolean(document.querySelector("dialog[open], .panel:not([hidden]), #mentionPicker:not([hidden])"))
+        || roomRail.classList.contains("drawer-open") || !$("#readerPanel").hidden;
+      const now = performance.now();
+      if (overlay) lastEscapeAt = -Infinity;
+      else if (now - lastEscapeAt <= 500) { lastEscapeAt = -Infinity; app.focusChatComposer({ force: true }); }
+      else lastEscapeAt = now;
+    }
     if (event.key === "Tab" && roomRail.classList.contains("drawer-open") && !document.querySelector("dialog[open]")) {
       const stops = [...roomRail.querySelectorAll("button:not(:disabled), input:not(:disabled)")].filter((node) => node.getClientRects().length);
       const first = stops[0], last = stops.at(-1);
@@ -411,6 +432,10 @@ export function initEvents(app) {
     if (event.key === "Escape" && !$("#memberPanel").hidden) {
       app.closePanels();
       app.lastFocus?.focus();
+    }
+    if (event.key === "Escape" && !$("#roomOptions").hidden) {
+      app.closePanels();
+      $("#btnRoomOptions").focus();
     }
     if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
       // Same switch as a rail row click on a joined room, in the order the rail renders.

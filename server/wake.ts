@@ -4,7 +4,7 @@ import { formatNotificationLines, formatServeWakePrompt, readQuestionExcerpt, re
 import { clearPendingAdmission, getOrCreatePendingAdmission, markPendingAdmissionAdmitted, pendingAdmission, prunePendingAdmission, rejectPendingAdmission, type QueueItem } from "../src/center/queue.ts";
 import { sendAsyncNotification } from "../src/center/queue-transport.ts";
 import { notificationPrefix } from "../src/center/notification-budget.ts";
-import { readInbox, type InboxItem } from "./inbox";
+import { readInbox, type InboxItem } from "./inbox.ts";
 import { explicitlyAddresses } from "../src/center/mentions.ts";
 
 const wakeClaims = new Map<string, number>();

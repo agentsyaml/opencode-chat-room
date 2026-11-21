@@ -1,7 +1,7 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.7.3",
-  "description": "A chat-room plugin and central server for OpenCode.",
+  "version": "0.7.4",
+  "description": "A chat-room server, web client, terminal client, and OpenCode/Codex/dsh plugins.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agentsyaml/opencode-chat-room.git"
@@ -16,16 +16,20 @@
     "./chat-server": "./server/chat-server.ts"
   },
   "bin": {
-    "opencode-chat-room": "cli.ts"
+    "opencode-chat-room": "dist/cli.js"
   },
   "files": [
     "cli.ts",
+    "dist",
     "plugin.ts",
     "index.ts",
     "src",
-    "!src/**/*.test.ts",
+    "!src/tests",
+    "!src/**/*.test.*",
+    "!src/tui/test",
     "skills/chatroom/SKILL.md",
     "server/chat-server.ts",
+    "server/http-server.ts",
     "server/json-body.ts",
     "server/inbox.ts",
     "server/history-route.ts",
@@ -57,9 +61,16 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "server": "bun run server/chat-server.ts",
-    "test": "for file in src/tests/*.test.ts server/*.test.ts; do bun test \"$file\" || exit; done",
+    "build:cli": "bun build cli.ts --target=node --packages external --outfile dist/cli.js >&2",
+    "prepack": "bun run build:cli",
+    "server": "node cli.ts",
+    "server:bun": "bun cli.ts",
+    "server:deno": "deno run --allow-env --allow-read --allow-write --allow-net cli.ts",
+    "test": "for file in src/tests/*.test.ts server/*.test.ts; do bun test \"$file\" || exit; done && bun test src/tui/test",
     "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=24.2.0"
   },
   "devDependencies": {
     "@opencode/plugin": "2.0.29",
@@ -72,7 +83,9 @@
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.29",
     "@opencode/client": "2.0.32",
+    "@opentui/core": "0.2.16",
     "croner": "11.0.0",
+    "yaml": "^2.9.0",
     "zod": "4.1.8"
   }
 }

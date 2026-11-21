@@ -106,6 +106,14 @@ Override configuration in the profile's own `cordis.patch.yml`:
         participant: alex
 ```
 
+The same values can come from `chatroom.json`, `chatroom.jsonc`,
+`chatroom.yaml`, or `chatroom.yml` in the current directory or
+`$XDG_CONFIG_HOME/chatroom/` (usually `~/.config/chatroom/`). Use
+`CHAT_ROOM_CONFIG` to choose a file explicitly. Precedence is profile config,
+then environment for `url` and `token`, then file, then defaults. File fields
+are `client.url`, `client.token`, `client.participant`,
+`client.deliveryIntervalMs`, and `client.requestTimeoutMs`.
+
 Defaults: `url` is `CHAT_ROOM_SERVER_URL` or `http://127.0.0.1:4399`; `token` is
 `CHAT_ROOM_SERVER_TOKEN` or empty; `participant` is the OS user name;
 `deliveryIntervalMs` is 5000 (minimum 1000); `requestTimeoutMs` is 15000.

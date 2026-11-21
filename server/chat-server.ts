@@ -1,8 +1,9 @@
 // ponytail: central chat-room server. Single HTTP service holding the
 // authoritative SQLite room database; plugins (central mode) talk to it
 // via CHAT_ROOM_SERVER_URL. Optional bearer token (CHAT_ROOM_SERVER_TOKEN).
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import RoomService, {
   RoomError,
@@ -15,28 +16,33 @@ import {
   admissionMatches,
   clearPendingAdmission,
 } from "../src/center/queue.ts";
-import { readInbox } from "./inbox";
+import { readInbox } from "./inbox.ts";
 import { isReceiverOwnerID } from "../src/state/receiver-owner.ts";
-import { claimWake, touchActive, wakeMentionedSessions } from "./wake";
-import { historyRoute } from "./history-route";
-import { messageRecallRoutes } from "./message-recall-routes";
-import { roomPayload } from "./room-payload";
-import { isUser, settleAdmins, settleOwner } from "./room-owner";
-import { jsonObject } from "./json-body";
-import { roomManagement } from "./newrooms";
-import { memberRoutes } from "./member-routes";
-import { resourceRoutes } from "./resource-routes";
+import { claimWake, touchActive, wakeMentionedSessions } from "./wake.ts";
+import { historyRoute } from "./history-route.ts";
+import { messageRecallRoutes } from "./message-recall-routes.ts";
+import { roomPayload } from "./room-payload.ts";
+import { isUser, settleAdmins, settleOwner } from "./room-owner.ts";
+import { jsonObject } from "./json-body.ts";
+import { roomManagement } from "./newrooms.ts";
+import { memberRoutes } from "./member-routes.ts";
+import { resourceRoutes } from "./resource-routes.ts";
 import { maxResourceBytes } from "../src/rooms/resources.ts";
-import { adminRoutes } from "./admin-routes";
-import { joinRequestRoutes } from "./join-requests";
-import { joinRoomMember } from "./room-join";
-import { roomReminderRoutes, startRoomReminderScheduler } from "./room-reminders";
+import { adminRoutes } from "./admin-routes.ts";
+import { joinRequestRoutes } from "./join-requests.ts";
+import { joinRoomMember } from "./room-join.ts";
+import { roomReminderRoutes, startRoomReminderScheduler } from "./room-reminders.ts";
+import { loadRoomConfig, resolveServerSettings } from "../src/config/file-config.ts";
+import { startServer } from "./http-server.ts";
 
 // The chat page shows this next to the app title; a missing package must not
 // leave a placeholder behind.
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+// The bundled CLI lives in dist/, while its published server files stay in server/.
+const here = existsSync(path.join(moduleDir, "chat.html")) ? moduleDir : path.resolve(moduleDir, "../server");
 let versionTag: Promise<string> | undefined;
-const chatVersionTag = () => (versionTag ??= Bun.file(path.join(import.meta.dir, "../package.json")).json()
-  .then((pkg) => typeof pkg?.version === "string" && pkg.version ? `v${pkg.version}` : "")
+const chatVersionTag = () => (versionTag ??= fs.readFile(path.join(here, "../package.json"), "utf8")
+  .then((text) => { const pkg = JSON.parse(text) as { version?: unknown }; return typeof pkg?.version === "string" && pkg.version ? `v${pkg.version}` : ""; })
   .catch(() => ""));
 
 function parsePort(value: string): number {
@@ -49,18 +55,23 @@ function parsePort(value: string): number {
   return port;
 }
 
-const hostname =
-  process.env.CHAT_ROOM_SERVER_HOST ?? process.env.HOST ?? "0.0.0.0";
+const settings = resolveServerSettings(loadRoomConfig());
+const hostname = settings.host;
 const displayHostname = hostname.includes(":") ? `[${hostname}]` : hostname;
-const port = parsePort(
-  process.env.CHAT_ROOM_SERVER_PORT ?? process.env.PORT ?? "4399",
-);
-const token = process.env.CHAT_ROOM_SERVER_TOKEN;
+const port = parsePort(settings.port);
+const token = settings.token;
+
+// The state directory and upload limit are read lazily from the environment;
+// publish the file values before the first database or upload call.
+if (!process.env.CHAT_ROOM_STATE_DIR && settings.stateDir) process.env.CHAT_ROOM_STATE_DIR = settings.stateDir;
+if (!process.env.CHAT_ROOM_MAX_FILE_SIZE_MB && settings.maxFileSizeMb !== undefined) {
+  process.env.CHAT_ROOM_MAX_FILE_SIZE_MB = String(settings.maxFileSizeMb);
+}
 
 // ponytail: 部署者显式配置的 serve 地址——消息到达时立即唤起被 @ 的已退出
 // session（零轮询延迟）；未配置则跳过（插件定时器兜底）。这是显式配置，
 // 不是对 opencode 存在的假设
-const serveWakeUrl = process.env.CHAT_ROOM_WAKE_SERVE_URL ?? "";
+const serveWakeUrl = settings.wakeServeUrl;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -87,7 +98,7 @@ async function handle(req: Request): Promise<Response> {
   }
   if (req.method === "GET" && p === "/chat") {
     const html = await fs
-      .readFile(path.join(import.meta.dir, "chat.html"), "utf8")
+      .readFile(path.join(here, "chat.html"), "utf8")
       .catch(() => null);
     if (html === null) {
       return json({ error: "chat page not found" }, 404);
@@ -102,14 +113,14 @@ async function handle(req: Request): Promise<Response> {
   }
   // The install surface lives at the origin root so the worker controls /chat, not /assets.
   if (req.method === "GET" && p === "/manifest.webmanifest") {
-    const body = await fs.readFile(path.join(import.meta.dir, "manifest.webmanifest"), "utf8").catch(() => null);
+    const body = await fs.readFile(path.join(here, "manifest.webmanifest"), "utf8").catch(() => null);
     if (body === null) return json({ error: "manifest not found" }, 404);
     return new Response(body, {
       headers: { "Content-Type": "application/manifest+json; charset=utf-8", "Cache-Control": "no-store" },
     });
   }
   if (req.method === "GET" && p === "/sw.js") {
-    const body = await fs.readFile(path.join(import.meta.dir, "sw.js"), "utf8").catch(() => null);
+    const body = await fs.readFile(path.join(here, "sw.js"), "utf8").catch(() => null);
     if (body === null) return json({ error: "service worker not found" }, 404);
     const version = (await chatVersionTag()) || "dev";
     return new Response(body.replaceAll("{{version}}", version), {
@@ -124,7 +135,7 @@ async function handle(req: Request): Promise<Response> {
     let relative: string;
     try { relative = decodeURIComponent(p.slice("/assets/".length)); }
     catch { return json({ error: "invalid asset path" }, 400); }
-    const root = path.resolve(import.meta.dir, "assets");
+    const root = path.resolve(here, "assets");
     const file = path.resolve(root, relative);
     if (!relative || !file.startsWith(`${root}${path.sep}`) || !/\.(?:css|js|mjs|svg|png|jpg|woff2?)$/i.test(file)) return json({ error: "not found" }, 404);
     const data = await fs.readFile(file).catch(() => null);
@@ -532,13 +543,19 @@ async function handle(req: Request): Promise<Response> {
   }
 }
 
-export default {
+const config = {
   hostname,
   port,
   fetch: handle,
   idleTimeout: 60,
   maxRequestBodySize: Math.max(128 * 1024 * 1024, maxResourceBytes()),
 };
+
+export default config;
+
+// Bun auto-serves the default export when this file is the entrypoint. Node and
+// Deno have no such convention, so they start the shared adapter explicitly.
+if (import.meta.main && typeof Bun === "undefined") await startServer(config);
 
 console.log(
   `chat-room center listening on http://${displayHostname}:${port}${token ? " (token auth on)" : ""}`,

@@ -257,7 +257,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     });
     expect(mobileHead.missingIcons).toEqual([]);
     expect(mobileHead.actionsTop).toBeGreaterThanOrEqual(mobileHead.mainBottom - 1);
-    for (const [trigger, panel] of [["#btnQuestions", "#questionPanel"], ["#btnReminders", "#reminderPanel"], ["#btnAnnouncements", "#announcementPanel"], ["#btnMembers", "#memberPanel"], ["#btnRoomOptions", "#roomOptions"]]) {
+    for (const [trigger, panel] of [["#btnQuestions", "#questionPanel"], ["#btnReminders", "#reminderPanel"], ["#btnMembers", "#memberPanel"], ["#btnRoomOptions", "#roomOptions"]]) {
       await alice.locator(trigger).click();
       const panelBox = await alice.locator(panel).boundingBox();
       expect(panelBox).not.toBeNull();
@@ -267,6 +267,16 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
       await alice.locator(trigger).click();
       await alice.locator(panel).waitFor({ state: "hidden" });
     }
+    // Announcements live in the Options menu now.
+    await alice.locator("#btnRoomOptions").click();
+    await alice.locator("#btnAnnouncements").click();
+    const announcementBox = await alice.locator("#announcementPanel").boundingBox();
+    expect(announcementBox).not.toBeNull();
+    expect(announcementBox!.x).toBeGreaterThanOrEqual(0);
+    expect(announcementBox!.x + announcementBox!.width).toBeLessThanOrEqual(376);
+    expect(announcementBox!.y).toBeGreaterThanOrEqual(mobileHead.headBottom);
+    await alice.keyboard.press("Escape");
+    await alice.locator("#announcementPanel").waitFor({ state: "hidden" });
     await alice.setViewportSize({ width: 320, height: 700 });
     const narrow = await alice.evaluate(() => ({ pageX: document.documentElement.scrollWidth - innerWidth, title: document.querySelector<HTMLElement>("#roomName")!.getBoundingClientRect().width }));
     expect(narrow.pageX).toBeLessThanOrEqual(1);
@@ -362,6 +372,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     // Only a human room administrator may remove members; the owner grants it here.
     await alice.locator("#btnRoomOptions").click(); await alice.locator("#btnEditRoom").click();
     await alice.locator("#editRoomDialog[open]").waitFor();
+    await alice.locator("#editRoomTabMembers").click();
     await alice.locator('#editRoomAdminIds input[value="Bob"]').waitFor();
     await alice.locator('#editRoomAdminIds input[value="Bob"]').check();
     await alice.locator("#editRoomSuccessor").selectOption("Bob");
@@ -387,7 +398,9 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await bob.locator("#btnMembers").click();
     await bob.locator("#btnRoomOptions").click(); await bob.locator("#btnEditRoom").click();
     await bob.locator("#editRoomDialog[open]").waitFor();
+    expect(await bob.locator("#editRoomTabOwnership").isVisible()).toBe(false);
     expect(await bob.locator("#editRoomOwnerOnly").isVisible()).toBe(false);
+    await bob.locator("#editRoomTabMembers").click();
     expect(await bob.locator("#editRoomOwnerOnlyNote").isVisible()).toBe(true);
     await bob.locator("#btnCloseEditRoom").click();
     await bob.locator("#btnMembers").click();
@@ -409,6 +422,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await bob.locator("#memberList li").filter({ hasText: "Dave" }).getByRole("button", { name: "Remove" }).waitFor({ timeout: 15000 });
     await alice.locator("#btnRoomOptions").click(); await alice.locator("#btnEditRoom").click();
     await alice.locator("#editRoomDialog[open]").waitFor();
+    await alice.locator("#editRoomTabMembers").click();
     await alice.locator('#editRoomAdminIds input[value="Bob"]').uncheck();
     await alice.locator("#editRoomForm button[type=submit]").click();
     await alice.locator("#editRoomDialog").waitFor({ state: "hidden" });

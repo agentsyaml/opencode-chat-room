@@ -8,4 +8,5 @@ skills
 *.md
 CHANGELOG.md
 **/*.test.ts
+src/tui/test
 npm-pack.json

@@ -349,7 +349,7 @@ async function profileMenuWorks(page: any) {
     expect(await trigger.getAttribute("aria-expanded")).toBe("false"); await page.keyboard.press("Escape"); await rail.waitFor({ state: "hidden" });
     expect(await drawer.getAttribute("aria-expanded")).toBe("false"); expect(await drawer.evaluate((node: HTMLElement) => document.activeElement === node)).toBe(true);
   } else {
-    await page.keyboard.press("Escape"); await page.locator("#chatSettings").waitFor({ state: "hidden" }); expect(await trigger.getAttribute("aria-expanded")).toBe("false"); expect(await trigger.evaluate((node: HTMLElement) => document.activeElement === node)).toBe(true);
+    await page.keyboard.press("Escape"); await page.locator("#chatSettings").waitFor({ state: "hidden" }); expect(await trigger.getAttribute("aria-expanded")).toBe("false"); await page.waitForFunction(() => document.activeElement?.id === "msgInput");
   }
 }
 async function metaRow(page: any) {

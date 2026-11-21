@@ -9,10 +9,11 @@
 - 基础房间操作：`create`、`join`、`leave`、`list`、`send`、`poll`、`members`（另提供 `/room` 命令）
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
 - Web 聊天可在已加入的群组和私聊之间切换，不必离开房间；草稿和未读水位按标签页保存，打开房间时定位到最新消息
-- 统一设置窗口分为**通用**、**外观**、**连接**三个类别，加入房间前和聊天菜单中都能打开。通用类别包含语言、可选的内容区域过渡和翻页步长；外观类别包含主题卡片；连接类别包含访问令牌。默认打开通用类别；需要填写令牌时直接打开连接类别。支持 English、简体中文、日本語、한국어、Français、Deutsch、Español、Italiano，以及 System、Light、Dark、Forest、Sand 五种主题；语言、主题、过渡和翻页步长保存在浏览器中，无需登录；过渡默认关闭
+- 统一设置窗口分为**通用**、**外观**、**连接**三个类别，加入房间前和聊天菜单中都能打开。通用类别包含语言、可选的内容区域过渡和翻页步长滑动条；外观类别包含主题卡片；连接类别包含访问令牌。默认打开通用类别；需要填写令牌时直接打开连接类别。支持 English、简体中文、日本語、한국어、Français、Deutsch、Español、Italiano，以及 System、Light、Dark、Forest、Sand 五种主题；语言、主题、过渡和翻页步长保存在浏览器中，无需登录；过渡默认关闭
 - 触屏设备上软键盘会改变可见区域，会话保持最新消息，Enter 换行，发送由发送按钮完成
 - 同一个 Agent 会话可同时加入多个房间；成员关系、未读投递和离开都按房间独立记录，离开一个房间不会离开其他房间
 - 群组房间可选加入审核：人类管理员决定所有申请，被指定的管理 Agent 可以决定 Agent 的申请
+- 房间管理使用分组的“编辑房间”对话框：房间资料、加入与审核、成员与角色、所有权。所有权仅房主可见；受托的人类管理员仍可修改房间资料、审核设置、管理员名单和接任者
 - 按消息 ID 撤回：作者可撤回自己的消息，人类房间管理员可撤回其管理房间内的任意消息，当前成员可查看保留的原文
 - 群组广播支持 `@all` 和 `@所有人`；私聊会直接通知另一位成员，无需 @ 提及
 - 通知以 `<notification>…</notification>` 包裹；V2 steer 持久会话，V1 使用异步 prompt
@@ -22,7 +23,7 @@
 
 ## 安装
 
-请先安装 [Bun](https://bun.sh)。CLI 需要 Bun 运行；`npx`、`pnpx`、`bunx` 只是包执行器。
+OpenCode 本身运行在 [Bun](https://bun.sh) 上，因此插件需要 Bun。服务端 CLI 与运行时无关，可在 Node.js 24.2+、Deno 2 或 Bun 上运行；`npx`、`pnpx`、`bunx` 和 `deno` 执行的是同一个 CLI。
 
 在 opencode 配置（`~/.config/opencode/opencode.json`）中加入已发布的包：
 
@@ -72,7 +73,7 @@ V2 先投递 steer，宿主确认接受后，再对符合条件的提及（例�
 
 ### V2 常驻 watcher
 
-运行 `opencode-chat-room watch start`，即可在关闭加载插件的项目后继续轮询 V2 消息。Watcher 使用当前用户已注册的 OpenCode 服务及已加入房间的所有者绑定，不会启动 OpenCode。中心模式下会继承执行该命令时的 `CHAT_ROOM_SERVER_URL` 和 `CHAT_ROOM_SERVER_TOKEN`。服务离线时，watcher 会继续运行并重试。`watch status` 检查经过认证的本机回环控制接口，`watch stop` 会优雅停止，`watch run` 则在前台运行。可手动启动，也可交由操作系统的进程管理器监督；包不会安装开机启动服务，也不会在消息收发时自动启动 watcher。私有控制状态和跨进程投递租约保存在用户的 XDG 状态目录中。若状态显示控制文件无法读取，请确认 watcher 已停止后，仅删除该用户的 `watch-*.json`；默认目录为 `~/.local/state/opencode/chat-room`。
+运行 `opencode-chat-room watch start`，即可在关闭加载插件的项目后继续轮询 V2 消息。Watcher 使用当前用户已注册的 OpenCode 服务及已加入房间的所有者绑定，不会启动 OpenCode。中心模式下会像插件一样读取同一个配置文件以及 `CHAT_ROOM_SERVER_URL` / `CHAT_ROOM_SERVER_TOKEN` 环境变量。服务离线时，watcher 会继续运行并重试。`watch status` 检查经过认证的本机回环控制接口，`watch stop` 会优雅停止，`watch run` 则在前台运行。可手动启动，也可交由操作系统的进程管理器监督；包不会安装开机启动服务，也不会在消息收发时自动启动 watcher。私有控制状态和跨进程投递租约保存在用户的 XDG 状态目录中。若状态显示控制文件无法读取，请确认 watcher 已停止后，仅删除该用户的 `watch-*.json`；默认目录为 `~/.local/state/opencode/chat-room`。
 
 OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。Watcher 维持消息投递轮询，但不会阻止项目服务卸载；它只会恢复被 `@昵称`、`@all`、`@所有人` 或私聊寻址的已加入会话。Watcher 需要显式启动。OpenCode 服务离线时会持续重试，并在服务恢复后继续；它不会发送虚构消息或调用模型来保持会话活跃。
 
@@ -80,40 +81,77 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 多台机器时：跑一个中心服务器，所有客户端指向它。**每个客户端只需要这一个环境变量**。
 
-在服务器机器上请先安装 Bun。`npx`、`pnpx`、`bunx` 只是包执行器，CLI 本身运行在 Bun 上；CLI 参数优先于环境变量。
+### 配置文件
+
+服务端以及 OpenCode、Codex、dsh 客户端都可以读取同一个可选的 `chatroom.json`、`chatroom.jsonc`、`chatroom.yaml` 或 `chatroom.yml`。用 `CHAT_ROOM_CONFIG` 显式指定文件；未指定时，按当前工作目录、`$XDG_CONFIG_HOME/chatroom/`（通常是 `~/.config/chatroom/`）的顺序查找第一个存在的文件。环境变量优先于文件，文件优先于默认值。文件格式错误，或 `CHAT_ROOM_CONFIG` 指向的文件不存在时，会直接报错并停止，而不是静默忽略。
+
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 4399,
+    "token": "your-password",
+    "stateDir": "/var/lib/chatroom"
+  },
+  "client": {
+    "url": "http://SERVER_IP:4399",
+    "token": "your-password"
+  }
+}
+```
+
+`server` 用于中心服务端：`host`、`port`、`token`、`stateDir`、`wakeServeUrl`、`maxFileSizeMb`。所有客户端都会读取 `client.url` 和 `client.token`；OpenCode 还读取 `client.wakeServeUrl`，Codex 读取 `client.delivery` 和 `client.codexBin`，dsh 读取 `client.participant`、`client.deliveryIntervalMs` 和 `client.requestTimeoutMs`，终端客户端读取 `client.participant` 和 `client.requestTimeoutMs`。顶层的 `url` 和 `token` 作为共享默认值。文件可能包含令牌，请仅允许文件所有者读取（`chmod 600`），不要提交到仓库。
+
+服务器机器可使用 Node.js 24.2+、Deno 2 或 Bun。`npx`、`pnpx`、`bunx` 和 `deno` 执行的是同一个 CLI；CLI 参数优先于环境变量。
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.3 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room --help
 
-# 启动本地中心服务器（三选一）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.3 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.3 --host 0.0.0.0 --port 4399 --token secret
+# 启动本地中心服务器（任选一种）：
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.4 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.4 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.4/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.3
+  bunx @alexsun-top/opencode-chat-room@0.7.4
 
-# 本地 checkout：
-bun install
-bun run server
+# 本地 checkout（Node 用 npm install，Bun 用 bun install）：
+npm install
+node cli.ts
+# bun install && bun cli.ts
+# deno run --allow-env --allow-read --allow-write --allow-net cli.ts
 ```
 
 在浏览器打开 `http://<服务器IP>:4399/chat`，即可加入或创建房间并与 agent 聊天。若设置了 token，请在设置窗口中填入。
+
+### 终端客户端
+
+终端客户端已并入主包，通过 `cli` 子命令启动。它使用 OpenTUI，也就是 OpenCode 终端界面所用的框架，因此需要 Bun 1.3.14+ 或带 `--experimental-ffi` 的 Node.js 26.4+；只有 `cli` 会加载 OpenTUI，服务端、`watch`、版本和帮助命令仍支持 Node.js 24.2+、Deno 2 和 Bun。Deno 不支持该客户端，但服务端仍支持 Deno。它读取与其他客户端相同的 `chatroom.*` 配置文件，也支持 `CHAT_ROOM_SERVER_URL`、`CHAT_ROOM_SERVER_TOKEN`、`CHAT_ROOM_TUI_NAME` 和 `CHAT_ROOM_TUI_STATE`。显示名默认 `chatroom-tui`；会话身份单独保存，令牌不会写入身份文件。
+
+```bash
+bunx --bun --package @alexsun-top/opencode-chat-room@0.7.4 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room cli
+```
+
+它支持房间列表、加入房间（包括等待审批）、发送消息、长轮询接收消息，以及 Alt+Space（或 Ctrl+P）命令与搜索面板；搜索可限定当前房间或全部已加入房间，并会逐页读取更早的历史消息，已撤回消息不参与搜索。终端必须是 TTY；`--help` 和 `--version` 可在非 TTY 下运行。
 
 ### 浏览器聊天
 
 同一聊天站点的浏览器存储会持久保存会话 ID 和昵称，供多个标签页及浏览器重启后共用。旧配置首次迁移时，由第一个打开的标签页沿用原标签页 ID；其他标签页加载或重新加载后采用共享身份。这不是账户或登录。清除站点存储、使用无痕窗口或切换浏览器配置文件都会创建新身份；若本地存储和标签页存储都被阻止，身份只在当前页面内存中有效。若另一个标签页更改了共享身份，旧标签页会停止发送请求并提示重新加载。
 
-每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。发送后消息会立即以浅色预览显示，服务器确认后恢复正常；发送失败会移除预览并保留重试入口。Home 和 End 会把光标放在提及块旁的可编辑文本中，点击提及块会把光标放在块后，按 Backspace 可删除。复制或剪切提及会保留其标记（只选中提及本身也一样），粘贴后仍恢复为提及块；普通 `@名字` 文本保持纯文本，已不在房间中的成员也不会被恢复成提及。窗口较矮时，左侧栏会压缩底部和房间行，让房间列表保持可用，而不是被聊天内容撑大。左侧栏的 `+` 会打开带遮罩的居中弹窗，内含房间名和加入审核开关；取消、Esc 或点击遮罩都会关闭弹窗，并把焦点还给 `+`。
+每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。发送后消息会立即以浅色预览显示，服务器确认后恢复正常；发送失败会移除预览并保留重试入口。Home 和 End 会把光标放在提及块旁的可编辑文本中，点击提及块会把光标放在块后，按 Backspace 可删除。复制或剪切提及会保留其标记（只选中提及本身也一样），粘贴后仍恢复为提及块；普通 `@名字` 文本保持纯文本，已不在房间中的成员也不会被恢复成提及。窗口较矮时，左侧栏会压缩底部和房间行，让房间列表保持可用，而不是被聊天内容撑大。左侧栏的 `+` 会打开带遮罩的居中弹窗，内含房间名和加入审核开关；取消、Esc 或点击遮罩都会关闭弹窗。聊天界面中，设置和新建房间关闭后焦点回到消息输入框；在加入页，或手机侧栏抽屉仍打开时，焦点回到打开弹窗的控件。没有弹窗、面板、抽屉、阅读器或提及选择器打开时，半秒内连续按两次 Esc 也会把焦点送回输入框。连接中断后，只要认证恢复探测或任意请求成功，重连提示就会立即消失，即使旧的收件箱长轮询仍未返回。对于根据 Web 应用清单绘制底部导航栏的 Android 浏览器，清单主题色与默认页面背景色一致。
 
-侧栏切换只切换当前视图，不会离开房间。私聊由成员列表中选中的已注册会话创建。系统加入、离开、移除事件及房间预览会使用当前语言；普通用户消息不会被翻译。
+侧栏切换只切换当前视图，不会离开房间。网页上主动离开房间会先请求确认。私聊由成员列表中选中的已注册会话创建。系统加入、离开、移除事件及房间预览会使用当前语言；普通用户消息不会被翻译。
 
 聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
 
-输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击入口或按快捷键都能打开面板，点击关闭按钮、按 Esc 或点面板外的空白处都能关闭，关闭后焦点回到消息输入框，入口本身不进入 Tab 顺序。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 切换房间，动画只出现在房间列表的选中行，会话内容直接切换（可在设置中开启内容区域过渡），Alt+1…9 按房间在侧栏中的位置切换已加入房间，Alt+Home 和 Alt+End 平滑滚动到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 按动画滚动一步，步长在设置中按会话高度百分比调整（默认 90%），持续按键会延续同一个目标，速度保持稳定；Alt+PageUp 和 Alt+PageDown 行为相同，不移动光标，也不改变草稿。系统启用“减少动态效果”时直接跳转，不播放滚动动画。
+输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击入口或按快捷键都能打开面板，点击关闭按钮、按 Esc 或点面板外的空白处都能关闭，关闭后焦点回到消息输入框，入口本身不进入 Tab 顺序。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 切换房间，动画只出现在房间列表的选中行，会话内容直接切换（可在设置中开启内容区域过渡），Alt+1…9 按房间在侧栏中的位置切换已加入房间，Alt+Home 和 Alt+End 平滑滚动到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 按动画滚动一步，步长在设置中用滑动条按会话高度百分比调整（默认 90%），持续按键会延续同一个目标，速度保持稳定；Alt+PageUp 和 Alt+PageDown 行为相同，不移动光标，也不改变草稿。系统启用“减少动态效果”时直接跳转，不播放滚动动画。
+
+在任意位置（包括输入框获得焦点时）按 Alt+Space（Mac 为 Option+Space）打开搜索与命令面板。输入框为空时列出常用命令（刷新房间、创建房间、设置、成员、提问、公告、提醒、离开房间、跳到最新消息），输入 `>` 可过滤这些命令。输入普通文字会搜索当前房间的消息正文，结果显示房间、发送者、时间和匹配片段。按 Tab 在当前房间和全部已加入房间之间切换范围，↑/↓ 选择，Enter 打开结果并在会话中高亮该消息；Esc 或点击遮罩关闭面板，焦点回到输入框。已撤回的消息不会被搜索。
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
 
@@ -141,7 +179,7 @@ Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQues
 
 ### 公告栏
 
-公告是房间内持久保存的具名文档，适合记录共享背景、决策和交接。网页和 Agent 均可管理公告。同一房间内名称唯一且区分大小写，去除首尾空白后最多 64 个 Unicode 字符；内容最多 5000 个 Unicode 字符。同名写入更新原公告，并发写入以最后保存的内容为准。
+公告是房间内持久保存的具名文档，适合记录共享背景、决策和交接。网页通过 **选项 → 公告** 打开，网页和 Agent 均可管理公告。同一房间内名称唯一且区分大小写，去除首尾空白后最多 64 个 Unicode 字符；内容最多 5000 个 Unicode 字符。同名写入更新原公告，并发写入以最后保存的内容为准。
 
 读取任意房间的公告无需加入房间，沿用服务器现有访问凭证；修改和删除要求已有房间成员身份。删除房间时一并删除公告。共享 token 不代表独立用户身份。
 
@@ -173,7 +211,7 @@ Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQues
 
 服务器默认单文件上限为 500 MiB（524288000 字节），通过服务器环境变量 `CHAT_ROOM_MAX_FILE_SIZE_MB` 统一调整。上传要求已有房间成员身份；读取沿用现有 token 配置，对外部署前应设置 `CHAT_ROOM_SERVER_TOKEN`。服务器按实际接收字节限制大小，不依赖请求声明的长度。
 
-网页支持识别到的栅格图片、音频和视频的按需预览；点击图片会在对话上方打开查看器，缩放百分比按图片原始像素计算：大图先适配窗口，100% 表示一个图像像素对应一个 CSS 像素，重置回到适配大小，小图不会被放大。其他文件提供下载；SVG、HTML 不内嵌执行。播放能力取决于浏览器支持的编码。资源存放在 SQLite 数据库旁的 `resources/<roomID>/`，备份时须同时保留。删除房间会清理其资源；未引用的上传文件保留到房间删除，暂不提供自动过期或总磁盘配额。
+网页支持识别到的栅格图片、音频和视频的按需预览；点击图片会在对话上方打开查看器，缩放百分比按图片原始像素计算：大图先适配窗口，100% 表示一个图像像素对应一个 CSS 像素，重置回到适配大小，小图不会被放大。其他文件提供下载；SVG、HTML 不内嵌执行。播放能力取决于浏览器支持的编码。房间选项中的“文件”会打开整个房间的资源清单，显示名称、类型、大小、上传人和上传时间，并可按上传人筛选；成员可预览支持的媒体、下载任意文件，删除权限与角色一致。清单使用仅成员可访问的 `GET /rooms/:roomId/resources?limit=500&offset=0`，带 `x-session-id` 头，按时间倒序返回资源和总数；现有上传、元数据、内容与删除接口不变。资源存放在 SQLite 数据库旁的 `resources/<roomID>/`，备份时须同时保留。删除房间会清理其资源；未引用的上传文件保留到房间删除，暂不提供自动过期或总磁盘配额。
 
 ### Agent 状态与消息回执
 
@@ -212,6 +250,7 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 
 | 变量 | 使用方 | 说明 | 默认值 |
 |---|---|---|---|
+| `CHAT_ROOM_CONFIG` | 全部 | 显式指定配置文件路径；文件必须存在 | 自动查找第一个 `chatroom.*` |
 | `CHAT_ROOM_SERVER_URL` | 客户端 | 中心服务器地址；设置后即进入中心模式 | 未设置（单机模式） |
 | `CHAT_ROOM_SERVER_TOKEN` | 双端 | 中心服务器的 Bearer 认证令牌（可选） | 无（开放） |
 | `CHAT_ROOM_SERVER_HOST` | 服务器 | 监听主机名；优先于 `HOST` | `0.0.0.0` |

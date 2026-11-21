@@ -1,4 +1,5 @@
 import os from "node:os";
+import { loadRoomConfig } from "./file-config.ts";
 
 /** Resolved connection and delivery settings for the plugin. */
 export interface RoomConfig {
@@ -27,18 +28,27 @@ function positive(value: unknown, fallback: number, name: string, minimum: numbe
   return value;
 }
 
-/** Validate configuration once at load so a bad url or interval fails loudly. */
-export function resolveConfig(input: RoomConfigInput = {}): RoomConfig {
-  const url = String(input.url ?? process.env.CHAT_ROOM_SERVER_URL ?? DEFAULT_URL).replace(/\/+$/, "");
+/** Precedence: explicit input, then environment, then the chatroom config file, then defaults. */
+export function resolveConfig(
+  input: RoomConfigInput = {},
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+): RoomConfig {
+  const file = loadRoomConfig(env, cwd);
+  const url = String(
+    input.url ?? (env.CHAT_ROOM_SERVER_URL || undefined) ?? file?.client?.url ?? file?.url ?? DEFAULT_URL,
+  ).replace(/\/+$/, "");
   if (!/^https?:\/\/[^/]+/.test(url)) throw new TypeError("dsh-chat-room: url must be an http(s) origin");
-  const token = String(input.token ?? process.env.CHAT_ROOM_SERVER_TOKEN ?? "");
-  const participant = String(input.participant ?? os.userInfo().username).trim().slice(0, 64);
+  const token = String(
+    input.token ?? (env.CHAT_ROOM_SERVER_TOKEN || undefined) ?? file?.client?.token ?? file?.token ?? "",
+  );
+  const participant = String(input.participant ?? file?.client?.participant ?? os.userInfo().username).trim().slice(0, 64);
   if (!participant) throw new TypeError("dsh-chat-room: participant must not be empty");
   return {
     url,
     token,
     participant,
-    deliveryIntervalMs: positive(input.deliveryIntervalMs, 5000, "deliveryIntervalMs", 1000),
-    requestTimeoutMs: positive(input.requestTimeoutMs, 15000, "requestTimeoutMs", 1000),
+    deliveryIntervalMs: positive(input.deliveryIntervalMs ?? file?.client?.deliveryIntervalMs, 5000, "deliveryIntervalMs", 1000),
+    requestTimeoutMs: positive(input.requestTimeoutMs ?? file?.client?.requestTimeoutMs, 15000, "requestTimeoutMs", 1000),
   };
 }

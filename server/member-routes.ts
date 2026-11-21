@@ -2,9 +2,9 @@ import { memberActivity, type WorkState } from "../src/state/member-state.ts";
 import { acknowledgeRead, acknowledgeReadWithReceipts, readReceipts, readState, recordMessageReceipts, reportPresence, type ReceiptEvidence, type ReceiptIdentity } from "../src/state/store.ts";
 import { isReceiverOwnerID } from "../src/state/receiver-owner.ts";
 import { clearPendingAdmission } from "../src/center/queue.ts";
-import { touchActive } from "./wake";
-import { announcementRoutes } from "./announcement-routes";
-import { jsonObject } from "./json-body";
+import { touchActive } from "./wake.ts";
+import { announcementRoutes } from "./announcement-routes.ts";
+import { jsonObject } from "./json-body.ts";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const states = new Set<WorkState>(["working", "idle", "waiting", "unknown"]);

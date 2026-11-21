@@ -1,5 +1,6 @@
 // Minimal MCP stdio server: one `room` tool over the central chat-room HTTP API.
 import { centerAction, centerConfig, sessionIDFor } from "./center.mjs";
+import { resolveCodexConfig } from "./config.mjs";
 import { startDelivery } from "./deliver.mjs";
 import readline from "node:readline";
 
@@ -52,7 +53,7 @@ export function startServer(options = {}) {
   const output = options.output ?? process.stdout;
   const env = options.env ?? process.env;
   const cfg = centerConfig(env);
-  const deliveryEnabled = env.CHAT_ROOM_DELIVERY !== "0";
+  const { delivery: deliveryEnabled, codexBin } = resolveCodexConfig(env);
   const log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
   const deliveries = new Map();
 
@@ -60,7 +61,7 @@ export function startServer(options = {}) {
 
   const ensureDelivery = (threadID) => {
     if (!deliveryEnabled || !threadID || deliveries.has(threadID)) return;
-    deliveries.set(threadID, startDelivery({ cfg, threadID, log, spawnFn: options.spawnFn }));
+    deliveries.set(threadID, startDelivery({ cfg, threadID, log, spawnFn: options.spawnFn, bin: codexBin }));
   };
 
   const callRoom = async (args, threadID) => {
@@ -87,7 +88,7 @@ export function startServer(options = {}) {
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
           capabilities: { tools: {} },
-          serverInfo: { name: "chat_room", version: "0.1.3" },
+          serverInfo: { name: "chat_room", version: "0.1.4" },
           instructions: INSTRUCTIONS,
         },
       });

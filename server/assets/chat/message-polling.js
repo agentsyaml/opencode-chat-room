@@ -5,14 +5,63 @@ import { setRoomPreview } from "./system-messages.js";
 export function initMessagePolling(app, isUnreadMessage) {
   const $ = app.$;
   let pollDelay = 2000;
+  let recoveryTimer = null;
+  let recoveryRoom = null;
+  let recoveryGeneration = 0;
 
-  // A restarted network can leave the browser's old request hanging. Retry at
+  // A hung long-poll cannot notice that the network came back. Probe separately
+  // so the connection bar clears as soon as any authenticated request succeeds.
+  function stopRecovery() {
+    if (recoveryTimer) clearTimeout(recoveryTimer);
+    recoveryTimer = null;
+    recoveryRoom = null;
+    recoveryGeneration = 0;
+  }
+  function scheduleRecovery(immediate = false) {
+    const roomId = app.state.room?.id;
+    if (!app.state.polling || !roomId) return;
+    if (recoveryTimer && recoveryRoom === roomId) {
+      if (!immediate) return;
+      clearTimeout(recoveryTimer);
+    } else stopRecovery();
+    recoveryRoom = roomId;
+    recoveryGeneration = app.state.pollGeneration;
+    recoveryTimer = setTimeout(() => { void probeRecovery(roomId, recoveryGeneration); }, immediate ? 0 : 2000);
+  }
+  async function probeRecovery(roomId, generation) {
+    recoveryTimer = null;
+    if (!app.state.polling || app.state.room?.id !== roomId || app.state.pollGeneration !== generation) { stopRecovery(); return; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+      await app.api(`/rooms/${encodeURIComponent(roomId)}`, { signal: controller.signal });
+      if (!app.state.polling || app.state.room?.id !== roomId || app.state.pollGeneration !== generation) { stopRecovery(); return; }
+      app.setOnline(true);
+      stopRecovery();
+      pollDelay = 2000;
+      app.startPolling();
+    } catch (error) {
+      if (!app.state.polling || app.state.room?.id !== roomId || app.state.pollGeneration !== generation) { stopRecovery(); return; }
+      if (error.status === 404) {
+        stopRecovery();
+        void app.removeJoinedRoom(roomId, { reason: true });
+        return;
+      }
+      if (error.status === 401) {
+        stopRecovery();
+        app.setOnline(false);
+        if (!app.settingsOpen()) app.openChatSettings();
+        return;
+      }
+      recoveryTimer = setTimeout(() => { void probeRecovery(roomId, generation); }, 2000);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // A restarted network can leave the browser's old request hanging. Probe at
   // once instead of waiting for the long-poll timeout.
-  window.addEventListener("online", () => {
-    if (!app.state.polling || !app.state.room) return;
-    pollDelay = 2000;
-    app.startPolling();
-  });
+  window.addEventListener("online", () => scheduleRecovery(true));
 
   function isCurrentPoll(roomId, generation) {
     return app.state.polling && app.state.pollGeneration === generation && app.state.room?.id === roomId;
@@ -32,6 +81,7 @@ export function initMessagePolling(app, isUnreadMessage) {
     app.state.pollGeneration++;
     app.state.pollController?.abort();
     app.state.pollController = null;
+    stopRecovery();
   };
 
   async function pollLoop(generation, signal) {
@@ -121,10 +171,12 @@ export function initMessagePolling(app, isUnreadMessage) {
         void app.reconcileRoom(roomId, generation);
       }
       app.setOnline(true);
+      stopRecovery();
       pollDelay = data.hasMore && (entry?.receivedTs || 0) > previousReceivedTs ? 0 : 2000;
     } catch (error) {
       if (!isCurrentPoll(roomId, generation)) return;
       if (error.status === 401) {
+        stopRecovery();
         app.setOnline(false);
         if (!app.settingsOpen()) app.openChatSettings();
         pollDelay = Math.min(pollDelay * 2, 30000);
@@ -133,6 +185,7 @@ export function initMessagePolling(app, isUnreadMessage) {
       } else {
         app.setOnline(false);
         pollDelay = 2000;
+        if (error.network || error.name === "AbortError" || error.name === "TimeoutError") scheduleRecovery();
       }
     }
   }
@@ -142,6 +195,7 @@ export function initMessagePolling(app, isUnreadMessage) {
     try {
       const room = await app.api(`/rooms/${encodeURIComponent(roomId)}`);
       if (!isCurrentPoll(roomId, generation)) return;
+      app.setOnline(true);
       const before = JSON.stringify([app.state.room.ownerId, app.state.room.adminIds ?? [], app.state.room.successorId ?? null, app.state.room.adminSessionID ?? null]);
       const openQuestions = Number(room.openQuestions);
       Object.assign(app.state.room, { participants: room.participants, ownerId: room.ownerId ?? app.state.room.ownerId, adminIds: room.adminIds ?? [], successorId: room.successorId ?? null, adminSessionID: room.adminSessionID ?? null, openQuestions: Number.isFinite(openQuestions) ? Math.max(0, openQuestions) : app.state.room.openQuestions });
@@ -156,6 +210,7 @@ export function initMessagePolling(app, isUnreadMessage) {
     try {
       const room = await app.api(`/rooms/${encodeURIComponent(roomId)}`);
       if (!isCurrentPoll(roomId, generation)) return;
+      app.setOnline(true);
       if (entry && Number.isFinite(Number(room.recallVersion))) entry.recallVersion = Number(room.recallVersion);
       const current = app.state.room.messages;
       const ids = new Set(current.map((message) => message.id));

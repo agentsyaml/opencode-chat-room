@@ -29,6 +29,7 @@ test.skipIf(!browserModule)("installs as an app and starts from the shell while 
     const manifest = await page.evaluate(async () => (await fetch("/manifest.webmanifest")).json());
     expect(manifest.start_url).toBe("/chat");
     expect(manifest.display).toBe("standalone");
+    expect(manifest.theme_color).toBe(manifest.background_color);
     expect(manifest.icons.length).toBeGreaterThanOrEqual(2);
     expect(await page.locator('link[rel="manifest"]').getAttribute("href")).toBe("/manifest.webmanifest");
     expect(await page.locator('meta[name="mobile-web-app-capable"]').getAttribute("content")).toBe("yes");

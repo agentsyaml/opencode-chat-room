@@ -195,6 +195,7 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     await page.route(uploadPattern, async (route: BrowserRoute) => { if (decodeURIComponent(route.request().headers()["x-file-name"] || "") === "__Test_leave.png") { leaveStarted(); await leaveGate; try { await route.abort(); } catch {} } else await route.continue(); });
     await page.locator("#attachmentPicker").setInputFiles({ name: "__Test_leave.png", mimeType: "image/png", buffer: png }); await leaveRequest;
     await page.locator("#btnRoomOptions").click(); await page.locator("#btnLeave").click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" }); await page.locator("#btnAcceptConfirm").click();
     await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "__Test_AttachmentSecond"); releaseLeave();
     await page.waitForTimeout(50); await page.unroute(uploadPattern);
     expect(await page.locator("#attachmentList .attachment-item").count()).toBe(0);

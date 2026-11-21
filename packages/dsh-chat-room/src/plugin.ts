@@ -161,8 +161,13 @@ export const name = "dsh-chat-room";
 export const inject = ["tools"];
 
 /** Register the room tool and the context delivery hook. */
-export function apply(ctx: HostContext, input: RoomConfigInput = {}): void {
-  const cfg = resolveConfig(input);
+export function apply(
+  ctx: HostContext,
+  input: RoomConfigInput = {},
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
+): void {
+  const cfg = resolveConfig(input, env, cwd);
   const joined = new Set<string>();
   const lastFlush = new Map<string, number>();
   ctx.tools.register(createRoomTool(cfg, joined));

@@ -32,7 +32,7 @@ test("a joined session receives a queued Codex message and advances the watermar
 
   const child = spawn(process.execPath, ["plugin/mcp-server.mjs"], {
     cwd: root,
-    env: { ...process.env, CHAT_ROOM_SERVER_URL: center.url, CHAT_ROOM_CODEX_BIN: bin },
+    env: { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir, CHAT_ROOM_SERVER_URL: center.url, CHAT_ROOM_CODEX_BIN: bin },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const responses = new Map();
@@ -85,7 +85,7 @@ test("an approved pending join reaches its Codex thread without join_status", as
   });
   const child = spawn(process.execPath, ["plugin/mcp-server.mjs"], {
     cwd: root,
-    env: { ...process.env, CHAT_ROOM_SERVER_URL: center.url, CHAT_ROOM_CODEX_BIN: bin },
+    env: { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir, CHAT_ROOM_SERVER_URL: center.url, CHAT_ROOM_CODEX_BIN: bin },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const call = (id, arguments_) => child.stdin.write(`${JSON.stringify({

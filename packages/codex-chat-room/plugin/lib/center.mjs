@@ -2,12 +2,11 @@
 // This mirrors the subset of the OpenCode plugin's central mode that the
 // central server can serve without a host session transport.
 import os from "node:os";
+import { resolveCodexConfig } from "./config.mjs";
 
 export function centerConfig(env = process.env) {
-  return {
-    url: (env.CHAT_ROOM_SERVER_URL || "http://127.0.0.1:4399").replace(/\/+$/, ""),
-    token: env.CHAT_ROOM_SERVER_TOKEN || "",
-  };
+  const { url, token } = resolveCodexConfig(env);
+  return { url: url.replace(/\/+$/, ""), token };
 }
 
 export function sessionIDFor(threadID) {

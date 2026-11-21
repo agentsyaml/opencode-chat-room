@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import readline from "node:readline";
@@ -7,6 +8,8 @@ import { roomPayload, startCenter } from "./helpers.mjs";
 import { ROOM_TOOL } from "../plugin/lib/server.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+// Keep spawned servers away from a developer's real chatroom config.
+const testEnv = { HOME: path.join(root, "test", ".no-home"), XDG_CONFIG_HOME: path.join(root, "test", ".no-config") };
 
 test("room tool accepts message text up to 5000 characters", () => {
   assert.equal(ROOM_TOOL.inputSchema.properties.text.maxLength, 5000);
@@ -15,7 +18,7 @@ test("room tool accepts message text up to 5000 characters", () => {
 function startMcp(env) {
   const child = spawn(process.execPath, ["plugin/mcp-server.mjs"], {
     cwd: root,
-    env: { ...process.env, CHAT_ROOM_DELIVERY: "0", ...env },
+    env: { ...process.env, ...testEnv, CHAT_ROOM_DELIVERY: "0", ...env },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const responses = new Map();

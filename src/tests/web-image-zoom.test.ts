@@ -170,6 +170,7 @@ test.skipIf(!browserModule)("the owner hands the room to a person and never to a
     expect(await page.locator("#btnDeleteRoom").isVisible()).toBe(true);
     await page.locator("#btnEditRoom").click();
     await page.locator("#editRoomDialog[open]").waitFor();
+    await page.locator("#editRoomTabOwnership").click();
     await page.waitForFunction(() => Array.from((document.querySelector("#editRoomOwner") as HTMLSelectElement).options).some((option) => option.value === "__Test_TransferPeer"), undefined, { timeout: 15000 });
     const options = await page.locator("#editRoomOwner option").evaluateAll((nodes: HTMLOptionElement[]) => nodes.map((node) => node.value));
     expect(options).toContain("__Test_TransferPeer");

@@ -1,9 +1,9 @@
 import { databasePath, listJoinRequests, readJoinRequest, readState } from "../src/state/store.ts";
 import { findJoinRequest, removeJoinRequest, writeSqliteStateWithDatabase } from "../src/state/sqlite-state.ts";
-import { binding, tx, validCurrent } from "./admin-state";
-import { hasAdminCapability } from "./admin-auth";
-import { isRoomAdmin } from "./room-owner";
-import { joinRoomMember } from "./room-join";
+import { binding, tx, validCurrent } from "./admin-state.ts";
+import { hasAdminCapability } from "./admin-auth.ts";
+import { isRoomAdmin } from "./room-owner.ts";
+import { joinRoomMember } from "./room-join.ts";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 

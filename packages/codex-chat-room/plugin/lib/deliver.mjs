@@ -92,14 +92,14 @@ export async function deliverOnce(cfg, threadID, options = {}) {
   return { delivered, failed };
 }
 
-export function startDelivery({ cfg, threadID, log = console.error, spawnFn, timeoutMs = 15000 }) {
+export function startDelivery({ cfg, threadID, log = console.error, spawnFn, timeoutMs = 15000, bin }) {
   let stopped = false;
   let failures = 0;
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const run = async () => {
     while (!stopped) {
       try {
-        const result = await deliverOnce(cfg, threadID, { log, spawnFn, timeoutMs });
+        const result = await deliverOnce(cfg, threadID, { log, spawnFn, timeoutMs, bin });
         failures = result.failed > 0 ? failures + 1 : 0;
         if (result.failed > 0) await wait(Math.min(5000 * 2 ** failures, 60000));
         // A pending session returns immediately with no items; avoid busy-polling

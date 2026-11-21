@@ -36,12 +36,14 @@ export function initCreateRoomDialog(app) {
   dialog.addEventListener("click", (event) => { if (event.target === dialog) close(); });
   dialog.addEventListener("cancel", () => trigger.setAttribute("aria-expanded", "false"));
   dialog.addEventListener("close", () => {
-    const target = opener;
+    const target = opener, restore = restoreFocus;
     opener = null;
+    restoreFocus = true;
     trigger.setAttribute("aria-expanded", "false");
     app.hideCreateRoomError();
-    if (restoreFocus && target?.isConnected) target.focus({ preventScroll: true });
-    restoreFocus = true;
+    if (!restore) return;
+    if (app.focusChatComposer?.({ force: true })) return;
+    if (target?.isConnected) target.focus({ preventScroll: true });
   });
   app.$("#btnCloseCreateRoom")?.addEventListener("click", () => close());
   app.$("#btnCancelCreateRoom")?.addEventListener("click", () => close());

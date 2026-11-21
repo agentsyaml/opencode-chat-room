@@ -56,7 +56,7 @@ test.skipIf(!browserModule)("the mobile chat header stays compact with usable co
       if (metrics.title.scroll > metrics.title.client) expect(metrics.title.scroll).toBeGreaterThan(metrics.title.client);
       expect(metrics.drawer.width).toBeGreaterThanOrEqual(44);
       expect(metrics.drawer.height).toBeGreaterThanOrEqual(44);
-      expect(metrics.chips.length).toBe(5);
+      expect(metrics.chips.length).toBe(4);
       expect(metrics.chips.every((chip: { width: number; height: number }) => chip.width >= 44 && chip.height >= 44)).toBe(true);
       expect(metrics.actionsBelowMain).toBe(width <= 480);
       if (width === 390 || width === 549) await page.screenshot({ path: path.join(artifacts, `chat-mobile-header-${width}.png`) });

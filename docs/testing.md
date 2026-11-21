@@ -28,7 +28,8 @@ placing a fixture row before reading a layout metric — say so in a comment whe
 
 `bunfig.toml` preloads `scripts/test-env.ts` for every `bun test` run from the repository
 root. A top-level run deletes inherited `CHAT_ROOM_*` variables, points `HOME`, XDG paths
-and `CHAT_ROOM_STATE_DIR` at a temporary sandbox, sets `BUN_OPTIONS=--no-env-file`, and
+and `CHAT_ROOM_STATE_DIR` at a temporary sandbox, points `CHAT_ROOM_CONFIG` at an empty object
+`chatroom.json` (`{}`), sets `BUN_OPTIONS=--no-env-file`, and
 rejects environment-configured center or wake URLs other than empty values or reserved
 `.invalid` / `.example` hosts. Tests that need a local fake center pass its allocated
 origin directly instead of putting loopback into the environment. Spawned Bun servers
@@ -39,3 +40,8 @@ spawned server. Use `bun run test`, which runs each file in its own process; pas
 several files to one ad-hoc `bun test` call does not isolate their module caches. The
 sandbox removes its temporary directories in `afterAll`; a crashed run may leave a
 directory under the OS temp root, which is safe to delete.
+
+`bun run test` also runs the terminal client tests under `src/tui/test`. They use the
+OpenTUI test renderer instead of a real terminal. The CI `runtime` job separately runs
+`scripts/smoke-server.ts` under Node.js, Bun, and Deno, and the Bun-only
+`scripts/tui-compat.mjs` that verifies the OpenTUI dependency loads.

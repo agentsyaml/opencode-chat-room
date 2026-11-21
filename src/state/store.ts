@@ -1,6 +1,7 @@
 // Shared state facade for the standalone SQLite database.
 // (rooms + registry), identity, and formatting. Used by plugin.ts (standalone
 // mode) and server/chat-server.ts (central mode).
+import { Buffer } from "node:buffer";
 import path from "node:path";
 import os from "node:os";
 import RoomService, { type Message, type Room } from "../rooms/room-service.ts";

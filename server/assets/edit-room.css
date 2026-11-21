@@ -1,0 +1,77 @@
+/* Edit room: a settings-style tabbed dialog with a fixed footer. */
+#editRoomDialog {
+  width: min(920px, calc(100vw - 32px));
+  max-width: none;
+  height: min(680px, calc(100dvh - 40px));
+  max-height: none;
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 22px;
+}
+#editRoomDialog[open] { display: flex; flex-direction: column; animation: edit-room-in .18s ease-out both; }
+@keyframes edit-room-in { from { opacity: 0; transform: translateY(8px); } }
+#editRoomDialog::backdrop { background: rgb(8 20 16 / .52); backdrop-filter: blur(5px); }
+
+#editRoomDialog .edit-room-head { flex: none; align-items: flex-start; padding: 22px 24px 14px; }
+#editRoomDialog .edit-room-head h2 { margin: 0; }
+
+#editRoomDialog .edit-room-form { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+#editRoomDialog .edit-room-body { display: grid; flex: 1; grid-template-columns: 224px minmax(0, 1fr); min-height: 0; }
+#editRoomDialog .edit-room-nav { padding-top: 2px; }
+#editRoomDialog .edit-room-content { min-width: 0; }
+#editRoomDialog .edit-room-panel { padding-top: 2px; }
+
+#editRoomDialog .edit-room-hint { margin: -2px 0 18px; }
+#editRoomDialog .admin-fieldset .hint:last-child { margin-bottom: 0; }
+#editRoomDialog .edit-room-owner-note {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--accent-soft) 58%, transparent);
+  line-height: 1.5;
+}
+
+#editRoomDialog .edit-room-footer {
+  display: grid;
+  flex: none;
+  gap: 6px;
+  padding: 10px 24px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  background: color-mix(in srgb, var(--surface) 86%, var(--surface-2));
+}
+#editRoomDialog .edit-room-status { margin: 0; color: var(--danger); font-size: 12.5px; line-height: 1.45; }
+#editRoomDialog .edit-room-status:empty { min-height: 0; }
+#editRoomDialog .edit-room-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#editRoomDialog .edit-room-actions .btn { min-width: 96px; }
+
+@media (max-width: 760px) {
+  #editRoomDialog { width: calc(100vw - 20px); height: calc(100dvh - 24px); border-radius: 18px; }
+  #editRoomDialog .edit-room-head { padding: 16px 16px 10px; }
+  #editRoomDialog .edit-room-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  #editRoomDialog .edit-room-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    padding: 0 10px 10px;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+    overflow: visible;
+  }
+  #editRoomDialog[data-owner="false"] .edit-room-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #editRoomDialog .edit-room-nav .settings-tab {
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-height: 58px;
+    padding: 6px 3px;
+    font-size: 10.5px;
+    line-height: 1.2;
+    text-align: center;
+  }
+  #editRoomDialog .edit-room-nav .settings-tab svg { width: 16px; height: 16px; }
+  #editRoomDialog .edit-room-panel { padding: 10px 16px 22px; }
+  #editRoomDialog .edit-room-footer { padding: 8px 16px calc(12px + env(safe-area-inset-bottom)); }
+  #editRoomDialog .edit-room-actions .btn { flex: 1; min-height: 44px; }
+}

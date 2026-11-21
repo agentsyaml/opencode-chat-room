@@ -1,12 +1,12 @@
 import RoomService, { RoomError, type Room } from "../src/rooms/room-service.ts";
 import { databasePath, writeState } from "../src/state/store.ts";
 import { writeSqliteStateWithDatabase } from "../src/state/sqlite-state.ts";
-import { binding, enroll, exec, tx, validCurrent } from "./admin-state";
-import { hasAdminCapability } from "./admin-auth";
-import { roomPayload } from "./room-payload";
+import { binding, enroll, exec, tx, validCurrent } from "./admin-state.ts";
+import { hasAdminCapability } from "./admin-auth.ts";
+import { roomPayload } from "./room-payload.ts";
 import { clearPendingAdmission } from "../src/center/queue.ts";
 import { removeRoomResources } from "../src/rooms/resources.ts";
-import { isOwnerEntry, isRoomAdmin, isUser } from "./room-owner";
+import { isOwnerEntry, isRoomAdmin, isUser } from "./room-owner.ts";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const mutate = <T>(fn: (service: RoomService, registry: import("../src/state/store.ts").Registry) => T) => writeState(fn);

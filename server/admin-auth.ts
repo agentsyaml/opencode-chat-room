@@ -1,4 +1,4 @@
-import { matchesHash, type Binding } from "./admin-state";
+import { matchesHash, type Binding } from "./admin-state.ts";
 
 export function agentHeadersMatch(request: Request, binding: Binding): boolean {
   return request.headers.get("x-chat-agent-session") === binding.session_id &&

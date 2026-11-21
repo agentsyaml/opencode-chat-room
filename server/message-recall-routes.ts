@@ -1,5 +1,5 @@
 import { recallMessage, revealMessageContent } from "../src/state/store.ts";
-import { jsonObject } from "./json-body";
+import { jsonObject } from "./json-body.ts";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const MAX_SESSION = 128;

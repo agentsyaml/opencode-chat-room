@@ -1,6 +1,6 @@
 import { countOpenQuestions, readHistory } from "../src/state/store.ts";
 import type { Room } from "../src/rooms/room-service.ts";
-import { binding, tx } from "./admin-state";
+import { binding, tx } from "./admin-state.ts";
 
 // Initial page of history sent when a room is opened; older pages load on scroll.
 export const ROOM_WINDOW = 100;

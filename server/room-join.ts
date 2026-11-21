@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import RoomService, { type Room } from "../src/rooms/room-service.ts";
 import type { Registry, RegistryEntry } from "../src/state/store.ts";
-import { bindOwner, isUser } from "./room-owner";
+import { bindOwner, isUser } from "./room-owner.ts";
 
 export type JoinMember = {
   sessionID: string;

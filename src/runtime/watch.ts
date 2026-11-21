@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { appendFile, chmod, link, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
@@ -10,12 +11,14 @@ import { receiverOwnerID } from "../state/receiver-owner.ts";
 import { claimWatcher, closeReceiverState, releaseWatcherClaim, receiverStateDirectory, watcherProcessMayExist } from "../state/receiver-state.ts";
 import { databasePath, loadRegistry } from "../state/store.ts";
 import { request, type CenterOpts } from "../center/center-client.ts";
+import { loadRoomConfig, resolveClientSettings } from "../config/file-config.ts";
 import { assertDeliveryLease } from "../center/session-delivery.ts";
 import type { QueueTransport } from "../center/queue-transport.ts";
 import { pollOwnedSessions } from "./v2-receiver.ts";
-import { pollKnownSessions } from "../../plugin";
+import { pollKnownSessions } from "../../plugin.ts";
 import { locallyOwnedSessions, reportAgentPresence } from "../agent/agent-presence.ts";
 import { flushReceiptCandidates, receiptDestination } from "../agent/agent-receipts.ts";
+import { startServer } from "../../server/http-server.ts";
 
 type WatchRecord = { phase: "starting" | "running"; token: string; nonce: string; instanceID: string; pid: number; port?: number; createdAt?: number };
 function canonicalPath(value: string): string {
@@ -33,8 +36,9 @@ function canonicalPath(value: string): string {
     }
   }
 }
+const clientSettings = () => resolveClientSettings(loadRoomConfig());
 const profile = () => {
-  const center = process.env.CHAT_ROOM_SERVER_URL ?? "";
+  const center = clientSettings().url;
   const home = process.env.HOME || os.homedir();
   let target = `standalone:${canonicalPath(databasePath())}`;
   if (center) { try { const url = new URL(center); target = `${url.origin}${url.pathname}`; } catch { target = "invalid-center"; } }
@@ -136,9 +140,10 @@ export async function watcherSweep(deps: WatchSweepDeps = defaultSweepDeps()): P
 }
 
 function defaultSweepDeps(): WatchSweepDeps {
+  const settings = clientSettings();
   const center: CenterOpts = {
-    center: process.env.CHAT_ROOM_SERVER_URL ?? "",
-    token: process.env.CHAT_ROOM_SERVER_TOKEN ?? "",
+    center: settings.url,
+    token: settings.token,
   };
   return {
     discover: discoverCompatibleRegisteredHost,
@@ -308,7 +313,7 @@ export async function runWatcher(): Promise<void> {
   let shuttingDown = false;
   let interval: ReturnType<typeof setInterval> | undefined;
   let activeSweep: Promise<unknown> | undefined;
-  let server: ReturnType<typeof Bun.serve> | undefined;
+  let server: Awaited<ReturnType<typeof startServer>> | undefined;
   let finish!: () => void;
   const done = new Promise<void>((resolve) => { finish = resolve; });
   const stop = async () => {
@@ -319,14 +324,14 @@ export async function runWatcher(): Promise<void> {
     process.off("SIGTERM", onSignal);
     await activeSweep?.catch(() => {});
     await logEvent("stopped");
-    server?.stop(true);
+    await server?.close();
     await removeRecord(token!, nonce!);
     try { releaseWatcherClaim(profile(), instanceID!); } catch { /* Dead process detection reclaims the row next time. */ }
     closeReceiverState();
     finish();
   };
   const onSignal = () => { void stop(); };
-  const controlServer = Bun.serve({
+  const controlServer = await startServer({
     hostname: "127.0.0.1", port: 0,
     fetch(request) {
       const url = new URL(request.url);
@@ -349,7 +354,7 @@ export async function runWatcher(): Promise<void> {
   try {
     await saveRecord({ phase: "running", token, nonce, instanceID: instanceID!, pid: process.pid, port: controlServer.port, createdAt });
   } catch (error) {
-    controlServer.stop(true);
+    await controlServer.close();
     await removeRecord(token, nonce);
     releaseWatcherClaim(profile(), instanceID!);
     throw error;

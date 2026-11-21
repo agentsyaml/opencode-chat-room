@@ -1,6 +1,6 @@
 import { createRandomId, LS, LOADED_MESSAGE_LIMIT } from "./state.js";
 import { renderMarkdown } from "./markdown.js";
-import { hasMessageSelection, pruneMessageRows, trimMessages } from "./message-window.js";
+import { hasMessageSelection, pruneMessageRows, trimMessages, focusedMessage } from "./message-window.js";
 import { formatSystemMessage, setRoomPreview } from "./system-messages.js";
 import { installEditor } from "./editor.js";
 import { adminAgentBadge, isAdminAgent } from "./admin-badge.js";
@@ -102,6 +102,10 @@ export function initMessages(app) {
   app.jumpToBottom = () => {
     app.state.readAnchorGuard = null;
     app.state.followBottom = true;
+    if (app.state.focusMessageId) {
+      app.state.focusMessageId = null;
+      app.rerenderMessages();
+    }
     $("#thread").scrollTop = $("#thread").scrollHeight;
     const entry = app.state.room && app.state.rooms.get(app.state.room.id);
     app.state.unread = entry ? entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0) : 0;
@@ -188,6 +192,11 @@ export function initMessages(app) {
     }
   };
 
+  // Today keeps the compact clock; older messages carry the date because the
+  // day separator scrolls away or gets trimmed.
+  app.messageTime = (timestamp) => new Date(timestamp).toDateString() === new Date().toDateString()
+    ? app.timeHM(timestamp) : app.fmtTime(timestamp);
+
   app.renderMessage = (message, live) => {
     const row = document.createElement("li");
     row.dataset.sender = message.senderId;
@@ -210,7 +219,7 @@ export function initMessages(app) {
       name.className = "msg-name";
       name.textContent = own ? app.t("you") : sender;
       time.className = "msg-time";
-      time.textContent = app.timeHM(message.createdAt);
+      time.textContent = app.messageTime(message.createdAt);
       meta.append(name);
       if (isAdminAgent(app, message.senderSessionID || message.senderId)) meta.append(adminAgentBadge(app));
       meta.append(time);
@@ -253,20 +262,33 @@ export function initMessages(app) {
 
   app.renderMessages = (live = false) => {
     const thread = $("#thread"), list = $("#msgList"), messages = app.state.room.messages;
-    const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 80;
+    // A palette jump renders a window around the target instead of the newest
+    // tail. While that window is up, live appends stay off screen so the target
+    // is not trimmed away.
+    const focus = focusedMessage(app, list, messages);
+    if (focus?.existing) { app.updateJump(); return { skipped: 0 }; }
+    const nearBottom = !focus && thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 80;
     let skipped = 0;
     let anchorId = null, anchorOffset = 0, oldTop = thread.scrollTop;
     const viewport = thread.getBoundingClientRect();
     const firstVisible = [...list.children].find((node) => node.dataset.msgId && node.getBoundingClientRect().bottom > viewport.top);
     anchorId = firstVisible?.dataset.msgId || null;
     anchorOffset = firstVisible ? firstVisible.getBoundingClientRect().top - viewport.top : 0;
+    if (focus) {
+      // Start a fresh window containing the target, wherever it sits in the
+      // loaded state (which can hold up to LOADED_MESSAGE_LIMIT messages).
+      list.textContent = "";
+      app.rendered = 0;
+    }
     pruneMessageRows(list, messages);
     let last = list.lastElementChild;
     const renderedIds = new Set([...list.querySelectorAll("[data-msg-id]")].map((node) => node.dataset.msgId));
     let startIndex = 0;
     const lastId = [...list.querySelectorAll("[data-msg-id]")].at(-1)?.dataset.msgId;
     if (lastId) for (let index = messages.length - 1; index >= 0; index--) if (messages[index].id === lastId) { startIndex = index + 1; break; }
-    for (let index = startIndex; index < messages.length; index++) {
+    const renderStart = focus ? Math.max(0, focus.index - 120) : startIndex;
+    const renderEnd = focus ? Math.min(messages.length, focus.index + 120) : messages.length;
+    for (let index = renderStart; index < renderEnd; index++) {
       const message = messages[index];
       if (renderedIds.has(message.id) || app.failedRenderIds.has(message.id)) continue;
       try {
@@ -378,6 +400,9 @@ export function initMessages(app) {
       else updated = await app.api(`/rooms/${encodeURIComponent(room.id)}/messages`, {
         method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, ...(replyTarget ? { replyToMessageID: replyTarget.id } : {}) }),
       });
+      // A successful request proves the connection is usable, even if a stale
+      // long-poll is still waiting to time out.
+      app.setOnline(true);
       app.completeAttachments?.(room.id, message.ids);
       const pendingIndex = room.messages.findIndex((item) => item.id === pending.id);
       if (pendingIndex >= 0) room.messages.splice(pendingIndex, 1);

@@ -131,8 +131,9 @@
   .user-menu-trigger .rail-avatar { flex: none; width: 34px; height: 34px; border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--line)); font-size: 13px; font-weight: 700; }
   .user-menu-caret { font-size: 14px; }
   .user-menu-panel { top: auto; right: auto; bottom: calc(100% + 8px); left: 0; max-height: min(65dvh, 560px); overflow: auto; }
-  .room-options-panel { display: grid; gap: 4px; width: 190px; }
-  .menu-action { width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+  .room-options-panel { display: grid; gap: 4px; width: 190px; max-height: min(70dvh, 420px); overflow: auto; }
+  .menu-action { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+  .menu-action > svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
   .menu-action:hover { background: var(--surface-2); }
   /* A non-owner still sees the entry; it reads as secondary and explains itself. */
   .menu-action.menu-secondary { color: var(--ink-3); }

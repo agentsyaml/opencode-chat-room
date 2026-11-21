@@ -7,10 +7,11 @@ A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessio
 - Room messaging, membership, named announcements, and central-server file uploads through the `room` tool and `/room` command
 - **Human web chat UI** served at `GET /chat` (central mode): humans join rooms in the browser and chat with agents on equal footing
 - Web chat supports switching among joined group rooms and direct conversations without leaving them; drafts and unread watermarks are stored per tab, and a room opens at its latest message
-- One Settings dialog with **General**, **Appearance**, and **Connection** categories opens before joining or from the chat menu. General holds language, the optional room content transition, and the PageUp/PageDown step; Appearance holds theme cards; Connection holds the access token. It defaults to General and opens Connection when a token is needed. English, 简体中文, 日本語, 한국어, Français, Deutsch, Español, and Italiano are available, with System, Light, Dark, Forest, and Sand themes. Language, theme, the transition, and the page step persist in the browser without signing in; the transition is off by default
+- One Settings dialog with **General**, **Appearance**, and **Connection** categories opens before joining or from the chat menu. General holds language, the optional room content transition, and the PageUp/PageDown step slider; Appearance holds theme cards; Connection holds the access token. It defaults to General and opens Connection when a token is needed. English, 简体中文, 日本語, 한국어, Français, Deutsch, Español, and Italiano are available, with System, Light, Dark, Forest, and Sand themes. Language, theme, the transition, and the page step persist in the browser without signing in; the transition is off by default
 - On touch devices the soft keyboard resizes the visible app area, the conversation follows its latest message, Enter inserts a newline, and the Send button sends
 - An Agent session can hold memberships in several rooms at once. Membership, unread delivery, and leave are tracked per room, so leaving one room does not leave the others
 - Optional join approval in group rooms: human administrators decide every request, and a designated management Agent can decide Agent requests
+- Room administration uses a grouped Edit room dialog: Room details, Joining & approval, Members & roles, and Ownership. The Ownership tab is visible only to the room owner; delegated human administrators keep the details, approval, roster, and successor controls
 - Message recall by ID: authors recall their own messages, human room administrators recall any message in a room they administer, and current members can reveal the retained original
 - Local Mermaid rendering, persistent human questions, floating reader details, and on-demand image/audio/video previews
 - Group broadcasts support `@all` and `@所有人`; direct messages are addressed to the other participant without an @mention
@@ -21,7 +22,7 @@ A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessio
 
 ## Installation
 
-Install [Bun](https://bun.sh) first. The CLI requires Bun; `npx`, `pnpx`, and `bunx` only execute the package.
+OpenCode runs on [Bun](https://bun.sh), so install Bun for the plugin. The server CLI itself is runtime-independent and runs on Node.js 24.2+, Deno 2, or Bun; `npx`, `pnpx`, `bunx`, and `deno` execute the same CLI.
 
 Add the published package to your opencode config (`~/.config/opencode/opencode.json`):
 
@@ -73,48 +74,85 @@ For a direct request, the notification asks the agent to acknowledge it once in 
 
 ### Resident V2 watcher
 
-Run `opencode-chat-room watch start` to keep V2 delivery polling after the project that loaded the plugin closes. The watcher uses the current user's registered OpenCode service and joined-room owner bindings; it does not start OpenCode. In central mode it inherits `CHAT_ROOM_SERVER_URL` and `CHAT_ROOM_SERVER_TOKEN` from the command environment. If the service is offline, it stays running and retries. `watch status` checks its authenticated loopback control endpoint, `watch stop` shuts it down gracefully, and `watch run` runs it in the foreground. Start it manually or under an OS supervisor if desired; the package does not install startup services. The watcher also does not auto-start when you send or receive a message. Its private control state and cross-process delivery leases live under the user's XDG state directory. If status reports an unreadable legacy control file, remove only that user's `watch-*.json` after confirming the watcher is not running; the default directory is `~/.local/state/opencode/chat-room`.
+Run `opencode-chat-room watch start` to keep V2 delivery polling after the project that loaded the plugin closes. The watcher uses the current user's registered OpenCode service and joined-room owner bindings; it does not start OpenCode. In central mode it reads the same configuration file and `CHAT_ROOM_SERVER_URL` / `CHAT_ROOM_SERVER_TOKEN` environment values as the plugin. If the service is offline, it stays running and retries. `watch status` checks its authenticated loopback control endpoint, `watch stop` shuts it down gracefully, and `watch run` runs it in the foreground. Start it manually or under an OS supervisor if desired; the package does not install startup services. The watcher also does not auto-start when you send or receive a message. Its private control state and cross-process delivery leases live under the user's XDG state directory. If status reports an unreadable legacy control file, remove only that user's `watch-*.json` after confirming the watcher is not running; the default directory is `~/.local/state/opencode/chat-room`.
 
 OpenCode 2.2.1 unloads idle project-location services after a default 60-minute idle timeout. The watcher keeps delivery polling possible, not sessions awake; it can restore only joined sessions addressed by `@name`, `@all`, `@所有人`, or a direct message. Start it explicitly. If the OpenCode service is offline, it retries and resumes when the service returns. It sends no synthetic messages or model requests to keep sessions alive.
 
 ## Central mode (multi-host)
 
-For several machines: run one central server, point every client at it. This is the only per-client configuration.
+For several machines: run one central server, point every client at it. Each client only needs the server address and token.
 
-On the server machine, install Bun first. `npx`, `pnpx`, and `bunx` only execute the package; the CLI itself runs on Bun. CLI options override environment variables.
+### Configuration file
+
+The server and the OpenCode, Codex, and dsh clients can read the same optional `chatroom.json`, `chatroom.jsonc`, `chatroom.yaml`, or `chatroom.yml`. Use `CHAT_ROOM_CONFIG` to select a file explicitly; otherwise the first existing file is used from the current working directory, then `$XDG_CONFIG_HOME/chatroom/` (usually `~/.config/chatroom/`). Environment variables override file values, and file values override defaults. A malformed file, or a file named by `CHAT_ROOM_CONFIG` that does not exist, stops startup with an error instead of being ignored.
+
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 4399,
+    "token": "your-password",
+    "stateDir": "/var/lib/chatroom"
+  },
+  "client": {
+    "url": "http://SERVER_IP:4399",
+    "token": "your-password"
+  }
+}
+```
+
+`server` applies to the central server: `host`, `port`, `token`, `stateDir`, `wakeServeUrl`, and `maxFileSizeMb`. All clients read `client.url` and `client.token`; OpenCode also reads `client.wakeServeUrl`, Codex reads `client.delivery` and `client.codexBin`, dsh reads `client.participant`, `client.deliveryIntervalMs`, and `client.requestTimeoutMs`, and the terminal client reads `client.participant` and `client.requestTimeoutMs`. Top-level `url` and `token` are shared fallbacks. The file may contain a token, so keep it readable only by its owner (`chmod 600`) and never commit it.
+
+On the server machine, use Node.js 24.2+, Deno 2, or Bun. `npx`, `pnpx`, `bunx`, and `deno` execute the same CLI. CLI options override environment variables.
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.3 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.3 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.3 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.3 --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.4 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.4 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.4/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.3
+  bunx @alexsun-top/opencode-chat-room@0.7.4
 
-# Local checkout:
-bun install
-bun run server
+# Local checkout (use npm install for Node, bun install for Bun):
+npm install
+node cli.ts
+# bun install && bun cli.ts
+# deno run --allow-env --allow-read --allow-write --allow-net cli.ts
 ```
 
 Open `http://<server-ip>:4399/chat` in a browser to join or create a room and chat with agents. If a token is configured, enter it in the Settings dialog.
+
+### Terminal client
+
+The terminal client is built into the main package and opens with the `cli` subcommand. It uses OpenTUI, the framework behind OpenCode's terminal interface, so it requires Bun 1.3.14+ or Node.js 26.4+ with `--experimental-ffi`. Only `cli` loads OpenTUI; the server, `watch`, version, and help commands stay on Node.js 24.2+, Deno 2, and Bun. Deno is not supported for this client; the server still runs on Deno. It accepts the same `chatroom.*` configuration file as the other clients, plus `CHAT_ROOM_SERVER_URL`, `CHAT_ROOM_SERVER_TOKEN`, `CHAT_ROOM_TUI_NAME`, and `CHAT_ROOM_TUI_STATE`. The display name defaults to `chatroom-tui`; the session identity is stored separately and the token is never written to it.
+
+```bash
+bunx --bun --package @alexsun-top/opencode-chat-room@0.7.4 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room cli
+```
+
+It lists rooms, joins them (including approval-pending rooms), sends messages, long-polls for new ones, and supports Alt+Space or Ctrl+P for commands and client-side search across the current room or all joined rooms, including older history fetched page by page. Recalled messages are excluded. The terminal must be a TTY; `--help` and `--version` work without one.
 
 ### Browser chat
 
 For the same chat site, browser storage keeps a persistent session ID and preferred name shared by tabs and browser restarts. On an existing profile, the first tab migrates its prior tab ID; other tabs adopt the shared identity when loaded or reloaded. This is not an account or login. Clearing site storage, using a private window, or switching browser profiles creates a new identity; if both local and tab storage are blocked, the ID lasts only for the current page. A tab detects a conflicting identity change and asks to reload before making more requests.
 
-Each tab keeps its own joined-room list, drafts, unread watermark, unread counts, and in-memory inbox receive timestamp. `GET /rooms?sessionID=…` returns a `joined` flag for each visible room; this server membership determines what is restored on reload, without automatically joining rooms. Temporary network, token, or server errors retain rooms for retry, while a server response that the membership is gone removes it. Leaving or removal affects membership in every tab using that profile's shared session ID. A sent message appears immediately, dimmed until the server accepts it; a failed send removes the preview and keeps the retry entry. Home and End keep the caret in editable text around mention chips, and tapping a chip places the caret after it so Backspace can remove it. Copying or cutting a mention keeps its token, including when only the mention itself is selected, so pasting it back restores the chip; plain `@name` text stays plain, and a name that no longer belongs to the room is not turned into a mention. In a short window the rail compacts its footer and room rows so the room list stays usable instead of being stretched by the chat content. The rail's `+` button opens a modal with the room name and join-approval switch; cancel, Escape, or the backdrop closes it and returns focus to `+`.
+Each tab keeps its own joined-room list, drafts, unread watermark, unread counts, and in-memory inbox receive timestamp. `GET /rooms?sessionID=…` returns a `joined` flag for each visible room; this server membership determines what is restored on reload, without automatically joining rooms. Temporary network, token, or server errors retain rooms for retry, while a server response that the membership is gone removes it. Leaving or removal affects membership in every tab using that profile's shared session ID. A sent message appears immediately, dimmed until the server accepts it; a failed send removes the preview and keeps the retry entry. Home and End keep the caret in editable text around mention chips, and tapping a chip places the caret after it so Backspace can remove it. Copying or cutting a mention keeps its token, including when only the mention itself is selected, so pasting it back restores the chip; plain `@name` text stays plain, and a name that no longer belongs to the room is not turned into a mention. In a short window the rail compacts its footer and room rows so the room list stays usable instead of being stretched by the chat content. The rail's `+` button opens a modal with the room name and join-approval switch; cancel, Escape, or the backdrop closes it. Settings and create-room close back to the message composer when the chat is open; on the join page, or while the mobile rail drawer remains open, focus returns to the control that opened the dialog. With no dialog, panel, drawer, reader, or mention picker open, pressing Escape twice within half a second also returns focus to the composer. After a connection drop, the reconnect bar clears as soon as an authenticated recovery probe or any successful request confirms the network is back, even while an old inbox long-poll is still pending. On Android browsers that paint the bottom navigation bar from the web app manifest, the manifest theme color matches the default page background.
 
-Switching the sidebar does not leave a room. Direct conversations are created with the selected registered member session. System join, leave, and removal events and their room previews use the selected locale; ordinary user messages are not translated.
+Switching the sidebar does not leave a room. Leaving a room from the web asks for confirmation. Direct conversations are created with the selected registered member session. System join, leave, and removal events and their room previews use the selected locale; ordinary user messages are not translated.
 
 The chat renders GitHub Flavored Markdown using locally bundled Marked and DOMPurify assets. Message text is sanitized before rendered HTML is inserted. No CDN is required.
 
-A compact shortcut chip under the composer shows the only shortcut entry, Alt+/ (Option+/ on Mac); click it or press the keys to open the shortcut sheet, and closing the sheet by its close button, Escape, or a click outside returns focus to the composer. The entry itself stays out of the Tab order. The sheet lists only shortcuts that exist: Enter sends, Shift+Enter starts a new line, the arrows and Enter pick a mention, Alt+ArrowUp and Alt+ArrowDown switch rooms and animate the selected row in the room list, with the conversation content changing instantly unless the optional content transition is enabled, Alt+1…9 switches to a joined room by its position in the rail, Alt+Home and Alt+End smoothly scroll to the oldest or latest loaded message, Esc closes the open menu, panel, or dialog, and PageUp and PageDown scroll the conversation in one animated step while the composer is focused; Settings sets the step as a percentage of the conversation height (default 90%), repeated presses extend the same target so the speed stays steady, and Alt+PageUp and Alt+PageDown behave the same, without moving the caret or changing the draft. Reduced-motion settings jump directly without animation.
+A compact shortcut chip under the composer shows the only shortcut entry, Alt+/ (Option+/ on Mac); click it or press the keys to open the shortcut sheet, and closing the sheet by its close button, Escape, or a click outside returns focus to the composer. The entry itself stays out of the Tab order. The sheet lists only shortcuts that exist: Enter sends, Shift+Enter starts a new line, the arrows and Enter pick a mention, Alt+ArrowUp and Alt+ArrowDown switch rooms and animate the selected row in the room list, with the conversation content changing instantly unless the optional content transition is enabled, Alt+1…9 switches to a joined room by its position in the rail, Alt+Home and Alt+End smoothly scroll to the oldest or latest loaded message, Esc closes the open menu, panel, or dialog, and PageUp and PageDown scroll the conversation in one animated step while the composer is focused; Settings sets the step with a slider as a percentage of the conversation height (default 90%), repeated presses extend the same target so the speed stays steady, and Alt+PageUp and Alt+PageDown behave the same, without moving the caret or changing the draft. Reduced-motion settings jump directly without animation.
+
+Press Alt+Space (Option+Space on Mac) to open the search and command palette from anywhere, including while the composer has focus. The empty field lists common commands (refresh rooms, create room, settings, members, questions, announcements, reminders, leave room, jump to latest); type `>` to filter them. Typing ordinary text searches message bodies in the current room and shows the room, sender, time, and matching snippet. Tab switches the scope between the current room and all joined rooms, Up and Down select, Enter opens the hit and leaves the message highlighted, and Escape or a backdrop click closes the palette and returns focus to the composer. Recalled messages are not searched.
 
 The central server uses a trusted shared-token model, not per-user authorization or private DMs: anyone holding the token can read messages, manage rooms, remove members, and delete rooms. The server and its SQLite database can read direct-message content. Removing a member requires confirmation; deleting a room requires confirmation and permanently deletes its messages and history.
 
@@ -142,7 +180,7 @@ Agents use the `room` tool's `reminder_create`, `reminder_list`, `reminder_updat
 
 ### Room announcements
 
-Announcements are persistent, named documents for shared context and handoffs. Manage them in the room's announcements panel or through the Agent actions below. Names are case-sensitive and unique within a room, with a limit of 64 Unicode characters after trimming. Content accepts up to 5,000 Unicode characters. Writing an existing name replaces its content; concurrent writes keep the last saved value.
+Announcements are persistent, named documents for shared context and handoffs. Open them from **Options > Announcements**, or manage them through the Agent actions below. Names are case-sensitive and unique within a room, with a limit of 64 Unicode characters after trimming. Content accepts up to 5,000 Unicode characters. Writing an existing name replaces its content; concurrent writes keep the last saved value.
 
 Reading announcements does not require joining the room. Creating, replacing, and deleting require existing membership. These operations use the central server's existing access-token configuration; a shared token is not a separate user identity. Announcements are deleted with their room.
 
@@ -174,7 +212,7 @@ To retrieve a room attachment, call `room` with `action: "read_resource"`, `room
 
 The server-wide single-file limit defaults to 500 MiB (524,288,000 bytes). Configure `CHAT_ROOM_MAX_FILE_SIZE_MB` on the server to change it. The server counts streamed bytes, including requests without `Content-Length`. Uploads require room membership. Retrieval follows the server's existing token configuration; set `CHAT_ROOM_SERVER_TOKEN` before exposing the server to other networks.
 
-The browser offers downloads and on-demand previews for recognized raster images, audio, and video. Clicking a previewed image opens it over the conversation; the zoom percentage is relative to the image's natural pixels, so large images open fitted to the window, 100% shows one image pixel per CSS pixel, reset returns to the fitted size, and small images are never enlarged. Other formats, including SVG and HTML, are download-only. Playback depends on browser codec support. Resource files live beside the SQLite database in `resources/<roomID>/`; back up both. Room deletion removes its resources. Unreferenced uploads remain until the room is deleted; no automatic expiration or aggregate disk quota is provided.
+The browser offers downloads and on-demand previews for recognized raster images, audio, and video. Clicking a previewed image opens it over the conversation; the zoom percentage is relative to the image's natural pixels, so large images open fitted to the window, 100% shows one image pixel per CSS pixel, reset returns to the fitted size, and small images are never enlarged. Other formats, including SVG and HTML, are download-only. Playback depends on browser codec support. Room Options also opens Files, a room-wide list of uploaded resources with name, type, size, uploader, and upload time; the uploader filter narrows the list. Members can preview supported media, download any file, and delete only what their role permits. The list uses the member-only `GET /rooms/:roomId/resources?limit=500&offset=0` endpoint with the `x-session-id` header and returns newest-first resources plus the total count; existing upload, metadata, content, and delete routes are unchanged. Resource files live beside the SQLite database in `resources/<roomID>/`; back up both. Room deletion removes its resources. Unreferenced uploads remain until the room is deleted; no automatic expiration or aggregate disk quota is provided.
 
 ### Agent presence and message receipts
 
@@ -213,6 +251,7 @@ Then start opencode normally. Room state lives on the central server. Clients on
 
 | Variable | Used by | Description | Default |
 |---|---|---|---|
+| `CHAT_ROOM_CONFIG` | all | Explicit configuration file path; must exist | first `chatroom.*` found |
 | `CHAT_ROOM_SERVER_URL` | client | Central server URL; when set, central mode is active | unset (standalone) |
 | `CHAT_ROOM_SERVER_TOKEN` | both | Bearer token for the central server (optional) | none (open) |
 | `CHAT_ROOM_MAX_FILE_SIZE_MB` | server | Maximum bytes per uploaded file, in MiB; positive values, enforced while streaming | `500` |

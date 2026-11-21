@@ -135,6 +135,7 @@ export function initRooms(app) {
     app.rendered = 0;
     app.firstMessageId = null;
     app.state.pendingAction = null;
+    app.state.focusMessageId = null;
     LS.roomId = roomId;
     app.showChat();
     app.renderHead();
@@ -249,9 +250,12 @@ export function initRooms(app) {
     $("#btnCreate").disabled = busy;
   };
 
-  app.leaveRoom = (silent = false) => {
-    const roomId = app.state.room?.id;
-    if (roomId) void app.removeJoinedRoom(roomId, { leaveServer: !silent });
+  app.leaveRoom = async (silent = false) => {
+    const room = app.state.room;
+    if (!room) return;
+    if (!silent && !(await app.confirmAction(app.t("leaveRoomConfirm", { name: room.name })))) return;
+    app.closePanels?.();
+    void app.removeJoinedRoom(room.id, { leaveServer: !silent });
   };
   app.removeJoinedRoom = async (roomId, { leaveServer = false, reason = false, reconcile = false } = {}) => {
     if (!reconcile) invalidateRoomList();
@@ -269,6 +273,7 @@ export function initRooms(app) {
       app.state.unread = 0;
       app.rendered = 0;
       app.firstMessageId = null;
+      app.state.focusMessageId = null;
       $("#msgList").textContent = "";
       $("#msgInput").contentEditable = "false";
       $("#msgInput").setAttribute("aria-disabled", "true"); $("#msgInput").tabIndex = -1;

@@ -90,23 +90,30 @@ test.skipIf(!browserModule)("the rail opens a centered create-room dialog with a
       return { name: app.state.room.name, policy: app.state.room.joinPolicy };
     }, "/assets/chat/state.js")).toEqual({ name: "__Test_DialogRoom", policy: "approval" });
 
-    // Cancel, Escape, and the backdrop each dismiss the modal and restore focus.
+    // Cancel, Escape, the backdrop, and the close button restore the composer.
     await page.locator("#btnNewRoom").click();
     await dialog.waitFor({ state: "visible" });
     await page.locator("#btnCancelCreateRoom").click();
     await dialog.waitFor({ state: "hidden" });
-    expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnNewRoom");
+    await page.waitForFunction(() => document.activeElement?.id === "msgInput");
     expect(await page.locator("#btnNewRoom").getAttribute("aria-expanded")).toBe("false");
 
     await page.locator("#btnNewRoom").click();
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
-    expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnNewRoom");
+    await page.waitForFunction(() => document.activeElement?.id === "msgInput");
 
     await page.locator("#btnNewRoom").click();
     await dialog.waitFor({ state: "visible" });
     await page.mouse.click(6, 6);
     await dialog.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "msgInput");
+
+    await page.locator("#btnNewRoom").click();
+    await dialog.waitFor({ state: "visible" });
+    await page.locator("#btnCloseCreateRoom").click();
+    await dialog.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "msgInput");
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator("#btnRoomsDrawer").click();

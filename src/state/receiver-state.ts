@@ -1,7 +1,7 @@
-import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Database, isBusyError } from "./sqlite.ts";
 
 const databases = new Map<string, Database>();
 const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -14,8 +14,7 @@ function initialize(db: Database): void {
       return;
     } catch (error) {
       try { db.exec("ROLLBACK"); } catch { /* No transaction remained open. */ }
-      const err = error as { code?: string };
-      if (!/SQLITE_(BUSY|LOCKED)/.test(err.code ?? "") || attempt >= 7) throw error;
+      if (!isBusyError(error) || attempt >= 7) throw error;
       pause(Math.min(20 * 2 ** attempt, 250));
     }
   }
@@ -78,8 +77,7 @@ function immediate<T>(fn: (db: Database) => T): T {
   for (let attempt = 0; ; attempt++) {
     try { return db.transaction(() => fn(db)).immediate(); }
     catch (error) {
-      const err = error as { code?: string };
-      if (!/SQLITE_(BUSY|LOCKED)/.test(err.code ?? "") || attempt >= 7) throw error;
+      if (!isBusyError(error) || attempt >= 7) throw error;
       pause(Math.min(20 * 2 ** attempt, 250));
     }
   }

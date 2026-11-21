@@ -5,6 +5,7 @@
       "args": ["mcp-server.mjs"],
       "cwd": ".",
       "env_vars": [
+        "CHAT_ROOM_CONFIG",
         "CHAT_ROOM_SERVER_URL",
         "CHAT_ROOM_SERVER_TOKEN",
         "CHAT_ROOM_DELIVERY",

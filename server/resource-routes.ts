@@ -1,7 +1,9 @@
+import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { deleteResource, findResource, maxResourceBytes, resourcePath, uploadResource, type Resource } from "../src/rooms/resources.ts";
+import { Readable } from "node:stream";
+import { deleteResource, findResource, listRoomResources, maxResourceBytes, resourcePath, uploadResource, type Resource } from "../src/rooms/resources.ts";
 import { readState } from "../src/state/store.ts";
-import { isRoomAdmin, isUser } from "./room-owner";
+import { isRoomAdmin, isUser } from "./room-owner.ts";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -18,9 +20,22 @@ export async function resourceRoutes(req: Request, url: URL): Promise<Response |
   }
   const upload = url.pathname.match(/^\/rooms\/([^/]+)\/resources$/);
   const item = url.pathname.match(/^\/rooms\/([^/]+)\/resources\/([^/]+)(\/content)?$/);
-  if ((!upload || req.method !== "POST") && (!item || (req.method !== "GET" && !(req.method === "DELETE" && !item[3])))) return undefined;
+  if (!upload && !item) return undefined;
+  if (upload && req.method !== "POST" && req.method !== "GET") return undefined;
+  if (item && req.method !== "GET" && !(req.method === "DELETE" && !item[3])) return undefined;
   try {
     const roomID = decodeURIComponent((upload ?? item)![1]!);
+    if (upload && req.method === "GET") {
+      const sessionID = req.headers.get("x-session-id") ?? "";
+      const entry = await readState((_svc, registry) => registry[roomID]?.[sessionID]);
+      if (!entry) return json({ error: "forbidden" }, 403);
+      const rawLimit = Number(url.searchParams.get("limit") ?? 500);
+      const rawOffset = Number(url.searchParams.get("offset") ?? 0);
+      const limit = Number.isSafeInteger(rawLimit) ? Math.min(1000, Math.max(1, rawLimit)) : 500;
+      const offset = Number.isSafeInteger(rawOffset) ? Math.max(0, rawOffset) : 0;
+      const page = await listRoomResources(roomID, limit, offset);
+      return json({ resources: page.items, total: page.total, limit, offset }, 200);
+    }
     if (upload) {
       const sessionID = req.headers.get("x-session-id") ?? "";
       const entry = await readState((_svc, registry) => registry[roomID]?.[sessionID]);
@@ -78,5 +93,5 @@ async function content(req: Request, resource: Resource): Promise<Response> {
   const inline = /^(image\/(png|jpeg|gif|webp)|audio\/(mpeg|ogg|wav)|video\/(mp4|webm))$/.test(resource.mimeType);
   const headers = new Headers({ ...safeHeaders, "Content-Type": resource.mimeType, "Content-Disposition": contentDisposition(resource.name, inline), "Content-Length": String(end - start + 1) });
   if (status === 206) headers.set("Content-Range", `bytes ${start}-${end}/${info.size}`);
-  return new Response(Bun.file(path).slice(start, end + 1).stream(), { status, headers });
+  return new Response(Readable.toWeb(createReadStream(path, { start, end })) as unknown as ReadableStream, { status, headers });
 }

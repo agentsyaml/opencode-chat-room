@@ -53,7 +53,7 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
             const rect = (selector: string) => { const { x, y, width, height, bottom } = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect(); return { x, y, width, height, bottom }; };
             const root = document.scrollingElement!;
             const thread = document.querySelector<HTMLElement>("#thread")!;
-            const headerControls = ["#btnRoomsDrawer", "#btnQuestions", "#btnAnnouncements", "#btnMembers", "#btnRoomOptions"].map((selector) => {
+            const headerControls = ["#btnRoomsDrawer", "#btnQuestions", "#btnMembers", "#btnRoomOptions"].map((selector) => {
               const button = document.querySelector<HTMLElement>(selector)!;
               const icon = button.querySelector<SVGElement>("svg.action-icon")!;
               const iconBox = icon.getBoundingClientRect();
@@ -85,7 +85,7 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
           expect(metrics.headerControls.every((control: any) => control.fill === "none" && control.stroke !== "none")).toBe(true);
           expect(metrics.headerControls.every((control: any) => control.iconDisplay === (width <= 900 ? "block" : "none"))).toBe(true);
           const visibleIcons = metrics.headerControls.filter((control: any) => control.iconWidth > 0 && control.iconHeight > 0);
-          expect(visibleIcons.length).toBe(width <= 760 ? 5 : width <= 900 ? 4 : 0);
+          expect(visibleIcons.length).toBe(width <= 760 ? 4 : width <= 900 ? 3 : 0);
           expect(visibleIcons.every((control: any) => control.fill === "none" && control.stroke !== "none")).toBe(true);
           const visibleControls = metrics.headerControls.filter((control: any) => control.display !== "none");
           if (width <= 900) expect(visibleControls.every((control: any) => control.iconDisplay === "block" && control.iconWidth > 0 && control.iconHeight > 0)).toBe(true);
@@ -110,7 +110,7 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
     await page.setViewportSize({ width: 390, height: 844 });
     const mobileHeader = await page.evaluate(() => {
       const box = (selector: string) => { const rect = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect(); return { left: rect.left, top: rect.top }; };
-      return { trigger: box("#btnRoomsDrawer"), title: box("#roomName"), header: box(".chat-head"), chips: ["#btnQuestions", "#btnAnnouncements", "#btnMembers", "#btnRoomOptions"].map(box) };
+      return { trigger: box("#btnRoomsDrawer"), title: box("#roomName"), header: box(".chat-head"), chips: ["#btnQuestions", "#btnMembers", "#btnRoomOptions"].map(box) };
     });
     expect(mobileHeader.trigger.left).toBeLessThan(mobileHeader.title.left);
     // The action chips wrap to their own row on a phone, so only compare the ones beside the trigger.

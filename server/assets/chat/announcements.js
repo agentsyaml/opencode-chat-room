@@ -135,12 +135,14 @@ export function initAnnouncements(app) {
   $("#btnCancelAnnouncement").addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   trigger.addEventListener("click", () => {
+    // The entry lives in the Options menu, so choosing it closes that menu first.
     const open = panel.hidden; app.closePanels(); panel.hidden = !open;
-    trigger.setAttribute("aria-expanded", String(open)); if (open) { void load(); $("#announcementHeading").focus(); }
+    if (open) { void load(); $("#announcementHeading").focus(); }
+    else $("#btnRoomOptions").focus();
   });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !dialog.open && !panel.hidden) { app.closePanels(); trigger.focus(); } });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !dialog.open && !panel.hidden) { app.closePanels(); $("#btnRoomOptions").focus(); } });
   const close = app.closePanels;
-  app.closePanels = () => { close(); panel.hidden = true; trigger.setAttribute("aria-expanded", "false"); if (dialog.open) dialog.close(); };
+  app.closePanels = () => { close(); panel.hidden = true; if (dialog.open) dialog.close(); };
   document.addEventListener("chat-room-activated", (event) => {
     const id = event.detail;
     if (dialog.open) dialog.close();

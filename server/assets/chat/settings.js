@@ -7,7 +7,7 @@ export function initSettings(app) {
   if (!dialog) return;
   const tokenInput = $("#inTokenChat"), tokenHint = $("#tokenHint");
   const contentInput = $("#inContentTransition");
-  const pageInput = $("#inPageStep");
+  const pageInput = $("#inPageStep"), pageValue = $("#pageStepValue");
   const tabs = [...dialog.querySelectorAll('[role="tab"]')];
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   let opener = null;
@@ -61,6 +61,7 @@ export function initSettings(app) {
     syncThemeInputs();
     if (contentInput) contentInput.checked = app.LS.contentTransition;
     if (pageInput) pageInput.value = String(app.LS.pageStep);
+    if (pageValue) pageValue.textContent = `${app.LS.pageStep}%`;
     tokenInput.value = app.LS.token;
     if (tokenHint) tokenHint.hidden = !token;
     if (dialog.open) {
@@ -88,21 +89,26 @@ export function initSettings(app) {
   $("#btnCloseSettings")?.addEventListener("click", close);
   dialog.addEventListener("click", (event) => { if (event.target === dialog) close(); });
   dialog.addEventListener("cancel", () => opener?.setAttribute("aria-expanded", "false"));
+  pageInput?.addEventListener("input", () => {
+    app.LS.pageStep = pageInput.value;
+    pageInput.value = String(app.LS.pageStep);
+    if (pageValue) pageValue.textContent = `${app.LS.pageStep}%`;
+  });
   dialog.addEventListener("change", (event) => {
     if (event.target instanceof HTMLInputElement && event.target.name === "theme") app.setTheme(event.target.value);
     if (event.target === contentInput) app.LS.contentTransition = contentInput.checked;
     if (event.target === pageInput) {
       app.LS.pageStep = pageInput.value;
       pageInput.value = String(app.LS.pageStep);
+      if (pageValue) pageValue.textContent = `${app.LS.pageStep}%`;
     }
   });
   dialog.addEventListener("close", () => {
     const target = opener;
     opener = null;
-    if (target?.isConnected) {
-      target.setAttribute("aria-expanded", "false");
-      target.focus({ preventScroll: true });
-    }
+    if (target?.isConnected) target.setAttribute("aria-expanded", "false");
+    if (app.focusChatComposer?.({ force: true })) return;
+    if (target?.isConnected) target.focus({ preventScroll: true });
   });
   // The palette follows the system through its media query; only the browser chrome needs a nudge.
   scheme.addEventListener("change", () => { if (app.LS.theme === "system") syncThemeColor(); });

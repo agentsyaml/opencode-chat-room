@@ -1,5 +1,6 @@
+import { Buffer } from "node:buffer";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import type { Database, SQLQueryBindings } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "../src/state/sqlite.ts";
 import { databasePath } from "../src/state/store.ts";
 import { initializeAdminSchema, withStateTransaction } from "../src/state/sqlite-state.ts";
 

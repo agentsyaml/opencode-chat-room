@@ -1,7 +1,7 @@
 import { databasePath } from "../src/state/store.ts";
 import { readHistoryPage } from "../src/state/sqlite-state.ts";
-import { hasAdminCapability } from "./admin-auth";
-import { binding, digest, ensureAdminSchema, exec, isAgentMember, many, matchesHash, newSecret, publicRoom, tx, validCurrent } from "./admin-state";
+import { hasAdminCapability } from "./admin-auth.ts";
+import { binding, digest, ensureAdminSchema, exec, isAgentMember, many, matchesHash, newSecret, publicRoom, tx, validCurrent } from "./admin-state.ts";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);

@@ -5,7 +5,33 @@ import { isRoomAdmin } from "./admin-badge.js";
 // the room payload and room owners manage it here instead of an operator token.
 export function initAdmin(app) {
   const $ = app.$, dialog = $("#editRoomDialog");
-  let agents = [], people = [], generation = 0, agentsReady = false, rosterReady = false;
+  let agents = [], people = [], generation = 0, agentsReady = false, rosterReady = false, opener = null;
+  const tabs = [...dialog.querySelectorAll('[role="tab"]')];
+
+  // One tab stop for the visible tabs; arrow keys move selection like a native tab widget.
+  const activateTab = (name, { focus = false } = {}) => {
+    for (const tab of tabs) {
+      const selected = tab.dataset.editRoomTab === name;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      const panel = document.getElementById(tab.getAttribute("aria-controls"));
+      if (panel) panel.hidden = !selected;
+      if (selected && focus) tab.focus();
+    }
+  };
+  const onTabKey = (event) => {
+    const items = tabs.filter((tab) => !tab.hidden), index = items.indexOf(event.target);
+    if (index < 0) return;
+    const step = event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : 0;
+    const target = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : step ? (index + step + items.length) % items.length : -1;
+    if (target < 0) return;
+    event.preventDefault();
+    activateTab(items[target].dataset.editRoomTab, { focus: true });
+  };
+  for (const tab of tabs) {
+    tab.addEventListener("click", () => activateTab(tab.dataset.editRoomTab));
+    tab.addEventListener("keydown", onTabKey);
+  }
 
   // Only people can own a room: agents carry a protocol, a host, or a receiver binding.
   const isPerson = (entry) => Boolean(entry?.name) && !entry.protocol && !entry.host && !entry.receiverOwnerID;
@@ -67,9 +93,17 @@ export function initAdmin(app) {
     renderAdminIds(room);
     $("#editRoomAdminIdsEmpty").hidden = true;
     renderSuccessorOptions(room);
-    $("#editRoomOwnerOnly").hidden = !isOwner();
-    $("#editRoomOwnerOnlyNote").hidden = isOwner();
+    const owner = isOwner();
+    // The Ownership tab only exists for the owner; its fields stay in the form for everyone.
+    dialog.dataset.owner = owner ? "true" : "false";
+    $("#editRoomTabOwnership").hidden = !owner;
+    $("#editRoomOwnerOnly").hidden = !owner;
+    $("#editRoomOwnerOnlyNote").hidden = owner;
+    activateTab("details");
+    const active = document.activeElement;
+    opener = active instanceof HTMLElement && active.getClientRects().length ? active : $("#btnRoomOptions");
     dialog.showModal();
+    $("#editRoomName").focus();
     void loadAgents(++generation);
   }
 
@@ -90,7 +124,13 @@ export function initAdmin(app) {
   $("#btnOwnerOnlyOk").addEventListener("click", () => ownerDialog.close());
   ownerDialog.addEventListener("click", (event) => { if (event.target === ownerDialog) ownerDialog.close(); });
   $("#btnCloseEditRoom").addEventListener("click", () => dialog.close());
+  $("#btnCancelEditRoom").addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener("close", () => {
+    const target = opener;
+    opener = null;
+    if (target?.isConnected && target.getClientRects().length) target.focus({ preventScroll: true });
+  });
   $("#editRoomForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const room = app.state.room; if (!room) return;

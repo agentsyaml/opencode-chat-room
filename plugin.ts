@@ -34,12 +34,15 @@ import { uploadAgentResource } from "./src/rooms/resource-upload.ts";
 import { readAgentResource, resourceReadFailure } from "./src/rooms/resource-read.ts";
 import { adminTool, adminToolDescription, adminToolSchema } from "./src/agent/admin-client.ts";
 import { runReminderTool } from "./src/center/reminder-client.ts";
+import { loadRoomConfig, resolveClientSettings } from "./src/config/file-config.ts";
 // ponytail: CHAT_ROOM_SERVER_URL switches to central mode (all state on a
-// central server); unset = standalone local-file mode
-const centerUrl = process.env.CHAT_ROOM_SERVER_URL ?? "";
-const centerToken = process.env.CHAT_ROOM_SERVER_TOKEN ?? "";
+// central server); unset = standalone local-file mode. A chatroom.json(c)/yaml
+// file is the shared fallback; environment variables still override it.
+const connection = resolveClientSettings(loadRoomConfig());
+const centerUrl = connection.url;
+const centerToken = connection.token;
 // A configured OpenCode serve URL is required to wake exited sessions.
-const serveWakeUrl = process.env.CHAT_ROOM_WAKE_SERVE_URL ?? "";
+const serveWakeUrl = connection.wakeServeUrl;
 type PluginRuntime = V2Runtime;
 
 const runtimeContext = new AsyncLocalStorage<PluginRuntime>();

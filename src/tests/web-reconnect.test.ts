@@ -63,6 +63,64 @@ test.skipIf(!browserModule)("network recovery clears the connection bar and stal
   }
 }, 60000);
 
+test.skipIf(!browserModule)("a hung long poll clears as soon as the recovery probe succeeds", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-reconnect-hang-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    page.setDefaultTimeout(15000);
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("__Test_Hung");
+    await page.locator("#inRoomName").fill("__Test_HungRoom");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+
+    const empty = JSON.stringify({ member: true, items: [], hasMore: false });
+    let networkDown = true;
+    let inbox = "abort";
+    await page.route("**/inbox?*", async (route: any) => {
+      if (inbox === "abort") return route.abort("failed");
+      if (inbox === "hold") {
+        await new Promise((resolve) => setTimeout(resolve, 8000));
+        return route.abort("failed").catch(() => {});
+      }
+      return route.fulfill({ status: 200, contentType: "application/json", body: empty });
+    });
+    await page.route("**/rooms/*", (route: any) => {
+      const request = route.request();
+      if (networkDown && request.method() === "GET") return route.abort("failed");
+      return route.continue();
+    });
+    await page.evaluate(async (modulePath: string) => {
+      const { app } = await import(modulePath);
+      app.startPolling();
+    }, "/assets/chat/state.js");
+    await page.locator("#connBar").waitFor({ state: "visible" });
+
+    // Simulate a long poll that is still hanging after connectivity returns.
+    inbox = "hold";
+    networkDown = false;
+    const started = Date.now();
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await page.locator("#connBar").waitFor({ state: "hidden", timeout: 5000 });
+    expect(Date.now() - started).toBeLessThan(4500);
+    inbox = "pass";
+    await page.waitForTimeout(250);
+    expect(await page.locator("#connBar").isVisible()).toBe(false);
+  } finally {
+    await browser?.close();
+    server.kill("SIGTERM");
+    await new Promise((resolve) => server.once("exit", resolve));
+    await rm(stateDir, { recursive: true, force: true });
+  }
+}, 60000);
+
 function isolatedEnv(dir: string, port: number): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of ["CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL"]) delete env[key];

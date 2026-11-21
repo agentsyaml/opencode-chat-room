@@ -27,6 +27,11 @@ test("resource API keeps uploads member-gated and serves safe ranged content", a
     const upload = await req("/rooms/"+room.id+"/resources","POST",{"X-Session-ID":"member","X-File-Name":encodeURIComponent("photo.png"),"Content-Type":"application/octet-stream"},new Uint8Array([137,80,78,71,13,10,26,10,1,2]));
     if (upload.status !== 201) throw new Error("upload failed: "+upload.status+" "+await upload.text());
     const resource = (await upload.json()).resource;
+    const outsiderList = await req("/rooms/"+room.id+"/resources","GET",{"X-Session-ID":"outsider"});
+    if (outsiderList.status !== 403) throw new Error("nonmember resource list was accepted");
+    const listed = await req("/rooms/"+room.id+"/resources?limit=1","GET",{"X-Session-ID":"member"});
+    const listedBody = await listed.json();
+    if (listed.status !== 200 || listedBody.total !== 1 || listedBody.resources.length !== 1 || listedBody.resources[0].id !== resource.id) throw new Error("resource list was incorrect: "+listed.status+" "+JSON.stringify(listedBody));
     const unauthGet = await server.fetch(new Request("http://local/rooms/"+room.id+"/resources/"+resource.id));
     if (unauthGet.status !== 401) throw new Error("unauthenticated resource read was accepted");
     const unauthContent = await server.fetch(new Request("http://local/rooms/"+room.id+"/resources/"+resource.id+"/content"));

@@ -32,8 +32,11 @@ if (!trusted) {
   const home = path.join(root, "home"), config = path.join(root, "config");
   const state = path.join(root, "state"), rooms = path.join(root, "rooms");
   for (const dir of [home, config, state, rooms]) mkdirSync(dir, { recursive: true });
+  const emptyConfig = path.join(root, "chatroom.json");
+  writeFileSync(emptyConfig, "{}");
   Object.assign(process.env, { HOME: home, XDG_CONFIG_HOME: config, XDG_STATE_HOME: state,
-    CHAT_ROOM_STATE_DIR: rooms, CHAT_ROOM_TEST_ISOLATED: "1", CHAT_ROOM_TEST_SANDBOX: root });
+    CHAT_ROOM_STATE_DIR: rooms, CHAT_ROOM_CONFIG: emptyConfig,
+    CHAT_ROOM_TEST_ISOLATED: "1", CHAT_ROOM_TEST_SANDBOX: root });
   writeFileSync(path.join(root, ".sandbox"), "1");
   for (const key of critical) process.env[key] = "";
   afterAll(() => { try { rmSync(root, { recursive: true, force: true }); } catch {} });
@@ -46,5 +49,10 @@ if (!trusted) {
   }
   if (!fakeCenter(process.env.CHAT_ROOM_WAKE_SERVE_URL)) delete process.env.CHAT_ROOM_WAKE_SERVE_URL;
   for (const key of critical) process.env[key] ??= "";
+  if (!process.env.CHAT_ROOM_CONFIG || !inside(process.env.CHAT_ROOM_CONFIG)) {
+    const emptyConfig = path.join(sandbox!, "chatroom.json");
+    if (!existsSync(emptyConfig)) writeFileSync(emptyConfig, "{}");
+    process.env.CHAT_ROOM_CONFIG = emptyConfig;
+  }
 }
 if (!(process.env.BUN_OPTIONS ?? "").includes("--no-env-file")) process.env.BUN_OPTIONS = `${process.env.BUN_OPTIONS ?? ""} --no-env-file`.trim();

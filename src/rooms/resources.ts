@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { databasePath, readState } from "../state/store.ts";
-import { getResource, putResource, removeResource, type StoredResource } from "../state/sqlite-state.ts";
+import { getResource, listResources, putResource, removeResource, type StoredResource } from "../state/sqlite-state.ts";
 
 export type Resource = StoredResource;
 export class ResourceError extends Error {
-  constructor(readonly status: number, message: string) { super(message); }
+  readonly status: number;
+  constructor(status: number, message: string) { super(message); this.status = status; }
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const storageDir = () => path.join(path.dirname(databasePath()), "resources");
@@ -132,6 +133,10 @@ export async function uploadResource(roomID: string, filename: string, body: Rea
 export function resourcePath(resource: Pick<Resource, "id" | "roomID">): string {
   if (!uuid.test(resource.roomID) || !uuid.test(resource.id)) throw new ResourceError(404, "resource not found");
   return path.join(roomDirectory(resource.roomID), resource.id);
+}
+export async function listRoomResources(roomID: string, limit = 500, offset = 0): Promise<{ items: Resource[]; total: number }> {
+  if (!uuid.test(roomID)) throw new ResourceError(404, "room not found");
+  return listResources(databasePath(), roomID, limit, offset);
 }
 export async function findResource(roomID: string, id: string): Promise<Resource | undefined> {
   if (!uuid.test(id)) return undefined;

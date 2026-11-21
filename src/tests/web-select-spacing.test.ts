@@ -58,7 +58,8 @@ test.skipIf(!browserModule)("select controls keep the chevron gap equal to the t
 
     await page.locator("#btnRoomOptions").click(); await page.locator("#btnEditRoom").click();
     await page.locator("#editRoomDialog[open]").waitFor();
-    for (const selector of ["#editRoomSuccessor", "#editRoomAdmin", "#editRoomOwner"]) await expectSelect(page, selector, 10);
+    await page.locator("#editRoomTabMembers").click();
+    await expectSelect(page, "#editRoomSuccessor", 10);
     await page.locator("#editRoomSuccessor").screenshot({ path: path.join(artifacts, "select-admin-light.png") });
     const lightIcon = await iconSource(page, "#editRoomSuccessor");
     await page.emulateMedia({ colorScheme: "dark" });
@@ -67,6 +68,8 @@ test.skipIf(!browserModule)("select controls keep the chevron gap equal to the t
     expect(darkIcon).toContain("a6b3aa");
     await page.locator("#editRoomSuccessor").screenshot({ path: path.join(artifacts, "select-admin-dark.png") });
     await page.emulateMedia({ colorScheme: "light" });
+    await page.locator("#editRoomTabOwnership").click();
+    for (const selector of ["#editRoomAdmin", "#editRoomOwner"]) await expectSelect(page, selector, 10);
     await page.locator("#btnCloseEditRoom").click();
 
     await page.locator("#btnReminders").click(); await page.locator("#btnNewReminder").click();
@@ -87,6 +90,7 @@ test.skipIf(!browserModule)("select controls keep the chevron gap equal to the t
     await page.keyboard.press("Escape"); await page.locator("#roomRail.drawer-open").waitFor({ state: "detached" });
     await page.locator("#btnRoomOptions").click(); await page.locator("#btnEditRoom").click();
     await page.locator("#editRoomDialog[open]").waitFor();
+    await page.locator("#editRoomTabMembers").click();
     await expectSelect(page, "#editRoomSuccessor", 10);
     await page.locator("#editRoomSuccessor").screenshot({ path: path.join(artifacts, "select-admin-mobile.png") });
     await page.locator("#btnCloseEditRoom").click();

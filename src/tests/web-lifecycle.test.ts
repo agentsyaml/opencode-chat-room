@@ -306,7 +306,9 @@ async function stalePollCannotRemoveRejoinedRoom(browser: any, origin: string, s
   await page.goto(`${origin}/chat`); await switchTo(page, room.id);
   await page.waitForFunction(() => (window as any).__stalePollStarted === true);
   await api(origin, `/rooms/${room.id}/kick`, "POST", { sessionID: "poll-owner", targetSessionID: sid });
-  await page.locator("#btnRoomOptions").click(); await page.locator("#btnLeave").click(); await page.locator("#joinView").waitFor({ state: "visible" });
+  await page.locator("#btnRoomOptions").click(); await page.locator("#btnLeave").click();
+  await page.locator("#confirmDialog").waitFor({ state: "visible" }); await page.locator("#btnAcceptConfirm").click();
+  await page.locator("#joinView").waitFor({ state: "visible" });
   await page.locator("#inName").fill("Victim"); await page.locator("#inRoomId").fill(room.id); await page.locator("#btnJoin").click();
   await switchTo(page, room.id);
   expect((await api(origin, `/rooms/${room.id}/members`)).some((member: any) => member.sessionID === sid)).toBe(true);

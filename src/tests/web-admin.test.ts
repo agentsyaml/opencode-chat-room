@@ -98,6 +98,7 @@ test.skipIf(!browserModule)("owner designates an administrator agent; access is 
     const designate = async (value: string) => {
       await page.locator("#btnRoomOptions").click(); await page.locator("#btnEditRoom").click();
       await page.locator("#editRoomDialog[open]").waitFor();
+      await page.locator("#editRoomTabOwnership").click();
       await page.waitForFunction((id: string) => Array.from((document.querySelector("#editRoomAdmin") as HTMLSelectElement).options).some((option) => option.value === id), agentSession);
       await page.locator("#editRoomAdmin").selectOption(value);
       await page.locator("#editRoomForm button[type=submit]").click();
@@ -199,7 +200,9 @@ test.skipIf(!browserModule)("user navigation supersedes room restoration", async
     await page.locator("#btnRefreshRooms").click(); await directFailure;
     await page.route(`${origin}/rooms/${activeRoom}/members`, async (route: BrowserRoute) => { const response = await route.fetch(); groupMembersStarted(); await groupGate; await route.fulfill({ response }); groupMembersDone(); });
     await groupMembers;
-    await page.locator("#btnRoomOptions").click(); await page.locator("#btnLeave").click(); await page.waitForFunction((id: string) => sessionStorage.getItem("chat.roomId") !== id, activeRoom);
+    await page.locator("#btnRoomOptions").click(); await page.locator("#btnLeave").click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" }); await page.locator("#btnAcceptConfirm").click();
+    await page.waitForFunction((id: string) => sessionStorage.getItem("chat.roomId") !== id, activeRoom);
     releaseGroupMembers(); await groupDone; await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     expect(await page.evaluate(() => sessionStorage.getItem("chat.roomId"))).not.toBe(activeRoom);
     expect(await page.evaluate((id: string) => JSON.parse(sessionStorage.getItem("chat.joinedRoomIds") || "[]").includes(id), activeRoom)).toBe(false);

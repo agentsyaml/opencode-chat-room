@@ -1,5 +1,7 @@
+import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
 import type { Resource } from "./resources.ts";
 
 type PermissionContext = { directory: string; worktree?: string; ask(input: { permission: string; patterns: string[]; always: string[]; metadata: Record<string, unknown> }): Promise<void> };
@@ -32,13 +34,14 @@ export async function uploadAgentResource(opts: UploadOptions, roomID: string, f
   };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
   const response = await fetch(`${opts.center}/rooms/${encodeURIComponent(roomID)}/resources`, {
-    method: "POST", headers, body: Bun.file(actual).stream(),
+    method: "POST", headers,
+    body: Readable.toWeb(createReadStream(actual)) as unknown as BodyInit,
     redirect: "error",
     // Large transfers need more than the JSON client's ten-second deadline.
     signal: AbortSignal.timeout(30 * 60_000),
-    // @ts-expect-error Bun supports streaming request bodies without buffering.
+    // Streaming request bodies require half-duplex framing in fetch.
     duplex: "half",
-  });
+  } as RequestInit & { duplex: "half" });
   const data = await response.json().catch(() => ({})) as { resource?: Resource; error?: string };
   if (!response.ok || !data.resource) throw new Error(data.error ?? `upload failed (${response.status})`);
   return `${JSON.stringify(data.resource)}\n[[resource:${data.resource.id}]]\nThe upload alone is invisible. To display this attachment, include the marker above unchanged in a send message, outside backticks or code blocks.`;

@@ -1,4 +1,7 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 const usage = `Usage: opencode-chat-room [options]
 
@@ -10,6 +13,7 @@ Options:
   -t, --token <token>    Enable bearer token authentication
 
 Commands:
+  cli [--name <name>]    Open the terminal client
   watch run|start|status|stop`;
 
 type ValueOption = "host" | "port" | "token";
@@ -37,6 +41,15 @@ function validatePort(value: string): void {
 }
 
 const args = process.argv.slice(2);
+if (args[0] === "cli") {
+  // Keep the plain-JS TUI outside dist so bundling cannot hoist OpenTUI into
+  // every CLI command. The packaged layout has dist/cli.js beside src/tui.
+  const packaged = new URL("../src/tui/main.mjs", import.meta.url);
+  const source = new URL("./src/tui/main.mjs", import.meta.url);
+  const entry = existsSync(fileURLToPath(packaged)) ? packaged : source;
+  const { main } = await import(entry.href);
+  process.exit(await main(args.slice(1)));
+}
 if (args[0] === "watch") {
   const action = args[1];
   if ((args.length === 2 && (action === "help" || action === "--help")) ||
@@ -102,9 +115,15 @@ if (help) {
 }
 
 if (version) {
-  const packageJson = (await Bun.file(
-    new URL("./package.json", import.meta.url),
-  ).json()) as { version?: string };
+  let packageJson: { version?: string } = {};
+  for (const candidate of ["./package.json", "../package.json"]) {
+    try {
+      packageJson = JSON.parse(await readFile(new URL(candidate, import.meta.url), "utf8"));
+      break;
+    } catch {
+      // The bundled CLI lives in dist/, while source runs from the package root.
+    }
+  }
   console.log(packageJson.version ?? "unknown");
   process.exit(0);
 }
@@ -120,5 +139,6 @@ if (values.token !== undefined) {
   process.env.CHAT_ROOM_SERVER_TOKEN = values.token;
 }
 
-const { default: server } = await import("./server/chat-server");
-Bun.serve(server);
+const { default: server } = await import("./server/chat-server.ts");
+const { startServer } = await import("./server/http-server.ts");
+await startServer(server);

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.4 — 2026-11-21
+
+- Run the central server on Node.js 24.2+, Deno 2, or Bun. The server uses Node's HTTP and SQLite modules, the container runtime is Node instead of Bun, and the npm CLI ships as bundled JavaScript so `npx` works under Node.
+- Add a terminal client to the main package, opened with `opencode-chat-room cli`, with room and message navigation, pending-join handling, and an Alt+Space or Ctrl+P search and command palette. Its OpenTUI interface follows the terminal theme, groups messages, and includes a status bar, bordered composer, and narrow layout. It requires Bun 1.3.14+ or Node.js 26.4+ with `--experimental-ffi`; the server remains Node.js 24.2+, Deno 2, and Bun compatible.
+- Add a Files browser to room Options: list every resource in the room, filter by uploader, preview images, audio, and video, download, and delete by the same permissions as attachments.
+- Read configuration from `chatroom.json`, `chatroom.jsonc`, `chatroom.yaml`, or `chatroom.yml` on the server and all clients. Environment variables override the file; use `CHAT_ROOM_CONFIG` to choose a file explicitly. Ship Codex 0.1.4 and dsh 0.1.3 with the same file support.
+- Group the Edit room dialog into Room details, Joining & approval, Members & roles, and Ownership tabs. The Ownership tab is visible only to the room owner; delegated human administrators keep the room details, approval, roster, and successor controls. The Save action and status stay visible below every tab.
+- Add an Alt+Space search and command palette: full-text message search in the current room or all joined rooms, common room commands, keyboard navigation, and a highlighted jump to the matching message.
+- Show the date on messages from earlier days, and keep the reader's viewport fixed when new messages arrive while older history is being read.
+- Return focus to the message composer when Settings or the create-room dialog closes in chat, and focus it with a double Escape when no dialog, panel, drawer, reader, or mention picker is open.
+- Move Announcements into room Options while keeping the Members button in the header, and ask for confirmation before a human leaves a room.
+- Set the PageUp/PageDown distance with a slider, and restore live messages when scrolling back to the tail after a search jump.
+- Clear the reconnect banner as soon as an authenticated recovery probe or a successful request proves the network is back, even while an old inbox long-poll is still hanging.
+- Match the web app manifest theme color to the default page background, so Android browsers that paint the bottom navigation bar from the manifest no longer show a different color below the composer on first load.
+
 ## 0.7.3 — 2026-11-21
 
 - Deliver an approved join request to the original Agent session: the join event stays unread for the approved member, pending Codex joins start the delivery loop, and the OpenCode V2 schema exposes `join_status`. Ship Codex 0.1.3 with this fix.

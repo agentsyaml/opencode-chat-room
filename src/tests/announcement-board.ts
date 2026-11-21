@@ -3,8 +3,7 @@ import path from "node:path";
 
 export async function announcementBoardWorks(page: any, artifacts: string) {
   const name = "__Test_AnnouncementBoard", content = "Plain text only: <img src=x onerror=alert(1)>";
-  await page.locator("#btnAnnouncements").click();
-  await page.locator("#announcementPanel").waitFor({ state: "visible" });
+  await openAnnouncementPanel(page);
   await page.waitForFunction(() => document.querySelector("#announcementStatus")?.textContent === "No announcements yet.");
   await openAnnouncement(page);
   // The editor is a writing surface, not a four-line dialog.
@@ -40,7 +39,20 @@ export async function announcementBoardWorks(page: any, artifacts: string) {
   await announcementRaces(page, name);
   await announcementRoomActivation(page);
   await closeAnnouncement(page);
+  await closeAnnouncementPanel(page);
+}
+
+async function openAnnouncementPanel(page: any) {
+  await page.locator("#btnRoomOptions").click();
   await page.locator("#btnAnnouncements").click();
+  await page.locator("#announcementPanel").waitFor({ state: "visible" });
+}
+
+async function closeAnnouncementPanel(page: any) {
+  if (await page.locator("#announcementPanel").isVisible()) {
+    await page.keyboard.press("Escape");
+    await page.locator("#announcementPanel").waitFor({ state: "hidden" });
+  }
 }
 
 async function openAnnouncement(page: any, name?: string) {
@@ -114,7 +126,8 @@ async function announcementRaces(page: any, first: string) {
   expect(await page.locator(name).inputValue()).toBe("__Test_FailedDraft");
   expect(await page.locator(content).inputValue()).toBe("Keep failed draft");
   await closeAnnouncement(page);
-  await page.locator("#btnAnnouncements").click(); await page.locator("#btnAnnouncements").click();
+  await closeAnnouncementPanel(page);
+  await openAnnouncementPanel(page);
   await page.waitForFunction(() => document.querySelectorAll("#announcementList button").length === 1);
   await openAnnouncement(page);
   expect(await page.locator(name).inputValue()).toBe("__Test_FailedDraft");
@@ -148,7 +161,7 @@ async function announcementRoomActivation(page: any) {
   await page.locator("#btnSaveAnnouncement").click();
   await page.waitForFunction(() => document.querySelector("#announcementStatus")?.textContent === "Announcement saved.");
   await page.locator("#announcementDialog").waitFor({ state: "hidden" });
-  await page.locator("#btnAnnouncements").click();
+  await closeAnnouncementPanel(page);
   const targetName = "__Test_AnnouncementDelayed";
   await page.locator("#btnNewRoom").click(); await page.locator("#inRoomNameChat").fill(targetName);
   await page.locator("#btnCreateChatRoom").click();
@@ -156,31 +169,31 @@ async function announcementRoomActivation(page: any) {
   const targetID = await page.evaluate((url: string) => import(url).then(({ app }) => app.state.room.id), "/assets/chat/state.js");
   await page.locator("#msgInput").fill("Announcement history anchor"); await page.locator("#btnSend").click();
   await page.locator("#msgList").getByText("Announcement history anchor").waitFor();
-  await page.locator("#btnAnnouncements").click();
+  await openAnnouncementPanel(page);
   await openAnnouncement(page);
   await page.locator("#announcementName").fill("__Test_TargetAnnouncement");
   await page.locator("#announcementContent").fill("Target room content");
   await page.locator("#btnSaveAnnouncement").click();
   await page.waitForFunction(() => document.querySelector("#announcementStatus")?.textContent === "Announcement saved.");
   await page.locator("#announcementDialog").waitFor({ state: "hidden" });
-  await page.locator("#btnAnnouncements").click();
+  await closeAnnouncementPanel(page);
   await page.locator(`#roomListChat [data-room-id="${sourceID}"]`).click();
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), sourceID);
-  await page.locator("#btnAnnouncements").click();
+  await openAnnouncementPanel(page);
   await openAnnouncement(page, "__Test_FailedDraft");
   expect(await page.locator("#announcementContent").inputValue()).toBe("Keep failed draft");
   await closeAnnouncement(page);
   await page.locator(`#roomListChat [data-room-id="${targetID}"]`).click();
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), targetID);
   await page.waitForFunction(() => document.querySelector("#msgList")?.textContent?.includes("Announcement history anchor"));
-  if (!await page.locator("#announcementPanel").isVisible()) await page.locator("#btnAnnouncements").click();
+  if (!await page.locator("#announcementPanel").isVisible()) await openAnnouncementPanel(page);
   await openAnnouncement(page, "__Test_TargetAnnouncement");
   expect(await page.locator("#announcementContent").inputValue()).toBe("Target room content");
   expect(await page.locator("#msgList").getByText("Announcement history anchor").count()).toBe(1);
   await closeAnnouncement(page);
   await page.locator(`#roomListChat [data-room-id="${sourceID}"]`).click();
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), sourceID);
-  if (!await page.locator("#announcementPanel").isVisible()) await page.locator("#btnAnnouncements").click();
+  if (!await page.locator("#announcementPanel").isVisible()) await openAnnouncementPanel(page);
   await openAnnouncement(page, "__Test_FailedDraft");
   expect(await page.locator("#announcementContent").inputValue()).toBe("Keep failed draft");
 }

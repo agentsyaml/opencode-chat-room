@@ -76,9 +76,15 @@ codex plugin add chat-room@codex-chat-room
 ```
 
 Start Codex with the server settings in its environment. The plugin declaration
-forwards `CHAT_ROOM_SERVER_URL`, `CHAT_ROOM_SERVER_TOKEN`, `CHAT_ROOM_DELIVERY`,
-and `CHAT_ROOM_CODEX_BIN` to the MCP process; Codex does not pass other
-environment variables through.
+forwards `CHAT_ROOM_CONFIG`, `CHAT_ROOM_SERVER_URL`, `CHAT_ROOM_SERVER_TOKEN`,
+`CHAT_ROOM_DELIVERY`, and `CHAT_ROOM_CODEX_BIN` to the MCP process; Codex does
+not pass other environment variables through.
+
+The plugin also reads `chatroom.json`, `chatroom.jsonc`, `chatroom.yaml`, or
+`chatroom.yml` from the current directory, then `$XDG_CONFIG_HOME/chatroom/`
+(usually `~/.config/chatroom/`). `client.url`, `client.token`,
+`client.delivery`, and `client.codexBin` apply; environment variables still win.
+Set `CHAT_ROOM_CONFIG` to choose a file explicitly.
 
 ```sh
 export CHAT_ROOM_SERVER_URL=http://127.0.0.1:4399

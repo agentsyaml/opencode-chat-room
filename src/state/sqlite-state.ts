@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -6,6 +5,7 @@ import RoomService, { type Message, type Room, type Participant } from "../rooms
 import type { MessageReceipt, PresenceReport, ReceiptEvidence, ReceiptIdentity, ReceiptWriteResult, Registry, RegistryEntry } from "./store.ts";
 import { presenceOwnerMatches, receiptOwnerMatches } from "./member-state.ts";
 import { isRoomAdmin } from "./roles.ts";
+import { Database, isBusyError } from "./sqlite.ts";
 
 type State = { rooms: Room[]; registry: Registry };
 type Page<T> = { items: T[]; hasMore: boolean };
@@ -91,7 +91,7 @@ async function initialize(file: string): Promise<Database> {
         db.exec("PRAGMA busy_timeout=50;");
         return db;
       } catch (error) {
-        if (!isBusy(error) || attempt >= 7) throw error;
+        if (!isBusyError(error) || attempt >= 7) throw error;
         await pause(Math.min(20 * 2 ** attempt, 250));
       }
     }
@@ -131,6 +131,14 @@ export async function putResource(file: string, resource: StoredResource): Promi
     return true;
   });
 }
+export async function listResources(file: string, roomID: string, limit = 500, offset = 0): Promise<{ items: StoredResource[]; total: number }> {
+  const db = await initialize(file);
+  const items = db.query("SELECT id,room_id AS roomID,name,mime_type AS mimeType,size,created_at AS createdAt,uploader_session_id AS uploaderSessionID,uploader_name AS uploaderName FROM resources WHERE room_id=? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?")
+    .all(roomID, limit, offset) as StoredResource[];
+  const total = Number((db.query("SELECT COUNT(*) AS count FROM resources WHERE room_id=?").get(roomID) as { count: number } | null)?.count ?? 0);
+  return { items, total };
+}
+
 export async function getResource(file: string, roomID: string, id: string): Promise<StoredResource | undefined> {
   const db = await openStateDatabase(file);
   const row = db.query("SELECT id,room_id AS roomID,name,mime_type AS mimeType,size,created_at AS createdAt,uploader_session_id AS uploaderSessionID,uploader_name AS uploaderName FROM resources WHERE room_id=? AND id=?")
@@ -203,16 +211,12 @@ function readLegacy(file: string): unknown | undefined {
 }
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-function isBusy(error: unknown): boolean {
-  const err = error as { code?: string; message?: string };
-  return err.code === "SQLITE_BUSY" || err.code === "SQLITE_LOCKED" || /database is locked/i.test(err.message ?? "");
-}
 
 async function immediate<T>(db: Database, fn: () => T): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try { return db.transaction(fn).immediate(); }
     catch (error) {
-      if (!isBusy(error) || attempt >= 7) throw error;
+      if (!isBusyError(error) || attempt >= 7) throw error;
       await pause(Math.min(20 * 2 ** attempt, 250));
     }
   }

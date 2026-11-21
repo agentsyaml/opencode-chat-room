@@ -10,6 +10,14 @@ import path from "node:path";
 const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
 const token = "chat-settings-token";
 
+async function setPageStep(page: any, value: string) {
+  await page.locator("#inPageStep").evaluate((node: HTMLInputElement, next: string) => {
+    node.value = next;
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
 test.skipIf(!browserModule)("settings uses tabbed categories for language, appearance, and connection", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-settings-"));
@@ -97,14 +105,14 @@ test.skipIf(!browserModule)("settings uses tabbed categories for language, appea
     await page.locator("#inContentTransition").check();
     expect(await page.evaluate(() => localStorage.getItem("chat.contentTransition"))).toBe("1");
     expect(await page.locator("#inPageStep").inputValue()).toBe("90");
-    await page.locator("#inPageStep").fill("55");
-    await page.locator("#inPageStep").press("Tab");
+    expect(await page.locator("#pageStepValue").textContent()).toBe("90%");
+    await setPageStep(page, "55");
     expect(await page.evaluate(() => localStorage.getItem("chat.pageStep"))).toBe("55");
-    await page.locator("#inPageStep").fill("5");
-    await page.locator("#inPageStep").press("Tab");
+    expect(await page.locator("#pageStepValue").textContent()).toBe("55%");
+    await setPageStep(page, "5");
     expect(await page.evaluate(() => localStorage.getItem("chat.pageStep"))).toBe("20");
-    await page.locator("#inPageStep").fill("55");
-    await page.locator("#inPageStep").press("Tab");
+    expect(await page.locator("#pageStepValue").textContent()).toBe("20%");
+    await setPageStep(page, "55");
 
     // All five themes are large cards that switch live and follow the system option.
     await page.locator("#settingsTabAppearance").click();
@@ -213,7 +221,15 @@ test.skipIf(!browserModule)("settings uses tabbed categories for language, appea
     await page.screenshot({ path: path.join(screenshots, "settings-desktop-connection-dark.png") });
     await page.mouse.click(6, 6);
     await page.locator("#chatSettings").waitFor({ state: "hidden" });
-    expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnSettings");
+    await page.waitForFunction(() => document.activeElement?.id === "msgInput");
+    expect(await page.locator("#btnSettings").getAttribute("aria-expanded")).toBe("false");
+
+    // The close button also returns to the composer instead of the rail trigger.
+    await page.locator("#btnSettings").click();
+    await page.locator("#chatSettings[open]").waitFor();
+    await page.locator("#btnCloseSettings").click();
+    await page.locator("#chatSettings").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "msgInput");
     expect(await page.locator("#btnSettings").getAttribute("aria-expanded")).toBe("false");
 
     // Mobile: the categories become one horizontal segmented row without clipping or overflow.
