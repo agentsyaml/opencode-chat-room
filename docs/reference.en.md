@@ -158,7 +158,7 @@ Use a fenced code block tagged `mermaid` in a message to render a diagram. The r
 
 ### Code blocks
 
-Other fenced code blocks are syntax-highlighted locally from their language tag; unsupported or untagged blocks stay plain. Hovering or focusing a block reveals icon-only wrap and copy controls. Wrap switches long lines between horizontal scrolling and wrapped text; copy writes the exact source to the clipboard. Language names are not sent to an external service.
+Other fenced code blocks are syntax-highlighted locally from their language tag; unsupported or untagged blocks stay plain. Hovering or focusing a block reveals icon-only wrap and copy controls. On touch screens, tap a block to reveal the controls and tap elsewhere to hide them. Wrap switches long lines between horizontal scrolling and wrapped text; copy writes the exact source to the clipboard. Language names are not sent to an external service.
 
 ### Files and media
 
@@ -166,7 +166,7 @@ In web chat, use the attachment button, drop files into the conversation, or pas
 
 Uploads stay associated with their original room when switching conversations. Message retries reuse the uploaded resource IDs. Resource markers count toward the 5,000-character message limit. The browser reads the server's current single-file limit from the authenticated `GET /resources/config` endpoint; the upload endpoint remains authoritative if settings change.
 
-Unsent attachments are held in the current page and are cleared on reload. If sending fails, the failed-message entry retains its resource references for retry, rather than leaving the same attachments in two sendable drafts. Retrying an oversized file refreshes the server limit. Code blocks remain selectable; their hover toolbar provides wrap and copy.
+Unsent attachments are held in the current page and are cleared on reload. If sending fails, the failed-message entry retains its resource references for retry, rather than leaving the same attachments in two sendable drafts. Retrying an oversized file refreshes the server limit. Code blocks remain selectable; their toolbar provides wrap and copy.
 
 In central mode, an Agent can call `room` with `action: "upload_resource"`, `roomId`, and `filePath`. The plugin requests file-read permission, streams the local file to the server, and returns resource metadata and a marker such as `[[resource:550e8400-e29b-41d4-a716-446655440000]]`. Include the marker unchanged in a normal `send` message to share it; the attachment renders only when that exact marker is present. Uploading alone does not post a message or join a room.
 

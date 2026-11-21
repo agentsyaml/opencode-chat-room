@@ -56,6 +56,13 @@ function decorateCodeBlock(code, app) {
   block.className = "code-block";
   pre.replaceWith(block);
   block.append(pre, codeToolbar(code, pre, block, app));
+  // Touch screens have no hover: a tapped code block keeps focus so its toolbar stays reachable.
+  if (window.matchMedia("(pointer: coarse)").matches) {
+    block.tabIndex = 0;
+    block.addEventListener("pointerdown", (event) => {
+      if (!event.target.closest?.(".code-tool-button")) block.focus({ preventScroll: true });
+    });
+  }
 }
 
 function highlightCode(code) {
@@ -76,8 +83,8 @@ function codeToolbar(code, pre, block, app) {
   wrap.setAttribute("aria-pressed", "false");
   wrap.addEventListener("click", (event) => {
     event.stopPropagation();
-    // A pointer click should not pin the toolbar open; hovering is enough.
-    if (event.detail > 0) wrap.blur();
+    // A pointer click should not pin the toolbar open; hovering is enough on desktop, focus on touch.
+    if (event.detail > 0 && !matchMedia("(pointer: coarse)").matches) wrap.blur();
     const wrapped = !block.classList.contains("is-wrapped");
     if (wrapped) block._codeScrollLeft = pre.scrollLeft;
     block.classList.toggle("is-wrapped", wrapped);
@@ -87,7 +94,7 @@ function codeToolbar(code, pre, block, app) {
   const copy = codeToolButton("code-copy-button", "copyMessage", app, copyIcon(), checkIcon());
   copy.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (event.detail > 0) copy.blur();
+    if (event.detail > 0 && !matchMedia("(pointer: coarse)").matches) copy.blur();
     void copyCode(copy, code, app);
   });
   toolbar.append(wrap, copy);

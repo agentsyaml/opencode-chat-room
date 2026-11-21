@@ -169,11 +169,25 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     await mobile.locator("#btnJoin").click();
     await mobile.locator("#chatView").waitFor({ state: "visible" });
     const mobileBlock = mobile.locator(".msg-text .code-block").first();
+    const mobileToolbar = mobileBlock.locator(".code-toolbar");
+    const toolbarOpacity = () => mobileToolbar.evaluate((node: Element) => getComputedStyle(node).opacity);
+    const waitToolbarOpacity = (value: "0" | "1") => mobile.waitForFunction((expected: string) => {
+      const toolbar = document.querySelector(".msg-text .code-block .code-toolbar");
+      return toolbar !== null && getComputedStyle(toolbar).opacity === expected;
+    }, value);
     await mobileBlock.waitFor();
     await mobileBlock.scrollIntoViewIfNeeded();
-    await mobile.waitForTimeout(400);
-    expect(await mobileBlock.locator(".code-toolbar").evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
-    await mobile.screenshot({ path: path.join(artifactDir, "code-block-mobile.png") });
+    await waitToolbarOpacity("0");
+    expect(await toolbarOpacity()).toBe("0");
+    await mobile.screenshot({ path: path.join(artifactDir, "code-block-mobile-at-rest.png") });
+    await mobileBlock.tap({ position: { x: 12, y: 20 } });
+    await waitToolbarOpacity("1");
+    expect(await toolbarOpacity()).toBe("1");
+    await mobile.screenshot({ path: path.join(artifactDir, "code-block-mobile-tapped.png") });
+    await mobile.locator(".msg-text p").first().tap();
+    await waitToolbarOpacity("0");
+    expect(await toolbarOpacity()).toBe("0");
+    await mobile.screenshot({ path: path.join(artifactDir, "code-block-mobile-dismissed.png") });
     await mobileContext.close();
     expect(mobileErrors).toEqual([]);
 

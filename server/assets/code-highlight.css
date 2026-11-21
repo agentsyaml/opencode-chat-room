@@ -10,6 +10,8 @@
 }
 
 .code-block { position: relative; min-width: 0; }
+.code-block:focus { outline: none; }
+.code-block:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .code-block pre {
   margin: 0;
@@ -51,11 +53,6 @@
 .code-block:focus-within .code-toolbar {
   opacity: 1;
   pointer-events: auto;
-}
-
-/* Touch screens have no hover: keep the controls reachable at all times. */
-@media (hover: none), (pointer: coarse) {
-  .code-toolbar { opacity: 1; pointer-events: auto; }
 }
 
 .code-tool-button {
