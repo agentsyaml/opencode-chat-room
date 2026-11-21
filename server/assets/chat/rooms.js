@@ -69,8 +69,12 @@ export function initRooms(app) {
 
   app.enterRoom = (room, name, intent = app.state.navigationGeneration) => {
     app.ensureJoinedRoom(room, name);
-    if (intent === app.state.navigationGeneration) app.activateRoom(room.id);
-    else {
+    if (intent === app.state.navigationGeneration) {
+      app.activateRoom(room.id);
+      // Membership changed, so the rail needs one refresh. Plain room switches
+      // stay cache-only and do not reach the network here.
+      void app.refreshRoomList();
+    } else {
       app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
       app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
       void app.refreshRoomList();
@@ -141,7 +145,9 @@ export function initRooms(app) {
     app.renderHead();
     $("#msgList").textContent = "";
     app.state.listMetrics = { height: 0, top: 0, client: 0 };
-    app.renderMessages(false);
+    // Cached history can hold thousands of messages. Render the newest window
+    // first so switching stays immediate; older rows are prepended on demand.
+    app.renderMessages(false, 300);
     app.restoreReadingPosition?.(roomId);
     app.state.readAnchorGuard = null;
     app.startPolling();
@@ -173,7 +179,8 @@ export function initRooms(app) {
     app.markActiveRoomRead();
     app.renderRoomOptions($("#roomList"), app.state.availableRooms || []);
     app.renderRoomOptions($("#roomListChat"), app.state.availableRooms || []);
-    void app.refreshRoomList();
+    // Switching must render from the local cache. The room watcher refreshes
+    // membership metadata in the background; do not start a room-list request here.
     // Switching rooms replaces the clicked row; keep the composer ready to type.
     app.focusComposer?.();
     document.dispatchEvent(new CustomEvent("chat-room-activated", { detail: roomId }));
@@ -280,6 +287,7 @@ export function initRooms(app) {
       $("#btnSend").disabled = true;
     }
     app.state.rooms.delete(roomId);
+    app.state.availableRooms = (app.state.availableRooms || []).filter((room) => room.id !== roomId);
     void deleteCachedRoom(roomId);
     app.state.memberSessions.delete(roomId);
     app.state.joinedIds.delete(roomId);

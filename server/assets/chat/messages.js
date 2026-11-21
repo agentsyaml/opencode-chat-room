@@ -5,6 +5,7 @@ import { formatSystemMessage, setRoomPreview } from "./system-messages.js";
 import { installEditor } from "./editor.js";
 import { adminAgentBadge, isAdminAgent } from "./admin-badge.js";
 import { initMessagePolling } from "./message-polling.js";
+import { iconNode } from "./icons.js";
 
 export function initMessages(app) {
   const $ = app.$;
@@ -241,13 +242,7 @@ export function initMessages(app) {
       copy.dataset.i18nAriaLabel = "copyMessage";
       copy.dataset.i18nTitle = "copyMessage";
       copy.title = app.t("copyMessage");
-      const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      icon.classList.add("message-copy-icon"); icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
-      const back = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      back.setAttribute("x", "4"); back.setAttribute("y", "3"); back.setAttribute("width", "13"); back.setAttribute("height", "15"); back.setAttribute("rx", "2");
-      const front = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      front.setAttribute("x", "8"); front.setAttribute("y", "7"); front.setAttribute("width", "12"); front.setAttribute("height", "14"); front.setAttribute("rx", "2");
-      icon.append(back, front);
+      const icon = iconNode("copy", "message-copy-icon");
       const feedback = document.createElement("span");
       feedback.className = "message-copy-feedback"; feedback.dataset.flashOutput = ""; feedback.dataset.i18n = "copyMessage";
       feedback.hidden = true; feedback.setAttribute("role", "status"); feedback.setAttribute("aria-live", "polite"); feedback.textContent = app.t("copyMessage");
@@ -260,7 +255,7 @@ export function initMessages(app) {
     return row;
   };
 
-  app.renderMessages = (live = false) => {
+  app.renderMessages = (live = false, tailLimit = 0) => {
     const thread = $("#thread"), list = $("#msgList"), messages = app.state.room.messages;
     // A palette jump renders a window around the target instead of the newest
     // tail. While that window is up, live appends stay off screen so the target
@@ -286,7 +281,7 @@ export function initMessages(app) {
     let startIndex = 0;
     const lastId = [...list.querySelectorAll("[data-msg-id]")].at(-1)?.dataset.msgId;
     if (lastId) for (let index = messages.length - 1; index >= 0; index--) if (messages[index].id === lastId) { startIndex = index + 1; break; }
-    const renderStart = focus ? Math.max(0, focus.index - 120) : startIndex;
+    const renderStart = focus ? Math.max(0, focus.index - 120) : Math.max(startIndex, tailLimit ? messages.length - tailLimit : 0);
     const renderEnd = focus ? Math.min(messages.length, focus.index + 120) : messages.length;
     for (let index = renderStart; index < renderEnd; index++) {
       const message = messages[index];

@@ -84,7 +84,10 @@ test.skipIf(!browserModule)("restore blocks login, retries transient errors, and
       if (width <= 760) await owner.locator("#btnRoomsDrawer").click();
       const profile = await owner.evaluate(() => {
         const trigger = document.querySelector<HTMLElement>("#btnSettings")!, avatar = document.querySelector<HTMLElement>("#profileAvatar")!, name = document.querySelector<HTMLElement>("#railIdentity")!, caret = document.querySelector<HTMLElement>(".user-menu-caret")!;
-        const center = (node: HTMLElement) => node.getBoundingClientRect().top + node.offsetHeight / 2;
+        const center = (node: Element) => {
+          const rect = node.getBoundingClientRect();
+          return rect.top + rect.height / 2;
+        };
         const style = getComputedStyle(avatar);
         return { centered: Math.abs(center(trigger) - center(avatar)) < 1 && Math.abs(center(trigger) - center(name)) < 1 && Math.abs(center(trigger) - center(caret)) < 1, frameSquare: avatar.offsetWidth === avatar.offsetHeight, display: style.display, align: style.alignItems, justify: style.justifyItems };
       });

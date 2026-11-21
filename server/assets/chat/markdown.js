@@ -1,11 +1,11 @@
 import { createRandomId, LS } from "./state.js";
 import { isRoomAdmin } from "./admin-badge.js";
+import { iconNode } from "./icons.js";
 
 const mentionPattern = /<at>@([^<]+)<\/at>/g;
 const resourcePattern = /\[\[resource:([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})\]\]/gi;
 let mermaidReady = false;
 const previewUrls = new Map();
-const svgNamespace = "http://www.w3.org/2000/svg";
 let previewObserver;
 
 export function renderMarkdown(root, text, app) {
@@ -113,36 +113,9 @@ function codeToolButton(className, key, app, ...icons) {
   return button;
 }
 
-function codeIcon(className, shapes) {
-  const svg = document.createElementNS(svgNamespace, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("code-tool-icon", className);
-  for (const [tag, attributes] of shapes) {
-    const node = document.createElementNS(svgNamespace, tag);
-    for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
-    svg.append(node);
-  }
-  return svg;
-}
-
-function wrapIcon() {
-  return codeIcon("code-wrap-icon", [
-    ["path", { d: "M4 5h16M4 11h13a3.5 3.5 0 0 1 0 7h-4M4 18h5" }],
-    ["path", { d: "m8 16-3 3 3 3" }],
-  ]);
-}
-
-function copyIcon() {
-  return codeIcon("code-copy-icon", [
-    ["rect", { x: "4", y: "3", width: "13", height: "15", rx: "2" }],
-    ["rect", { x: "8", y: "7", width: "12", height: "14", rx: "2" }],
-  ]);
-}
-
-function checkIcon() {
-  return codeIcon("code-check-icon", [["path", { d: "m5 12 4.5 4.5L19 7" }]]);
-}
+const wrapIcon = () => iconNode("text_wrap", "code-tool-icon code-wrap-icon");
+const copyIcon = () => iconNode("copy", "code-tool-icon code-copy-icon");
+const checkIcon = () => iconNode("checkmark", "code-tool-icon code-check-icon");
 
 async function copyCode(button, code, app) {
   const copied = await copyTextToClipboard(code.textContent);
@@ -280,8 +253,7 @@ function resourceSplit(app, resource, download, item) {
   toggle.setAttribute("data-i18n-aria-label", "resourceMoreActions");
   toggle._i18nValues = { name: resource.name };
   toggle.setAttribute("aria-label", app.t("resourceMoreActions", { name: resource.name }));
-  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg"), path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  icon.setAttribute("aria-hidden", "true"); icon.setAttribute("viewBox", "0 0 24 24"); path.setAttribute("d", "M6 9l6 6 6-6"); icon.append(path); toggle.append(icon);
+  toggle.append(iconNode("chevron_down"));
   menu.className = "resource-split-menu"; menu.hidden = true; menu.setAttribute("role", "menu"); menu.append(item);
   group.append(download, toggle, menu);
   function close(focusToggle = false) {

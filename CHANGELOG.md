@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.5 — 2026-11-21
+
+- Ask before applying a web app update: when a new service worker is ready, a bottom-left prompt offers **Update now** or **Later**. Nothing reloads until **Update now** is chosen; **Later** keeps the current page intact and lets the update apply on the next open.
+- Debounce web search by 220 ms and keep the previous results visible while a new query runs, so typing no longer flashes an empty palette.
+- Show the Enter hint only on the selected palette row, and let Alt+1–9 move the selection directly.
+- Switch rooms from the local message cache: render the newest 300 rows first and prepend older cached rows on scroll, instead of issuing room-list or history requests when entering a room.
+- Use one local MIT-licensed Fluent System Icons sprite for every web icon, including room menus, dialogs, the palette, message actions, and code tools. No icon requests leave the page.
+- Move the selected room in the rail with a short Fluent decelerate glide and fade instead of a springy row motion.
+
 ## 0.7.4 — 2026-11-21
 
 - Run the central server on Node.js 24.2+, Deno 2, or Bun. The server uses Node's HTTP and SQLite modules, the container runtime is Node instead of Bun, and the npm CLI ships as bundled JavaScript so `npx` works under Node.

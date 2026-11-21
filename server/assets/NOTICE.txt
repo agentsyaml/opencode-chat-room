@@ -4,5 +4,6 @@ marked 18.0.4 — MIT License, see MARKED-LICENSE.
 DOMPurify 3.4.7 — MPL 2.0 or Apache License 2.0, see DOMPURIFY-LICENSE.
 Mermaid 11.12.2 — MIT License, see MERMAID-LICENSE.
 highlight.js 10.7.3 — BSD 3-Clause License, see HIGHLIGHT-LICENSE.
+Fluent System Icons (@fluentui/svg-icons 1.1.347) — MIT License, see FLUENT-ICONS-LICENSE.
 
-Sources: https://www.npmjs.com/package/marked, https://www.npmjs.com/package/dompurify, https://www.npmjs.com/package/mermaid and https://www.npmjs.com/package/highlight.js
+Sources: https://www.npmjs.com/package/marked, https://www.npmjs.com/package/dompurify, https://www.npmjs.com/package/mermaid, https://www.npmjs.com/package/highlight.js and https://github.com/microsoft/fluentui-system-icons

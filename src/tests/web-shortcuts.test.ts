@@ -37,10 +37,11 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     expect(await page.locator("#shortcutsHeading").textContent()).toBe("Keyboard shortcuts");
     const rows: string[][] = await page.locator("#shortcutsDialog .keys-list li").evaluateAll((items: Element[]) =>
       items.map((item) => Array.from(item.querySelectorAll("kbd")).map((key) => key.textContent ?? "")));
-    expect(rows.length).toBe(8);
+    expect(rows.length).toBe(9);
     expect(rows).toContainEqual(["Enter"]);
     expect(rows).toContainEqual(["Shift", "Enter"]);
     expect(rows).toContainEqual(["↑", "↓", "Enter"]);
+    expect(rows).toContainEqual([modifier, "Space"]);
     expect(rows).toContainEqual([modifier, "↑", "↓"]);
     expect(rows).toContainEqual([modifier, "1–9"]);
     expect(rows).toContainEqual([modifier, "Home", "End"]);
@@ -50,7 +51,7 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     expect(sheet).toContain("Switch to the previous or next room");
     expect(sheet).toContain("Scroll messages while typing");
     expect(sheet).not.toContain("Tab");
-    expect(sheet).not.toContain("Space");
+    expect(sheet).not.toContain("activates");
     expect(sheet).not.toContain("?");
     expect(await page.locator("#btnToggleHints").count()).toBe(0);
 
@@ -114,9 +115,12 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
       const observer = new MutationObserver(() => {
         const row = list?.querySelector(".room-row.room-switch-enter") as HTMLElement | null;
         if (!row) return;
+        const style = getComputedStyle(row);
         (window as any).__roomSwitchMotion = {
           className: row.className,
-          animation: getComputedStyle(row).animationName,
+          animation: style.animationName,
+          duration: style.animationDuration,
+          shift: style.getPropertyValue("--room-switch-shift").trim(),
         };
         observer.disconnect();
       });
@@ -129,9 +133,11 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
       return Boolean(row && row.dataset.roomId !== previous);
     }, beforeSwitch);
     await page.waitForFunction(() => Boolean((window as any).__roomSwitchMotion));
-    const switchMotion = await page.evaluate(() => (window as any).__roomSwitchMotion as { className: string; animation: string });
+    const switchMotion = await page.evaluate(() => (window as any).__roomSwitchMotion as { className: string; animation: string; duration: string; shift: string });
     expect(switchMotion.className).toContain("room-switch-enter");
     expect(switchMotion.animation).toBe("room-switch-row");
+    expect(switchMotion.duration).toBe("0.15s");
+    expect(switchMotion.shift).toBe("3px");
     expect(await page.locator("#msgList").evaluate((list: Element) => ({
       className: (list as HTMLElement).className,
       animation: getComputedStyle(list).animationName,

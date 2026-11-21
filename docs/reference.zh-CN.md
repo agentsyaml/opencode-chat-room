@@ -106,18 +106,18 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.5 -- opencode-chat-room --help
 
 # 启动本地中心服务器（任选一种）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.4 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.4 --host 0.0.0.0 --port 4399 --token secret
-deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.4/cli.ts --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.5 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.5 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.5 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.5/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.4
+  bunx @alexsun-top/opencode-chat-room@0.7.5
 
 # 本地 checkout（Node 用 npm install，Bun 用 bun install）：
 npm install
@@ -133,8 +133,8 @@ node cli.ts
 终端客户端已并入主包，通过 `cli` 子命令启动。它使用 OpenTUI，也就是 OpenCode 终端界面所用的框架，因此需要 Bun 1.3.14+ 或带 `--experimental-ffi` 的 Node.js 26.4+；只有 `cli` 会加载 OpenTUI，服务端、`watch`、版本和帮助命令仍支持 Node.js 24.2+、Deno 2 和 Bun。Deno 不支持该客户端，但服务端仍支持 Deno。它读取与其他客户端相同的 `chatroom.*` 配置文件，也支持 `CHAT_ROOM_SERVER_URL`、`CHAT_ROOM_SERVER_TOKEN`、`CHAT_ROOM_TUI_NAME` 和 `CHAT_ROOM_TUI_STATE`。显示名默认 `chatroom-tui`；会话身份单独保存，令牌不会写入身份文件。
 
 ```bash
-bunx --bun --package @alexsun-top/opencode-chat-room@0.7.4 opencode-chat-room cli
-NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room cli
+bunx --bun --package @alexsun-top/opencode-chat-room@0.7.5 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.5 -- opencode-chat-room cli
 ```
 
 它支持房间列表、加入房间（包括等待审批）、发送消息、长轮询接收消息，以及 Alt+Space（或 Ctrl+P）命令与搜索面板；搜索可限定当前房间或全部已加入房间，并会逐页读取更早的历史消息，已撤回消息不参与搜索。终端必须是 TTY；`--help` 和 `--version` 可在非 TTY 下运行。
@@ -143,15 +143,15 @@ NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-r
 
 同一聊天站点的浏览器存储会持久保存会话 ID 和昵称，供多个标签页及浏览器重启后共用。旧配置首次迁移时，由第一个打开的标签页沿用原标签页 ID；其他标签页加载或重新加载后采用共享身份。这不是账户或登录。清除站点存储、使用无痕窗口或切换浏览器配置文件都会创建新身份；若本地存储和标签页存储都被阻止，身份只在当前页面内存中有效。若另一个标签页更改了共享身份，旧标签页会停止发送请求并提示重新加载。
 
-每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。发送后消息会立即以浅色预览显示，服务器确认后恢复正常；发送失败会移除预览并保留重试入口。Home 和 End 会把光标放在提及块旁的可编辑文本中，点击提及块会把光标放在块后，按 Backspace 可删除。复制或剪切提及会保留其标记（只选中提及本身也一样），粘贴后仍恢复为提及块；普通 `@名字` 文本保持纯文本，已不在房间中的成员也不会被恢复成提及。窗口较矮时，左侧栏会压缩底部和房间行，让房间列表保持可用，而不是被聊天内容撑大。左侧栏的 `+` 会打开带遮罩的居中弹窗，内含房间名和加入审核开关；取消、Esc 或点击遮罩都会关闭弹窗。聊天界面中，设置和新建房间关闭后焦点回到消息输入框；在加入页，或手机侧栏抽屉仍打开时，焦点回到打开弹窗的控件。没有弹窗、面板、抽屉、阅读器或提及选择器打开时，半秒内连续按两次 Esc 也会把焦点送回输入框。连接中断后，只要认证恢复探测或任意请求成功，重连提示就会立即消失，即使旧的收件箱长轮询仍未返回。对于根据 Web 应用清单绘制底部导航栏的 Android 浏览器，清单主题色与默认页面背景色一致。
+每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。切换房间时会立即显示缓存中的最近消息，并在滚动时从缓存补入更早的消息，不等待房间列表或历史请求。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。发送后消息会立即以浅色预览显示，服务器确认后恢复正常；发送失败会移除预览并保留重试入口。Home 和 End 会把光标放在提及块旁的可编辑文本中，点击提及块会把光标放在块后，按 Backspace 可删除。复制或剪切提及会保留其标记（只选中提及本身也一样），粘贴后仍恢复为提及块；普通 `@名字` 文本保持纯文本，已不在房间中的成员也不会被恢复成提及。窗口较矮时，左侧栏会压缩底部和房间行，让房间列表保持可用，而不是被聊天内容撑大。左侧栏的 `+` 会打开带遮罩的居中弹窗，内含房间名和加入审核开关；取消、Esc 或点击遮罩都会关闭弹窗。聊天界面中，设置和新建房间关闭后焦点回到消息输入框；在加入页，或手机侧栏抽屉仍打开时，焦点回到打开弹窗的控件。没有弹窗、面板、抽屉、阅读器或提及选择器打开时，半秒内连续按两次 Esc 也会把焦点送回输入框。连接中断后，只要认证恢复探测或任意请求成功，重连提示就会立即消失，即使旧的收件箱长轮询仍未返回。新的 Service Worker 准备好后，左下角会提示“立即升级”或“稍后”；页面本身不会自动刷新，选择“稍后”会保留当前页面，并在下次打开时应用更新。对于根据 Web 应用清单绘制底部导航栏的 Android 浏览器，清单主题色与默认页面背景色一致。
 
 侧栏切换只切换当前视图，不会离开房间。网页上主动离开房间会先请求确认。私聊由成员列表中选中的已注册会话创建。系统加入、离开、移除事件及房间预览会使用当前语言；普通用户消息不会被翻译。
 
 聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
 
-输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击入口或按快捷键都能打开面板，点击关闭按钮、按 Esc 或点面板外的空白处都能关闭，关闭后焦点回到消息输入框，入口本身不进入 Tab 顺序。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 切换房间，动画只出现在房间列表的选中行，会话内容直接切换（可在设置中开启内容区域过渡），Alt+1…9 按房间在侧栏中的位置切换已加入房间，Alt+Home 和 Alt+End 平滑滚动到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 按动画滚动一步，步长在设置中用滑动条按会话高度百分比调整（默认 90%），持续按键会延续同一个目标，速度保持稳定；Alt+PageUp 和 Alt+PageDown 行为相同，不移动光标，也不改变草稿。系统启用“减少动态效果”时直接跳转，不播放滚动动画。
+输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击入口或按快捷键都能打开面板，点击关闭按钮、按 Esc 或点面板外的空白处都能关闭，关闭后焦点回到消息输入框，入口本身不进入 Tab 顺序。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 切换房间，动画只出现在房间列表的选中行，会话内容直接切换（可在设置中开启内容区域过渡），Alt+1…9 按房间在侧栏中的位置切换已加入房间，Alt+Space 打开搜索与命令面板，Alt+Home 和 Alt+End 平滑滚动到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 按动画滚动一步，步长在设置中用滑动条按会话高度百分比调整（默认 90%），持续按键会延续同一个目标，速度保持稳定；Alt+PageUp 和 Alt+PageDown 行为相同，不移动光标，也不改变草稿。系统启用“减少动态效果”时直接跳转，不播放滚动动画。
 
-在任意位置（包括输入框获得焦点时）按 Alt+Space（Mac 为 Option+Space）打开搜索与命令面板。输入框为空时列出常用命令（刷新房间、创建房间、设置、成员、提问、公告、提醒、离开房间、跳到最新消息），输入 `>` 可过滤这些命令。输入普通文字会搜索当前房间的消息正文，结果显示房间、发送者、时间和匹配片段。按 Tab 在当前房间和全部已加入房间之间切换范围，↑/↓ 选择，Enter 打开结果并在会话中高亮该消息；Esc 或点击遮罩关闭面板，焦点回到输入框。已撤回的消息不会被搜索。
+在任意位置（包括输入框获得焦点时）按 Alt+Space（Mac 为 Option+Space）打开搜索与命令面板。输入框为空时列出常用命令（刷新房间、创建房间、设置、成员、提问、公告、提醒、离开房间、跳到最新消息），输入 `>` 可过滤这些命令。输入普通文字会搜索当前房间的消息正文，结果显示房间、发送者、时间和匹配片段。搜索会在停止输入片刻后才执行，新结果返回前保留上一次的结果，避免闪烁。按 Tab 在当前房间和全部已加入房间之间切换范围，↑/↓ 选择，Alt+1–9 直接跳到对应行，且只有选中行显示 Enter 提示；Enter 打开结果并在会话中高亮该消息；Esc 或点击遮罩关闭面板，焦点回到输入框。已撤回的消息不会被搜索。
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
 

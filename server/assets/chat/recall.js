@@ -3,9 +3,10 @@ import { renderMarkdown } from "./markdown.js";
 import { isOwnMessage } from "./messages.js";
 import { isRoomAdmin } from "./admin-badge.js";
 import { formatSystemMessage, setRoomPreview } from "./system-messages.js";
+import { icon } from "./icons.js";
 
-const RECALL_ICON = '<svg class="message-recall-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg>';
-const RECALLED_ICON = '<svg class="recalled-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg>';
+const RECALL_ICON = icon("arrow_undo", "message-recall-icon");
+const RECALLED_ICON = icon("arrow_undo", "recalled-icon");
 
 // Recall is a soft hide: the server keeps the text and members may reveal it.
 export function initRecall(app) {

@@ -36,7 +36,7 @@
   background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 80%, #18382f), var(--accent));
   box-shadow: 0 3px 9px color-mix(in srgb, var(--accent) 22%, transparent);
 }
-.create-room-mark svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.9; }
+.create-room-mark svg { width: 18px; height: 18px; }
 .create-room-eyebrow { margin: 2px 0 0; color: var(--ink-3); font-size: 10px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
 .create-room-heading h2 { margin: 0; font-family: var(--font-display); font-size: 25px; font-weight: 600; letter-spacing: -.02em; line-height: 1.16; }
 .create-room-head .reader-close { margin: -6px -6px 0 0; }

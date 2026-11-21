@@ -118,7 +118,7 @@ async function expectSelect(page: any, selector: string, gap: number) {
   expect(metrics.appearance).toBe("none");
   expect(metrics.padLeft).toBe(gap);
   expect(metrics.position).toContain(`calc(100% - ${gap}px)`);
-  expect(metrics.size).toBe("12px 8px");
+  expect(metrics.size).toBe("16px 16px");
   expect(metrics.image).toContain("data:image/svg+xml");
   expect(metrics.padRight - metrics.padLeft).toBeGreaterThanOrEqual(20);
   expect(Math.round(metrics.height)).toBeGreaterThanOrEqual(36);

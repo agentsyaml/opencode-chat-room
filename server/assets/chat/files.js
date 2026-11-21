@@ -1,17 +1,18 @@
 // Room files: a file-browser dialog over the room's uploaded resources.
 import { LS } from "./state.js";
 import { isRoomAdmin } from "./admin-badge.js";
+import { icon } from "./icons.js";
 
 const PAGE_SIZE = 500;
 const UNKNOWN_UPLOADER = "__unknown_uploader__";
 const ICONS = {
-  image: '<svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 4 4 2-2 3 3"/></svg>',
-  audio: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
-  video: '<svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>',
-  file: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/></svg>',
-  preview: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></svg>',
-  download: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></svg>',
-  trash: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v5M14 11v5"/></svg>',
+  image: "image",
+  audio: "music_note_2",
+  video: "video",
+  file: "document",
+  preview: "eye",
+  download: "arrow_download",
+  trash: "delete",
 };
 
 export function initFiles(app) {
@@ -123,14 +124,14 @@ export function initFiles(app) {
     } catch { showError("resourceDeleteFailed"); }
   };
 
-  const actionButton = (action, label, icon, extra = {}) => {
+  const actionButton = (action, label, iconName, extra = {}) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `file-action file-action-${action}`;
     button.dataset.fileAction = action;
     button.setAttribute("aria-label", label);
     button.title = label;
-    button.innerHTML = icon;
+    button.innerHTML = icon(iconName);
     for (const [name, value] of Object.entries(extra)) button.setAttribute(name, value);
     return button;
   };
@@ -144,7 +145,7 @@ export function initFiles(app) {
     badge.className = "file-kind";
     badge.dataset.kind = kind;
     badge.setAttribute("aria-hidden", "true");
-    badge.innerHTML = ICONS[kind] || ICONS.file;
+    badge.innerHTML = icon(ICONS[kind] || ICONS.file);
 
     const main = document.createElement("div");
     main.className = "file-main";

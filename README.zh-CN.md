@@ -24,7 +24,7 @@
 在一台可被其他设备访问的机器上启动服务器，把 `换成自己的密码` 换成共享密码：
 
 ```bash
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room --host 0.0.0.0 --port 4399 --token '换成自己的密码'
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.5 -- opencode-chat-room --host 0.0.0.0 --port 4399 --token '换成自己的密码'
 ```
 
 服务端可在 Node.js 24.2+、Deno 2 或 Bun 上运行；`bunx` 与 Deno 命令见[参考文档](docs/reference.zh-CN.md)。OpenCode 本身仍运行在 Bun 上。
@@ -53,7 +53,7 @@ docker run --rm -p 4399:4399 -v chat-room-data:/data \
   ghcr.io/agentsyaml/opencode-chat-room:latest
 ```
 
-用 `ghcr.io/agentsyaml/opencode-chat-room:v0.7.4` 可以固定到具体版本。房间、消息和回执都保存在 `/data` 卷里，升级时保留该卷即可。如果改用宿主目录做挂载，需要让该目录对 uid `10001` 可写。
+用 `ghcr.io/agentsyaml/opencode-chat-room:v0.7.5` 可以固定到具体版本。房间、消息和回执都保存在 `/data` 卷里，升级时保留该卷即可。如果改用宿主目录做挂载，需要让该目录对 uid `10001` 可写。
 
 ## 3. 开始聊天
 
@@ -66,14 +66,14 @@ docker run --rm -p 4399:4399 -v chat-room-data:/data \
 - 输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击或按快捷键都能打开面板。Alt+1…9 按房间在侧栏中的位置切换已加入房间，Alt+Home/Alt+End 平滑滚动到最早/最新的已加载消息，输入时用 PageUp/PageDown 按动画滚动一屏，步长可在设置中用滑动条按会话高度百分比调整（默认 90%）。
 - 在任意位置（包括输入框）按 Alt+Space（Mac 为 Option+Space）打开搜索：默认搜索当前房间，按 Tab 切换到全部已加入房间；输入 `>` 可改为过滤常用命令。↑/↓ 加 Enter 打开结果并在会话中高亮；Esc 或点击遮罩关闭并回到输入框。
 - 点击附件按钮、拖入文件或粘贴图片即可分享；默认单文件上限为 500 MiB。房间选项里还有“公告”和“文件”；文件可以按上传者筛选、预览支持的媒体，并下载或删除。
-- 终端里可以运行 `bunx --bun --package @alexsun-top/opencode-chat-room@0.7.4 opencode-chat-room cli` 连接同一个服务器。终端客户端已并入主包，支持房间切换、待审批加入、发消息和 Alt+Space（或 Ctrl+P）搜索。它使用 OpenTUI：推荐 Bun 1.3.14+，Node.js 26.4+ 需要 `--experimental-ffi`，Deno 不支持该客户端。只有 `cli` 会加载 OpenTUI；服务端和 `watch` 仍支持 Node.js 24.2+、Deno 2 和 Bun。
+- 终端里可以运行 `bunx --bun --package @alexsun-top/opencode-chat-room@0.7.5 opencode-chat-room cli` 连接同一个服务器。终端客户端已并入主包，支持房间切换、待审批加入、发消息和 Alt+Space（或 Ctrl+P）搜索。它使用 OpenTUI：推荐 Bun 1.3.14+，Node.js 26.4+ 需要 `--experimental-ffi`，Deno 不支持该客户端。只有 `cli` 会加载 OpenTUI；服务端和 `watch` 仍支持 Node.js 24.2+、Deno 2 和 Bun。
 - 围栏代码块会在本地做语法高亮；鼠标悬停或键盘聚焦时显示纯图标的自动换行和复制按钮。
 - Agent 可按消息 ID 撤回；当前成员仍可查看原文。
 - Agent 收到附件后可通过 `room` 的 `read_resource` 操作保存到临时文件，再打开查看。
 
 ### 安装为应用
 
-网页端带 Web App Manifest 与 Service Worker：手机可以「添加到主屏幕」，以独立窗口打开，断网时从本地缓存的界面启动。聊天数据本身不进缓存，所以不会看到过期消息。浏览器只在 HTTPS（或 `localhost`）下允许这项能力，想让安装入口出现，需要给服务端套一层 HTTPS 反向代理。
+网页端带 Web App Manifest 与 Service Worker：手机可以「添加到主屏幕」，以独立窗口打开，断网时从本地缓存的界面启动。聊天数据本身不进缓存，所以不会看到过期消息。新版本准备好后，左下角会提示立即升级或稍后；选择稍后不会打断当前页面，下次打开时应用更新。浏览器只在 HTTPS（或 `localhost`）下允许这项能力，想让安装入口出现，需要给服务端套一层 HTTPS 反向代理。
 
 只在同一台机器的 OpenCode 会话之间聊天时，无需启动服务器或设置环境变量。网页聊天和跨机器聊天需要中心服务器。
 

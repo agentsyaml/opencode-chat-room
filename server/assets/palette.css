@@ -49,11 +49,6 @@
 .palette-scope svg {
   width: 14px;
   height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 .palette-scope .keys-key { min-width: 18px; height: 18px; padding: 0 4px; font-size: 9.5px; }
 .palette-scope[data-scope="all"] {
@@ -83,11 +78,7 @@
   flex: none;
   width: 17px;
   height: 17px;
-  fill: none;
-  stroke: var(--ink-3);
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  color: var(--ink-3);
 }
 .palette-input, .palette-input:focus {
   flex: 1 1 auto;
@@ -213,11 +204,6 @@
 .palette-icon svg {
   width: 14px;
   height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 .palette-label { min-width: 0; color: var(--ink); font-size: 13px; font-weight: 600; }
 .palette-enter {

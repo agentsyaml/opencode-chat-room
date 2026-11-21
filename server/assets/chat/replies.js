@@ -1,5 +1,6 @@
 import { LS } from "./state.js";
 import { replaceEditorRange, setEditorSelection, setCaret } from "./editor.js";
+import { icon } from "./icons.js";
 
 export function initReplies(app) {
   const $ = app.$, targets = new Map(Object.entries(LS.replyDrafts || {}).filter(([, item]) => validTarget(item)));
@@ -38,7 +39,7 @@ function bindMessageActions(app) {
     if (copy) {
       const actions = document.createElement("div"), reply = document.createElement("button");
       actions.className = "message-actions";
-      reply.type = "button"; reply.className = "message-reply"; reply.innerHTML = '<svg class="message-reply-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 10 4 15l5 5M4 15h9a7 7 0 0 0 7-7V5"/></svg>';
+      reply.type = "button"; reply.className = "message-reply"; reply.innerHTML = icon("arrow_reply", "message-reply-icon");
       reply.setAttribute("aria-label", app.t("replyMessage")); reply.dataset.i18nAriaLabel = "replyMessage"; reply.dataset.replyMessage = message.id;
       copy.before(actions); actions.append(copy, reply);
     }

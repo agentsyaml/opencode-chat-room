@@ -127,7 +127,7 @@ export function initShortcuts(app) {
     // Keep the motion in the room list: a vertical glide shows where the selection moved.
     for (const row of document.querySelectorAll("#roomList .room-row.selected, #roomListChat .room-row.selected")) {
       row.classList.remove("room-switch-enter");
-      row.style.setProperty("--room-switch-shift", `${direction > 0 ? 6 : -6}px`);
+      row.style.setProperty("--room-switch-shift", `${direction > 0 ? 3 : -3}px`);
       void row.offsetWidth;
       row.classList.add("room-switch-enter");
       row.scrollIntoView({ block: "nearest" });

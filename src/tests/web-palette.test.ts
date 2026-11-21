@@ -47,7 +47,24 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
       "Refresh rooms", "Create room", "Settings", "Members", "Questions",
       "Announcements", "Reminders", "Leave room", "Jump to latest",
     ]);
+    // Only the selected row advertises Enter, and Alt+number moves that selection.
+    expect(await page.locator("#paletteList .palette-enter:visible").count()).toBe(1);
+    await page.keyboard.press("Alt+Digit3");
+    const altSelection = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll("#paletteList .palette-row")) as HTMLElement[];
+      return {
+        selected: rows.findIndex((row) => row.getAttribute("aria-selected") === "true"),
+        visibleBadges: rows.filter((row) => {
+          const badge = row.querySelector(".palette-enter") as HTMLElement | null;
+          return Boolean(badge && !badge.hidden);
+        }).length,
+        selectedHasBadge: Boolean(rows[2]?.querySelector(".palette-enter")),
+      };
+    });
+    expect(altSelection).toEqual({ selected: 2, visibleBadges: 1, selectedHasBadge: true });
+    await page.keyboard.press("Alt+Digit1");
     expect(await page.locator("#paletteScopeLabel").textContent()).toBe("This room");
+    await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(screenshotDir, "web-palette-desktop-commands-1280.png") });
 
     // Escape closes and returns focus to the composer, not to the opener button.
@@ -65,6 +82,7 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     // A pending search reports its state; the app.searchMessages hook is used when present.
     await page.evaluate(async (url: string) => {
       const { app } = await import(url);
+      (app as any).__originalSearch = app.searchMessages;
       (app as any).searchMessages = () => new Promise((resolve) => setTimeout(() => resolve([]), 450));
     }, "/assets/chat/state.js");
     await page.locator("#msgInput").click();
@@ -75,7 +93,11 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     await page.locator("#paletteStatus").filter({ hasText: "No messages found." }).waitFor();
     await page.keyboard.press("Escape");
     await page.locator("#paletteDialog").waitFor({ state: "hidden" });
-    await page.evaluate(async (url: string) => { const { app } = await import(url); delete (app as any).searchMessages; }, "/assets/chat/state.js");
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      (app as any).searchMessages = (app as any).__originalSearch;
+      delete (app as any).__originalSearch;
+    }, "/assets/chat/state.js");
 
     // Message search shows room, sender, time, and the matching snippet.
     await page.locator("#msgInput").click();
@@ -95,6 +117,36 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     expect(meta.sender).toBe("__Test_PaletteOwner");
     expect(meta.time.length).toBeGreaterThan(0);
     expect(meta.snippet).toContain("violet-orchid-42");
+
+    // Typing a further character keeps the current hits visible until the
+    // debounce settles, and a burst of keystrokes runs only one search.
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      const original = (app as any).searchMessages;
+      (app as any).__searchCalls = 0;
+      (app as any).searchMessages = (...args: unknown[]) => {
+        (app as any).__searchCalls += 1;
+        return original.apply(app, args);
+      };
+    }, "/assets/chat/state.js");
+    const duringTyping = await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>("#paletteInput")!;
+      const list = document.querySelector<HTMLElement>("#paletteList")!;
+      input.value = "violet-orchid-42x";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return {
+        results: list.querySelectorAll(".palette-result").length,
+        state: document.querySelector<HTMLElement>("#paletteDialog")!.dataset.state,
+      };
+    });
+    expect(duringTyping.results).toBe(1);
+    expect(duringTyping.state).toBe("searching");
+    await page.locator("#paletteStatus").filter({ hasText: "No messages found." }).waitFor();
+    await page.locator("#paletteInput").fill("");
+    await page.evaluate(async (url: string) => { const { app } = await import(url); (app as any).__searchCalls = 0; }, "/assets/chat/state.js");
+    await page.locator("#paletteInput").pressSequentially("violet", { delay: 30 });
+    await result.waitFor();
+    expect(await page.evaluate(async (url: string) => { const { app } = await import(url); return (app as any).__searchCalls; }, "/assets/chat/state.js")).toBe(1);
     await page.screenshot({ path: path.join(screenshotDir, "web-palette-desktop-results-1280.png") });
 
     // Arrow selection and Enter open the hit and leave it highlighted.

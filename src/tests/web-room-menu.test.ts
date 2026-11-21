@@ -39,6 +39,7 @@ test.skipIf(!browserModule)("announcements open from the Options menu and leavin
     expect(await page.locator("#roomOptions #btnMembers").count()).toBe(0);
     expect(await page.locator("#roomOptions").isHidden()).toBe(true);
     expect(await page.locator("#roomOptions .menu-action").first().getAttribute("id")).toBe("btnAnnouncements");
+    expect(await page.locator("#roomOptions .menu-action svg").count()).toBe(5);
 
     await page.locator("#btnRoomOptions").click();
     expect(await page.locator("#btnRoomOptions").getAttribute("aria-expanded")).toBe("true");

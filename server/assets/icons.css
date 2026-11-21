@@ -1,0 +1,9 @@
+/* Fluent System Icons (MIT): one local sprite, filled with the current text color. */
+.fluent-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: currentColor;
+  stroke: none;
+}

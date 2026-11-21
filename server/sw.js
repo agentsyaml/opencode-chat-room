@@ -4,6 +4,8 @@ const CACHE = `oc-chat-${VERSION}`;
 const SHELL = "/chat";
 const STATIC = [
   "/assets/base.css",
+  "/assets/icons.css",
+  "/assets/fluent-icons.svg",
   "/assets/settings.css",
   "/assets/conversation.css",
   "/assets/recall.css",
@@ -39,8 +41,14 @@ self.addEventListener("install", (event) => {
         pending.push(new URL(match[1], `https://chat.invalid${url}`).pathname);
       }
     }
-    await self.skipWaiting();
+    // A first install should control immediately. A replacement waits until the page
+    // asks for it, so an open conversation is never reloaded without consent.
+    if (!self.registration.active) await self.skipWaiting();
   })());
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (event) => {

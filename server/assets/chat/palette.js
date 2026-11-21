@@ -1,16 +1,8 @@
+import { icon } from "./icons.js";
+
 // Alt+Space opens one keyboard-first surface: message search plus common room commands.
-const ICONS = {
-  refresh: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.8-2L20 12M4 12l2.6 5a7 7 0 0 0 11.8-2"/></svg>',
-  plus: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
-  gear: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>',
-  members: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 5.8M17 14a4.5 4.5 0 0 1 3.5 4.4V19h-3"/></svg>',
-  questions: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9.5 9a2.5 2.5 0 1 1 4.6 1.4c-.7.9-2.1 1.3-2.1 2.8M12 17.5h.01"/><circle cx="12" cy="12" r="9"/></svg>',
-  announcements: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>',
-  reminders: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>',
-  leave: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 4H5v16h5M15 8l4 4-4 4M19 12H9"/></svg>',
-  latest: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4v14M7 13l5 5 5-5M5 21h14"/></svg>',
-  command: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
-};
+
+const SEARCH_DEBOUNCE_MS = 220;
 
 export function initPalette(app) {
   const dialog = app.$("#paletteDialog");
@@ -27,18 +19,18 @@ export function initPalette(app) {
 
   const commands = () => {
     const available = [
-      { id: "refresh", label: t("refreshRooms"), icon: "refresh", keywords: "reload rooms", run: () => void app.refreshRoomList?.() },
-      { id: "create", label: t("createRoom"), icon: "plus", keywords: "new room", focusComposer: false,
+      { id: "refresh", label: t("refreshRooms"), icon: "arrow_sync", keywords: "reload rooms", run: () => void app.refreshRoomList?.() },
+      { id: "create", label: t("createRoom"), icon: "add", keywords: "new room", focusComposer: false,
         run: () => room() ? app.openCreateRoomDialog?.() : app.$("#inRoomName")?.focus({ preventScroll: true }) },
-      { id: "settings", label: t("settings"), icon: "gear", keywords: "preferences theme language", focusComposer: false, run: () => app.openSettings?.() },
+      { id: "settings", label: t("settings"), icon: "options", keywords: "preferences theme language", focusComposer: false, run: () => app.openSettings?.() },
     ];
     if (room()) available.push(
-      { id: "members", label: t("members"), icon: "members", keywords: "people roster", focusComposer: false, run: () => app.$("#btnMembers")?.click() },
-      { id: "questions", label: t("questions"), icon: "questions", keywords: "answers", focusComposer: false, run: () => app.$("#btnQuestions")?.click() },
-      { id: "announcements", label: t("announcements"), icon: "announcements", keywords: "notice board", focusComposer: false, run: () => app.$("#btnAnnouncements")?.click() },
-      { id: "reminders", label: t("reminders"), icon: "reminders", keywords: "schedule alarm", focusComposer: false, run: () => app.$("#btnReminders")?.click() },
-      { id: "leave", label: t("paletteLeaveRoom"), icon: "leave", keywords: "exit quit", focusComposer: false, run: () => app.leaveRoom?.(false) },
-      { id: "latest", label: t("paletteJumpLatest"), icon: "latest", keywords: "bottom newest", run: () => app.jumpToBottom?.() },
+      { id: "members", label: t("members"), icon: "people", keywords: "people roster", focusComposer: false, run: () => app.$("#btnMembers")?.click() },
+      { id: "questions", label: t("questions"), icon: "question_circle", keywords: "answers", focusComposer: false, run: () => app.$("#btnQuestions")?.click() },
+      { id: "announcements", label: t("announcements"), icon: "megaphone", keywords: "notice board", focusComposer: false, run: () => app.$("#btnAnnouncements")?.click() },
+      { id: "reminders", label: t("reminders"), icon: "alert", keywords: "schedule alarm", focusComposer: false, run: () => app.$("#btnReminders")?.click() },
+      { id: "leave", label: t("paletteLeaveRoom"), icon: "arrow_exit", keywords: "exit quit", focusComposer: false, run: () => app.leaveRoom?.(false) },
+      { id: "latest", label: t("paletteJumpLatest"), icon: "arrow_down", keywords: "bottom newest", run: () => app.jumpToBottom?.() },
     );
     return available;
   };
@@ -74,7 +66,11 @@ export function initPalette(app) {
 
   const syncSelection = () => {
     const rows = [...list.querySelectorAll(".palette-row")];
-    rows.forEach((row, index) => row.setAttribute("aria-selected", String(index === selected)));
+    rows.forEach((row, index) => {
+      row.setAttribute("aria-selected", String(index === selected));
+      const enter = row.querySelector(".palette-enter");
+      if (enter) enter.hidden = index !== selected;
+    });
     input.setAttribute("aria-expanded", String(items.length > 0));
     if (items.length && selected >= 0) input.setAttribute("aria-activedescendant", `palette-option-${selected}`);
     else input.removeAttribute("aria-activedescendant");
@@ -92,9 +88,9 @@ export function initPalette(app) {
       row.setAttribute("role", "option");
       row.style.setProperty("--palette-i", String(Math.min(index, 9)));
       if (item.kind === "command") {
-        const icon = document.createElement("span");
-        icon.className = "palette-icon";
-        icon.innerHTML = ICONS[item.icon] || ICONS.command;
+        const badge = document.createElement("span");
+        badge.className = "palette-icon";
+        badge.innerHTML = icon(item.icon || "arrow_right");
         const label = document.createElement("span");
         label.className = "palette-label";
         label.textContent = item.label;
@@ -102,7 +98,7 @@ export function initPalette(app) {
         enter.className = "palette-enter";
         enter.setAttribute("aria-hidden", "true");
         enter.textContent = "↵";
-        row.append(icon, label, enter);
+        row.append(badge, label, enter);
       } else {
         const top = document.createElement("span");
         top.className = "palette-result-top";
@@ -236,14 +232,17 @@ export function initPalette(app) {
     const value = input.value;
     if (!value.trim()) { showCommands(""); return; }
     if (value.startsWith(">")) { showCommands(value.slice(1)); return; }
+    const wasSearch = dialog.dataset.mode === "search";
     dialog.dataset.mode = "search";
     dialog.dataset.state = "searching";
     modeLabel.textContent = t("paletteSearchMode");
     list.setAttribute("aria-busy", "true");
-    render([], null);
+    // Keep the previous hits visible while typing. Clearing them on every
+    // keystroke is what makes the result list flicker.
+    if (!wasSearch || !items.length) render([], null);
     status.textContent = t("paletteSearching");
     const text = value.trim();
-    searchTimer = setTimeout(() => { void executeSearch(text, token); }, 120);
+    searchTimer = setTimeout(() => { void executeSearch(text, token); }, SEARCH_DEBOUNCE_MS);
   };
 
   const highlightHit = (item) => {
@@ -316,7 +315,7 @@ export function initPalette(app) {
   };
   app.openPalette = openPalette;
 
-  input.addEventListener("input", scheduleSearch);
+  input.addEventListener("input", (event) => { if (!event.isComposing) scheduleSearch(); });
   scopeButton.addEventListener("click", () => { toggleScope(); input.focus(); });
   app.$("#btnClosePalette")?.addEventListener("click", () => closePalette());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) closePalette(); });
@@ -360,6 +359,19 @@ export function initPalette(app) {
       if (!items.length || selected < 0) return;
       event.preventDefault();
       activate(items[selected]);
+      return;
+    }
+    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      const digit = /^(?:Digit|Numpad)([1-9])$/.exec(event.code)?.[1] ?? (/^[1-9]$/.test(event.key) ? event.key : null);
+      const index = digit ? Number(digit) - 1 : -1;
+      if (digit) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (index >= 0 && index < items.length) {
+          selected = index;
+          syncSelection();
+        }
+      }
     }
   });
 

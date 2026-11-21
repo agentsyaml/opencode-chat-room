@@ -66,6 +66,50 @@ test.skipIf(!browserModule)("Alt+Arrow steps through joined rooms in rail order"
     await page.keyboard.press("Control+Alt+ArrowDown");
     await page.waitForTimeout(300);
     expect(await selectedRoomID(page)).toBe(joined[start].id);
+
+    // Switching to a room with thousands of cached messages renders only the
+    // newest window, and scrolling up consumes the cache before any request.
+    let listRequests = 0, historyRequests = 0;
+    page.on("request", (request: any) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname === "/rooms") listRequests++;
+      if (pathname.endsWith("/history")) historyRequests++;
+    });
+    const cache = await page.evaluate(async ({ url, roomId }: { url: string; roomId: string }) => {
+      const { app } = await import(url);
+      const entry = app.state.rooms.get(roomId);
+      const base = Date.now();
+      entry.room.messages = Array.from({ length: 5000 }, (_, index) => ({
+        id: `seed-${index}`,
+        seq: index + 1,
+        senderId: "Seed",
+        senderSessionID: "seed-session",
+        text: `cached message ${index}`,
+        createdAt: base - (5000 - index) * 1000,
+      }));
+      entry.historyComplete = false;
+      entry.historyBeforeSeq = 1;
+      const started = performance.now();
+      app.activateRoom(roomId);
+      const switchMs = performance.now() - started;
+      const rows = document.querySelectorAll("#msgList [data-msg-id]").length;
+      const beforeScroll = rows;
+      document.querySelector<HTMLElement>("#thread")!.scrollTop = 0;
+      await app.loadOlderHistory();
+      return {
+        switchMs,
+        rows,
+        afterScroll: document.querySelectorAll("#msgList [data-msg-id]").length,
+        beforeScroll,
+      };
+    }, { url: "/assets/chat/state.js", roomId: next.id });
+    await page.waitForTimeout(120);
+    expect(cache.switchMs).toBeLessThan(250);
+    expect(cache.rows).toBeGreaterThanOrEqual(300);
+    expect(cache.rows).toBeLessThan(400);
+    expect(cache.afterScroll).toBeGreaterThan(cache.beforeScroll);
+    expect(listRequests).toBe(0);
+    expect(historyRequests).toBe(0);
   } finally {
     await browser?.close(); server.kill("SIGTERM");
     await new Promise((resolve) => server.once("exit", resolve));

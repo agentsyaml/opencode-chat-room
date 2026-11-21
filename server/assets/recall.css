@@ -1,6 +1,6 @@
 /* Recall: the row-level action, the tombstone, and the reveal disclosure. */
 .message-recall { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 8px; color: var(--ink-3); background: transparent; cursor: pointer; }
-.message-recall-icon { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.message-recall-icon { display: block; width: 16px; height: 16px; }
 .message-recall:hover, .message-recall:focus-visible { border-color: color-mix(in srgb, var(--danger) 32%, var(--line)); color: var(--danger); background: var(--danger-soft); }
 .message-recall:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .msg-text.recalled { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; border-style: dashed; border-color: color-mix(in srgb, var(--ink) 18%, transparent); background: color-mix(in srgb, var(--surface-2) 62%, var(--surface)); box-shadow: none; color: var(--ink-2); font-size: 14.5px; }
@@ -8,7 +8,7 @@
 .msg-text.recalled > :not(:first-child) { margin-top: 0; }
 .recalled-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--ink-2); font-weight: 550; }
 .recalled-mark { display: inline-flex; color: var(--ink-3); }
-.recalled-icon { display: block; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.recalled-icon { display: block; width: 15px; height: 15px; }
 .recalled-by { margin: 0; color: var(--ink-3); font-size: 12px; }
 .recalled-reveal { min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
 .recalled-reveal:hover, .recalled-reveal:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }

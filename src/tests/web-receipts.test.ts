@@ -54,10 +54,11 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     const contextMessage = await api(origin, `/rooms/${roomId}/messages`, "POST", { sessionID: "twin-b", text: `Context receipt with wide content\n\nhttps://example.com/${"unbroken-segment".repeat(12)}\n\n| Item | Status | Detail | Owner | Updated | Source |\n| --- | --- | --- | --- | --- | --- |\n| Queue | Waiting | Long text scrolls horizontally on small screens | Mira | Today | Room |\n\n\`\`\`js\nconst longIdentifier = 'selection-and-receipt-layout-regression';\nconsole.log(longIdentifier);\n\`\`\`` });
     await page.locator("#msgInput").fill("My short note");
     await page.locator("#btnSend").click();
-    await page.locator("#msgList").getByText("My short note").waitFor();
+    const ownRow = page.locator('#msgList [data-msg-id]:not([data-msg-id^="pending-"])').filter({ hasText: "My short note" }).last();
+    await ownRow.waitFor();
     const oldMessageID = oldMessage.messages.at(-1).id, targetMessageID = target.messages.at(-1).id;
     const contextMessageID = contextMessage.messages.at(-1).id;
-    const ownMessageID = await page.evaluate(async (url: string) => (await import(url)).app.state.room.messages.find((message: any) => message.text === "My short note").id, "/assets/chat/state.js");
+    const ownMessageID = (await ownRow.getAttribute("data-msg-id"))!;
     await api(origin, "/queued", "POST", { roomId, sessionID: ownerID, ts: oldMessage.messages.at(-1).createdAt });
     const members = await api(origin, `/rooms/${roomId}/members`);
     const owner = members.find((member: any) => member.sessionID === ownerID);

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createApp } from "./app.mjs";
 
 const NAME = "opencode-chat-room cli";
-const FALLBACK_VERSION = "0.7.4";
+const FALLBACK_VERSION = "0.7.5";
 
 export const HELP = `opencode-chat-room cli - terminal client for a chat-room server
 

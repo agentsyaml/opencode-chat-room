@@ -37,6 +37,9 @@ test.skipIf(!browserModule)("installs as an app and starts from the shell while 
     const worker = await (await fetch(`${origin}/sw.js`)).text();
     expect(worker).not.toContain("{{version}}");
     expect(worker).toContain('const VERSION = "v');
+    expect(worker).toContain('if (!self.registration.active) await self.skipWaiting();');
+    expect(worker).toContain('event.data?.type === "SKIP_WAITING"');
+    expect((worker.match(/self\.skipWaiting\(\)/g) ?? []).length).toBe(2);
     expect((await fetch(`${origin}/assets/icons/icon-192.png`)).headers.get("content-type")).toBe("image/png");
     await page.evaluate(() => navigator.serviceWorker.ready.then((ready) => Boolean(ready.active)));
     // The second visit is the one a worker controls, which is what an offline start runs.

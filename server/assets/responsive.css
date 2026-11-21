@@ -55,7 +55,7 @@
   .rail-tools { display: flex; align-items: center; gap: 7px; }
   .icon-btn { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--ink-2); font: inherit; font-size: 20px; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
   .icon-btn:hover { color: var(--accent); border-color: var(--line); background: var(--surface); }
-  .icon-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+  .icon-btn svg { width: 17px; height: 17px; }
   .rail-composer { position: absolute; top: 76px; left: 12px; right: 12px; z-index: 25; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
   .rail-composer .field { margin-bottom: 8px; }
   .rail-composer .btn { width: 100%; }
@@ -129,11 +129,11 @@
   .user-menu-trigger:focus-visible, .menu-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .user-menu-trigger #railIdentity { flex: 1; min-width: 0; overflow: hidden; color: var(--ink-2); text-overflow: ellipsis; white-space: nowrap; }
   .user-menu-trigger .rail-avatar { flex: none; width: 34px; height: 34px; border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--line)); font-size: 13px; font-weight: 700; }
-  .user-menu-caret { font-size: 14px; }
+  .user-menu-caret { width: 14px; height: 14px; }
   .user-menu-panel { top: auto; right: auto; bottom: calc(100% + 8px); left: 0; max-height: min(65dvh, 560px); overflow: auto; }
   .room-options-panel { display: grid; gap: 4px; width: 190px; max-height: min(70dvh, 420px); overflow: auto; }
   .menu-action { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; font: inherit; text-align: left; cursor: pointer; }
-  .menu-action > svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+  .menu-action > svg { flex: none; width: 16px; height: 16px; }
   .menu-action:hover { background: var(--surface-2); }
   /* A non-owner still sees the entry; it reads as secondary and explains itself. */
   .menu-action.menu-secondary { color: var(--ink-3); }
@@ -226,7 +226,7 @@
     .rail-foot { display: flex; min-height: var(--composer-block, 93px); }
     .rail-install { display: grid; gap: 6px; padding: 8px 4px 10px; border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent); }
     .rail-install .rail-install-btn { width: 100%; min-height: 40px; }
-    .rail-install svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .rail-install svg { width: 16px; height: 16px; }
     .rail-install .hint { margin: 0; font-size: 11.5px; line-height: 1.45; }
     .rail-label { margin: 0 8px 10px; font-size: 11px; }
     .rail-composer { top: 32px; left: 12px; right: 12px; }

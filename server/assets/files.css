@@ -4,11 +4,6 @@
   width: 15px;
   height: 15px;
   flex: none;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 #filesDialog {
@@ -115,11 +110,6 @@
 .file-kind svg {
   width: 18px;
   height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 .file-kind[data-kind="audio"] { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--surface)); }
 .file-kind[data-kind="video"] { color: var(--mention-blue); background: color-mix(in srgb, var(--mention-blue) 12%, var(--surface)); }
@@ -175,11 +165,6 @@
 .file-action svg {
   width: 16px;
   height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 .file-action:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 24%, transparent); background: var(--accent-soft); }
 .file-action.file-action-delete:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 28%, transparent); background: var(--danger-soft); }

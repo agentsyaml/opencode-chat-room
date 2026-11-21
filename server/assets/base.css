@@ -90,6 +90,27 @@
     .install-prompt { grid-template-columns: minmax(0, 1fr); }
     .install-prompt-actions { justify-content: flex-start; }
   }
+  .pwa-update {
+    position: fixed;
+    z-index: 60;
+    left: 18px;
+    bottom: max(18px, env(safe-area-inset-bottom));
+    display: grid;
+    gap: 10px;
+    width: min(392px, calc(100vw - 36px));
+    padding: 14px 16px;
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+    border-radius: 16px;
+    background: var(--surface);
+    box-shadow: 0 8px 30px rgb(34 53 47 / .16);
+  }
+  .pwa-update-copy strong { display: block; font-size: 13.5px; font-weight: 650; }
+  .pwa-update-copy p { margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+  .pwa-update-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pwa-update-actions .btn { min-height: 36px; padding: 7px 12px; font-size: 12.5px; }
+  @media (max-width: 560px) {
+    .pwa-update { right: 10px; bottom: max(10px, env(safe-area-inset-bottom)); left: 10px; width: auto; }
+  }
   .entry-card {
     display: grid;
     gap: 10px;
@@ -112,10 +133,10 @@
     appearance: none;
     padding-left: var(--select-pad);
     padding-right: calc(var(--select-pad) + 22px);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1.2 1.6 6 6.4l4.8-4.8' fill='none' stroke='%2363716b' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath fill='%2363716b' d='M4.22 8.47c.3-.3.77-.3 1.06 0L12 15.19l6.72-6.72a.75.75 0 1 1 1.06 1.06l-7.25 7.25c-.3.3-.77.3-1.06 0L4.22 9.53a.75.75 0 0 1 0-1.06'/%3E%3C/svg%3E");
     background-position: right var(--select-pad) center;
     background-repeat: no-repeat;
-    background-size: 12px 8px;
+    background-size: 16px 16px;
   }
   @media (forced-colors: active) {
     select { appearance: auto; padding-right: var(--select-pad); background-image: none; }
@@ -146,7 +167,7 @@
     color: var(--ink-2);
   }
   .locale-label { display: flex; align-items: center; gap: 6px; }
-  .locale-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .locale-icon { width: 16px; height: 16px; flex: none; }
 
   .input {
     width: 100%;
@@ -326,8 +347,8 @@
     transition: background .12s, border-color .12s;
   }
   .room-row:hover { background: var(--surface-2); border-color: var(--line); }
-  .room-row.room-switch-enter { animation: room-switch-row .2s ease-out; }
-  @keyframes room-switch-row { from { transform: translateY(var(--room-switch-shift, 6px)); } }
+  .room-row.room-switch-enter { animation: room-switch-row .15s cubic-bezier(.1, .9, .2, 1); }
+  @keyframes room-switch-row { from { opacity: .55; transform: translateY(var(--room-switch-shift, 3px)); } }
   .r-name { font-weight: 600; font-size: 14px; }
   .r-meta { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .r-go {
@@ -346,6 +367,7 @@
   /* Full-screen image viewer zoom controls and split file actions. */
   .image-dialog-tools { position: fixed; z-index: 2; top: 14px; left: 14px; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid rgb(255 255 255 / .18); border-radius: 999px; background: rgb(9 16 22 / .58); backdrop-filter: blur(6px); }
   .image-dialog-tool { display: grid; place-items: center; min-width: 40px; height: 40px; padding: 0 8px; border: 1px solid transparent; border-radius: 999px; color: #fff; background: transparent; font: inherit; font-size: 18px; font-weight: 600; line-height: 1; cursor: pointer; }
+  .image-dialog-tool .fluent-icon { width: 16px; height: 16px; }
   .image-dialog-tool:hover { background: rgb(255 255 255 / .14); }
   .image-dialog-tool:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
   .image-dialog-tool:disabled { opacity: .38; cursor: default; }
@@ -355,7 +377,7 @@
   .resource-split { position: relative; display: inline-flex; align-items: stretch; }
   .resource-split .resource-download { border-right: 0; border-radius: 10px 0 0 10px; }
   .resource-split .resource-split-toggle { display: grid; place-items: center; width: 34px; min-height: 34px; padding: 0; border-radius: 0 10px 10px 0; color: var(--ink-2); }
-  .resource-split .resource-split-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .resource-split .resource-split-toggle svg { width: 15px; height: 15px; }
   .resource-split .resource-split-toggle[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
   .resource-split-menu { position: absolute; z-index: 30; top: calc(100% + 5px); right: 0; min-width: 160px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
 
@@ -377,7 +399,7 @@
   .admin-join-policy + .join-policy-hint { margin-bottom: 12px; }
   .join-pending { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 12px 14px; padding: 18px 20px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 65%, var(--surface)), var(--surface)); box-shadow: 0 2px 5px rgb(34 53 47 / .04), 0 14px 34px rgb(34 53 47 / .07); }
   .join-pending-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; color: var(--accent-ink); background: var(--accent); }
-  .join-pending-mark svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .join-pending-mark svg { width: 19px; height: 19px; }
   .join-pending h2 { margin: 0; font-family: var(--font-display); font-size: 21px; font-weight: 600; letter-spacing: -.02em; }
   .join-pending p { margin: 5px 0 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
   .join-pending .hint { color: var(--ink-3); font-size: 12px; }

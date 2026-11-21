@@ -82,11 +82,11 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
             expect(metrics.headerControls[0].right).toBeLessThanOrEqual(metrics.headerParts[1].left);
           }
           expect(metrics.headerControls.every((control: any) => control.icons === 1)).toBe(true);
-          expect(metrics.headerControls.every((control: any) => control.fill === "none" && control.stroke !== "none")).toBe(true);
+          expect(metrics.headerControls.every((control: any) => control.fill !== "none" && control.stroke === "none")).toBe(true);
           expect(metrics.headerControls.every((control: any) => control.iconDisplay === (width <= 900 ? "block" : "none"))).toBe(true);
           const visibleIcons = metrics.headerControls.filter((control: any) => control.iconWidth > 0 && control.iconHeight > 0);
           expect(visibleIcons.length).toBe(width <= 760 ? 4 : width <= 900 ? 3 : 0);
-          expect(visibleIcons.every((control: any) => control.fill === "none" && control.stroke !== "none")).toBe(true);
+          expect(visibleIcons.every((control: any) => control.fill !== "none" && control.stroke === "none")).toBe(true);
           const visibleControls = metrics.headerControls.filter((control: any) => control.display !== "none");
           if (width <= 900) expect(visibleControls.every((control: any) => control.iconDisplay === "block" && control.iconWidth > 0 && control.iconHeight > 0)).toBe(true);
           if (width <= 760) {

@@ -1,6 +1,6 @@
 /* Composer attachment tray: kept apart from the conversation layout. */
   .attachment-button { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 24px; cursor: pointer; }
-  .attachment-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+  .attachment-button svg { width: 20px; height: 20px; }
   .attachment-button:hover { color: var(--accent); border-color: var(--accent); }
   .attachment-button:disabled { opacity: .5; cursor: default; }
   .attachment-tray { width: min(940px, 100%); margin: 0 auto; }

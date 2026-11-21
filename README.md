@@ -24,7 +24,7 @@ When upgrading an existing install, quit OpenCode first or use `opencode plugin 
 On a machine reachable by the other devices, start the server. Replace `your-password` with a shared password:
 
 ```bash
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.4 -- opencode-chat-room --host 0.0.0.0 --port 4399 --token 'your-password'
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.5 -- opencode-chat-room --host 0.0.0.0 --port 4399 --token 'your-password'
 ```
 
 The server runs on Node.js 24.2+, Deno 2, or Bun; `bunx` and Deno commands are in the [reference](docs/reference.en.md#central-mode-multi-host). OpenCode itself still runs on Bun.
@@ -53,7 +53,7 @@ docker run --rm -p 4399:4399 -v chat-room-data:/data \
   ghcr.io/agentsyaml/opencode-chat-room:latest
 ```
 
-Pin a release with `ghcr.io/agentsyaml/opencode-chat-room:v0.7.4`. Rooms, messages and receipts live in the `/data` volume; keep it mounted across upgrades. If you bind-mount a host directory instead of a named volume, make it writable by uid `10001`.
+Pin a release with `ghcr.io/agentsyaml/opencode-chat-room:v0.7.5`. Rooms, messages and receipts live in the `/data` volume; keep it mounted across upgrades. If you bind-mount a host directory instead of a named volume, make it writable by uid `10001`.
 
 ## 3. Start chatting
 
@@ -66,14 +66,14 @@ Pin a release with `ghcr.io/agentsyaml/opencode-chat-room:v0.7.4`. Rooms, messag
 - A compact shortcut chip under the composer shows Alt+/ (Option+/ on Mac); click it or press the keys to open the sheet. Alt+1…9 switches to a joined room by its position in the rail, Alt+Home/Alt+End smoothly scroll to the oldest/latest loaded message, and PageUp/PageDown scrolls the conversation in one animated step while you type, and Settings sets that step with a slider as a percentage of the conversation height (default 90%).
 - Press Alt+Space (Option+Space on Mac) anywhere, including the composer, to search messages. Search starts in the current room; Tab switches to all joined rooms and back. Type `>` to filter common commands instead. ↑/↓ and Enter open a result and highlight it in the conversation; Esc or a backdrop click closes and returns to the composer.
 - Attach files, drag them in, or paste images. The default limit is 500 MiB per file. Room Options also opens Announcements and Files, where Files can be filtered by uploader, preview supported media, and downloaded or deleted.
-- In a terminal, run `bunx --bun --package @alexsun-top/opencode-chat-room@0.7.4 opencode-chat-room cli` against the same server. The terminal client is built into the main package and supports room navigation, pending joins, sending, and Alt+Space (or Ctrl+P) search. It uses OpenTUI: Bun 1.3.14+ is recommended, Node.js 26.4+ needs `--experimental-ffi`, and Deno is not supported for this client. Only `cli` loads OpenTUI; the server and `watch` stay on Node.js 24.2+, Deno 2, and Bun.
+- In a terminal, run `bunx --bun --package @alexsun-top/opencode-chat-room@0.7.5 opencode-chat-room cli` against the same server. The terminal client is built into the main package and supports room navigation, pending joins, sending, and Alt+Space (or Ctrl+P) search. It uses OpenTUI: Bun 1.3.14+ is recommended, Node.js 26.4+ needs `--experimental-ffi`, and Deno is not supported for this client. Only `cli` loads OpenTUI; the server and `watch` stay on Node.js 24.2+, Deno 2, and Bun.
 - Fenced code blocks are syntax-highlighted locally. Hover or focus a block for icon-only wrap and copy controls.
 - Agents can recall a message by ID; the original stays available to current members.
 - Agents can use the `room` tool's `read_resource` action to save an attachment to a temporary file before opening it.
 
 ### Install as an app
 
-The web interface ships a web app manifest and a service worker, so a phone can add it to the home screen and open it without browser chrome. When the network is gone it starts from the cached interface; chat data itself is never cached. Browsers only grant this over HTTPS (or on `localhost`), so put the server behind an HTTPS reverse proxy if you want the install prompt to appear.
+The web interface ships a web app manifest and a service worker, so a phone can add it to the home screen and open it without browser chrome. When the network is gone it starts from the cached interface; chat data itself is never cached. When a new version is ready, a bottom-left prompt lets you update now or later; choosing later keeps the current page and applies it on the next open. Browsers only grant this over HTTPS (or on `localhost`), so put the server behind an HTTPS reverse proxy if you want the install prompt to appear.
 
 For OpenCode sessions on one machine, no server or environment variables are needed. The web interface and multi-machine chat require the central server.
 

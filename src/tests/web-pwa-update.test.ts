@@ -1,0 +1,117 @@
+/// <reference lib="dom" />
+import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import { createServer } from "node:net";
+import { spawn } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+
+const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
+const token = "chat-pwa-update-token";
+
+test.skipIf(!browserModule)("waits for consent before applying a new service worker", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-pwa-update-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 850 } });
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", (error: Error) => errors.push(error.message));
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.addInitScript(fakeServiceWorker);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#pwaUpdate").waitFor({ state: "visible" });
+    expect((await page.locator("#pwaUpdateTitle").textContent())?.trim()).toBe("Update available");
+    const desktop = await page.locator("#pwaUpdate").boundingBox();
+    expect(desktop).not.toBeNull();
+    expect(desktop!.x).toBeLessThan(40);
+    expect(desktop!.y + desktop!.height).toBeGreaterThan(800);
+    expect(desktop!.width).toBeLessThanOrEqual(392);
+
+    await page.locator("#btnPwaLater").click();
+    await page.locator("#pwaUpdate").waitFor({ state: "hidden" });
+    expect(await page.evaluate(() => (window as any).__pwa.calls.some((call: any) => call.kind === "post"))).toBe(false);
+
+    await page.evaluate(() => (window as any).__pwa.emitUpdate());
+    await page.locator("#pwaUpdate").waitFor({ state: "visible" });
+    await page.locator("#btnPwaUpdate").click();
+    await page.locator("#pwaUpdate").waitFor({ state: "hidden" });
+    const posted = await page.evaluate(() => (window as any).__pwa.calls.find((call: any) => call.kind === "post"));
+    expect(posted?.message).toEqual({ type: "SKIP_WAITING" });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => (window as any).__pwa.emitUpdate());
+    await page.locator("#pwaUpdate").waitFor({ state: "visible" });
+    const mobile = await page.locator("#pwaUpdate").boundingBox();
+    expect(mobile).not.toBeNull();
+    expect(mobile!.x).toBeGreaterThanOrEqual(8);
+    expect(mobile!.x + mobile!.width).toBeLessThanOrEqual(382);
+    await page.locator("#btnPwaLater").click();
+    expect(errors).toEqual([]);
+    await context.close();
+  } finally {
+    await browser?.close();
+    const stopped = new Promise((resolve) => server.once("exit", resolve));
+    server.kill("SIGTERM"); await stopped;
+    await rm(stateDir, { recursive: true, force: true });
+  }
+}, 90000);
+
+// The page otherwise suppresses the worker in automation, so replace the API with a
+// small controlled registration. This exercises the decision and message path, not
+// the browser's own update algorithm.
+function fakeServiceWorker() {
+  const calls: Array<{ kind: string; message?: unknown }> = [];
+  let updateFound: (() => void) | undefined;
+  const registration: any = {
+    waiting: { state: "installed", postMessage: (message: unknown) => calls.push({ kind: "post", message }), addEventListener() {} },
+    installing: null,
+    addEventListener(type: string, listener: () => void) { if (type === "updatefound") updateFound = listener; },
+    update() { calls.push({ kind: "update" }); return Promise.resolve(); },
+  };
+  const worker = {
+    controller: { state: "activated" },
+    ready: Promise.resolve(registration),
+    register() { calls.push({ kind: "register" }); return Promise.resolve(registration); },
+    addEventListener() {},
+  };
+  Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false, configurable: true });
+  Object.defineProperty(Navigator.prototype, "serviceWorker", { get: () => worker, configurable: true });
+  (window as any).__pwa = {
+    calls,
+    emitUpdate() {
+      const next = { state: "installed", postMessage: (message: unknown) => calls.push({ kind: "post", message }), addEventListener() {} };
+      registration.installing = next;
+      updateFound?.();
+    },
+  };
+}
+
+function isolatedEnv(stateDir: string, port: number): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of ["CHAT_ROOM_SERVER_URL", "CHAT_ROOM_SERVER_TOKEN", "CHAT_ROOM_WAKE_SERVE_URL"]) delete env[key];
+  return { ...env, HOME: path.join(stateDir, "home"), XDG_STATE_HOME: path.join(stateDir, "state"), CHAT_ROOM_STATE_DIR: stateDir, CHAT_ROOM_SERVER_HOST: "127.0.0.1", CHAT_ROOM_SERVER_PORT: String(port), CHAT_ROOM_SERVER_TOKEN: token };
+}
+
+async function unusedPort() {
+  const listener = createServer();
+  await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+  const address = listener.address();
+  if (!address || typeof address === "string") throw new Error("Could not reserve a local port");
+  await new Promise<void>((resolve) => listener.close(() => resolve()));
+  return address.port;
+}
+
+async function waitForServer(origin: string) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try { if ((await fetch(`${origin}/chat`)).ok) return; } catch { /* Server is starting. */ }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Local chat server did not start");
+}

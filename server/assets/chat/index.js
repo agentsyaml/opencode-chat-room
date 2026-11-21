@@ -47,7 +47,7 @@ initAnnouncements(app);
 initReminders(app);
 initAdmin(app);
 initImageZoom(app);
-initPwa();
+initPwa(app);
 initViewport();
 initInstallPrompt(app);
 initPalette(app);
