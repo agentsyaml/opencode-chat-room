@@ -12,7 +12,13 @@ export function initEvents(app) {
     if ($("#chatView").hidden || editor.contentEditable !== "true" || !editor.getClientRects().length) return false;
     if (roomRail.classList.contains("drawer-open")) return false;
     if (!force && (document.activeElement !== document.body || window.getSelection()?.toString())) return false;
+    const selection = window.getSelection();
+    const selectionInside = Boolean(selection?.anchorNode && editor.contains(selection.anchorNode));
     editor.focus({ preventScroll: true });
+    // A closed modal can leave the DOM selection inside its removed input even
+    // after the composer looks focused. Re-seat the caret so the next keystroke
+    // lands in the editor instead of disappearing.
+    if (force && !selectionInside) editor.setCaret?.(editor.value.length);
     return true;
   };
   app.focusComposer = () => {

@@ -4,9 +4,10 @@
 const SEARCH_LIMIT = 50;
 
 export function filterCommands(commands, query) {
-  const needle = String(query ?? "").trim().toLowerCase();
+  const normalize = (value) => String(value ?? "").trim().toLowerCase().replace(/[-_]+/g, " ");
+  const needle = normalize(query);
   if (!needle) return commands.slice();
-  return commands.filter((command) => command.label.toLowerCase().includes(needle));
+  return commands.filter((command) => normalize(command.label).includes(needle));
 }
 
 /** Commands shown when the palette query is empty. */
@@ -25,6 +26,20 @@ export function buildCommands({ rooms = [], current = null, joined = false, help
   }
   commands.push({ id: "search-room", label: "Search this room" });
   commands.push({ id: "search-all", label: "Search all joined rooms" });
+  commands.push({ id: "members", label: "Members" });
+  commands.push({ id: "join-requests", label: "Join requests" });
+  commands.push({ id: "announcements", label: "Announcements" });
+  commands.push({ id: "questions", label: "Questions" });
+  commands.push({ id: "files", label: "Files" });
+  commands.push({ id: "reminders", label: "Reminders" });
+  commands.push({ id: "settings", label: "Settings" });
+  commands.push({ id: "room-settings", label: "Room settings" });
+  commands.push({ id: "delete-room", label: "Delete room..." });
+  commands.push({ id: "recall-message", label: "Recall message..." });
+  commands.push({ id: "reveal-message", label: "Reveal message..." });
+  commands.push({ id: "reply-message", label: "Reply to message..." });
+  commands.push({ id: "ask-question", label: "Ask question..." });
+  commands.push({ id: "quit", label: "Quit" });
   return commands;
 }
 

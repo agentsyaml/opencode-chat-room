@@ -43,6 +43,9 @@ test.skipIf(!browserModule)("double Escape focuses the composer only without an 
     await page.waitForTimeout(80);
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
+    await page.keyboard.type("double escape typing");
+    expect(await page.evaluate(() => (document.querySelector("#msgInput") as HTMLTextAreaElement | null)?.value)).toContain("double escape typing");
+    await page.evaluate(() => { const input = document.querySelector("#msgInput") as HTMLTextAreaElement | null; if (input) input.value = ""; });
 
     // An open panel absorbs the first Escape, so the next press is a new single.
     await page.locator("#btnMembers").click();

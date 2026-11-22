@@ -13,7 +13,7 @@ async function fake(handler) {
       method: req.method,
       url: req.url,
       headers: req.headers,
-      body: raw ? JSON.parse(raw) : undefined,
+      body: raw && String(req.headers["content-type"] ?? "").includes("application/json") ? JSON.parse(raw) : raw || undefined,
     };
     calls.push(call);
     await handler(call, res);
@@ -102,6 +102,32 @@ test("createRoom sends joinPolicy and never a host field", async () => {
   }
 });
 
+test("updateRoom patches name, description and policy with the session", async () => {
+  const server = await fake((call, res) => reply(res, 200, { id: "r1", name: "Renamed" }));
+  try {
+    const api = createApi({ url: server.url, token: "t" });
+    assert.deepEqual(await api.updateRoom("r/1", "s1", { name: "Renamed", joinPolicy: "approval" }), { id: "r1", name: "Renamed" });
+    assert.equal(server.calls[0].method, "PATCH");
+    assert.equal(server.calls[0].url, "/rooms/r%2F1");
+    assert.deepEqual(server.calls[0].body, { sessionID: "s1", name: "Renamed", joinPolicy: "approval" });
+  } finally {
+    await server.close();
+  }
+});
+
+test("deleteRoom sends the session and path", async () => {
+  const server = await fake((call, res) => reply(res, 200, { ok: true }));
+  try {
+    const api = createApi({ url: server.url, token: "t" });
+    assert.deepEqual(await api.deleteRoom("r/1", "s1"), { ok: true });
+    assert.equal(server.calls[0].method, "DELETE");
+    assert.equal(server.calls[0].url, "/rooms/r%2F1");
+    assert.deepEqual(server.calls[0].body, { sessionID: "s1" });
+  } finally {
+    await server.close();
+  }
+});
+
 test("leave, send and markRead use the documented paths and bodies", async () => {
   const server = await fake((call, res) => {
     if (call.url === "/rooms/r1/messages") return reply(res, 201, { id: "r1", messages: [] });
@@ -148,6 +174,20 @@ test("poll forwards a finite afterTs and long-poll timeout", async () => {
   }
 });
 
+test("a long poll outlives the normal request timeout", async () => {
+  const server = await fake(async (call, res) => {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    reply(res, 200, { member: true, items: [], hasMore: false, recallVersion: 1 });
+  });
+  try {
+    const api = createApi({ url: server.url, token: "", requestTimeoutMs: 40 });
+    const result = await api.poll("r1", "s1", undefined, { timeoutMs: 10 });
+    assert.equal(result.member, true);
+  } finally {
+    await server.close();
+  }
+});
+
 test("HTTP errors become actionable ApiError messages", async () => {
   const cases = [
     { id: "401", status: 401, error: "unauthorized", pattern: /token/i },
@@ -185,6 +225,101 @@ test("history pages include the membership check and cursor", async () => {
       server.calls[0].url,
       "/rooms/r%201/history?limit=200&excludeSessionID=s%201%26x&beforeSeq=42",
     );
+  } finally {
+    await server.close();
+  }
+});
+
+test("members, announcements, questions, reminders and recall use documented routes", async () => {
+  const server = await fake((call, res) => {
+    if (call.url === "/rooms/r1/members") return reply(res, 200, { members: [{ name: "Alex" }] });
+    if (call.method === "GET" && call.url === "/rooms/r1/announcements") return reply(res, 200, { announcements: [{ name: "Rules" }] });
+    if (call.method === "PUT") return reply(res, 200, { announcement: { name: "Rules", content: "hi" } });
+    if (call.method === "DELETE" && call.url.includes("/announcements/")) return reply(res, 200, { ok: true });
+    if (call.method === "GET" && call.url === "/rooms/r1/questions") return reply(res, 200, { questions: [{ id: "q1" }] });
+    if (call.url.endsWith("/answers")) return reply(res, 201, { questionID: "q1", answer: { text: "yes" } });
+    if (call.method === "GET" && call.url.startsWith("/rooms/r1/reminders?")) return reply(res, 200, { reminders: [{ id: "rem1" }] });
+    if (call.method === "POST" && call.url === "/rooms/r1/reminders") return reply(res, 201, { reminder: { id: "rem1" } });
+    if (call.method === "PATCH") return reply(res, 200, { reminder: { id: "rem1", paused: true } });
+    if (call.method === "DELETE" && call.url.includes("/reminders/")) return reply(res, 200, { ok: true });
+    if (call.url.endsWith("/recall")) return reply(res, 200, { ok: true, messageID: "m1" });
+    if (call.url.includes("/content?")) return reply(res, 200, { text: "original" });
+    return reply(res, 200, { ok: true });
+  });
+  try {
+    const api = createApi({ url: server.url, token: "t" });
+    assert.deepEqual(await api.members("r1"), [{ name: "Alex" }]);
+    assert.deepEqual(await api.announcements("r1"), [{ name: "Rules" }]);
+    assert.deepEqual(await api.saveAnnouncement("r1", "Rules", "hi", "s1"), { name: "Rules", content: "hi" });
+    await api.deleteAnnouncement("r1", "Rules", "s1");
+    assert.deepEqual(await api.questions("r1"), [{ id: "q1" }]);
+    assert.deepEqual(await api.answerQuestion("r1", "q1", "s1", "yes"), { questionID: "q1", answer: { text: "yes" } });
+    assert.deepEqual(await api.reminders("r1", "s1"), [{ id: "rem1" }]);
+    assert.deepEqual(await api.createReminder("r1", "s1", "ping", { type: "once", at: "2030-01-01T00:00:00Z" }), { id: "rem1" });
+    assert.deepEqual(await api.updateReminder("r1", "rem1", "s1", { paused: true }), { id: "rem1", paused: true });
+    await api.deleteReminder("r1", "rem1", "s1");
+    assert.deepEqual(await api.recall("r1", "m1", "s1"), { ok: true, messageID: "m1" });
+    assert.deepEqual(await api.reveal("r1", "m1", "s1"), { text: "original" });
+    assert.ok(server.calls.some((entry) => entry.url === "/rooms/r1/announcements/Rules"));
+    assert.equal(server.calls.find((entry) => entry.url === "/rooms/r1/reminders?sessionID=s1").method, "GET");
+  } finally {
+    await server.close();
+  }
+});
+
+test("resources use the member header, download bytes and upload raw content", async () => {
+  const server = await fake((call, res) => {
+    if (call.method === "GET" && call.url.startsWith("/rooms/r1/resources?")) {
+      if (call.headers["x-session-id"] !== "s1") return reply(res, 403, { error: "forbidden" });
+      return reply(res, 200, { resources: [{ id: "f1" }], total: 1 });
+    }
+    if (call.method === "POST" && call.url === "/rooms/r1/resources") {
+      return reply(res, 201, { resource: { id: "f1", name: "a.txt" } });
+    }
+    if (call.url.endsWith("/content")) {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("hello");
+      return;
+    }
+    return reply(res, 404, { error: "no" });
+  });
+  try {
+    const api = createApi({ url: server.url, token: "t" });
+    assert.deepEqual(await api.resources("r1", "s1", 10, 0), { resources: [{ id: "f1" }], total: 1 });
+    assert.equal(server.calls[0].headers["x-session-id"], "s1");
+    const file = await api.resourceContent("r1", "f1");
+    assert.equal(new TextDecoder().decode(file.bytes), "hello");
+    assert.match(file.contentType, /text\/plain/);
+    assert.deepEqual(await api.uploadResource("r1", "s1", "a b.txt", new Uint8Array([1, 2, 3])), { id: "f1", name: "a.txt" });
+    const upload = server.calls.find((entry) => entry.method === "POST");
+    assert.equal(upload.headers["x-file-name"], "a%20b.txt");
+    assert.equal(upload.headers["x-session-id"], "s1");
+  } finally {
+    await server.close();
+  }
+});
+
+test("resource delete and join-request decisions use member sessions", async () => {
+  const server = await fake((call, res) => {
+    if (call.method === "GET" && call.url.startsWith("/rooms/r1/join-requests?")) {
+      return reply(res, 200, [{ sessionID: "s2", name: "Bob", isAgent: true, participantId: "Bob", createdAt: 1 }]);
+    }
+    if (call.method === "POST" && call.url.includes("/join-requests/s2/approve")) return reply(res, 200, { ok: true });
+    if (call.method === "POST" && call.url.includes("/join-requests/s2/deny")) return reply(res, 200, { ok: true });
+    if (call.method === "DELETE" && call.url === "/rooms/r1/resources/f1") return reply(res, 200, { ok: true });
+    return reply(res, 404, { error: "no" });
+  });
+  try {
+    const api = createApi({ url: server.url, token: "t" });
+    const requests = await api.joinRequests("r1", "s1");
+    assert.equal(requests.status, 200);
+    assert.deepEqual(requests.requests, [{ sessionID: "s2", name: "Bob", isAgent: true, participantId: "Bob", createdAt: 1 }]);
+    assert.equal(server.calls[0].url, "/rooms/r1/join-requests?sessionID=s1");
+    assert.deepEqual(await api.decideJoin("r1", "s2", "s1", "approve"), { ok: true });
+    assert.deepEqual(await api.decideJoin("r1", "s2", "s1", "deny"), { ok: true });
+    assert.deepEqual(await api.deleteResource("r1", "f1", "s1"), { ok: true });
+    assert.deepEqual(server.calls[3].body, {});
+    assert.equal(server.calls[3].headers["x-session-id"], "s1");
   } finally {
     await server.close();
   }

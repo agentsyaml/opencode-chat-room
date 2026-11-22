@@ -2,6 +2,11 @@
 // the reducer can be tested against a fake api. Palette methods are attached
 // from palette-app.mjs.
 import { attachPalette } from "./palette-app.mjs";
+import { attachInfo } from "./info-app.mjs";
+import { attachReminders } from "./reminder-app.mjs";
+import { attachRoomSettings } from "./room-settings-app.mjs";
+import { attachMessageActions } from "./message-app.mjs";
+import { attachJoinRequests } from "./join-app.mjs";
 import { mergeMessages, messageStamp, oldestSeq } from "./messages.mjs";
 
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
@@ -16,12 +21,16 @@ const normalizeRoom = (room) => ({
 });
 
 export class ChatApp {
-  constructor({ api, sessionID, participant, host = "", autoPoll = true, schedule = (fn, ms) => setTimeout(fn, ms) }) {
+  constructor({ api, sessionID, participant, host = "", autoPoll = true, settings = {}, downloadDir = process.cwd(), schedule = (fn, ms) => setTimeout(fn, ms) }) {
     this.api = api;
     this.sessionID = sessionID;
     this.participant = participant;
     this.autoPoll = autoPoll;
     this.schedule = schedule;
+    this.settings = { ...settings };
+    this.token = this.settings.token ?? "";
+    delete this.settings.token;
+    this.downloadDir = downloadDir;
     this.closed = false;
     this.pollToken = 0;
     this.timers = new Set();
@@ -35,6 +44,7 @@ export class ChatApp {
     this.state = {
       host,
       participant,
+      theme: "dark",
       connection: "connecting",
       rooms: [],
       selected: 0,
@@ -411,6 +421,11 @@ export class ChatApp {
 }
 
 attachPalette(ChatApp);
+attachInfo(ChatApp);
+attachReminders(ChatApp);
+attachRoomSettings(ChatApp);
+attachMessageActions(ChatApp);
+attachJoinRequests(ChatApp);
 
 export function createApp(options) {
   return new ChatApp(options);

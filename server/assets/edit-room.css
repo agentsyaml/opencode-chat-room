@@ -23,8 +23,15 @@
 #editRoomDialog .edit-room-panel { padding-top: 2px; }
 
 #editRoomDialog .edit-room-hint { margin: -2px 0 18px; }
+/* Field labels line up their icon with the first line, matching the settings rows. */
+#editRoomDialog .field-label:has(> .field-icon),
+#editRoomDialog .join-policy-label:has(> .field-icon) { display: flex; align-items: center; gap: 8px; }
+#editRoomDialog .field-icon { flex: none; width: 16px; height: 16px; color: var(--ink-3); }
 #editRoomDialog .admin-fieldset .hint:last-child { margin-bottom: 0; }
 #editRoomDialog .edit-room-owner-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 4px 0 0;
   padding: 10px 12px;
   border-left: 2px solid var(--accent);
@@ -32,6 +39,7 @@
   background: color-mix(in srgb, var(--accent-soft) 58%, transparent);
   line-height: 1.5;
 }
+#editRoomDialog .edit-room-owner-note .field-icon { margin-top: 1px; }
 
 #editRoomDialog .edit-room-footer {
   display: grid;

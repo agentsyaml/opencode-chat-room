@@ -112,7 +112,7 @@ test.skipIf(!browserModule)("announcements open from the Options menu and leavin
     await page.locator("#msgInput").click();
     await page.keyboard.press("Alt+Space");
     await page.locator("#paletteDialog[open]").waitFor();
-    await page.locator("#paletteInput").fill(">leave");
+    await page.locator("#paletteInput").fill("/leave");
     await page.locator("#paletteList .palette-command").filter({ hasText: "Leave room" }).click();
     await page.locator("#confirmDialog").waitFor({ state: "visible" });
     await page.locator("#btnAcceptConfirm").click();

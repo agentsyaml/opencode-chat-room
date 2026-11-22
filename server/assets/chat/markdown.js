@@ -8,6 +8,11 @@ let mermaidReady = false;
 const previewUrls = new Map();
 let previewObserver;
 
+export function isMarkdownResource(resource) {
+  const mime = String(resource?.mimeType || "").split(";")[0].trim().toLowerCase();
+  return mime === "text/markdown" || mime === "text/x-markdown" || /\.(?:md|markdown)$/i.test(String(resource?.name || ""));
+}
+
 export function renderMarkdown(root, text, app) {
   const mentions = [], diagrams = new Map();
   const nonce = createRandomId();
@@ -221,11 +226,14 @@ async function loadResourceCard(card, roomId, app) {
       remove = resourceMenuItem("resourceDelete", () => deleteResource(card, roomId, id, resource, app, status, remove), app);
       actions.append(resourceSplit(app, resource, download, remove));
     } else actions.append(download);
-    if (previewKind(type)) {
-      const preview = resourceButton("resourcePreview", resource.name, () => previewResource(card, roomId, id, resource, type, preview, app, status), app);
+    const markdown = isMarkdownResource(resource);
+    if (previewKind(type) || markdown) {
+      const preview = resourceButton("resourcePreview", resource.name, () => markdown
+        ? app.openDocPreview(roomId, resource, preview)
+        : previewResource(card, roomId, id, resource, type, preview, app, status), app);
       actions.append(preview);
       // Media you sent yourself is shown inline; other people's media stays collapsed.
-      if (card.closest(".msg.own")) void previewResource(card, roomId, id, resource, type, preview, app, status);
+      if (!markdown && card.closest(".msg.own")) void previewResource(card, roomId, id, resource, type, preview, app, status);
     }
   } catch (error) { if (card.isConnected) setResourceError(card, app, error?.status === 404 ? "resourceDeleted" : "resourceFailed"); }
 }
@@ -384,7 +392,7 @@ function previewKind(type) {
   if (["video/mp4", "video/webm", "video/ogg"].includes(type)) return "video";
   return "";
 }
-function formatBytes(value) {
+export function formatBytes(value) {
   const bytes = Math.max(0, Number(value) || 0);
   if (bytes < 1024) return `${bytes} B`;
   return bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;

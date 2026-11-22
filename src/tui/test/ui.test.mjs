@@ -16,7 +16,7 @@ const rooms = [
 
 function history(count = 3) {
   return Array.from({ length: count }, (_, index) =>
-    message(`m${index}`, `hello ${index}`, 1000 + index * 1000));
+    message(`m${index}`, `hello ${index} <at>@tip</at>`, 1000 + index * 1000));
 }
 
 function fakeApi({ messages = history(), joinPending = false } = {}) {
@@ -68,6 +68,15 @@ async function teardown(context) {
   context.renderer.destroy();
 }
 
+async function settle(context, needle) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await context.renderOnce();
+    if (!needle || context.captureCharFrame().includes(needle)) break;
+  }
+  await context.flush();
+}
+
 test("renders header, rooms, messages and composer", async () => {
   const api = fakeApi({
     messages: [
@@ -80,6 +89,7 @@ test("renders header, rooms, messages and composer", async () => {
   try {
     await context.app.openRoom(0);
     await context.renderOnce();
+    await settle(context, "hello 世界");
     const frame = context.captureCharFrame();
     assert.match(frame, /opencode-chat-room/);
     assert.match(frame, /alex/);
@@ -213,6 +223,7 @@ test("PageUp scrolls the message history", async () => {
   try {
     await context.app.openRoom(0);
     await context.renderOnce();
+    await settle(context, "hello 39");
     await context.flush();
     const bottomFrame = context.captureCharFrame();
     assert.match(bottomFrame, /hello 39/);
@@ -288,7 +299,7 @@ test("Alt+Home and Alt+End jump through the message history", async () => {
   try {
     await context.app.openRoom(0);
     await context.renderOnce();
-    await context.flush();
+    await settle(context, "hello 0");
     context.mockInput.pressKeys(["\x1b\x1b[H"]);
     await context.renderOnce();
     assert.equal(context.ui.scrollBox.scrollTop, 0);

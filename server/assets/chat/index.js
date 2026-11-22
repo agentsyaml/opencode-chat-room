@@ -23,6 +23,7 @@ import { initInstallPrompt } from "./install-prompt.js";
 import { initShortcuts } from "./shortcuts.js";
 import { initPalette } from "./palette.js";
 import { initFiles } from "./files.js";
+import { initDocPreview } from "./doc-preview.js";
 import { initViewport } from "./viewport.js";
 import { initSettings } from "./settings.js";
 
@@ -52,3 +53,4 @@ initViewport();
 initInstallPrompt(app);
 initPalette(app);
 initFiles(app);
+initDocPreview(app);

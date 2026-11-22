@@ -1,18 +1,18 @@
 // Command palette controller attached to ChatApp. Kept in its own file so the
 // terminal core stays under the project line budget.
-import { buildCommands, nextScope, scopeSources, searchMessages } from "./palette.mjs";
+import { buildCommands, filterCommands, nextScope, scopeSources, searchMessages } from "./palette.mjs";
 import { mergeMessages, oldestSeq } from "./messages.mjs";
 
 const SEARCH_PAGES = 2;
 
 export function attachPalette(Class) {
   Object.assign(Class.prototype, {
-    openPalette() {
+    openPalette({ slash = false } = {}) {
       this.historyPages.clear();
       this.state.help = false;
       this.state.palette = {
         mode: "commands",
-        query: "",
+        query: slash ? "/" : "",
         scope: "room",
         selected: 0,
         results: [],
@@ -30,12 +30,14 @@ export function attachPalette(Class) {
     },
 
     paletteCommands() {
-      return buildCommands({
+      const palette = this.state.palette;
+      const query = palette?.mode === "commands" ? String(palette.query ?? "").replace(/^\s*\//, "") : "";
+      return filterCommands(buildCommands({
         rooms: this.state.rooms,
         current: this.state.current,
         joined: this.state.joined,
         help: this.state.help,
-      });
+      }), query);
     },
 
     paletteItems() {
@@ -43,6 +45,7 @@ export function attachPalette(Class) {
       if (!palette) return [];
       if (palette.mode === "search") return palette.results;
       if (palette.mode === "commands") return this.paletteCommands();
+      if (palette.mode === "info") return palette.items ?? [];
       return [];
     },
 
@@ -114,9 +117,18 @@ export function attachPalette(Class) {
       const palette = this.state.palette;
       if (!palette) return;
       if (palette.mode === "prompt") {
-        await this.createRoomFromPrompt();
+        await this.submitPalettePrompt();
         return;
       }
+      if (palette.mode === "info") {
+        await this.runInfoSelection();
+        return;
+      }
+      if (palette.mode === "confirm") {
+        await this.runConfirm();
+        return;
+      }
+      if (palette.mode === "detail") return;
       if (palette.mode === "commands") {
         const command = this.paletteCommands()[palette.selected];
         if (command) await this.runPaletteCommand(command);
@@ -124,6 +136,17 @@ export function attachPalette(Class) {
       }
       const result = palette.results[palette.selected];
       if (result) await this.activateResult(result);
+    },
+
+    async submitPalettePrompt() {
+      const palette = this.state.palette;
+      const value = palette?.prompt?.value ?? "";
+      if (!palette?.prompt) return;
+      if (palette.prompt.action && palette.prompt.action !== "new-room") {
+        await this.submitCommandPrompt(palette.prompt, value);
+        return;
+      }
+      await this.createRoomFromPrompt();
     },
 
     async runPaletteCommand(command) {
@@ -135,7 +158,7 @@ export function attachPalette(Class) {
           return;
         case "new-room":
           palette.mode = "prompt";
-          palette.prompt = { label: "New room name", value: "" };
+          palette.prompt = { label: "New room name", value: "", action: "new-room", data: {} };
           palette.selected = 0;
           palette.error = "";
           this.touch();
@@ -160,6 +183,50 @@ export function attachPalette(Class) {
           palette.error = "";
           this.touch();
           void this.ensureSearchHistory();
+          return;
+        case "members":
+          await this.openMembers();
+          return;
+        case "join-requests":
+          await this.openJoinRequests();
+          return;
+        case "announcements":
+          await this.openAnnouncements();
+          return;
+        case "questions":
+          await this.openQuestions();
+          return;
+        case "files":
+          await this.openFiles();
+          return;
+        case "reminders":
+          await this.openReminders();
+          return;
+        case "settings":
+          this.openSettings();
+          return;
+        case "room-settings":
+          await this.openRoomSettings();
+          return;
+        case "delete-room":
+          await this.openRoomSettings();
+          this.askDeleteRoom();
+          return;
+        case "recall-message":
+          this.startMessageRecall();
+          return;
+        case "reveal-message":
+          this.startMessageReveal();
+          return;
+        case "reply-message":
+          this.startMessageReply();
+          return;
+        case "ask-question":
+          this.startAskQuestion();
+          return;
+        case "quit":
+          this.closePalette();
+          this.quit();
           return;
         default:
           if (command.roomId) {
@@ -228,15 +295,24 @@ export function attachPalette(Class) {
 
     setPaletteQuery(value) {
       const palette = this.state.palette;
-      if (!palette || palette.mode === "prompt") return;
+      if (!palette || (palette.mode !== "commands" && palette.mode !== "search")) return;
       const query = String(value ?? "");
       palette.error = "";
-      if (!query) {
+      if (!query.trim()) {
         palette.mode = "commands";
         palette.query = "";
         palette.results = [];
         palette.selected = 0;
         palette.searching = false;
+        this.touch();
+        return;
+      }
+      if (query.trimStart().startsWith("/")) {
+        palette.mode = "commands";
+        palette.query = query;
+        palette.results = [];
+        palette.searching = false;
+        palette.selected = 0;
         this.touch();
         return;
       }

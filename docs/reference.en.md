@@ -107,18 +107,18 @@ On the server machine, use Node.js 24.2+, Deno 2, or Bun. `npx`, `pnpx`, `bunx`,
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.5 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.6 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.5 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.5 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.5 --host 0.0.0.0 --port 4399 --token secret
-deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.5/cli.ts --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.6 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.6 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.6 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.6/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.5
+  bunx @alexsun-top/opencode-chat-room@0.7.6
 
 # Local checkout (use npm install for Node, bun install for Bun):
 npm install
@@ -134,11 +134,11 @@ Open `http://<server-ip>:4399/chat` in a browser to join or create a room and ch
 The terminal client is built into the main package and opens with the `cli` subcommand. It uses OpenTUI, the framework behind OpenCode's terminal interface, so it requires Bun 1.3.14+ or Node.js 26.4+ with `--experimental-ffi`. Only `cli` loads OpenTUI; the server, `watch`, version, and help commands stay on Node.js 24.2+, Deno 2, and Bun. Deno is not supported for this client; the server still runs on Deno. It accepts the same `chatroom.*` configuration file as the other clients, plus `CHAT_ROOM_SERVER_URL`, `CHAT_ROOM_SERVER_TOKEN`, `CHAT_ROOM_TUI_NAME`, and `CHAT_ROOM_TUI_STATE`. The display name defaults to `chatroom-tui`; the session identity is stored separately and the token is never written to it.
 
 ```bash
-bunx --bun --package @alexsun-top/opencode-chat-room@0.7.5 opencode-chat-room cli
-NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.5 -- opencode-chat-room cli
+bunx --package @alexsun-top/opencode-chat-room@0.7.6 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.6 -- opencode-chat-room cli
 ```
 
-It lists rooms, joins them (including approval-pending rooms), sends messages, long-polls for new ones, and supports Alt+Space or Ctrl+P for commands and client-side search across the current room or all joined rooms, including older history fetched page by page. Recalled messages are excluded. The terminal must be a TTY; `--help` and `--version` work without one.
+It renders message Markdown with OpenTUI, highlights mentions instead of showing `<at>` tags, and follows the terminal theme. It lists rooms, joins them (including approval-pending rooms), sends messages, and long-polls for new ones. Alt+Space or Ctrl+P opens commands and client-side search across the current room or all joined rooms, including older history fetched page by page; recalled messages are excluded. Typing `/` in an empty composer or on the room list opens the same palette in command mode. Commands cover refresh, new room, join/switch/leave, help, search, members, announcements (read, create, delete), questions (list and ask), files (download to `downloads/` under the current directory, upload an absolute path up to 100 MiB, delete with confirmation), reminders (list, create one-time or cron, edit, pause/resume, delete), settings (token redacted), room settings (rename, description, join policy, owner-only delete), join approvals (approve or deny pending requests when permitted), recall/reveal/reply by message ID, and quit. The terminal must be a TTY; `--help` and `--version` work without one.
 
 ### Browser chat
 
@@ -152,7 +152,7 @@ The chat renders GitHub Flavored Markdown using locally bundled Marked and DOMPu
 
 A compact shortcut chip under the composer shows the only shortcut entry, Alt+/ (Option+/ on Mac); click it or press the keys to open the shortcut sheet, and closing the sheet by its close button, Escape, or a click outside returns focus to the composer. The entry itself stays out of the Tab order. The sheet lists only shortcuts that exist: Enter sends, Shift+Enter starts a new line, the arrows and Enter pick a mention, Alt+ArrowUp and Alt+ArrowDown switch rooms and animate the selected row in the room list, with the conversation content changing instantly unless the optional content transition is enabled, Alt+1…9 switches to a joined room by its position in the rail, Alt+Space opens search and commands, Alt+Home and Alt+End smoothly scroll to the oldest or latest loaded message, Esc closes the open menu, panel, or dialog, and PageUp and PageDown scroll the conversation in one animated step while the composer is focused; Settings sets the step with a slider as a percentage of the conversation height (default 90%), repeated presses extend the same target so the speed stays steady, and Alt+PageUp and Alt+PageDown behave the same, without moving the caret or changing the draft. Reduced-motion settings jump directly without animation.
 
-Press Alt+Space (Option+Space on Mac) to open the search and command palette from anywhere, including while the composer has focus. The empty field lists common commands (refresh rooms, create room, settings, members, questions, announcements, reminders, leave room, jump to latest); type `>` to filter them. Typing ordinary text searches message bodies in the current room and shows the room, sender, time, and matching snippet. Search waits briefly for typing to pause and keeps the previous results visible until the new ones arrive. Tab switches the scope between the current room and all joined rooms, Up and Down select, Alt+1–9 jumps the selection to that row, and only the selected row shows the Enter hint. Enter opens the hit and leaves the message highlighted, and Escape or a backdrop click closes the palette and returns focus to the composer. Recalled messages are not searched.
+Press Alt+Space (Option+Space on Mac) to open the search and command palette from anywhere, including while the composer has focus. The empty field lists common commands (refresh rooms, create room, settings, members, questions, announcements, reminders, leave room, jump to latest); type `/` to filter them. Typing ordinary text searches message bodies in the current room and shows the room, sender, time, and matching snippet. Search waits briefly for typing to pause and keeps the previous results visible until the new ones arrive. Tab switches the scope between the current room and all joined rooms, Up and Down select, Alt+1–9 jumps the selection to that row, and only the selected row shows the Enter hint. Enter opens the hit and leaves the message highlighted, and Escape or a backdrop click closes the palette and returns focus to the composer. Recalled messages are not searched.
 
 The central server uses a trusted shared-token model, not per-user authorization or private DMs: anyone holding the token can read messages, manage rooms, remove members, and delete rooms. The server and its SQLite database can read direct-message content. Removing a member requires confirmation; deleting a room requires confirmation and permanently deletes its messages and history.
 
@@ -212,7 +212,7 @@ To retrieve a room attachment, call `room` with `action: "read_resource"`, `room
 
 The server-wide single-file limit defaults to 500 MiB (524,288,000 bytes). Configure `CHAT_ROOM_MAX_FILE_SIZE_MB` on the server to change it. The server counts streamed bytes, including requests without `Content-Length`. Uploads require room membership. Retrieval follows the server's existing token configuration; set `CHAT_ROOM_SERVER_TOKEN` before exposing the server to other networks.
 
-The browser offers downloads and on-demand previews for recognized raster images, audio, and video. Clicking a previewed image opens it over the conversation; the zoom percentage is relative to the image's natural pixels, so large images open fitted to the window, 100% shows one image pixel per CSS pixel, reset returns to the fitted size, and small images are never enlarged. Other formats, including SVG and HTML, are download-only. Playback depends on browser codec support. Room Options also opens Files, a room-wide list of uploaded resources with name, type, size, uploader, and upload time; the uploader filter narrows the list. Members can preview supported media, download any file, and delete only what their role permits. The list uses the member-only `GET /rooms/:roomId/resources?limit=500&offset=0` endpoint with the `x-session-id` header and returns newest-first resources plus the total count; existing upload, metadata, content, and delete routes are unchanged. Resource files live beside the SQLite database in `resources/<roomID>/`; back up both. Room deletion removes its resources. Unreferenced uploads remain until the room is deleted; no automatic expiration or aggregate disk quota is provided.
+The browser offers downloads and on-demand previews for recognized raster images, audio, and video. Markdown resources also open in a rendered document preview: on wide, tall windows it becomes a fixed right reading pane that narrows the conversation; on narrow or short windows it opens as a modal overlay. The pane and overlay close with Escape or the close button, keep Download available, and return focus to the opener or composer. Clicking a previewed image opens it over the conversation; the zoom percentage is relative to the image's natural pixels, so large images open fitted to the window, 100% shows one image pixel per CSS pixel, reset returns to the fitted size, and small images are never enlarged. Other formats, including SVG and HTML, are download-only. Playback depends on browser codec support. Room Options also opens Files, a room-wide list of uploaded resources with name, type, size, uploader, and upload time; the uploader filter narrows the list. Members can preview supported media and Markdown, download any file, and delete only what their role permits. The list uses the member-only `GET /rooms/:roomId/resources?limit=500&offset=0` endpoint with the `x-session-id` header and returns newest-first resources plus the total count; existing upload, metadata, content, and delete routes are unchanged. Resource files live beside the SQLite database in `resources/<roomID>/`; back up both. Room deletion removes its resources. Unreferenced uploads remain until the room is deleted; no automatic expiration or aggregate disk quota is provided.
 
 ### Agent presence and message receipts
 

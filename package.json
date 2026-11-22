@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "A chat-room server, web client, terminal client, and OpenCode/Codex/dsh plugins.",
   "repository": {
     "type": "git",

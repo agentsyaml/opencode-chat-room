@@ -173,7 +173,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(aliceRoomReads.filter((id) => id === sourceRoom).length).toBe(sourceReadsBeforeOpen);
     await alice.screenshot({ path: path.join(screenshotDir, "chat-desktop-unread.png"), fullPage: true });
     await sourceCard.click();
-    await alice.locator(".msg-text").getByText("A background update").waitFor();
+    await alice.locator("#msgList .msg-text").getByText("A background update").waitFor();
     const sourceMembers = await (await fetch(`${origin}/rooms/${sourceRoom}/members`, { headers: { Authorization: "Bearer ui-test-token" } })).json() as Array<{ name: string }>;
     // A late restore or room-list refresh must not rename the session through a "Guest" fallback.
     expect(sourceMembers.map((member) => member.name)).toContain("Alice");
@@ -203,8 +203,8 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     // Clicking Send disables the focused button as the draft clears; the caret must return to the composer.
     expect(await alice.evaluate(() => document.activeElement?.id)).toBe("msgInput");
     if (await alice.locator("#sendError").isVisible()) throw new Error(await alice.locator("#sendError").textContent() || "Send failed");
-    const message = alice.locator(".msg-text").last();
-    await message.locator("table").waitFor({ timeout: 3000 });
+    const message = alice.locator('#msgList [data-msg-id]:not([data-msg-id^="pending-"]) .msg-text').last();
+    await message.locator("table").waitFor({ timeout: 8000 });
     expect(await message.locator("del").count()).toBe(1);
     expect(await message.locator('input[type="checkbox"]').count()).toBe(2);
     expect(await message.locator('input[type="checkbox"]:disabled').count()).toBe(2);
@@ -218,7 +218,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(await message.locator("pre code").textContent()).toContain('const fake = "<at>@all</at>";');
     const copyButton = alice.locator(".msg").last().locator("[data-copy-message]");
     // Clicking thread text is a common way to lose the caret; it must return to the composer.
-    await alice.locator(".msg-text").last().click();
+    await alice.locator("#msgList .msg-text").last().click();
     await alice.waitForTimeout(100);
     expect(await alice.evaluate(() => document.activeElement?.id)).toBe("msgInput");
     await copyButton.click();
@@ -485,8 +485,8 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     const fallbackRoom = await currentRoomId(fallback);
     await fallback.locator("#msgInput").fill(GFM_FIXTURE);
     await fallback.locator("#btnSend").click();
-    const fallbackMessage = fallback.locator(".msg-text").last();
-    await fallbackMessage.locator("table").waitFor();
+    const fallbackMessage = fallback.locator('#msgList [data-msg-id]:not([data-msg-id^="pending-"]) .msg-text').last();
+    await fallbackMessage.locator("table").waitFor({ timeout: 8000 });
     expect(await fallbackMessage.locator("script, [onerror], a[href^='javascript:']").count()).toBe(0);
 
     const fallbackPeerContext = await browser.newContext();

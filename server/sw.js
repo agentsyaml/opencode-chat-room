@@ -16,6 +16,7 @@ const STATIC = [
   "/assets/edit-room.css",
   "/assets/palette.css",
   "/assets/files.css",
+  "/assets/doc-preview.css",
   "/assets/highlight-10.7.3.min.js",
   "/assets/icons/icon-192.png",
   "/assets/icons/icon-512.png",

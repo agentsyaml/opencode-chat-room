@@ -71,6 +71,9 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     await page.keyboard.press("Escape");
     await page.locator("#paletteDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
+    await page.keyboard.type("after palette");
+    expect(await page.evaluate(() => (document.querySelector("#msgInput") as HTMLTextAreaElement | null)?.value)).toContain("after palette");
+    await page.evaluate(() => { const input = document.querySelector("#msgInput") as HTMLTextAreaElement | null; if (input) input.value = ""; });
     await page.locator("#btnRefreshRooms").focus();
     await page.keyboard.press("Alt+Space");
     await page.locator("#paletteDialog[open]").waitFor();
@@ -190,13 +193,27 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     await page.locator("#paletteDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
 
-    // Command mode filters commands instead of searching message text.
+    // A leading slash enters command mode: the rest filters commands,
+    // case-insensitively, instead of searching message text.
     await page.locator("#msgInput").click();
     await page.keyboard.press("Alt+Space");
     await page.locator("#paletteDialog[open]").waitFor();
-    await page.locator("#paletteInput").fill(">leave");
+    await page.locator("#paletteInput").fill("/LEAVE");
     const filtered = await page.locator("#paletteList .palette-command .palette-label").allTextContents();
     expect(filtered).toEqual(["Leave room"]);
+    expect(await page.evaluate(() => (document.querySelector<HTMLElement>("#paletteDialog")!).dataset.mode)).toBe("commands");
+    // A bare slash lists every command.
+    await page.locator("#paletteInput").fill("/");
+    expect(await page.locator("#paletteList .palette-command .palette-label").allTextContents()).toEqual([
+      "Refresh rooms", "Create room", "Settings", "Members", "Questions",
+      "Announcements", "Reminders", "Leave room", "Jump to latest",
+    ]);
+    // Slash commands never reach the message search hook, even after the debounce.
+    await page.evaluate(async (url: string) => { const { app } = await import(url); (app as any).__searchCalls = 0; }, "/assets/chat/state.js");
+    await page.locator("#paletteInput").fill("/violet");
+    await page.waitForTimeout(400);
+    expect(await page.evaluate(async (url: string) => { const { app } = await import(url); return (app as any).__searchCalls; }, "/assets/chat/state.js")).toBe(0);
+    expect(await page.locator("#paletteStatus").textContent()).toBe("No matching commands.");
     await page.keyboard.press("Escape");
     await page.locator("#paletteDialog").waitFor({ state: "hidden" });
 

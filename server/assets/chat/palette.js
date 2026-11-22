@@ -231,7 +231,7 @@ export function initPalette(app) {
     const token = ++sequence;
     const value = input.value;
     if (!value.trim()) { showCommands(""); return; }
-    if (value.startsWith(">")) { showCommands(value.slice(1)); return; }
+    if (value.startsWith("/")) { showCommands(value.slice(1)); return; }
     const wasSearch = dialog.dataset.mode === "search";
     dialog.dataset.mode = "search";
     dialog.dataset.state = "searching";
@@ -292,7 +292,7 @@ export function initPalette(app) {
     syncScope();
     const value = input.value;
     if (!value.trim()) showCommands("");
-    else if (value.startsWith(">")) showCommands(value.slice(1));
+    else if (value.startsWith("/")) showCommands(value.slice(1));
     else scheduleSearch();
   };
 
@@ -331,8 +331,12 @@ export function initPalette(app) {
       // A stacked dialog keeps its own focus; otherwise the composer owns the page.
       if (document.querySelector("dialog[open]")) return;
       const composer = app.$("#msgInput");
-      if (app.state.room && !app.$("#chatView")?.hidden && composer?.contentEditable === "true") composer.focus({ preventScroll: true });
-      else if (!app.state.room) app.$("#inRoomId")?.focus({ preventScroll: true });
+      if (app.state.room && !app.$("#chatView")?.hidden && composer?.contentEditable === "true") {
+        const selection = getSelection();
+        const selectionInside = Boolean(selection?.anchorNode && composer.contains(selection.anchorNode));
+        composer.focus({ preventScroll: true });
+        if (!selectionInside) composer.setCaret?.(composer.value.length);
+      } else if (!app.state.room) app.$("#inRoomId")?.focus({ preventScroll: true });
     });
   });
 
@@ -390,7 +394,7 @@ export function initPalette(app) {
     syncScope();
     if (!dialog.open) return;
     const value = input.value;
-    if (!value.trim() || value.startsWith(">")) showCommands(value.startsWith(">") ? value.slice(1) : "");
+    if (!value.trim() || value.startsWith("/")) showCommands(value.startsWith("/") ? value.slice(1) : "");
     else scheduleSearch();
   };
 }

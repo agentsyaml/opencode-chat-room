@@ -31,6 +31,7 @@
 <link rel="stylesheet" href="/assets/edit-room.css">
 <link rel="stylesheet" href="/assets/palette.css">
 <link rel="stylesheet" href="/assets/files.css">
+<link rel="stylesheet" href="/assets/doc-preview.css">
 </head>
 <body>
 
@@ -177,14 +178,14 @@
           </div>
           <div class="settings-row">
             <div class="settings-copy">
-              <label class="settings-label" for="inContentTransition" data-i18n="contentTransition">Room content transition</label>
+              <label class="settings-label" for="inContentTransition"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-arrow_swap-24"></use></svg><span data-i18n="contentTransition">Room content transition</span></label>
               <p id="contentTransitionHint" class="settings-hint" data-i18n="contentTransitionHint">Slide messages in when switching rooms with Alt+Arrow. Off by default.</p>
             </div>
             <input id="inContentTransition" class="settings-switch" type="checkbox" role="switch" aria-describedby="contentTransitionHint">
           </div>
           <div class="settings-row settings-step-row">
             <div class="settings-copy">
-              <label class="settings-label" for="inPageStep" data-i18n="pageStep">Page scroll distance</label>
+              <label class="settings-label" for="inPageStep"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-arrow_down-24"></use></svg><span data-i18n="pageStep">Page scroll distance</span></label>
               <p id="pageStepHint" class="settings-hint" data-i18n="pageStepHint">How far PageUp and PageDown move per press, as a percentage of the conversation height. Default 90%.</p>
             </div>
             <div class="settings-range"><input id="inPageStep" type="range" min="20" max="200" step="5" value="90" aria-describedby="pageStepHint"><output id="pageStepValue" class="settings-range-value" for="inPageStep">90%</output></div>
@@ -192,7 +193,7 @@
         </section>
         <section id="settingsPanelAppearance" class="settings-panel" role="tabpanel" aria-labelledby="settingsTabAppearance" hidden>
           <fieldset class="settings-block">
-            <legend class="settings-label" data-i18n="themeLabel">Theme</legend>
+            <legend class="settings-label"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-circle_half_fill-24"></use></svg><span data-i18n="themeLabel">Theme</span></legend>
             <p class="settings-hint" data-i18n="settingsThemeHint">Saved in this browser. System follows your device.</p>
             <div class="theme-grid">
               <label class="theme-option" data-theme-choice="system">
@@ -226,16 +227,16 @@
         <section id="settingsPanelConnection" class="settings-panel" role="tabpanel" aria-labelledby="settingsTabConnection" hidden>
           <div class="settings-row settings-row-stack">
             <div class="settings-copy">
-              <label class="settings-label" for="inTokenChat" data-i18n="tokenOptional">Access token (optional)</label>
+              <label class="settings-label" for="inTokenChat"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-key-24"></use></svg><span data-i18n="tokenOptional">Access token (optional)</span></label>
               <p class="settings-hint" data-i18n="settingsTokenHint">Stored only in this browser. Needed only when the server asks for it.</p>
-              <p id="tokenHint" class="settings-hint settings-warning" data-i18n="tokenRequired" hidden>The server requires an access token (401).</p>
+              <p id="tokenHint" class="settings-hint settings-warning settings-icon-hint" hidden><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-alert-24"></use></svg><span data-i18n="tokenRequired">The server requires an access token (401).</span></p>
             </div>
             <div class="settings-token-control">
               <input id="inTokenChat" class="input" type="password" placeholder="Enter if the server requires it" data-i18n-placeholder="tokenPlaceholder" autocomplete="off" spellcheck="false" aria-describedby="tokenHint">
               <button class="btn ghost small" type="button" data-token-save="inTokenChat" data-i18n="save">Save</button>
             </div>
           </div>
-          <p class="settings-note" data-i18n="privacyNote">Anyone with the shared token can read direct messages and manage rooms; the server can read them too.</p>
+          <p class="settings-note"><svg class="fluent-icon settings-note-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-lock_closed-24"></use></svg><span data-i18n="privacyNote">Anyone with the shared token can read direct messages and manage rooms; the server can read them too.</span></p>
         </section>
       </div>
     </div>
@@ -317,27 +318,27 @@
           </nav>
           <div class="settings-content edit-room-content">
             <section id="editRoomPanelDetails" class="settings-panel edit-room-panel" role="tabpanel" aria-labelledby="editRoomTabDetails">
-              <label class="field"><span class="field-label" data-i18n="roomNameLabel">Room name</span><input id="editRoomName" class="input" maxlength="64" autocomplete="off" required></label>
-              <label class="field"><span class="field-label" data-i18n="roomDescriptionLabel">Description</span><textarea id="editRoomDescription" class="input" rows="3" maxlength="2000"></textarea></label>
+              <label class="field"><span class="field-label"><svg class="fluent-icon field-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-edit-24"></use></svg><span data-i18n="roomNameLabel">Room name</span></span><input id="editRoomName" class="input" maxlength="64" autocomplete="off" required></label>
+              <label class="field"><span class="field-label"><svg class="fluent-icon field-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-document-24"></use></svg><span data-i18n="roomDescriptionLabel">Description</span></span><textarea id="editRoomDescription" class="input" rows="3" maxlength="2000"></textarea></label>
             </section>
             <section id="editRoomPanelJoining" class="settings-panel edit-room-panel" role="tabpanel" aria-labelledby="editRoomTabJoining" hidden>
               <div class="join-policy admin-join-policy">
                 <input id="editRoomJoinPolicy" type="checkbox" role="switch" aria-describedby="editRoomJoinPolicyHint">
-                <label for="editRoomJoinPolicy" class="join-policy-label" data-i18n="requireApproval">Require approval to join</label>
+                <label for="editRoomJoinPolicy" class="join-policy-label"><svg class="fluent-icon field-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-shield_checkmark-24"></use></svg><span data-i18n="requireApproval">Require approval to join</span></label>
               </div>
               <p id="editRoomJoinPolicyHint" class="hint join-policy-hint" data-i18n="joinPolicyEditHint">New members need a human administrator's approval. Turning this off clears all pending requests.</p>
             </section>
             <section id="editRoomPanelMembers" class="settings-panel edit-room-panel" role="tabpanel" aria-labelledby="editRoomTabMembers" hidden>
-              <fieldset class="admin-fieldset"><legend class="field-label" data-i18n="adminIdsLabel">Human administrators</legend><div id="editRoomAdminIds" class="admin-checklist"></div><p id="editRoomAdminIdsEmpty" class="hint" data-i18n="adminIdsEmpty" hidden>No other members are in this room yet.</p><p class="hint" data-i18n="adminIdsHint">These members can edit room details, manage members, delete files, and choose a successor. The owner always has the same powers.</p></fieldset>
-              <label class="field"><span class="field-label" data-i18n="successorLabel">Successor if the owner leaves</span><select id="editRoomSuccessor" class="admin-select"></select></label>
+              <fieldset class="admin-fieldset"><legend class="field-label"><svg class="fluent-icon field-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-people-24"></use></svg><span data-i18n="adminIdsLabel">Human administrators</span></legend><div id="editRoomAdminIds" class="admin-checklist"></div><p id="editRoomAdminIdsEmpty" class="hint" data-i18n="adminIdsEmpty" hidden>No other members are in this room yet.</p><p class="hint" data-i18n="adminIdsHint">These members can edit room details, manage members, delete files, and choose a successor. The owner always has the same powers.</p></fieldset>
+              <label class="field"><span class="field-label"><svg class="fluent-icon field-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-arrow_swap-24"></use></svg><span data-i18n="successorLabel">Successor if the owner leaves</span></span><select id="editRoomSuccessor" class="admin-select"></select></label>
               <p class="hint edit-room-hint" data-i18n="successorHint">If the owner leaves, this person becomes owner. If an administrator leaves, this person takes that role. Leave empty to use the longest-present member.</p>
-              <p id="editRoomOwnerOnlyNote" class="hint edit-room-owner-note" data-i18n="ownerOnlySettingsNote" hidden>Only the owner can change the administrator agent or hand off the room.</p>
+              <p id="editRoomOwnerOnlyNote" class="hint edit-room-owner-note" hidden><svg class="fluent-icon field-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-lock_closed-24"></use></svg><span data-i18n="ownerOnlySettingsNote">Only the owner can change the administrator agent or hand off the room.</span></p>
             </section>
             <section id="editRoomPanelOwnership" class="settings-panel edit-room-panel" role="tabpanel" aria-labelledby="editRoomTabOwnership" hidden>
               <div id="editRoomOwnerOnly">
-                <label class="field"><span class="field-label" data-i18n="adminAgentLabel">Administrator agent</span><select id="editRoomAdmin" class="admin-select"></select></label>
+                <label class="field"><span class="field-label"><svg class="fluent-icon field-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-options-24"></use></svg><span data-i18n="adminAgentLabel">Administrator agent</span></span><select id="editRoomAdmin" class="admin-select"></select></label>
                 <p class="hint edit-room-hint" data-i18n="adminAgentHint">The designated agent can use the admin tool to inspect this room and its history. Only the owner can change this; leave empty for none.</p>
-                <label class="field"><span class="field-label" data-i18n="newOwnerLabel">New owner</span><select id="editRoomOwner" class="admin-select"></select></label>
+                <label class="field"><span class="field-label"><svg class="fluent-icon field-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-key-24"></use></svg><span data-i18n="newOwnerLabel">New owner</span></span><select id="editRoomOwner" class="admin-select"></select></label>
                 <p class="hint edit-room-hint" data-i18n="newOwnerHint">Hand the room to another person who is in it. Only the owner can do this; agents cannot own a room.</p>
               </div>
             </section>
@@ -525,6 +526,23 @@
         <p id="draftCount" class="draft-count">0 / 5000</p>
       </div>
     </footer>
+    <dialog id="docPreview" class="doc-preview" aria-labelledby="docPreviewTitle">
+      <header class="doc-preview-head">
+        <div class="doc-preview-heading">
+          <p class="doc-preview-eyebrow"><svg class="fluent-icon doc-preview-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-document-24"></use></svg><span data-i18n="docPreviewEyebrow">Markdown preview</span></p>
+          <h2 id="docPreviewTitle" tabindex="-1"></h2>
+          <p class="doc-preview-meta"><span id="docPreviewSize"></span><span id="docPreviewStatus" role="status" aria-live="polite"></span></p>
+        </div>
+        <div class="doc-preview-actions">
+          <button id="btnDocPreviewDownload" class="btn ghost small doc-preview-download" type="button" data-i18n="resourceDownload">Download</button>
+          <button id="btnCloseDocPreview" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button>
+        </div>
+      </header>
+      <div class="doc-preview-scroll">
+        <article id="docPreviewBody" class="doc-preview-body msg-text"></article>
+        <p id="docPreviewEmpty" class="hint doc-preview-empty" data-i18n="docPreviewEmpty" hidden>This document is empty.</p>
+      </div>
+    </dialog>
     <div id="attachmentDropOverlay" class="attachment-drop-overlay" role="status" aria-live="polite" data-i18n="dropFilesHere" hidden></div>
   </section>
 
@@ -573,7 +591,7 @@
     </header>
     <div class="palette-search">
       <svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-search-24"></use></svg>
-      <input id="paletteInput" class="input palette-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="paletteList" aria-describedby="paletteHint" aria-label="Search messages" data-i18n-aria-label="paletteSearchLabel" placeholder="Search messages, or type > for commands" data-i18n-placeholder="palettePlaceholder" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
+      <input id="paletteInput" class="input palette-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="paletteList" aria-describedby="paletteHint" aria-label="Search messages" data-i18n-aria-label="paletteSearchLabel" placeholder="Search messages, or type / for commands" data-i18n-placeholder="palettePlaceholder" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
       <span id="paletteMode" class="palette-mode" aria-hidden="true">Search</span>
     </div>
     <p id="paletteStatus" class="hint palette-status" role="status" aria-live="polite"></p>

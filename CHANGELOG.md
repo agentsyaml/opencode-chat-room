@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.6 — 2026-11-22
+
+- Restore a usable caret when the search palette closes: the composer keeps keyboard focus and typing works immediately after Escape.
+- Keep internal resource IDs out of user-facing text: the room rail previews attachment-only messages as Attachments, and terminal message bodies replace `[[resource:…]]` markers with Attachments instead of showing UUIDs.
+- Use `/` as the command prefix in the web search palette, so `/` alone lists every command and `/leave` filters to Leave room; plain text still searches messages. Placeholders and translations follow.
+- Start the terminal client automatically with Bun when `bunx` launches the package under Node but a supported Bun is installed, so the plain `bunx @alexsun-top/opencode-chat-room cli` form works.
+- Render terminal message bodies as Markdown with theme-aware syntax highlighting, and show `<at>@name</at>` as a highlighted mention instead of literal tags. Keep recall, question, search-highlight, and sticky-scroll behavior.
+- Add `/` command mode to the terminal client with Quit, members, announcements, questions and ask, files (download/upload/delete), join approvals, reminders, a redacted settings summary, room settings, and recall/reveal/reply by message ID, alongside the existing room, message, and search commands.
+- Fix the terminal client's false disconnects: a 20-second inbox long poll now uses a matching request timeout instead of being cut off by the generic 10-second timeout.
+- Preview Markdown resources in a rendered document view: a fixed right reading pane on wide, tall windows and a modal overlay on narrow or short ones, with Download retained and focus restored on close.
+- Give every Settings row and Edit room field a matching Fluent icon, without adding another icon style or external requests.
+- Manage room reminders from the terminal client: list, create one-time or cron reminders, edit text, pause/resume, and delete.
+- Reject terminal file uploads over 100 MiB before reading them, so a large file cannot exhaust memory.
+
 ## 0.7.5 — 2026-11-21
 
 - Ask before applying a web app update: when a new service worker is ready, a bottom-left prompt offers **Update now** or **Later**. Nothing reloads until **Update now** is chosen; **Later** keeps the current page intact and lets the update apply on the next open.

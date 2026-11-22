@@ -2,6 +2,7 @@
 import { LS } from "./state.js";
 import { isRoomAdmin } from "./admin-badge.js";
 import { icon } from "./icons.js";
+import { isMarkdownResource } from "./markdown.js";
 
 const PAGE_SIZE = 500;
 const UNKNOWN_UPLOADER = "__unknown_uploader__";
@@ -178,10 +179,11 @@ export function initFiles(app) {
     const actions = document.createElement("div");
     actions.className = "file-actions";
     const previewID = `file-preview-${resource.id}`;
-    if (mediaKind(resource.mimeType)) {
-      actions.append(actionButton("preview", app.t("filesPreviewLabel", { name: resource.name }), ICONS.preview, {
-        "aria-expanded": "false", "aria-controls": previewID,
-      }));
+    if (mediaKind(resource.mimeType) || isMarkdownResource(resource)) {
+      const inline = mediaKind(resource.mimeType);
+      actions.append(actionButton("preview", app.t("filesPreviewLabel", { name: resource.name }), ICONS.preview, inline
+        ? { "aria-expanded": "false", "aria-controls": previewID }
+        : {}));
     }
     actions.append(actionButton("download", app.t("filesDownloadLabel", { name: resource.name }), ICONS.download));
     if (canDelete(resource)) actions.append(actionButton("delete", app.t("filesDeleteLabel", { name: resource.name }), ICONS.trash));
@@ -338,7 +340,8 @@ export function initFiles(app) {
     hideError();
     const target = opener;
     opener = null;
-    if (target?.isConnected) target.focus({ preventScroll: true });
+    // A document preview opens right after the file list closes; keep focus there.
+    if (target?.isConnected && !document.querySelector("dialog[open]")) target.focus({ preventScroll: true });
   });
   list.addEventListener("click", (event) => {
     const button = event.target.closest?.("[data-file-action]");
@@ -347,7 +350,12 @@ export function initFiles(app) {
     const resource = items.find((item) => item.id === row?.dataset.resourceId);
     if (!resource) return;
     const action = button.dataset.fileAction;
-    if (action === "preview") void togglePreview(resource, row, button);
+    if (action === "preview" && isMarkdownResource(resource)) {
+      // The document pane lives in the chat view; the modal file list would hide it.
+      close();
+      app.openDocPreview(resource.roomID, resource, null);
+    }
+    else if (action === "preview") void togglePreview(resource, row, button);
     else if (action === "download") void download(resource);
     else if (action === "delete") void removeResource(resource);
   });

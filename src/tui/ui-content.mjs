@@ -1,19 +1,15 @@
 // State-to-renderable syncing for the OpenTUI view. These functions rebuild
 // message and room rows only when their signature changes.
-import {
-  BoxRenderable,
-  StyledText,
-  TextRenderable,
-  bold,
-  dim,
-  fg,
-  italic,
-} from "@opentui/core";
+import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
 import { formatMessage, messageStamp, sanitizeText } from "./messages.mjs";
+import { addNotice, buildMessageBlock, hashText, markdownStyle } from "./message-view.mjs";
 import { connectionStyle } from "./ui-theme.mjs";
 
 const clear = (container) => {
-  for (const child of container.getChildren()) container.remove(child.id);
+  for (const child of container.getChildren()) {
+    container.remove(child.id);
+    child.destroyRecursively?.();
+  }
 };
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -163,23 +159,6 @@ export function syncRooms(ui, state) {
   updateRoomStyles(ui, state);
 }
 
-function messageChunks(ui, message, info) {
-  const { theme } = ui;
-  const chunks = [];
-  const highlighted = message.id === ui.app.state.highlight;
-  if (highlighted) chunks.push(bold(fg(theme.accent)("▸ ")));
-  if (info.question) chunks.push(bold(fg(theme.warning)("? ")));
-  chunks.push(dim(`${info.time} `));
-  const own = message.senderId === ui.app.state.participant;
-  chunks.push(bold(fg(own ? theme.accent : theme.text)(info.sender)));
-  return chunks;
-}
-
-function messageBody(ui, info) {
-  if (info.recalled) return new StyledText([dim(italic(info.body))]);
-  return new StyledText([fg(ui.theme.text)(info.body)]);
-}
-
 export function syncMessages(ui, state) {
   const { current, pending, joined, messages, highlight } = state;
   const messageKey = messages
@@ -201,20 +180,29 @@ export function syncMessages(ui, state) {
   const wasAtBottom = ui.scrollBox.scrollHeight - ui.scrollBox.scrollTop - ui.scrollBox.viewport.height < 2;
   ui.messageSignature = signature;
 
-  clear(ui.messageContent);
   ui.pendingScrollTo = null;
   ui.pendingBottom = false;
 
   if (pending && pending.roomId === current?.id) {
+    clear(ui.messageContent);
+    ui.messageBlocks = [];
     addNotice(ui, "pending", sanitizeText(pending.message), ui.theme.warning);
     addNotice(ui, "pending-wait", "Waiting for approval...", ui.theme.muted);
   } else if (!current) {
+    clear(ui.messageContent);
+    ui.messageBlocks = [];
     addNotice(ui, "empty", "Select a room and press Enter.", ui.theme.muted);
   } else if (!joined) {
+    clear(ui.messageContent);
+    ui.messageBlocks = [];
     addNotice(ui, "empty", "Not joined · press Enter to join again.", ui.theme.muted);
   } else if (!messages.length) {
+    clear(ui.messageContent);
+    ui.messageBlocks = [];
     addNotice(ui, "empty", "No messages yet. Say hello.", ui.theme.muted);
   } else {
+    if (!ui.messageBlocks.length && ui.messageContent.getChildren().length) clear(ui.messageContent);
+    const nextBlocks = [];
     messages.forEach((message, index) => {
       const info = formatMessage(message, current);
       const previous = messages[index - 1];
@@ -222,33 +210,37 @@ export function syncMessages(ui, state) {
         ? previous.senderId !== message.senderId || messageStamp(message) - messageStamp(previous) > 300000
         : false;
       const highlighted = message.id === highlight;
-      const block = new BoxRenderable(ui.renderer, {
-        id: `message-${message.id}`,
-        width: "100%",
-        flexDirection: "column",
-        flexShrink: 0,
-        marginTop: index === 0 || gap ? 1 : 0,
-      });
-      block.add(new TextRenderable(ui.renderer, {
-        id: `message-head-${message.id}`,
-        width: "100%",
-        height: 1,
-        wrapMode: "none",
-        truncate: true,
-        content: new StyledText(messageChunks(ui, message, info)),
-      }));
-      block.add(new TextRenderable(ui.renderer, {
-        id: `message-body-${message.id}`,
-        width: "100%",
-        flexShrink: 0,
-        wrapMode: "word",
-        marginLeft: 2,
-        paddingRight: 1,
-        bg: highlighted ? ui.theme.raised : undefined,
-        content: messageBody(ui, info),
-      }));
-      ui.messageContent.add(block);
+      const key = [
+        ui.theme.mode,
+        current.id,
+        message.id,
+        message.recalledAt ? 1 : 0,
+        message.isQuestion ? 1 : 0,
+        message.senderId,
+        message.createdAt,
+        highlighted ? 1 : 0,
+        hashText(info.body),
+      ].join("|");
+      const existing = ui.messageBlocks[index];
+      let block;
+      if (existing?.key === key) {
+        block = existing.block;
+        block.marginTop = index === 0 || gap ? 1 : 0;
+      } else {
+        if (existing) {
+          ui.messageContent.remove(existing.block.id);
+          existing.block.destroyRecursively();
+        }
+        block = buildMessageBlock(ui, message, info, highlighted, index === 0 || gap ? 1 : 0);
+        ui.messageContent.add(block, index);
+      }
+      nextBlocks.push({ key, block });
     });
+    for (const stale of ui.messageBlocks.slice(messages.length)) {
+      ui.messageContent.remove(stale.block.id);
+      stale.block.destroyRecursively();
+    }
+    ui.messageBlocks = nextBlocks;
     if (highlight) ui.pendingScrollTo = `message-${highlight}`;
     else if (wasAtBottom) ui.pendingBottom = true;
   }
@@ -256,16 +248,6 @@ export function syncMessages(ui, state) {
   if (!ui.pendingScrollTo && !ui.pendingBottom && previousTop > 0) {
     ui.scrollBox.scrollTop = previousTop;
   }
-}
-
-function addNotice(ui, id, text, color) {
-  ui.messageContent.add(new TextRenderable(ui.renderer, {
-    id: `message-${id}`,
-    width: "100%",
-    flexShrink: 0,
-    wrapMode: "char",
-    content: new StyledText([fg(color)(sanitizeText(text))]),
-  }));
 }
 
 export function syncComposer(ui, state) {
@@ -304,12 +286,18 @@ export function syncStatus(ui, state) {
 
 export function syncFocus(ui, state) {
   const target = state.palette ? "palette" : state.help ? "help" : state.focus === "composer" ? "composer" : "rooms";
+  const paletteInput = Boolean(state.palette) && ["commands", "search", "prompt"].includes(state.palette.mode);
   if (target !== ui.focusKey) {
     if (ui.focusKey === "composer") ui.textarea.blur();
     if (ui.focusKey === "palette") ui.paletteInput.blur();
     if (target === "composer") ui.textarea.focus();
-    if (target === "palette") ui.paletteInput.focus();
+    if (target === "palette" && paletteInput) ui.paletteInput.focus();
     ui.focusKey = target;
+  }
+  if (ui.paletteInputMode !== paletteInput) {
+    if (paletteInput) ui.paletteInput.focus();
+    else ui.paletteInput.blur();
+    ui.paletteInputMode = paletteInput;
   }
   const accent = target === "composer";
   ui.composer.borderColor = accent ? ui.theme.accent : ui.theme.border;
@@ -320,7 +308,16 @@ export function syncPalette(ui, state) {
   const { theme, paletteBox } = ui;
   const palette = state.palette;
   paletteBox.visible = Boolean(palette);
-  if (!palette) return;
+  if (!palette) {
+    ui.detailSignature = "";
+    return;
+  }
+
+  const mode = palette.mode;
+  const isInput = mode === "commands" || mode === "search" || mode === "prompt";
+  const isList = mode === "commands" || mode === "search" || mode === "info";
+  const isDetail = mode === "detail";
+  const isConfirm = mode === "confirm";
 
   paletteBox.backgroundColor = theme.surface;
   paletteBox.borderColor = theme.accent;
@@ -328,6 +325,10 @@ export function syncPalette(ui, state) {
   ui.paletteTitle.fg = theme.text;
   ui.paletteScope.fg = theme.muted;
   ui.palettePrompt.fg = theme.accent;
+  ui.paletteInputRow.visible = isInput;
+  ui.paletteList.visible = isList;
+  ui.paletteDetailScroll.visible = isDetail;
+  ui.paletteConfirm.visible = isConfirm;
   ui.paletteInput.placeholderColor = theme.faint;
   ui.paletteInput.textColor = theme.text;
   ui.paletteInput.focusedTextColor = theme.text;
@@ -337,15 +338,21 @@ export function syncPalette(ui, state) {
   ui.paletteList.selectedTextColor = theme.selectedFg;
 
   const scope = palette.scope === "all" ? "all joined rooms" : "this room";
-  ui.paletteTitle.content = palette.mode === "prompt" ? "New room" : palette.mode === "search" ? "Search messages" : "Palette";
-  ui.paletteScope.content = palette.mode === "prompt" ? "create" : palette.mode === "search" ? scope : "commands";
-  ui.paletteInput.placeholder = palette.mode === "prompt"
-    ? "Room name"
-    : palette.mode === "search"
+  const defaultTitle = mode === "prompt"
+    ? "New room"
+    : mode === "search"
+      ? "Search messages"
+      : "Palette";
+  ui.paletteTitle.content = palette.title || defaultTitle;
+  ui.paletteScope.content = palette.subtitle
+    || (mode === "prompt" ? "create" : mode === "search" ? scope : "commands");
+  ui.paletteInput.placeholder = mode === "prompt"
+    ? palette.prompt?.label || "Enter a value"
+    : mode === "search"
       ? "Type to search messages"
       : "Type to search or run a command";
 
-  const value = palette.mode === "prompt" ? palette.prompt?.value ?? "" : palette.query;
+  const value = mode === "prompt" ? palette.prompt?.value ?? "" : palette.query ?? "";
   if (ui.paletteInput.value !== value) {
     ui.syncingPalette = true;
     try {
@@ -355,33 +362,68 @@ export function syncPalette(ui, state) {
     }
   }
 
-  let options;
-  if (palette.mode === "commands") {
+  let options = [];
+  if (mode === "commands") {
     options = ui.app.paletteCommands().map((command) => ({ name: command.label, description: "", value: command.id }));
-  } else if (palette.mode === "prompt") {
-    options = [{ name: "Enter creates the room", description: "", value: "" }];
-  } else if (!palette.results.length) {
-    options = [{ name: palette.searching ? "Searching..." : "No matches", description: "", value: "" }];
-  } else {
-    options = palette.results.map((result) => {
-      const info = formatMessage(result.message, null);
-      return {
-        name: `${sanitizeText(result.roomName)}  ${info.time} ${info.sender}  ${sanitizeText(result.snippet)}`,
-        description: "",
-        value: result.message.id,
-      };
-    });
+  } else if (mode === "search") {
+    options = !palette.results.length
+      ? [{ name: palette.searching ? "Searching..." : "No matches", description: "", value: "" }]
+      : palette.results.map((result) => {
+        const info = formatMessage(result.message, null);
+        return {
+          name: `${sanitizeText(result.roomName)}  ${info.time} ${info.sender}  ${sanitizeText(result.snippet)}`,
+          description: "",
+          value: result.message.id,
+        };
+      });
+  } else if (mode === "info") {
+    options = palette.loading
+      ? [{ name: "Loading...", description: "", value: "" }]
+      : palette.items.length
+        ? palette.items.map((item) => ({ name: item.name, description: "", value: item.value }))
+        : [{ name: palette.error ? "Unavailable" : "Nothing here", description: "", value: "" }];
   }
   ui.paletteList.options = options;
-  ui.paletteList.setSelectedIndex(Math.min(palette.selected, Math.max(0, options.length - 1)));
+  if (isList) ui.paletteList.setSelectedIndex(Math.min(palette.selected ?? 0, Math.max(0, options.length - 1)));
+
+  let desiredHeight;
+  if (mode === "commands" || mode === "info") {
+    desiredHeight = Math.min(ui.renderer.height - 2, Math.max(9, options.length + 5));
+  } else if (isDetail) {
+    desiredHeight = Math.min(ui.renderer.height - 2, Math.max(12, Math.floor(ui.renderer.height * 0.8)));
+  } else if (isConfirm) {
+    desiredHeight = Math.min(9, Math.max(6, ui.renderer.height - 4));
+  } else {
+    desiredHeight = Math.min(16, Math.max(9, Math.floor(ui.renderer.height / 2) + 1));
+  }
+  if (paletteBox.height !== desiredHeight) paletteBox.height = desiredHeight;
+
+  ui.paletteDetailMarkdown.syntaxStyle = markdownStyle(ui);
+  ui.paletteDetailMarkdown.fg = theme.text;
+  if (isDetail) {
+    const signature = `${theme.mode}:${palette.detail?.title}:${palette.detail?.markdown}`;
+    if (signature !== ui.detailSignature) {
+      ui.detailSignature = signature;
+      ui.paletteDetailMarkdown.content = palette.detail?.markdown ?? "";
+      ui.paletteDetailScroll.scrollTop = 0;
+    }
+  }
+  if (isConfirm) {
+    ui.paletteConfirm.content = `  ${palette.confirm?.text ?? ""}`;
+    ui.paletteConfirm.fg = theme.warning;
+  }
 
   const footer = palette.error
-    || (palette.mode === "prompt"
-      ? "Enter create · Esc close"
-      : palette.mode === "search"
+    || (mode === "prompt"
+      ? palette.hint || "Enter confirm · Esc cancel"
+      : mode === "search"
         ? `↑↓ select · Enter open · Tab: ${palette.scope === "all" ? "this room" : "all rooms"} · Esc close${palette.searching ? " · searching..." : ""}`
-        : "↑↓ select · Enter run · Esc close");
-  ui.paletteHint.content = `  ${sanitizeText(footer)}`;
+        : mode === "detail"
+          ? palette.hint || "↑↓ scroll · Esc back"
+          : mode === "confirm"
+            ? palette.hint || "Enter or y confirms · n or Esc cancels"
+            : palette.hint || (mode === "info" ? "↑↓ select · Enter open · Esc close" : "↑↓ select · Enter run · Esc close"));
+  ui.paletteHint.content = `  ${sanitizeText(footer)}${palette.searching && mode !== "search" ? "  · working..." : ""}`;
   ui.paletteHint.fg = palette.error ? theme.error : theme.muted;
 }
 
@@ -419,6 +461,7 @@ export function syncHelp(ui, state) {
     ["Enter", "send message"],
     ["Ctrl+J", "insert newline"],
     ["Esc", "clear / blur"],
+    ["/", "commands (empty composer)"],
     ["Alt+Space", "palette / search"],
     ["Ctrl+R", "refresh rooms"],
     ["Ctrl+C", "quit"],

@@ -1,10 +1,11 @@
 // CLI entry for `opencode-chat-room cli`. Config, HTTP and session helpers are
 // imported lazily so --help/--version work without a terminal or OpenTUI.
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { createApp } from "./app.mjs";
 
 const NAME = "opencode-chat-room cli";
-const FALLBACK_VERSION = "0.7.5";
+const FALLBACK_VERSION = "0.7.6";
 
 export const HELP = `opencode-chat-room cli - terminal client for a chat-room server
 
@@ -24,6 +25,9 @@ A token is never accepted on the command line. See the README for fields.
 Keys: arrows select rooms · Enter opens · Tab focuses the composer ·
 PageUp/PageDown scroll · Alt+Home/End jumps · Alt+Space or Ctrl+P opens the
 palette · Ctrl+C quits.
+Type / in an empty composer for commands: members, join requests, announcements,
+questions, files, reminders, room settings, recall/reveal/reply/ask,
+delete room and quit.
 This command needs an interactive terminal.
 `;
 
@@ -56,7 +60,7 @@ function runtimeProblem() {
     (bunMajor > 1 || (bunMajor === 1 && (bunMinor > 3 || (bunMinor === 3 && bunPatch >= 14))));
   const nodeSupported = nodeMajor > 26 || (nodeMajor === 26 && nodeMinor >= 4);
   if (typeof globalThis.Deno !== "undefined" || (!bunSupported && !nodeSupported)) {
-    return "the terminal client requires Bun 1.3.14+ or Node.js 26.4+. Run it with bunx, or with node --experimental-ffi on Node 26.4+.";
+    return "the terminal client requires Bun 1.3.14+ or Node.js 26.4+ with --experimental-ffi. Install Bun 1.3.14+ and retry, or use a supported Node.js version.";
   }
   return "";
 }
@@ -114,7 +118,7 @@ export async function main(argv = process.argv.slice(2)) {
   let renderer;
   let ui;
   try {
-    const [{ resolveTuiConfig }, { loadSession, saveSession }, { createApi }] = await Promise.all([
+    const [{ resolveTuiConfig, findTuiConfigFile }, { loadSession, saveSession }, { createApi }] = await Promise.all([
       import("./config.mjs"),
       import("./session.mjs"),
       import("./http.mjs"),
@@ -149,7 +153,22 @@ export async function main(argv = process.argv.slice(2)) {
       targetFps: 30,
       clearOnShutdown: true,
     });
-    const app = createApp({ api, sessionID: session.sessionID, participant, host });
+    const app = createApp({
+      api,
+      sessionID: session.sessionID,
+      participant,
+      host,
+      settings: {
+        server: config.url,
+        participant,
+        sessionFile: config.stateFile,
+        configFile: findTuiConfigFile(process.env, process.cwd()) ?? "",
+        requestTimeoutMs: config.requestTimeoutMs,
+        pollTimeoutMs: 20000,
+        token: config.token,
+      },
+      downloadDir: path.join(process.cwd(), "downloads"),
+    });
     ui = createTui(renderer, app);
     await app.init();
     ui.sync();

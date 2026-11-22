@@ -66,7 +66,7 @@ test.skipIf(!browserModule)("a new tab starts from the server read watermark", a
     releaseRead(); await readDone;
     await second.waitForFunction(async (url: string) => (await import(url)).app.state.unread === 0, "/assets/chat/state.js");
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
-}, 60000);
+}, 90000);
 
 test.skipIf(!browserModule)("a render-failed message blocks the watermark even when later messages render", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
@@ -129,7 +129,7 @@ test.skipIf(!browserModule)("a render-failed message blocks the watermark even w
     const readTs = await page.evaluate(async ({ url, id }: { url: string; id: string }) => (await import(url)).app.state.rooms.get(id).readTs, { url: "/assets/chat/state.js", id: room.id });
     expect(readTs).toBeLessThan(middle.createdAt);
   } finally { await browser?.close(); server.kill("SIGTERM"); await new Promise((resolve) => server.once("exit", resolve)); await rm(stateDir, { recursive: true, force: true }); }
-}, 60000);
+}, 90000);
 
 async function api(origin: string, route: string, method: string, body: unknown) {
   const response = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });

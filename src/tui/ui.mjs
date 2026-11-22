@@ -26,10 +26,13 @@ export class Tui {
     this.app = app;
     this.themeState = createTheme(renderer);
     this.theme = this.themeState.theme;
+    app.state.theme = this.theme.mode;
     this.focusKey = null;
     this.roomSignature = "";
     this.messageSignature = "";
     this.helpSignature = "";
+    this.syntaxStyles = new Map();
+    this.messageBlocks = [];
     this.selectedRoomID = null;
     this.hoverRoomId = null;
     this.roomRows = new Map();
@@ -38,6 +41,8 @@ export class Tui {
     this.pendingRoomScroll = null;
     this.syncingComposer = false;
     this.syncingPalette = false;
+    this.paletteInputMode = false;
+    this.detailSignature = "";
 
     Object.assign(this, createView(renderer, this.theme));
     this.textarea.onContentChange = () => {
@@ -56,6 +61,7 @@ export class Tui {
     this.onResize = () => this.sync();
     this.onTheme = (mode) => {
       if (!this.themeState.set(mode)) return;
+      this.app.state.theme = this.themeState.mode;
       this.roomSignature = "";
       this.messageSignature = "";
       this.helpSignature = "";
@@ -171,6 +177,11 @@ export class Tui {
     }
 
     if (state.focus === "composer") {
+      if (key.sequence === "/" && this.textarea.plainText.length === 0) {
+        key.preventDefault();
+        this.app.openPalette({ slash: true });
+        return;
+      }
       if (key.name === "return") {
         key.preventDefault();
         this.app.setDraft(this.textarea.plainText);
@@ -204,11 +215,17 @@ export class Tui {
       // Focusing the composer in this handler must not let the same key reach
       // the now-focused textarea twice or split the first character.
       key.stopPropagation();
+      if (key.sequence === "/" && !state.draft) {
+        this.app.openPalette({ slash: true });
+        return;
+      }
       this.app.appendDraft(key.sequence);
     }
   }
 
   handlePaletteKey(key) {
+    const palette = this.app.state.palette;
+    if (!palette) return;
     if ((key.name === "space" && (key.meta || key.option)) || (key.name === "p" && key.ctrl)) {
       key.preventDefault();
       this.app.closePalette();
@@ -216,7 +233,92 @@ export class Tui {
     }
     if (key.name === "escape") {
       key.preventDefault();
-      this.app.closePalette();
+      if (palette.mode === "confirm") this.app.cancelConfirm();
+      else if (palette.mode === "detail") this.app.backFromDetail();
+      else this.app.closePalette();
+      return;
+    }
+    if (palette.mode === "confirm") {
+      if (key.name === "return" || key.sequence === "y") {
+        key.preventDefault();
+        void this.app.runConfirm();
+      } else if (key.sequence === "n") {
+        key.preventDefault();
+        this.app.cancelConfirm();
+      }
+      return;
+    }
+    if (palette.mode === "detail") {
+      if (key.name === "up" || key.name === "pageup") {
+        key.preventDefault();
+        this.paletteDetailScroll.scrollBy(-0.5, "viewport");
+        this.renderer.requestRender();
+      } else if (key.name === "down" || key.name === "pagedown") {
+        key.preventDefault();
+        this.paletteDetailScroll.scrollBy(0.5, "viewport");
+        this.renderer.requestRender();
+      } else if (key.sequence === "d" && palette.kind === "announcements") {
+        key.preventDefault();
+        this.app.askDeleteAnnouncement(palette.detail?.title);
+      } else if (palette.kind === "room-settings") {
+        if (key.sequence === "r") {
+          key.preventDefault();
+          this.app.startRoomRename();
+        } else if (key.sequence === "d") {
+          key.preventDefault();
+          this.app.startRoomDescription();
+        } else if (key.sequence === "j") {
+          key.preventDefault();
+          this.app.askRoomJoinPolicy();
+        } else if (key.sequence === "x") {
+          key.preventDefault();
+          this.app.askDeleteRoom();
+        }
+      } else if (key.name === "return") {
+        key.preventDefault();
+      }
+      return;
+    }
+    if (palette.mode === "info") {
+      if (key.name === "up" || key.name === "down") {
+        key.preventDefault();
+        this.app.movePalette(key.name === "up" ? -1 : 1);
+      } else if (key.name === "pageup" || key.name === "pagedown") {
+        key.preventDefault();
+        this.app.movePalette(key.name === "pageup" ? -5 : 5);
+      } else if (key.name === "return") {
+        key.preventDefault();
+        void this.app.runPaletteSelection();
+      } else if (key.sequence === "n" && palette.kind === "announcements") {
+        key.preventDefault();
+        this.app.startAnnouncementCreate();
+      } else if (key.sequence === "d" && palette.kind === "announcements") {
+        key.preventDefault();
+        this.app.askDeleteAnnouncement();
+      } else if (key.sequence === "u" && palette.kind === "files") {
+        key.preventDefault();
+        this.app.startFileUpload();
+      } else if (key.sequence === "d" && palette.kind === "files") {
+        key.preventDefault();
+        this.app.askDeleteFile();
+      } else if (key.sequence === "d" && palette.kind === "join-requests") {
+        key.preventDefault();
+        this.app.askJoinDecision("deny");
+      } else if (palette.kind === "reminders") {
+        if (key.sequence === "n") {
+          key.preventDefault();
+          this.app.startReminderCreate();
+        } else if (key.sequence === "p") {
+          key.preventDefault();
+          void this.app.toggleReminder();
+        } else if (key.sequence === "e") {
+          key.preventDefault();
+          this.app.startReminderEdit();
+        } else if (key.sequence === "d") {
+          key.preventDefault();
+          this.app.askDeleteReminder();
+        }
+      }
       return;
     }
     if (key.name === "tab") {

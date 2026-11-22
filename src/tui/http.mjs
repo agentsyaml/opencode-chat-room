@@ -35,20 +35,24 @@ function query(params) {
 export function createApi({ url, token, requestTimeoutMs = 10000 }) {
   const base = String(url ?? "").replace(/\/+$/, "");
 
-  async function call(route, { method = "GET", body, signal } = {}) {
-    const headers = {};
+  async function call(route, { method = "GET", body, signal, timeoutMs = requestTimeoutMs, headers: extra = {}, parseJson = true } = {}) {
+    const headers = { ...extra };
     if (token) headers.Authorization = `Bearer ${token}`;
-    if (body !== undefined) headers["Content-Type"] = "application/json";
-    const timeout = AbortSignal.timeout(requestTimeoutMs);
+    if (body !== undefined && typeof body !== "string" && !(body instanceof Uint8Array)) headers["Content-Type"] = "application/json";
+    const timeout = AbortSignal.timeout(timeoutMs);
     const res = await fetch(`${base}${route}`, {
       method,
       headers,
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : { body: typeof body === "string" || body instanceof Uint8Array ? body : JSON.stringify(body) }),
       signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
     });
-    const data = await res.json().catch(() => ({}));
+    // Binary downloads must not be cloned and JSON-parsed; that would duplicate the
+    // whole payload in memory before the caller reads it.
+    const data = parseJson || !res.ok
+      ? await res.clone().json().catch(() => ({}))
+      : {};
     if (!res.ok) throw apiError(res.status, res.statusText, data);
-    return { status: res.status, data };
+    return { status: res.status, data, response: res };
   }
 
   const room = (roomId) => `/rooms/${encodeURIComponent(roomId)}`;
@@ -83,21 +87,116 @@ export function createApi({ url, token, requestTimeoutMs = 10000 }) {
     async leave(roomId, sessionID) {
       await call(`${room(roomId)}/leave`, { method: "POST", body: { sessionID } });
     },
-    async send(roomId, sessionID, text) {
-      return (await call(`${room(roomId)}/messages`, { method: "POST", body: { sessionID, text } })).data;
+    async send(roomId, sessionID, text, { replyToMessageID, isQuestion } = {}) {
+      return (await call(`${room(roomId)}/messages`, {
+        method: "POST",
+        body: { sessionID, text, ...(replyToMessageID ? { replyToMessageID } : {}), ...(isQuestion ? { isQuestion: true } : {}) },
+      })).data;
     },
     async poll(roomId, sessionID, afterTs, { signal, timeoutMs = 20000 } = {}) {
       const wait = Number.isFinite(timeoutMs) ? Math.max(0, Math.floor(timeoutMs)) : 20000;
       const after = Number.isFinite(afterTs) && afterTs >= 0 ? afterTs : undefined;
       const params = { sessionID, roomId, excludeSelf: 0, timeout: wait, afterTs: after };
-      return (await call(`/inbox?${query(params)}`, { signal })).data;
+      // The inbox holds the request for up to `wait`; the normal request timeout
+      // must not cut that long poll short and report a false disconnect.
+      const longPollTimeout = Math.max(requestTimeoutMs, wait + 5000);
+      return (await call(`/inbox?${query(params)}`, { signal, timeoutMs: longPollTimeout })).data;
     },
     async markRead(roomId, sessionID, ts) {
       await call("/read", { method: "POST", body: { roomId, sessionID, ts } });
     },
+    async members(roomId) {
+      return (await call(`${room(roomId)}/members`)).data.members ?? [];
+    },
+    async announcements(roomId) {
+      return (await call(`${room(roomId)}/announcements`)).data.announcements ?? [];
+    },
+    async saveAnnouncement(roomId, name, content, sessionID) {
+      return (await call(`${room(roomId)}/announcements/${encodeURIComponent(name)}`, {
+        method: "PUT", body: { sessionID, content },
+      })).data.announcement;
+    },
+    async deleteAnnouncement(roomId, name, sessionID) {
+      await call(`${room(roomId)}/announcements/${encodeURIComponent(name)}`, { method: "DELETE", body: { sessionID } });
+    },
+    async questions(roomId) {
+      return (await call(`${room(roomId)}/questions`)).data.questions ?? [];
+    },
+    async answerQuestion(roomId, questionId, sessionID, text) {
+      return (await call(`${room(roomId)}/questions/${encodeURIComponent(questionId)}/answers`, {
+        method: "POST", body: { sessionID, text },
+      })).data;
+    },
+    async reminders(roomId, sessionID) {
+      return (await call(`${room(roomId)}/reminders?${query({ sessionID })}`)).data.reminders ?? [];
+    },
+    async createReminder(roomId, sessionID, text, schedule) {
+      return (await call(`${room(roomId)}/reminders`, { method: "POST", body: { sessionID, text, schedule } })).data.reminder;
+    },
+    async updateReminder(roomId, reminderId, sessionID, patch) {
+      return (await call(`${room(roomId)}/reminders/${encodeURIComponent(reminderId)}`, {
+        method: "PATCH", body: { sessionID, ...patch },
+      })).data.reminder;
+    },
+    async deleteReminder(roomId, reminderId, sessionID) {
+      await call(`${room(roomId)}/reminders/${encodeURIComponent(reminderId)}`, { method: "DELETE", body: { sessionID } });
+    },
+    async recall(roomId, messageId, sessionID) {
+      return (await call(`${room(roomId)}/messages/${encodeURIComponent(messageId)}/recall`, {
+        method: "POST", body: { sessionID },
+      })).data;
+    },
+    async reveal(roomId, messageId, sessionID) {
+      return (await call(`${room(roomId)}/messages/${encodeURIComponent(messageId)}/content?${query({ sessionID })}`)).data;
+    },
+    async resources(roomId, sessionID, limit = 500, offset = 0) {
+      return (await call(`${room(roomId)}/resources?${query({ limit, offset })}`, {
+        headers: { "x-session-id": sessionID },
+      })).data;
+    },
+    async resourceContent(roomId, resourceId) {
+      const { response } = await call(`${room(roomId)}/resources/${encodeURIComponent(resourceId)}/content`, {
+        parseJson: false,
+      });
+      return { bytes: new Uint8Array(await response.arrayBuffer()), contentType: response.headers.get("content-type") ?? "" };
+    },
+    async deleteResource(roomId, resourceId, sessionID) {
+      const { data } = await call(`${room(roomId)}/resources/${encodeURIComponent(resourceId)}`, {
+        method: "DELETE",
+        body: {},
+        headers: { "x-session-id": sessionID },
+      });
+      return data;
+    },
+    async joinRequests(roomId, sessionID) {
+      const { status, data } = await call(`${room(roomId)}/join-requests?${query({ sessionID })}`);
+      return { status, requests: Array.isArray(data) ? data : [] };
+    },
+    async decideJoin(roomId, requestSessionID, sessionID, decision) {
+      const { data } = await call(`${room(roomId)}/join-requests/${encodeURIComponent(requestSessionID)}/${decision}`, {
+        method: "POST",
+        body: { sessionID },
+      });
+      return data;
+    },
+    async uploadResource(roomId, sessionID, filename, bytes) {
+      const { data } = await call(`${room(roomId)}/resources`, {
+        method: "POST",
+        body: bytes,
+        headers: { "x-session-id": sessionID, "x-file-name": encodeURIComponent(filename), "Content-Type": "application/octet-stream" },
+      });
+      return data.resource;
+    },
     async createRoom(name, sessionID, ownerId, joinPolicy = "open") {
       const body = { name, sessionID, ownerId, joinPolicy };
       return (await call("/rooms", { method: "POST", body })).data;
+    },
+    async updateRoom(roomId, sessionID, patch) {
+      const body = { sessionID, ...patch };
+      return (await call(`${room(roomId)}`, { method: "PATCH", body })).data;
+    },
+    async deleteRoom(roomId, sessionID) {
+      return (await call(`${room(roomId)}`, { method: "DELETE", body: { sessionID } })).data;
     },
   };
 }

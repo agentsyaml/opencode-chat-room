@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -41,7 +42,26 @@ function validatePort(value: string): void {
 }
 
 const args = process.argv.slice(2);
+
+// `bunx package` runs the bin with Node by default, even when Bun is installed.
+// The terminal client needs Bun here, so hand off to a supported Bun when one is
+// available instead of making every user remember the --bun flag.
+function relaunchTuiWithBun(): void {
+  if (process.versions.bun) return;
+  const probe = spawnSync("bun", ["--version"], { encoding: "utf8" });
+  if (probe.error || probe.status !== 0) return;
+  const [major = 0, minor = 0, patch = 0] = String(probe.stdout).trim().split(".").map(Number);
+  const supported = major > 1 || (major === 1 && (minor > 3 || (minor === 3 && patch >= 14)));
+  if (!supported) return;
+  const child = spawnSync("bun", [fileURLToPath(import.meta.url), ...process.argv.slice(2)], {
+    stdio: "inherit",
+    env: process.env,
+  });
+  process.exit(child.status ?? 1);
+}
+
 if (args[0] === "cli") {
+  relaunchTuiWithBun();
   // Keep the plain-JS TUI outside dist so bundling cannot hoist OpenTUI into
   // every CLI command. The packaged layout has dist/cli.js beside src/tui.
   const packaged = new URL("../src/tui/main.mjs", import.meta.url);

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { formatSystemMessage } from "../../server/assets/chat/system-messages.js";
+import { formatRoomPreview, formatSystemMessage } from "../../server/assets/chat/system-messages.js";
 import { app } from "../../server/assets/chat/state.js";
 
 const say = (text: string) => formatSystemMessage({ senderId: "system", text }, app);
@@ -36,6 +36,14 @@ test("joined changes translate every segment", () => {
   app.locale = "en";
   expect(say('Alex updated the room description; Alex set join approval to open'))
     .toBe("Alex updated the room description; Alex opened this room to join without approval");
+});
+
+test("room previews do not expose resource markers", () => {
+  app.locale = "en";
+  expect(formatRoomPreview({ preview: "[[resource:0eebea95-8672-4aa1-a77a-0e9b6e3f39e1]]" }, null, app))
+    .toBe("Attachments");
+  expect(formatRoomPreview({ preview: "report [[resource:0eebea95-8672-4aa1-a77a-0e9b6e3f39e1]]" }, null, app))
+    .toBe("report · Attachments");
 });
 
 test("every pattern key has an EN and ZH translation", () => {
