@@ -1,6 +1,7 @@
 // Message actions on top of the palette prompts: recall and reveal by id with
 // confirmation, and a prompt-based reply flow that uses api.send's replyTo.
 import { mergeMessages } from "./messages.mjs";
+import { canonicalizeMentions } from "./mentions.mjs";
 
 const errorText = (error) => (error instanceof Error ? error.message : String(error ?? "unknown error"));
 
@@ -49,7 +50,7 @@ export function attachMessageActions(Class) {
         return;
       }
       if (prompt.action === "message-ask") {
-        const question = String(value ?? "").trim();
+        const question = canonicalizeMentions(String(value ?? "").trim(), room.participants);
         if (!question) {
           palette.error = "question text is required";
           this.touch();
@@ -108,7 +109,7 @@ export function attachMessageActions(Class) {
         return;
       }
       if (prompt.action === "message-reply-text") {
-        const text = String(value ?? "").trim();
+        const text = canonicalizeMentions(String(value ?? "").trim(), room.participants);
         if (!text) {
           palette.error = "reply text is required";
           this.touch();

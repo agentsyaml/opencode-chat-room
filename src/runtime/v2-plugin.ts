@@ -81,7 +81,7 @@ export function createV2Setup(deps: {
       });
       toolRegistration = await context.tool.transform((editor) => editor.add({
         name: "room",
-        description: "Chat room operations: create, join, join_status, leave and list rooms; send and poll messages; list members and announcements; manage reminders. In an approval room join returns pending: you are not a member yet; call join_status to check whether an administrator approved you. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads.",
+        description: "Chat room operations: create, join, join_status, leave and list rooms; send and poll messages; list members, announcements and tasks; create, update and delete room tasks; manage reminders. In an approval room join returns pending: you are not a member yet; call join_status to check whether an administrator approved you. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads.",
         options: { codemode: false },
         input: roomSchema(),
         execute: async (args, toolContext) => {
@@ -169,7 +169,7 @@ export function createV2Setup(deps: {
 
 export function roomSchema() {
   return z.object({
-    action: z.enum(["create", "join", "join_status", "leave", "list", "send", "poll", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete"]),
+    action: z.enum(["create", "join", "join_status", "leave", "list", "send", "poll", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete", "task_list", "task_create", "task_update", "task_delete"]),
     name: z.string().max(64).optional().describe("For join: your own participant display name, NOT the room name (required). For create: the new room name."),
     roomId: z.string().optional(),
     resourceId: z.string().optional(),
@@ -178,6 +178,15 @@ export function roomSchema() {
     isQuestion: z.boolean().optional(),
     announcementName: z.string().optional().describe("Name of a room announcement; distinct from participant or room name."),
     content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters."),
+    taskId: z.string().optional().describe("Task UUID from task_list; required for task_update and task_delete."),
+    title: z.string().optional().describe("Task title, 1 to 200 characters; required for task_create."),
+    description: z.string().optional().describe("Task description, at most 5000 characters."),
+    assignee: z.string().optional().describe("Participant display name responsible for the task; empty leaves it unassigned."),
+    status: z.enum(["todo", "doing", "done"]).optional().describe("Task status; the assignee may change only this field."),
+    dueDate: z.string().optional().describe("Task due date as YYYY-MM-DD; empty clears it."),
+    participants: z.array(z.string()).optional().describe("Task participants as room participant display names; empty clears them."),
+    conclusion: z.string().optional().describe("Task conclusion, at most 5000 characters; empty clears it."),
+    steps: z.array(z.union([z.string(), z.object({ text: z.string(), done: z.boolean().optional() })])).optional().describe("Task checklist, at most 30 steps; each is text of 1 to 300 characters or {text, done}; empty clears them."),
     reminderId: z.string().optional(),
     schedule: z.discriminatedUnion("type", [z.object({ type: z.literal("once"), at: z.string(), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() }), z.object({ type: z.literal("cron"), expression: z.string().regex(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() })]).optional(),
     paused: z.boolean().optional(),

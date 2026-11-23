@@ -1,6 +1,6 @@
 import { icon } from "./icons.js";
 
-// Alt+Space opens one keyboard-first surface: message search plus common room commands.
+// Alt+Space or Ctrl+P opens one keyboard-first surface: message search plus common room commands.
 
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -15,7 +15,8 @@ export function initPalette(app) {
 
   // The eyebrow names the real key on this platform, matching the shortcut sheet.
   const combo = app.$("#paletteCombo");
-  if (combo && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)) combo.textContent = "Option + Space";
+  const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+  if (combo) combo.textContent = mac ? "Ctrl + P / Option + Space" : "Ctrl + P / Alt + Space";
 
   const commands = () => {
     const available = [
@@ -28,6 +29,7 @@ export function initPalette(app) {
       { id: "members", label: t("members"), icon: "people", keywords: "people roster", focusComposer: false, run: () => app.$("#btnMembers")?.click() },
       { id: "questions", label: t("questions"), icon: "question_circle", keywords: "answers", focusComposer: false, run: () => app.$("#btnQuestions")?.click() },
       { id: "announcements", label: t("announcements"), icon: "megaphone", keywords: "notice board", focusComposer: false, run: () => app.$("#btnAnnouncements")?.click() },
+      ...(room().kind === "direct" ? [] : [{ id: "tasks", label: t("tasksTitle"), icon: "checkmark", keywords: "todo checklist work", focusComposer: false, run: () => app.openTasksDialog?.() }]),
       { id: "reminders", label: t("reminders"), icon: "alert", keywords: "schedule alarm", focusComposer: false, run: () => app.$("#btnReminders")?.click() },
       { id: "leave", label: t("paletteLeaveRoom"), icon: "arrow_exit", keywords: "exit quit", focusComposer: false, run: () => app.leaveRoom?.(false) },
       { id: "latest", label: t("paletteJumpLatest"), icon: "arrow_down", keywords: "bottom newest", run: () => app.jumpToBottom?.() },
@@ -381,8 +383,11 @@ export function initPalette(app) {
 
   document.addEventListener("keydown", (event) => {
     if (event.defaultPrevented || event.isComposing) return;
-    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (event.code !== "Space" && event.key !== " ") return;
+    const altSpace = event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      && (event.code === "Space" || event.key === " ");
+    const ctrlP = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
+      && (event.code === "KeyP" || event.key.toLowerCase() === "p");
+    if (!altSpace && !ctrlP) return;
     event.preventDefault();
     event.stopPropagation();
     openPalette();

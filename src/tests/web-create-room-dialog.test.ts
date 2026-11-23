@@ -145,6 +145,30 @@ test.skipIf(!browserModule)("the rail opens a centered create-room dialog with a
     expect(await page.locator("#roomRail").evaluate((rail: HTMLElement) => rail.classList.contains("drawer-open"))).toBe(true);
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnNewRoom");
 
+    // A double submit must create one room, not two.
+    await page.setViewportSize({ width: 1280, height: 850 });
+    await page.evaluate(() => {
+      document.querySelector("#roomRail")?.classList.remove("drawer-open");
+      document.querySelector("#btnRoomsDrawer")?.setAttribute("aria-expanded", "false");
+    });
+    let posts = 0;
+    await page.route("**/rooms", async (route: any) => {
+      if (route.request().method() === "POST") {
+        posts += 1;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      await route.continue();
+    });
+    await page.evaluate(async (modulePath: string) => {
+      const { app } = await import(modulePath);
+      app.openCreateRoomDialog();
+      document.querySelector<HTMLInputElement>("#inRoomNameChat")!.value = "__Test_DialogRace";
+      await Promise.all([app.createRoom(), app.createRoom()]);
+    }, "/assets/chat/state.js");
+    await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "__Test_DialogRace");
+    expect(posts).toBe(1);
+    await page.unroute("**/rooms");
+
     await context.close();
   } finally {
     await browser?.close();

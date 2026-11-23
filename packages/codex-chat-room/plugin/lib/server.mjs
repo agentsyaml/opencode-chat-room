@@ -7,12 +7,14 @@ import readline from "node:readline";
 export const ROOM_ACTIONS = [
   "create", "join", "join_status", "leave", "list", "send", "poll", "recall", "members",
   "announcement_list", "announcement_read", "announcement_write", "announcement_delete",
+  "task_list", "task_create", "task_update", "task_delete",
 ];
 
 export const ROOM_TOOL = {
   name: "room",
   description:
-    "Chat room operations on a central opencode-chat-room server: create, join, leave and list rooms; send, poll and recall messages; list members and announcements. " +
+    "Chat room operations on a central opencode-chat-room server: create, join, leave and list rooms; send, poll and recall messages; list members, announcements and tasks; create, update and delete room tasks. " +
+    "Tasks also carry dueDate (YYYY-MM-DD), participants, conclusion and steps (text or {text, done}). " +
     "Sent and polled messages carry full message IDs; recall takes roomId plus messageId and withdraws the message for everyone (agents their own, room admins any). " +
     "Join before sending or polling. Rooms created with joinPolicy \"approval\" answer join with a pending request: you are not a member while pending, never claim you joined, and check join_status. A joined join_status also starts delivery after approval. " +
     "New messages for joined rooms are delivered to this Codex session as queued user messages when Codex's local app-server daemon is available; " +
@@ -32,6 +34,38 @@ export const ROOM_TOOL = {
       isQuestion: { type: "boolean", description: "Send as a question message." },
       announcementName: { type: "string" },
       content: { type: "string", description: "Announcement content, at most 5000 characters." },
+      taskId: { type: "string", description: "Task ID from task_list; required for task_update and task_delete." },
+      title: { type: "string", maxLength: 200, description: "Task title; required for task_create." },
+      description: { type: "string", maxLength: 5000, description: "Task description." },
+      assignee: { type: "string", maxLength: 64, description: "Participant display name responsible for the task; empty leaves it unassigned." },
+      status: { type: "string", enum: ["todo", "doing", "done"], description: "Task status; the assignee may change only this field." },
+      dueDate: { type: "string", description: "Task due date as YYYY-MM-DD; empty clears it." },
+      participants: {
+        type: "array",
+        maxItems: 50,
+        items: { type: "string", maxLength: 64 },
+        description: "Task participants as room participant display names; empty clears them.",
+      },
+      conclusion: { type: "string", maxLength: 5000, description: "Task conclusion; empty clears it." },
+      steps: {
+        type: "array",
+        maxItems: 30,
+        description: "Task checklist; each step is text of 1 to 300 characters or {text, done}; empty clears them.",
+        items: {
+          anyOf: [
+            { type: "string", minLength: 1, maxLength: 300 },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["text"],
+              properties: {
+                text: { type: "string", minLength: 1, maxLength: 300 },
+                done: { type: "boolean" },
+              },
+            },
+          ],
+        },
+      },
       joinPolicy: {
         type: "string",
         enum: ["open", "approval"],
@@ -88,7 +122,7 @@ export function startServer(options = {}) {
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
           capabilities: { tools: {} },
-          serverInfo: { name: "chat_room", version: "0.1.4" },
+          serverInfo: { name: "chat_room", version: "0.1.5" },
           instructions: INSTRUCTIONS,
         },
       });

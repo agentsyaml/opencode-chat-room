@@ -1,5 +1,5 @@
 {
   "name": "chat-room",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Central chat rooms for Codex sessions, with queued message delivery."
 }

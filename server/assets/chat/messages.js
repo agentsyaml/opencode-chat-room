@@ -11,6 +11,7 @@ export function initMessages(app) {
   const $ = app.$;
   installEditor($("#msgInput"));
   $("#msgInput").isKnownMention = (name) => app.mentionExists(name);
+  $("#msgInput").mentionLabel = (name) => name === "all" ? app.t("allMembers") : name;
 
   app.autoGrow = (textarea) => {
     const thread = $("#thread"), atBottom = Boolean(app.state.room && Math.abs(thread.scrollHeight - thread.clientHeight - thread.scrollTop) < 1);

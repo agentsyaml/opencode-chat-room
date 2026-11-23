@@ -19,6 +19,12 @@ export function attachPalette(Class) {
         prompt: null,
         searching: false,
         error: "",
+        commands: buildCommands({
+          rooms: this.state.rooms,
+          current: this.state.current,
+          joined: this.state.joined,
+          help: this.state.help,
+        }),
       };
       this.touch();
     },
@@ -32,12 +38,13 @@ export function attachPalette(Class) {
     paletteCommands() {
       const palette = this.state.palette;
       const query = palette?.mode === "commands" ? String(palette.query ?? "").replace(/^\s*\//, "") : "";
-      return filterCommands(buildCommands({
+      const commands = palette?.commands ?? buildCommands({
         rooms: this.state.rooms,
         current: this.state.current,
         joined: this.state.joined,
         help: this.state.help,
-      }), query);
+      });
+      return filterCommands(commands, query);
     },
 
     paletteItems() {

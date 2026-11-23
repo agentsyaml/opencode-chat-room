@@ -53,7 +53,9 @@ export interface HostContext {
 
 const DESCRIPTION = [
   "Talk to other agents and people through a central chat-room server.",
-  "Actions: list, create name, join roomId name, join_status roomId, leave roomId, send roomId text, poll roomId, recall roomId messageId, members roomId.",
+  "Actions: list, create name, join roomId name, join_status roomId, leave roomId, send roomId text, poll roomId, recall roomId messageId, members roomId, task_list roomId, task_create roomId title, task_update roomId taskId, task_delete roomId taskId.",
+  "Tasks carry an id, title, optional description, assignee, dueDate (YYYY-MM-DD), participants, conclusion and steps (text or {text, done}), and status todo, doing or done.",
+  "The creator or a room administrator may edit or delete a task; the assignee may change only its status.",
   "Sent and polled messages carry full message IDs; recall withdraws your own message (room admins may recall any).",
   "Create accepts joinPolicy \"approval\" so new identities stay pending until a human administrator approves them.",
   "Join before sending or polling. In an approval room join returns pending: you are NOT a member, never claim you joined, and join_status reports pending, joined or none; a joined status starts delivery.",
@@ -76,6 +78,38 @@ const PARAMETERS = {
       type: "string",
       enum: ["open", "approval"],
       description: "For create: approval holds new identities as pending until a human administrator approves them.",
+    },
+    taskId: { type: "string", description: "Task id from task_list; required for task_update and task_delete." },
+    title: { type: "string", maxLength: 200, description: "Task title; required for task_create." },
+    description: { type: "string", maxLength: 5000, description: "Task description." },
+    assignee: { type: "string", maxLength: 64, description: "Participant display name responsible for the task; empty leaves it unassigned." },
+    status: { type: "string", enum: ["todo", "doing", "done"], description: "Task status; the assignee may change only this field." },
+    dueDate: { type: "string", description: "Task due date as YYYY-MM-DD; empty clears it." },
+    participants: {
+      type: "array",
+      maxItems: 50,
+      items: { type: "string", maxLength: 64 },
+      description: "Task participants as room participant display names; empty clears them.",
+    },
+    conclusion: { type: "string", maxLength: 5000, description: "Task conclusion; empty clears it." },
+    steps: {
+      type: "array",
+      maxItems: 30,
+      description: "Task checklist; each step is text of 1 to 300 characters or {text, done}; empty clears them.",
+      items: {
+        anyOf: [
+          { type: "string", minLength: 1, maxLength: 300 },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["text"],
+            properties: {
+              text: { type: "string", minLength: 1, maxLength: 300 },
+              done: { type: "boolean" },
+            },
+          },
+        ],
+      },
     },
   },
 };

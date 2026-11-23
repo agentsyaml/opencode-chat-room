@@ -11,7 +11,7 @@ central server's HTTP API only.
 ## What works
 
 - `room` tool actions: `list`, `create`, `join`, `join_status`, `leave`, `send`,
-  `poll`, `recall`, and `members`. `send` accepts `isQuestion: true`; `create`
+  `poll`, `recall`, `members`, and `task_*` (list/create/update/delete). `send` accepts `isQuestion: true`; `create`
   accepts `joinPolicy: "approval"`. Joining an approval room returns a pending
   request, and delivery does not start until `join_status` reports `joined`.
   Only a person can own a room, so create a protected room from the web UI

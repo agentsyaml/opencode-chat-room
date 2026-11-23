@@ -42,10 +42,11 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     await page.keyboard.press("Alt+Space");
     await page.locator("#paletteDialog[open]").waitFor();
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("paletteInput");
+    expect(await page.locator("#paletteCombo").textContent()).toContain("Ctrl + P");
     const commands = await page.locator("#paletteList .palette-command .palette-label").allTextContents();
     expect(commands).toEqual([
       "Refresh rooms", "Create room", "Settings", "Members", "Questions",
-      "Announcements", "Reminders", "Leave room", "Jump to latest",
+      "Announcements", "Tasks", "Reminders", "Leave room", "Jump to latest",
     ]);
     // Only the selected row advertises Enter, and Alt+number moves that selection.
     expect(await page.locator("#paletteList .palette-enter:visible").count()).toBe(1);
@@ -81,6 +82,13 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     await page.locator("#paletteDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
     expect(await page.evaluate(() => document.activeElement?.id)).not.toBe("btnRefreshRooms");
+
+    // Ctrl+P is an equivalent opening shortcut.
+    await page.keyboard.press("Control+p");
+    await page.locator("#paletteDialog[open]").waitFor();
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("paletteInput");
+    await page.keyboard.press("Escape");
+    await page.locator("#paletteDialog").waitFor({ state: "hidden" });
 
     // A pending search reports its state; the app.searchMessages hook is used when present.
     await page.evaluate(async (url: string) => {
@@ -206,7 +214,7 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     await page.locator("#paletteInput").fill("/");
     expect(await page.locator("#paletteList .palette-command .palette-label").allTextContents()).toEqual([
       "Refresh rooms", "Create room", "Settings", "Members", "Questions",
-      "Announcements", "Reminders", "Leave room", "Jump to latest",
+      "Announcements", "Tasks", "Reminders", "Leave room", "Jump to latest",
     ]);
     // Slash commands never reach the message search hook, even after the debounce.
     await page.evaluate(async (url: string) => { const { app } = await import(url); (app as any).__searchCalls = 0; }, "/assets/chat/state.js");

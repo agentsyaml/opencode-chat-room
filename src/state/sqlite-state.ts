@@ -86,6 +86,8 @@ async function initialize(file: string): Promise<Database> {
     CREATE TABLE IF NOT EXISTS registry(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,session_id TEXT NOT NULL,server_url TEXT NOT NULL,api_prefix TEXT NOT NULL,protocol TEXT,name TEXT NOT NULL,last_read_ts INTEGER,last_queued_ts INTEGER,directory TEXT,host TEXT,receiver_owner_id TEXT,membership_id TEXT,work_state TEXT,last_seen_at INTEGER,PRIMARY KEY(room_id,session_id));`);
         db.exec("CREATE TABLE IF NOT EXISTS announcements(room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,name TEXT NOT NULL,content TEXT NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(room_id,name))");
         db.exec("CREATE TABLE IF NOT EXISTS resources(id TEXT PRIMARY KEY,room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,name TEXT NOT NULL,mime_type TEXT NOT NULL,size INTEGER NOT NULL,created_at INTEGER NOT NULL,uploader_session_id TEXT,uploader_name TEXT)");
+        db.exec("CREATE TABLE IF NOT EXISTS room_tasks(id TEXT PRIMARY KEY,room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,title TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',assignee TEXT NOT NULL DEFAULT '',status TEXT NOT NULL CHECK(status IN ('todo','doing','done')),creator_name TEXT NOT NULL,creator_session_id TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,due_date TEXT NOT NULL DEFAULT '',participants TEXT NOT NULL DEFAULT '[]',conclusion TEXT NOT NULL DEFAULT '',steps TEXT NOT NULL DEFAULT '[]')");
+        db.exec("CREATE INDEX IF NOT EXISTS room_tasks_room_status_created ON room_tasks(room_id,status,created_at,id)");
         await ensureRoomColumns(db);
         await migrate(db, file);
         db.exec("PRAGMA busy_timeout=50;");
@@ -151,6 +153,66 @@ export async function removeResource(file: string, roomID: string, id: string): 
   const db = await openStateDatabase(file);
   return immediate(db, () => db.query("DELETE FROM resources WHERE room_id=? AND id=?").run(roomID, id).changes > 0);
 }
+
+// --- Room tasks (group rooms only; HTTP permissions live in rooms/tasks.ts) ---
+export const ROOM_TASK_STATUSES = ["todo", "doing", "done"] as const;
+export type RoomTaskStatus = (typeof ROOM_TASK_STATUSES)[number];
+export type RoomTaskStep = { text: string; done: boolean };
+export type RoomTask = {
+  id: string; roomId: string; title: string; description: string; assignee: string;
+  status: RoomTaskStatus; creatorName: string; creatorSessionID: string;
+  createdAt: number; updatedAt: number; dueDate: string; participants: string[];
+  conclusion: string; steps: RoomTaskStep[];
+};
+type RoomTaskRow = Omit<RoomTask, "status" | "participants" | "steps"> & { status: string; participants: string; steps: string };
+const ROOM_TASK_COLUMNS = "id,room_id AS roomId,title,description,assignee,status,creator_name AS creatorName,creator_session_id AS creatorSessionID,created_at AS createdAt,updated_at AS updatedAt,due_date AS dueDate,participants,conclusion,steps";
+const jsonArray = <T>(value: string): T[] => {
+  try { const parsed = JSON.parse(value) as unknown; return Array.isArray(parsed) ? parsed as T[] : []; }
+  catch { return []; }
+};
+const roomTask = (row: RoomTaskRow): RoomTask => ({
+  ...row, status: row.status as RoomTaskStatus,
+  participants: jsonArray<string>(row.participants), steps: jsonArray<RoomTaskStep>(row.steps),
+});
+
+export function listRoomTasks(db: Database, roomID: string): RoomTask[] {
+  return (db.query(`SELECT ${ROOM_TASK_COLUMNS} FROM room_tasks WHERE room_id=? ORDER BY created_at,id`).all(roomID) as RoomTaskRow[]).map(roomTask);
+}
+
+export function readRoomTask(db: Database, roomID: string, id: string): RoomTask | undefined {
+  const row = db.query(`SELECT ${ROOM_TASK_COLUMNS} FROM room_tasks WHERE room_id=? AND id=?`).get(roomID, id) as RoomTaskRow | null;
+  return row ? roomTask(row) : undefined;
+}
+
+export function insertRoomTask(db: Database, task: RoomTask): void {
+  db.query("INSERT INTO room_tasks(id,room_id,title,description,assignee,status,creator_name,creator_session_id,created_at,updated_at,due_date,participants,conclusion,steps) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .run(task.id, task.roomId, task.title, task.description, task.assignee, task.status, task.creatorName, task.creatorSessionID,
+      task.createdAt, task.updatedAt, task.dueDate, JSON.stringify(task.participants), task.conclusion, JSON.stringify(task.steps));
+}
+
+export type RoomTaskPatch = Partial<Pick<RoomTask, "title" | "description" | "assignee" | "status" | "dueDate" | "participants" | "conclusion" | "steps">>;
+
+export function patchRoomTask(db: Database, roomID: string, id: string, patch: RoomTaskPatch, updatedAt: number): RoomTask | undefined {
+  const sets: string[] = [], values: string[] = [];
+  for (const [column, value] of [["title", patch.title], ["description", patch.description], ["assignee", patch.assignee], ["status", patch.status], ["due_date", patch.dueDate], ["conclusion", patch.conclusion]] as const) {
+    if (value !== undefined) { sets.push(`${column}=?`); values.push(value); }
+  }
+  if (patch.participants !== undefined) { sets.push("participants=?"); values.push(JSON.stringify(patch.participants)); }
+  if (patch.steps !== undefined) { sets.push("steps=?"); values.push(JSON.stringify(patch.steps)); }
+  db.query(`UPDATE room_tasks SET ${sets.map((set) => `${set},`).join("")}updated_at=? WHERE room_id=? AND id=?`)
+    .run(...values, updatedAt, roomID, id);
+  return readRoomTask(db, roomID, id);
+}
+
+export function deleteRoomTask(db: Database, roomID: string, id: string): boolean {
+  return db.query("DELETE FROM room_tasks WHERE room_id=? AND id=?").run(roomID, id).changes > 0;
+}
+
+export function deleteCompletedRoomTasks(db: Database, roomID: string, creatorSessionID?: string): number {
+  return creatorSessionID === undefined
+    ? db.query("DELETE FROM room_tasks WHERE room_id=? AND status='done'").run(roomID).changes
+    : db.query("DELETE FROM room_tasks WHERE room_id=? AND status='done' AND creator_session_id=?").run(roomID, creatorSessionID).changes;
+}
 async function ensureRoomColumns(db: Database): Promise<void> {
     await immediate(db, () => {
     const messageColumns = db.query("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
@@ -161,6 +223,11 @@ async function ensureRoomColumns(db: Database): Promise<void> {
     if (!messageColumns.some((column) => column.name === "recalled_by")) db.exec("ALTER TABLE messages ADD COLUMN recalled_by TEXT");
     db.exec("CREATE INDEX IF NOT EXISTS messages_pending_questions ON messages(room_id,is_question,answered_by,seq)");
     db.exec("CREATE INDEX IF NOT EXISTS messages_room_recalled ON messages(room_id,recalled_at)");
+    const taskColumns = db.query("PRAGMA table_info(room_tasks)").all() as Array<{ name: string }>;
+    if (!taskColumns.some((column) => column.name === "due_date")) db.exec("ALTER TABLE room_tasks ADD COLUMN due_date TEXT NOT NULL DEFAULT ''");
+    if (!taskColumns.some((column) => column.name === "participants")) db.exec("ALTER TABLE room_tasks ADD COLUMN participants TEXT NOT NULL DEFAULT '[]'");
+    if (!taskColumns.some((column) => column.name === "conclusion")) db.exec("ALTER TABLE room_tasks ADD COLUMN conclusion TEXT NOT NULL DEFAULT ''");
+    if (!taskColumns.some((column) => column.name === "steps")) db.exec("ALTER TABLE room_tasks ADD COLUMN steps TEXT NOT NULL DEFAULT '[]'");
     db.exec("CREATE TABLE IF NOT EXISTS room_recall_versions(room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,version INTEGER NOT NULL)");
     db.exec(`CREATE TABLE IF NOT EXISTS room_join_requests(
       room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,

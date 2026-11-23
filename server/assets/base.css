@@ -347,8 +347,6 @@
     transition: background .12s, border-color .12s;
   }
   .room-row:hover { background: var(--surface-2); border-color: var(--line); }
-  .room-row.room-switch-enter { animation: room-switch-row .15s cubic-bezier(.1, .9, .2, 1); }
-  @keyframes room-switch-row { from { opacity: .55; transform: translateY(var(--room-switch-shift, 3px)); } }
   .r-name { font-weight: 600; font-size: 14px; }
   .r-meta { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .r-go {

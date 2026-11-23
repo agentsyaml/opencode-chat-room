@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "A chat-room server, web client, terminal client, and OpenCode/Codex/dsh plugins.",
   "repository": {
     "type": "git",
@@ -40,6 +40,7 @@
     "server/join-requests.ts",
     "server/room-join.ts",
     "server/member-routes.ts",
+    "server/task-routes.ts",
     "server/announcement-routes.ts",
     "server/resource-routes.ts",
     "server/admin-routes.ts",

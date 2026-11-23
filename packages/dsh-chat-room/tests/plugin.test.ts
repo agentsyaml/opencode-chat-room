@@ -61,6 +61,13 @@ describe("room plugin", () => {
     expect(h.definition.name).toBe("room");
     expect(h.definition.parameters).toMatchObject({ required: ["action"] });
     expect((h.definition.parameters.properties as Record<string, { maxLength?: number }>).text?.maxLength).toBe(5000);
+    const properties = h.definition.parameters.properties as Record<string, { enum?: string[]; type?: string; maxItems?: number; maxLength?: number }>;
+    expect(properties.action?.enum).toContain("task_list");
+    expect(properties.status?.enum).toEqual(["todo", "doing", "done"]);
+    expect(properties.dueDate?.type).toBe("string");
+    expect(properties.participants?.maxItems).toBe(50);
+    expect(properties.conclusion?.maxLength).toBe(5000);
+    expect(properties.steps?.maxItems).toBe(30);
     expect(await h.run({ action: "join", roomId: "r1", name: "alice" })).toEqual({ text: "joined room r1 (dev)" });
     expect(fake.requests.find((request) => request.path === "/rooms/r1/join")?.body).toMatchObject({
       sessionID: "dsh:session-1", participantId: "alice", participantName: "alice",

@@ -16,6 +16,7 @@ import {
 } from "./queue.ts";
 import type { InboxItem } from "./center-inbox.ts";
 import { assertDeliveryLease } from "./session-delivery.ts";
+import { formatTasks, taskFields, validateTaskFields, type Task } from "../agent/task-tool.ts";
 export { queueAdmissionId } from "./queue.ts";
 export { createQueueTransport, sendAsyncNotification, sendQueue } from "./queue-transport.ts";
 export type { QueueTransport, PushResult } from "./queue-transport.ts";
@@ -165,6 +166,15 @@ export async function centerAction(
     text?: string;
     announcementName?: string;
     content?: string;
+    taskId?: string;
+    title?: string;
+    description?: string;
+    assignee?: string;
+    status?: string;
+    dueDate?: string;
+    participants?: string[];
+    conclusion?: string;
+    steps?: Array<string | { text: string; done?: boolean }>;
     isQuestion?: boolean;
     receiverOwnerID?: string;
     protocol?: "v1" | "v2";
@@ -290,6 +300,40 @@ export async function centerAction(
       }
       await request(opts, path, "DELETE", { sessionID });
       return `announcement deleted: ${args.announcementName}`;
+    }
+    case "task_list": {
+      if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
+      const result = await request(opts, `/rooms/${encodeURIComponent(args.roomId)}/tasks?sessionID=${encodeURIComponent(sessionID)}`, "GET") as { tasks?: Task[] };
+      return formatTasks(Array.isArray(result.tasks) ? result.tasks : []);
+    }
+    case "task_create": {
+      if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
+      const error = validateTaskFields(args, true);
+      if (error) return `error: ${error}`;
+      const result = await request(opts, `/rooms/${encodeURIComponent(args.roomId)}/tasks`, "POST", {
+        sessionID,
+        ...taskFields(args),
+      }) as { task: Task };
+      return `task created: ${result.task.title} (id: ${result.task.id}, status: ${result.task.status})`;
+    }
+    case "task_update": {
+      if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
+      if (!args.taskId) return "error: taskId is required; run task_list to get a task ID";
+      const error = validateTaskFields(args, false);
+      if (error) return `error: ${error}`;
+      const fields = taskFields(args);
+      if (!Object.keys(fields).length) return "error: at least one of title, description, assignee, status, dueDate, participants, conclusion, or steps is required to update a task";
+      const result = await request(opts, `/rooms/${encodeURIComponent(args.roomId)}/tasks/${encodeURIComponent(args.taskId)}`, "PATCH", {
+        sessionID,
+        ...fields,
+      }) as { task: Task };
+      return `task updated: ${result.task.title} (id: ${result.task.id}, status: ${result.task.status})`;
+    }
+    case "task_delete": {
+      if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
+      if (!args.taskId) return "error: taskId is required; run task_list to get a task ID";
+      await request(opts, `/rooms/${encodeURIComponent(args.roomId)}/tasks/${encodeURIComponent(args.taskId)}`, "DELETE", { sessionID });
+      return `task deleted: ${args.taskId}`;
     }
     case "send": {
       if (!args.roomId) {

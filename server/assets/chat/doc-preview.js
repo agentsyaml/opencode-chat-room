@@ -11,7 +11,7 @@ export function initDocPreview(app) {
   const status = app.$("#docPreviewStatus"), body = app.$("#docPreviewBody");
   const empty = app.$("#docPreviewEmpty"), download = app.$("#btnDocPreviewDownload");
   const chatView = app.$("#chatView"), pane = matchMedia(PANE_QUERY);
-  let current = null, blob = null, token = 0, opener = null, pendingReopen = false;
+  let current = null, blob = null, token = 0, opener = null, pendingReopen = false, restoreOnClose = true;
 
   const show = () => {
     if (pane.matches) {
@@ -36,6 +36,7 @@ export function initDocPreview(app) {
 
   const open = async (roomId, resource, source) => {
     opener = source instanceof HTMLElement ? source : null;
+    restoreOnClose = true;
     current = { roomId, resource };
     const request = ++token;
     blob = null;
@@ -65,8 +66,13 @@ export function initDocPreview(app) {
   };
 
   const close = (restoreFocus = true) => {
+    restoreOnClose = restoreFocus;
     if (!restoreFocus) opener = null;
+    // Remove the column class now; the queued close event must not leave Tasks
+    // hidden behind a column the task pane is about to take back.
+    chatView.classList.remove("has-doc");
     if (dialog.open) dialog.close();
+    else restoreOnClose = true;
   };
 
   const downloadDocument = () => {
@@ -95,7 +101,9 @@ export function initDocPreview(app) {
   dialog.addEventListener("close", () => {
     // A breakpoint switch closes and reopens the same dialog; its queued close event
     // must not wipe the document that is already back on screen.
-    if (pendingReopen) { pendingReopen = false; return; }
+    if (pendingReopen) { pendingReopen = false; restoreOnClose = true; return; }
+    const shouldRestore = restoreOnClose;
+    restoreOnClose = true;
     token++;
     current = null; blob = null;
     chatView.classList.remove("has-doc");
@@ -103,6 +111,7 @@ export function initDocPreview(app) {
     title.textContent = ""; size.textContent = ""; status.textContent = "";
     body.textContent = ""; empty.hidden = true; download.disabled = true;
     const target = opener; opener = null;
+    if (!shouldRestore) return;
     if (target?.isConnected && target.getClientRects().length) target.focus({ preventScroll: true });
     else app.focusChatComposer?.({ force: true });
   });

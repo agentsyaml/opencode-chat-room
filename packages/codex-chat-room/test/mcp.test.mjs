@@ -13,6 +13,13 @@ const testEnv = { HOME: path.join(root, "test", ".no-home"), XDG_CONFIG_HOME: pa
 
 test("room tool accepts message text up to 5000 characters", () => {
   assert.equal(ROOM_TOOL.inputSchema.properties.text.maxLength, 5000);
+  assert.ok(ROOM_TOOL.inputSchema.properties.action.enum.includes("task_update"));
+  assert.deepEqual(ROOM_TOOL.inputSchema.properties.status.enum, ["todo", "doing", "done"]);
+  assert.equal(ROOM_TOOL.inputSchema.properties.dueDate.type, "string");
+  assert.equal(ROOM_TOOL.inputSchema.properties.participants.maxItems, 50);
+  assert.equal(ROOM_TOOL.inputSchema.properties.conclusion.maxLength, 5000);
+  assert.equal(ROOM_TOOL.inputSchema.properties.steps.maxItems, 30);
+  assert.equal(ROOM_TOOL.inputSchema.properties.steps.items.anyOf.length, 2);
 });
 
 function startMcp(env) {

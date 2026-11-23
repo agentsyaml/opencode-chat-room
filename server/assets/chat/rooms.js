@@ -133,6 +133,7 @@ export function initRooms(app) {
       app.captureReadingPosition?.();
     }
     app.stopPolling();
+    app.state.previousRoomId = app.state.room?.id;
     app.state.room = entry.room;
     app.state.myName = entry.name;
     app.state.unread = entry.unreadIds.size + (entry.unreadOverflow ? 100 : 0);
@@ -212,6 +213,7 @@ export function initRooms(app) {
   };
 
   app.createRoom = async (pending) => {
+    if (app.state.joinBusy) return;
     const fromChat = pending?.fromChat ?? Boolean(app.state.room);
     const name = pending?.name || (fromChat ? app.state.myName : $("#inName").value.trim()) || LS.name || app.t("guest");
     const roomName = pending?.roomName || $(fromChat ? "#inRoomNameChat" : "#inRoomName").value.trim();
@@ -253,6 +255,7 @@ export function initRooms(app) {
   };
 
   app.setJoinBusy = (busy) => {
+    app.state.joinBusy = busy;
     $("#btnJoin").disabled = busy;
     $("#btnCreate").disabled = busy;
   };
@@ -304,7 +307,9 @@ export function initRooms(app) {
       if (next) app.activateRoom(next, true);
       else {
         LS.roomId = "";
-        app.showJoin(false, true);
+        // Leaving the last room returns to the start screen; reload the list so
+        // the room the user just left is available to rejoin without a manual refresh.
+        app.showJoin(true, true);
         if (reason) app.showJoinError("roomNotFound");
       }
     }

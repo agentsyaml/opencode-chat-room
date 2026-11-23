@@ -5,7 +5,7 @@ import path from "node:path";
 import { createApp } from "./app.mjs";
 
 const NAME = "opencode-chat-room cli";
-const FALLBACK_VERSION = "0.7.6";
+const FALLBACK_VERSION = "0.7.7";
 
 export const HELP = `opencode-chat-room cli - terminal client for a chat-room server
 
@@ -25,9 +25,9 @@ A token is never accepted on the command line. See the README for fields.
 Keys: arrows select rooms · Enter opens · Tab focuses the composer ·
 PageUp/PageDown scroll · Alt+Home/End jumps · Alt+Space or Ctrl+P opens the
 palette · Ctrl+C quits.
-Type / in an empty composer for commands: members, join requests, announcements,
-questions, files, reminders, room settings, recall/reveal/reply/ask,
-delete room and quit.
+Type / at the start of the composer for inline commands; @ mentions members.
+Commands include: members, join requests, announcements, questions, files,
+reminders, room settings, recall/reveal/reply/ask, delete room and quit.
 This command needs an interactive terminal.
 `;
 

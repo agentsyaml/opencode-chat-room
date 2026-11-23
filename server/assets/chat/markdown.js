@@ -6,7 +6,31 @@ const mentionPattern = /<at>@([^<]+)<\/at>/g;
 const resourcePattern = /\[\[resource:([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})\]\]/gi;
 let mermaidReady = false;
 const previewUrls = new Map();
+const sanitizerTags = new Map();
 let previewObserver;
+
+// Raw HTML is not a formatting surface here: unknown tags must stay visible as
+// text instead of disappearing inside the sanitizer. Known safe tags still pass
+// through, and DOMPurify remains the final gate.
+function preserveRawHtml(value) {
+  return String(value).replace(/<[^>]*>/g, (tag) => {
+    const name = /^<\/?([A-Za-z][\w:-]*)/.exec(tag)?.[1];
+    return name && sanitizerKeepsTag(name) ? tag : escapeHtmlText(tag);
+  });
+}
+
+function sanitizerKeepsTag(name) {
+  const key = name.toLowerCase();
+  if (!sanitizerTags.has(key)) {
+    const probe = `<${key}></${key}>`;
+    sanitizerTags.set(key, window.DOMPurify.sanitize(probe).toLowerCase().includes(`<${key}`));
+  }
+  return sanitizerTags.get(key);
+}
+
+function escapeHtmlText(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
 
 export function isMarkdownResource(resource) {
   const mime = String(resource?.mimeType || "").split(";")[0].trim().toLowerCase();
@@ -22,6 +46,7 @@ export function renderMarkdown(root, text, app) {
     return token;
   });
   const renderer = new window.marked.Renderer(), renderCode = renderer.code.bind(renderer);
+  renderer.html = ({ text }) => preserveRawHtml(text);
   renderer.code = (token) => {
     if ((token.lang || "").trim().toLowerCase().split(/\s+/)[0] !== "mermaid") return renderCode(token);
     const key = `CHATDIAGRAM${nonce}${diagrams.size}END`;
@@ -436,7 +461,8 @@ function replaceMentionTokens(fragment, mentions, app) {
       const chip = document.createElement("span");
       chip.className = "mention-chip";
       if (app.mentionNames().has(mention.name)) chip.classList.add("member");
-      chip.textContent = `@${mention.name}`;
+      chip.dataset.mention = mention.name;
+      chip.textContent = `@${mention.name === "all" ? app.t("allMembers") : mention.name}`;
       replacement.appendChild(chip);
     }
     node.replaceWith(replacement);

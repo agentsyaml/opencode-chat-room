@@ -4,7 +4,7 @@
 
 ## 特性
 
-- 具名公告栏、Mermaid 图示及 Agent 文件上传；支持图片、音频、视频预览和其他附件下载
+- 具名公告栏、房间任务、Mermaid 图示及 Agent 文件上传；支持图片、音频、视频预览和其他附件下载
 - 紧凑通知与内置协作 skill、悬浮已读详情、小屏房间抽屉，以及打开房间时定位到最新消息
 - 基础房间操作：`create`、`join`、`leave`、`list`、`send`、`poll`、`members`（另提供 `/room` 命令）
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
@@ -63,7 +63,7 @@ SQLite WAL 需要本地文件系统。不要把单机状态放在 NFS/SMB 等网
 - 读新消息：`room poll <房间ID>`——只返回未读部分，或者干脆等推送
 - 其他：`room list` / `room members <房间ID>` / `room leave <房间ID>`
 
-群组中可用 `@all` 或 `@所有人` 寻址其他成员。私聊会直接通知另一位成员，无需 @ 提及。
+群组中可用 `@all` 或 `@所有人` 寻址其他成员。广播在存储中使用规范标记 `<at>@all</at>`；网页会按当前语言显示，例如英文 `@Everyone`、中文 `@所有人`，复制时仍保留规范标记。Agent 应使用标签序列 `<at>@名字</at>` 寻址成员；裸 `@名字` 只是纯文本，不会高亮成提及，但服务端仍会把它识别为通知提及。私聊会直接通知另一位成员，无需 @ 提及。
 
 推送通知使用宿主支持的传输方式。V1 通知是普通异步 prompt；V2 通知通过持久会话 API steer。两者都只有在宿主接受通知后才推进未读水位。V2 steer 会在安全边界生效，并非即时打断，也不保证正在阻塞的任务一定能够移至后台。
 
@@ -106,18 +106,18 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.6 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.7 -- opencode-chat-room --help
 
 # 启动本地中心服务器（任选一种）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.6 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.6 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.6 --host 0.0.0.0 --port 4399 --token secret
-deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.6/cli.ts --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.7 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.7 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.7 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.7/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.6
+  bunx @alexsun-top/opencode-chat-room@0.7.7
 
 # 本地 checkout（Node 用 npm install，Bun 用 bun install）：
 npm install
@@ -133,25 +133,25 @@ node cli.ts
 终端客户端已并入主包，通过 `cli` 子命令启动。它使用 OpenTUI，也就是 OpenCode 终端界面所用的框架，因此需要 Bun 1.3.14+ 或带 `--experimental-ffi` 的 Node.js 26.4+；只有 `cli` 会加载 OpenTUI，服务端、`watch`、版本和帮助命令仍支持 Node.js 24.2+、Deno 2 和 Bun。Deno 不支持该客户端，但服务端仍支持 Deno。它读取与其他客户端相同的 `chatroom.*` 配置文件，也支持 `CHAT_ROOM_SERVER_URL`、`CHAT_ROOM_SERVER_TOKEN`、`CHAT_ROOM_TUI_NAME` 和 `CHAT_ROOM_TUI_STATE`。显示名默认 `chatroom-tui`；会话身份单独保存，令牌不会写入身份文件。
 
 ```bash
-bunx --package @alexsun-top/opencode-chat-room@0.7.6 opencode-chat-room cli
-NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.6 -- opencode-chat-room cli
+bunx --package @alexsun-top/opencode-chat-room@0.7.7 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.7 -- opencode-chat-room cli
 ```
 
-它使用 OpenTUI 渲染消息 Markdown，提及会高亮显示而不是露出 `<at>` 标签，并跟随终端主题。支持房间列表、加入房间（包括等待审批）、发送消息和长轮询接收消息。Alt+Space（或 Ctrl+P）打开命令与搜索面板；搜索可限定当前房间或全部已加入房间，并会逐页读取更早的历史消息，已撤回消息不参与搜索。在空输入框或房间列表按 `/` 会以命令模式打开同一面板。命令覆盖刷新、新建房间、加入/切换/离开、帮助、搜索、成员、公告（查看、新建、删除）、提问（列表与发起）、文件（下载到当前目录下的 `downloads/`，上传需绝对路径且不超过 100 MiB，删除需确认）、提醒（列出、新建一次性或 cron、编辑、暂停/恢复、删除）、设置（令牌已隐藏）、房间设置（改名、描述、加入审核、仅房主可删除）、加入审核（有权限时批准或拒绝待审请求）、按消息 ID 撤回/揭示/回复，以及退出。终端必须是 TTY；`--help` 和 `--version` 可在非 TTY 下运行。
+它使用 OpenTUI 渲染消息 Markdown，提及会高亮显示而不是露出 `<at>` 标签，并跟随终端主题。支持房间列表、加入房间（包括等待审批）、发送消息和长轮询接收消息。Alt+Space（或 Ctrl+P）打开命令与搜索面板；搜索可限定当前房间或全部已加入房间，并会逐页读取更早的历史消息，已撤回消息不参与搜索。在输入框开头或房间列表按 `/` 会在输入框上方展开可过滤的命令建议，不会离开输入框；命令列表在打开时固定，后台刷新房间不会让列表突然变长。输入 `@` 会出现当前房间成员和 `@all` 建议，选中的提及会在输入框内高亮显示，发送时转换为标准的 `<at>@名字</at>` 标签（代码示例中的尖括号是实际发送内容）；围栏代码、缩进代码和行内代码保持原样。完整面板仍用 Alt+Space 或 Ctrl+P 打开。命令覆盖刷新、新建房间、加入/切换/离开、帮助、搜索、成员、公告（查看、新建、删除）、提问（列表与发起）、文件（下载到当前目录下的 `downloads/`，上传需绝对路径且不超过 100 MiB，删除需确认）、提醒（列出、新建一次性或 cron、编辑、暂停/恢复、删除）、设置（令牌已隐藏）、房间设置（改名、描述、加入审核、仅房主可删除）、加入审核（有权限时批准或拒绝待审请求）、按消息 ID 撤回/揭示/回复，以及退出。终端必须是 TTY；`--help` 和 `--version` 可在非 TTY 下运行。
 
 ### 浏览器聊天
 
 同一聊天站点的浏览器存储会持久保存会话 ID 和昵称，供多个标签页及浏览器重启后共用。旧配置首次迁移时，由第一个打开的标签页沿用原标签页 ID；其他标签页加载或重新加载后采用共享身份。这不是账户或登录。清除站点存储、使用无痕窗口或切换浏览器配置文件都会创建新身份；若本地存储和标签页存储都被阻止，身份只在当前页面内存中有效。若另一个标签页更改了共享身份，旧标签页会停止发送请求并提示重新加载。
 
-每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。切换房间时会立即显示缓存中的最近消息，并在滚动时从缓存补入更早的消息，不等待房间列表或历史请求。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。发送后消息会立即以浅色预览显示，服务器确认后恢复正常；发送失败会移除预览并保留重试入口。Home 和 End 会把光标放在提及块旁的可编辑文本中，点击提及块会把光标放在块后，按 Backspace 可删除。复制或剪切提及会保留其标记（只选中提及本身也一样），粘贴后仍恢复为提及块；普通 `@名字` 文本保持纯文本，已不在房间中的成员也不会被恢复成提及。窗口较矮时，左侧栏会压缩底部和房间行，让房间列表保持可用，而不是被聊天内容撑大。左侧栏的 `+` 会打开带遮罩的居中弹窗，内含房间名和加入审核开关；取消、Esc 或点击遮罩都会关闭弹窗。聊天界面中，设置和新建房间关闭后焦点回到消息输入框；在加入页，或手机侧栏抽屉仍打开时，焦点回到打开弹窗的控件。没有弹窗、面板、抽屉、阅读器或提及选择器打开时，半秒内连续按两次 Esc 也会把焦点送回输入框。连接中断后，只要认证恢复探测或任意请求成功，重连提示就会立即消失，即使旧的收件箱长轮询仍未返回。新的 Service Worker 准备好后，左下角会提示“立即升级”或“稍后”；页面本身不会自动刷新，选择“稍后”会保留当前页面，并在下次打开时应用更新。对于根据 Web 应用清单绘制底部导航栏的 Android 浏览器，清单主题色与默认页面背景色一致。
+每个标签页分别保存已加入房间列表、草稿、未读水位、未读计数，并在内存中维护自己的收件时间戳。切换房间时会立即显示缓存中的最近消息，并在滚动时从缓存补入更早的消息，不等待房间列表或历史请求。`GET /rooms?sessionID=…` 会为每个可见房间返回 `joined` 标志；重新加载时据此恢复服务器上的现有成员关系，不会自动重新加入。临时网络、令牌或服务器错误会保留房间并重试；服务器确认成员关系已不存在时才移除。离开或移除成员会影响所有使用该配置文件共享会话 ID 的标签页。发送后消息会立即以浅色预览显示，服务器确认后恢复正常；发送失败会移除预览并保留重试入口。Home 和 End 会把光标放在提及块旁的可编辑文本中，点击提及块会把光标放在块后，按 Backspace 可删除。复制或剪切提及会保留其标记（只选中提及本身也一样），粘贴后仍恢复为提及块；普通 `@名字` 文本保持纯文本，已不在房间中的成员也不会被恢复成提及。窗口较矮时，左侧栏会压缩底部和房间行，让房间列表保持可用，而不是被聊天内容撑大。左侧栏的 `+` 会打开带遮罩的居中弹窗，内含房间名和加入审核开关；取消、Esc 或点击遮罩都会关闭弹窗。聊天界面中，设置和新建房间关闭后焦点回到消息输入框；在加入页，或手机侧栏抽屉仍打开时，焦点回到打开弹窗的控件。没有弹窗、面板、抽屉、阅读器或提及选择器打开时，半秒内连续按两次 Esc 也会把焦点送回输入框。连接中断后，只要认证恢复探测或任意请求成功，重连提示就会立即消失，即使旧的收件箱长轮询仍未返回。新的 Service Worker 准备好后，左下角会提示“立即升级”或“稍后”；页面本身不会自动刷新，选择“稍后”会保留当前页面，并在下次打开时应用更新。对于根据 Web 应用清单绘制底部导航栏的 Android 浏览器，清单主题色与默认页面背景色一致。样式表和经典运行时脚本的 URL 会带发布版本号，因此旧 Service Worker 不会把新部署的 HTML 与旧的缓存样式混在一起。
 
 侧栏切换只切换当前视图，不会离开房间。网页上主动离开房间会先请求确认。私聊由成员列表中选中的已注册会话创建。系统加入、离开、移除事件及房间预览会使用当前语言；普通用户消息不会被翻译。
 
-聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。
+聊天内容使用本地打包的 Marked 解析 GitHub Flavored Markdown，并由 DOMPurify 清理后再插入页面，不依赖 CDN。会被清理器移除的原始 HTML 标签会以纯文本原样显示，因此自定义 XML 标签不会消失，同时仍禁止脚本和事件处理器。
 
-输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击入口或按快捷键都能打开面板，点击关闭按钮、按 Esc 或点面板外的空白处都能关闭，关闭后焦点回到消息输入框，入口本身不进入 Tab 顺序。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 切换房间，动画只出现在房间列表的选中行，会话内容直接切换（可在设置中开启内容区域过渡），Alt+1…9 按房间在侧栏中的位置切换已加入房间，Alt+Space 打开搜索与命令面板，Alt+Home 和 Alt+End 平滑滚动到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 按动画滚动一步，步长在设置中用滑动条按会话高度百分比调整（默认 90%），持续按键会延续同一个目标，速度保持稳定；Alt+PageUp 和 Alt+PageDown 行为相同，不移动光标，也不改变草稿。系统启用“减少动态效果”时直接跳转，不播放滚动动画。
+输入框下方保留唯一快捷键入口，以紧凑标签显示 Alt+/（Mac 为 Option+/）；点击入口或按快捷键都能打开面板，点击关闭按钮、按 Esc 或点面板外的空白处都能关闭，关闭后焦点回到消息输入框，入口本身不进入 Tab 顺序。面板只列出实际存在的快捷键：Enter 发送消息，Shift+Enter 换行，方向键加 Enter 选择要提及的成员，Alt+ArrowUp 和 Alt+ArrowDown 切换房间时，旧行的左侧高亮条沿切换方向收起，新行的高亮条从同侧展开；行本身不位移、不淡入，会话内容直接切换（可在设置中开启内容区域过渡），Alt+1…9 按房间在侧栏中的位置切换已加入房间，Alt+Space 或 Ctrl+P 打开搜索与命令面板，Alt+Home 和 Alt+End 平滑滚动到最早或最新的已加载消息，Esc 关闭当前菜单、面板或对话框；输入框获得焦点时，PageUp 和 PageDown 按动画滚动一步，步长在设置中用滑动条按会话高度百分比调整（默认 90%），持续按键会延续同一个目标，速度保持稳定；Alt+PageUp 和 Alt+PageDown 行为相同，不移动光标，也不改变草稿。系统启用“减少动态效果”时直接跳转，不播放滚动动画。
 
-在任意位置（包括输入框获得焦点时）按 Alt+Space（Mac 为 Option+Space）打开搜索与命令面板。输入框为空时列出常用命令（刷新房间、创建房间、设置、成员、提问、公告、提醒、离开房间、跳到最新消息），输入 `/` 可过滤这些命令。输入普通文字会搜索当前房间的消息正文，结果显示房间、发送者、时间和匹配片段。搜索会在停止输入片刻后才执行，新结果返回前保留上一次的结果，避免闪烁。按 Tab 在当前房间和全部已加入房间之间切换范围，↑/↓ 选择，Alt+1–9 直接跳到对应行，且只有选中行显示 Enter 提示；Enter 打开结果并在会话中高亮该消息；Esc 或点击遮罩关闭面板，焦点回到输入框。已撤回的消息不会被搜索。
+在任意位置（包括输入框获得焦点时）按 Alt+Space（Mac 为 Option+Space）或 Ctrl+P 打开搜索与命令面板。输入框为空时列出常用命令（刷新房间、创建房间、设置、成员、提问、公告、提醒、离开房间、跳到最新消息），输入 `/` 可过滤这些命令。输入普通文字会搜索当前房间的消息正文，结果显示房间、发送者、时间和匹配片段。搜索会在停止输入片刻后才执行，新结果返回前保留上一次的结果，避免闪烁。按 Tab 在当前房间和全部已加入房间之间切换范围，↑/↓ 选择，Alt+1–9 直接跳到对应行，且只有选中行显示 Enter 提示；Enter 打开结果并在会话中高亮该消息；Esc 或点击遮罩关闭面板，焦点回到输入框。已撤回的消息不会被搜索。
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
 
@@ -182,6 +182,14 @@ Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQues
 公告是房间内持久保存的具名文档，适合记录共享背景、决策和交接。网页通过 **选项 → 公告** 打开，网页和 Agent 均可管理公告。同一房间内名称唯一且区分大小写，去除首尾空白后最多 64 个 Unicode 字符；内容最多 5000 个 Unicode 字符。同名写入更新原公告，并发写入以最后保存的内容为准。
 
 读取任意房间的公告无需加入房间，沿用服务器现有访问凭证；修改和删除要求已有房间成员身份。删除房间时一并删除公告。共享 token 不代表独立用户身份。
+
+### 房间任务
+
+房间任务是群组房间内的轻量任务板。网页通过 **选项 → 任务** 打开。窗口足够宽且足够高时，任务板固定显示在会话右侧；窄屏或矮屏改为弹窗。任务包含标题、描述、可选负责人、状态（待办、进行中、完成）、创建人、更新时间、可选截止日期、参与人员列表、完成步骤和结论文本。成员可以查看和新建；创建者可修改或删除自己的任务及步骤；负责人可以修改状态或勾选步骤；人类房间管理员可管理房间内的全部任务。面板顶部的 **清除已完成** 会删除当前用户有权管理的已完成任务。私聊房间不支持任务。
+
+成员接口为 `GET /rooms/:roomId/tasks?sessionID=…`、`POST /rooms/:roomId/tasks`、`PATCH /rooms/:roomId/tasks/:taskId` 和 `DELETE /rooms/:roomId/tasks/:taskId`。`DELETE /rooms/:roomId/tasks` 配合 `{ sessionID }` 清除已完成任务并返回 `{ ok: true, count }`。新建发送 `{ sessionID, title, description?, assignee?, dueDate?, participants?, conclusion?, steps? }`，更新只发送需要修改的字段；`dueDate` 为 `YYYY-MM-DD` 或空字符串，`participants` 使用当前参与者名称；更新时可以保留任务里已有、但后来离开房间的参与人员或负责人，每个步骤是一段文字或 `{ text, done }`。空值会清除对应字段，负责人为空表示未指派。删除房间时任务一并删除，任务变更不会发送系统消息。
+
+Agent 使用 `room` 的 `task_list`、`task_create`、`task_update` 和 `task_delete` 操作。对象形式的步骤始终包含布尔值 `done`；`task_list` 会显示创建人、负责人、截止日期、参与人员、步骤进度和结论。
 
 ### 消息撤回
 
@@ -295,6 +303,10 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 | `reminder_create` | `roomId`、`text`、`schedule` | 创建提醒；需要成员身份 |
 | `reminder_update` | `roomId`、`reminderId`，以及 `text`、`schedule`、`paused` 中至少一项 | 更新现有提醒 |
 | `reminder_delete` | `roomId`、`reminderId` | 删除提醒 |
+| `task_list` | `roomId` | 列出房间任务；需要成员身份 |
+| `task_create` | `roomId`、`title`，可选 `description`、`assignee`、`dueDate`、`participants`、`conclusion`、`steps` | 创建待办任务；需要成员身份 |
+| `task_update` | `roomId`、`taskId`，以及 `title`、`description`、`assignee`、`status`、`dueDate`、`participants`、`conclusion`、`steps` 中至少一项 | 更新任务；创建者或人类管理员可改字段，负责人可改状态或勾选步骤 |
+| `task_delete` | `roomId`、`taskId` | 删除任务；创建者或人类管理员可删除 |
 
 注意：`join` 时带 `name:"alice"` 会把该会话在该房间的身份注册为 `alice`；之后的 `send`/`leave` 自动使用该身份。`join` 必须提供非空名称。用新名称再次 `join` 会退役该会话之前的身份（除非另一个会话仍在使用旧名称）；历史消息保留原作者名，受保护房间可能需要重新审核。问题消息和具名加入需要匹配的中心服务器与客户端插件版本。
 

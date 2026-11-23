@@ -5,6 +5,7 @@ import { clearPendingAdmission } from "../src/center/queue.ts";
 import { touchActive } from "./wake.ts";
 import { announcementRoutes } from "./announcement-routes.ts";
 import { jsonObject } from "./json-body.ts";
+import { taskRoutes } from "./task-routes.ts";
 
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const states = new Set<WorkState>(["working", "idle", "waiting", "unknown"]);
@@ -15,6 +16,8 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 export async function memberRoutes(req: Request, url: URL): Promise<Response | undefined> {
+  const tasks = await taskRoutes(req, url);
+  if (tasks) return tasks;
   const announcements = await announcementRoutes(req, url);
   if (announcements) return announcements;
   if (req.method === "POST" && url.pathname === "/read") {

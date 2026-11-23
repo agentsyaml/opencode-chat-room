@@ -276,6 +276,7 @@ test("room settings shows roles and applies rename, description and policy", asy
     assert.match(frame, /Editing.*available/);
     assert.match(frame, /r rename · d desc · j policy/);
     assert.match(frame, /x delete/);
+    assert.doesNotMatch(frame, /\*\*/, "markdown bold markers should be concealed");
 
     context.mockInput.pressKeys(["r"]);
     await context.renderOnce();

@@ -41,7 +41,7 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     expect(rows).toContainEqual(["Enter"]);
     expect(rows).toContainEqual(["Shift", "Enter"]);
     expect(rows).toContainEqual(["↑", "↓", "Enter"]);
-    expect(rows).toContainEqual([modifier, "Space"]);
+    expect(rows).toContainEqual([modifier, "Space", "Ctrl", "P"]);
     expect(rows).toContainEqual([modifier, "↑", "↓"]);
     expect(rows).toContainEqual([modifier, "1–9"]);
     expect(rows).toContainEqual([modifier, "Home", "End"]);
@@ -113,14 +113,19 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
       const list = document.querySelector("#roomListChat");
       (window as any).__roomSwitchMotion = null;
       const observer = new MutationObserver(() => {
-        const row = list?.querySelector(".room-row.room-switch-enter") as HTMLElement | null;
-        if (!row) return;
-        const style = getComputedStyle(row);
+        const enter = list?.querySelector(".room-row.room-switch-enter") as HTMLElement | null;
+        const leave = list?.querySelector(".room-row.room-switch-leave") as HTMLElement | null;
+        if (!enter) return;
+        const enterStyle = getComputedStyle(enter, "::before");
+        const leaveStyle = leave ? getComputedStyle(leave, "::before") : null;
         (window as any).__roomSwitchMotion = {
-          className: row.className,
-          animation: style.animationName,
-          duration: style.animationDuration,
-          shift: style.getPropertyValue("--room-switch-shift").trim(),
+          className: enter.className,
+          leaveClassName: leave?.className ?? "",
+          animation: enterStyle.animationName,
+          duration: enterStyle.animationDuration,
+          origin: getComputedStyle(enter).getPropertyValue("--room-switch-origin").trim(),
+          leaveAnimation: leaveStyle?.animationName ?? "",
+          leaveOrigin: leave ? getComputedStyle(leave).getPropertyValue("--room-switch-origin").trim() : "",
         };
         observer.disconnect();
       });
@@ -133,11 +138,17 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
       return Boolean(row && row.dataset.roomId !== previous);
     }, beforeSwitch);
     await page.waitForFunction(() => Boolean((window as any).__roomSwitchMotion));
-    const switchMotion = await page.evaluate(() => (window as any).__roomSwitchMotion as { className: string; animation: string; duration: string; shift: string });
+    const switchMotion = await page.evaluate(() => (window as any).__roomSwitchMotion as {
+      className: string; leaveClassName: string; animation: string; duration: string;
+      origin: string; leaveAnimation: string; leaveOrigin: string;
+    });
     expect(switchMotion.className).toContain("room-switch-enter");
-    expect(switchMotion.animation).toBe("room-switch-row");
-    expect(switchMotion.duration).toBe("0.15s");
-    expect(switchMotion.shift).toBe("3px");
+    expect(switchMotion.leaveClassName).toContain("room-switch-leave");
+    expect(switchMotion.animation).toBe("room-switch-bar-in");
+    expect(switchMotion.leaveAnimation).toBe("room-switch-bar-out");
+    expect(switchMotion.duration).toBe("0.18s");
+    expect(switchMotion.origin).toBe("top");
+    expect(switchMotion.leaveOrigin).toBe("bottom");
     expect(await page.locator("#msgList").evaluate((list: Element) => ({
       className: (list as HTMLElement).className,
       animation: getComputedStyle(list).animationName,

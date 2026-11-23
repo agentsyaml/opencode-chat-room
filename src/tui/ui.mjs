@@ -14,6 +14,8 @@ import {
 } from "./ui-content.mjs";
 import { createTheme } from "./ui-theme.mjs";
 import { createView } from "./ui-view.mjs";
+import { handleSuggestKey, syncSuggest } from "./ui-suggest.mjs";
+import { syncMentionHighlights } from "./ui-mentions.mjs";
 
 const printable = (key) => {
   const char = Array.from(key.sequence ?? "")[0];
@@ -43,11 +45,24 @@ export class Tui {
     this.syncingPalette = false;
     this.paletteInputMode = false;
     this.detailSignature = "";
+    this.suggestKind = null;
+    this.suggestSnapshot = null;
+    this.suggestItems = [];
+    this.suggestSelected = 0;
+    this.suggestTrigger = null;
+    this.suggestQuery = "";
+    this.suggestDismissed = null;
+    this.mentionStyles = new Map();
+    this.mentionSignature = "";
+    this.mentionTypeId = null;
 
     Object.assign(this, createView(renderer, this.theme));
     this.textarea.onContentChange = () => {
       if (this.syncingComposer) return;
       this.app.setDraft(this.textarea.plainText);
+      syncSuggest(this, this.app.state);
+      syncMentionHighlights(this, this.app.state);
+      this.renderer.requestRender();
     };
     this.paletteInput.onContentChange = () => {
       if (this.syncingPalette) return;
@@ -127,6 +142,7 @@ export class Tui {
       this.handlePaletteKey(key);
       return;
     }
+    if (state.focus === "composer" && handleSuggestKey(this, key, state)) return;
     if ((key.name === "space" && (key.meta || key.option)) || (key.name === "p" && key.ctrl)) {
       key.preventDefault();
       this.app.openPalette();
@@ -177,11 +193,6 @@ export class Tui {
     }
 
     if (state.focus === "composer") {
-      if (key.sequence === "/" && this.textarea.plainText.length === 0) {
-        key.preventDefault();
-        this.app.openPalette({ slash: true });
-        return;
-      }
       if (key.name === "return") {
         key.preventDefault();
         this.app.setDraft(this.textarea.plainText);
@@ -215,10 +226,6 @@ export class Tui {
       // Focusing the composer in this handler must not let the same key reach
       // the now-focused textarea twice or split the first character.
       key.stopPropagation();
-      if (key.sequence === "/" && !state.draft) {
-        this.app.openPalette({ slash: true });
-        return;
-      }
       this.app.appendDraft(key.sequence);
     }
   }
@@ -355,6 +362,7 @@ export class Tui {
     syncPalette(this, state);
     syncHelp(this, state);
     syncFocus(this, state);
+    syncSuggest(this, state);
     this.renderer.requestRender();
   }
 }

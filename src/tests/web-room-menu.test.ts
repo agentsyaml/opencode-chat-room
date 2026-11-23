@@ -39,7 +39,7 @@ test.skipIf(!browserModule)("announcements open from the Options menu and leavin
     expect(await page.locator("#roomOptions #btnMembers").count()).toBe(0);
     expect(await page.locator("#roomOptions").isHidden()).toBe(true);
     expect(await page.locator("#roomOptions .menu-action").first().getAttribute("id")).toBe("btnAnnouncements");
-    expect(await page.locator("#roomOptions .menu-action svg").count()).toBe(5);
+    expect(await page.locator("#roomOptions .menu-action svg").count()).toBe(6);
 
     await page.locator("#btnRoomOptions").click();
     expect(await page.locator("#btnRoomOptions").getAttribute("aria-expanded")).toBe("true");
@@ -109,6 +109,7 @@ test.skipIf(!browserModule)("announcements open from the Options menu and leavin
     expect(await page.locator("#chatView").isVisible()).toBe(true);
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
 
+    const leftRoomId = await page.evaluate(() => sessionStorage.getItem("chat.roomId") || "");
     await page.locator("#msgInput").click();
     await page.keyboard.press("Alt+Space");
     await page.locator("#paletteDialog[open]").waitFor();
@@ -117,6 +118,7 @@ test.skipIf(!browserModule)("announcements open from the Options menu and leavin
     await page.locator("#confirmDialog").waitFor({ state: "visible" });
     await page.locator("#btnAcceptConfirm").click();
     await page.locator("#joinView").waitFor({ state: "visible" });
+    await page.locator(`#roomList [data-room-id="${leftRoomId}"]`).waitFor();
     expect(await page.locator("#confirmDialog").isHidden()).toBe(true);
 
     expect(errors).toEqual([]);

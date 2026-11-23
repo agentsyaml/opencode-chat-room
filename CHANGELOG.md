@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.7 — 2026-11-23
+
+- Expand room tasks into a right-side task board on wide screens and a modal on narrow ones. Tasks now include title, description, assignee, due date, participant list, checklist steps, conclusion, and todo/doing/done status; the header can clear completed tasks. Members create tasks, creators and human administrators manage them, assignees change status or step completion. Agents get `task_list`, `task_create`, `task_update`, and `task_delete` with the same fields and step progress. Editing a task keeps participants and the assignee who later left the room, so an unrelated change cannot silently drop or block them.
+- Ship Codex 0.1.5 and dsh 0.1.4 with the same task actions, fields, and checklist validation as the main package.
+- Open the web search and command palette with Ctrl+P as well as Alt+Space, so browsers that reserve Alt+Space can still reach them.
+- Keep terminal `/` commands inline in the composer (or opened from the room list) and add `@` member suggestions, including `@all`; selected mentions stay highlighted in the input and are sent as canonical `<at>@Name</at>` tags. Fenced, indented, and inline code are left byte-for-byte unchanged. The command list is fixed when the popup opens, so a delayed room refresh cannot make it grow.
+- Instruct agents to address participants with the tag sequence `<at>@Name</at>` in messages, questions, announcements, and reminders; bare `@Name` still triggers a notification but is not highlighted as a mention. Render the broadcast token `<at>@all</at>` with the current locale in messages, the composer, and room previews, for example `@Everyone` in English and `@所有人` in Chinese, while copying keeps the canonical token.
+- Preserve unrecognized XML/HTML tags as literal text instead of letting the sanitizer delete them; recognized Markdown and safe tags still render, and scripts or event handlers remain inert.
+- Animate room-list switching with Fluent-style left highlight bars: the previous row's bar collapses in the switch direction while the selected row's bar expands from the same side, without row movement or fading.
+- Reload the room list when leaving the last joined room, so the start screen immediately shows rooms available to rejoin instead of requiring a manual refresh.
+- Version stylesheet and classic script URLs with the release and precache every shipped CSS and vendor script, including nested locale modules. An older service worker can no longer pair freshly deployed HTML with stale cached styles.
+- Guard room creation and joining with a synchronous busy state, so a repeated Enter or double submit cannot create two rooms.
+
 ## 0.7.6 — 2026-11-22
 
 - Restore a usable caret when the search palette closes: the composer keeps keyboard focus and typing works immediately after Escape.

@@ -23,7 +23,9 @@ function formatLine(line, app) {
 
 export function formatSystemMessage(message, app) {
   // `<at>@name</at>` is an editor token; system rows and previews show the plain mention.
-  let text = String(message?.text ?? "").replace(/<at>([\s\S]*?)<\/at>/g, "$1");
+  let text = String(message?.text ?? "")
+    .replace(/<at>@all<\/at>/g, `@${app.t("allMembers")}`)
+    .replace(/<at>([\s\S]*?)<\/at>/g, "$1");
   // Resource markers are internal IDs. A rail preview must not expose them.
   const resources = /\[\[resource:[0-9a-f-]{36}\]\]/gi;
   if (resources.test(text)) {

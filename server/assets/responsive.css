@@ -62,7 +62,32 @@
   .mobile-locale { display: none; }
   .rail-rooms { flex: 1; min-height: 0; overflow: auto; list-style: none; margin: 0; padding: 0; }
   #roomListChat .room-row { padding: 11px 12px; border-color: transparent; border-radius: 12px; }
-  #roomListChat .room-row.selected { background: linear-gradient(110deg, color-mix(in srgb, var(--accent-soft) 92%, var(--surface)), var(--accent-soft)); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); box-shadow: inset 3px 0 var(--accent); }
+  #roomListChat .room-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 18%;
+    bottom: 18%;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent);
+    opacity: 0;
+    transform: scaleY(0);
+    transform-origin: var(--room-switch-origin, center);
+    pointer-events: none;
+  }
+  #roomListChat .room-row.selected::before { opacity: 1; transform: scaleY(1); }
+  #roomListChat .room-row.room-switch-enter::before,
+  #roomListChat .room-row.room-switch-leave::before {
+    animation-duration: .18s;
+    animation-timing-function: cubic-bezier(.1, .9, .2, 1);
+    animation-fill-mode: both;
+  }
+  #roomListChat .room-row.room-switch-enter::before { animation-name: room-switch-bar-in; }
+  #roomListChat .room-row.room-switch-leave::before { animation-name: room-switch-bar-out; }
+  @keyframes room-switch-bar-in { from { opacity: 0; transform: scaleY(0); } to { opacity: 1; transform: scaleY(1); } }
+  @keyframes room-switch-bar-out { from { opacity: 1; transform: scaleY(1); } to { opacity: 0; transform: scaleY(0); } }
+  #roomListChat .room-row.selected { background: linear-gradient(110deg, color-mix(in srgb, var(--accent-soft) 92%, var(--surface)), var(--accent-soft)); border-color: color-mix(in srgb, var(--accent) 24%, var(--line)); }
   .r-kind { color: var(--accent); font-size: 11px; font-weight: 700; }
   .r-status { color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
   .r-preview { overflow: hidden; color: var(--ink-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }

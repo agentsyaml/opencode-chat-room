@@ -16,17 +16,27 @@ const STATIC = [
   "/assets/edit-room.css",
   "/assets/palette.css",
   "/assets/files.css",
+  "/assets/tasks.css",
   "/assets/doc-preview.css",
   "/assets/highlight-10.7.3.min.js",
+  "/assets/marked-18.0.4.js",
+  "/assets/dompurify-3.4.7.js",
+  "/assets/mermaid-11.12.2.min.js",
   "/assets/icons/icon-192.png",
   "/assets/icons/icon-512.png",
+  "/assets/icons/apple-touch-icon.png",
   "/manifest.webmanifest",
 ];
+const VERSIONED = new Set(STATIC.filter((path) => path.endsWith(".css") || /^\/assets\/(?:highlight|marked|dompurify|mermaid)-/.test(path)));
+const versioned = (path) => `${path}?v=${VERSION}`;
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    await cache.addAll([SHELL, ...STATIC]);
+    // Stylesheets and classic scripts carry the release version. A client still
+    // running an older worker therefore misses its old cache after a deploy instead
+    // of mixing new HTML with stale styles.
+    await cache.addAll([SHELL, ...STATIC.map((path) => VERSIONED.has(path) ? versioned(path) : path)]);
     // The shell is a module graph, so an offline start needs the imports too. Walk them
     // from the entry point instead of keeping a list that drifts with every new module.
     const pending = ["/assets/chat/index.js"], seen = new Set();
@@ -38,7 +48,7 @@ self.addEventListener("install", (event) => {
       if (!response?.ok) continue;
       const source = await response.clone().text();
       await cache.put(url, response);
-      for (const match of source.matchAll(/from\s+"(\.\/[\w.-]+\.js)"/g)) {
+      for (const match of source.matchAll(/(?:from\s+"|import\(\s*")(\.\.?\/[^"]+\.js)"/g)) {
         pending.push(new URL(match[1], `https://chat.invalid${url}`).pathname);
       }
     }

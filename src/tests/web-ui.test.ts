@@ -210,7 +210,30 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(await message.locator('input[type="checkbox"]:disabled').count()).toBe(2);
     expect(await message.locator("ul ul").count()).toBe(1);
     expect(await message.locator("a[href^='https://']").count()).toBe(1);
-    expect(await message.locator(".mention-chip").textContent()).toBe("@all");
+    expect(await message.locator(".mention-chip").textContent()).toBe("@Everyone");
+    await alice.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      app.setLocale("zh-CN");
+      app.renderMessages(false);
+    }, "/assets/chat/state.js");
+    expect(await message.locator(".mention-chip").textContent()).toBe("@所有人");
+    const editorChip = await alice.evaluate(async (urls: { state: string; editor: string }) => {
+      const { app } = await import(urls.state);
+      const { setEditorText, editorText } = await import(urls.editor);
+      app.setLocale("zh-CN");
+      const input = document.querySelector<HTMLElement>("#msgInput")!;
+      setEditorText(input, "<at>@all</at> tail");
+      const chip = input.querySelector<HTMLElement>(".editor-mention");
+      const result = { text: chip?.textContent, mention: chip?.dataset.mention, value: editorText(input) };
+      (input as HTMLElement & { value: string }).value = "";
+      return result;
+    }, { state: "/assets/chat/state.js", editor: "/assets/chat/editor.js" });
+    expect(editorChip).toEqual({ text: "@所有人", mention: "all", value: "<at>@all</at> tail" });
+    await alice.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      app.setLocale("en");
+      app.renderMessages(false);
+    }, "/assets/chat/state.js");
     expect(await message.locator("pre .mention-chip").count()).toBe(0);
     expect(await message.locator("script, [onerror], a[href^='javascript:']").count()).toBe(0);
     expect(await alice.evaluate(() => (window as any).__chatXss ?? false)).toBe(false);

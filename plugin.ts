@@ -30,6 +30,7 @@ import { explicitlyAddresses } from "./src/center/mentions.ts";
 import { createV2Setup, type V2Runtime } from "./src/runtime/v2-plugin.ts";
 import { createV1Server } from "./src/runtime/v1-plugin.ts";
 import { runAnnouncementTool } from "./src/agent/announcement-tool.ts";
+import { runTaskTool } from "./src/agent/task-tool.ts";
 import { uploadAgentResource } from "./src/rooms/resource-upload.ts";
 import { readAgentResource, resourceReadFailure } from "./src/rooms/resource-read.ts";
 import { adminTool, adminToolDescription, adminToolSchema } from "./src/agent/admin-client.ts";
@@ -247,7 +248,7 @@ export async function pollKnownSessions(
   await flushReceiptCandidates({ destination: receiptDestination(""), receiverOwnerID: transport.receiverOwnerID }).catch(() => {});
 }
 
-const READ_ONLY_ACTIONS = new Set(["list", "members", "poll", "join_status", "announcement_list", "announcement_read"]);
+const READ_ONLY_ACTIONS = new Set(["list", "members", "poll", "join_status", "announcement_list", "announcement_read", "task_list"]);
 
 function actionableError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -270,7 +271,7 @@ function actionableError(error: unknown): string {
 }
 
 export const roomArgs = z.object({
-  action: z.enum(["create", "join", "join_status", "leave", "list", "send", "poll", "recall", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete"]),
+  action: z.enum(["create", "join", "join_status", "leave", "list", "send", "poll", "recall", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete", "task_list", "task_create", "task_update", "task_delete"]),
   name: z.string().max(64).optional().describe("For join: your own participant display name, NOT the room name (required). For create: the new room name."),
   roomId: z.string().optional().describe("Room UUID, not the room name. Required for resource actions and every room-scoped action."),
   messageId: z.string().optional().describe("For recall: the full message ID returned by send or poll; required for recall."),
@@ -280,6 +281,15 @@ export const roomArgs = z.object({
   isQuestion: z.boolean().optional().describe("For send: mark the message as a question awaiting an answer."),
   announcementName: z.string().optional().describe("Exact announcement name from announcement_list; distinct from participant or room name."),
   content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters; required for announcement_write."),
+  taskId: z.string().optional().describe("Task UUID from task_list; required for task_update and task_delete."),
+  title: z.string().optional().describe("Task title, 1 to 200 characters; required for task_create."),
+  description: z.string().optional().describe("Task description, at most 5000 characters."),
+  assignee: z.string().optional().describe("Participant display name responsible for the task; empty leaves it unassigned."),
+  status: z.enum(["todo", "doing", "done"]).optional().describe("Task status; the assignee may change only this field."),
+  dueDate: z.string().optional().describe("Task due date as YYYY-MM-DD; empty clears it."),
+  participants: z.array(z.string()).optional().describe("Task participants as room participant display names; empty clears them."),
+  conclusion: z.string().optional().describe("Task conclusion, at most 5000 characters; empty clears it."),
+  steps: z.array(z.union([z.string(), z.object({ text: z.string(), done: z.boolean().optional() })])).optional().describe("Task checklist, at most 30 steps; each is text of 1 to 300 characters or {text, done}; empty clears them."),
   reminderId: z.string().optional().describe("Reminder UUID from reminder_list; required for reminder_update and reminder_delete."),
   schedule: z.discriminatedUnion("type", [z.object({ type: z.literal("once"), at: z.string(), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() }), z.object({ type: z.literal("cron"), expression: z.string().regex(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/), timezone: z.string().refine((value) => { try { new Intl.DateTimeFormat("en", { timeZone: value }); return true; } catch { return false; } }, "timezone must be an IANA timezone").optional() })]).optional(),
   paused: z.boolean().optional(),
@@ -343,6 +353,8 @@ const roomExecute = async (
       }
       const announcementResult = await runAnnouncementTool(args, context.sessionID);
       if (announcementResult !== undefined) return announcementResult;
+      const taskResult = await runTaskTool(args, context.sessionID);
+      if (taskResult !== undefined) return taskResult;
       // ponytail: act as the identity this session registered with on join
       let selfName = identity();
       let joinPrevName: string | undefined;
@@ -525,7 +537,7 @@ const roomExecute = async (
     }
 };
 const room = tool({
-  description: "Chat room operations: create, join, leave and list rooms; send, poll and recall messages; list members and announcements; manage reminders. Sent and polled messages carry full message IDs; recall takes roomId plus messageId and withdraws the message for everyone (agents their own, room admins any). Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. Resource actions need both roomId (the room UUID) and resourceId (the UUID in the marker); the marker alone does not identify the room. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads. Room joinPolicy \"approval\" makes join a pending request: you are not a member while pending, never claim otherwise, and use join_status to check whether a human administrator approved it.",
+  description: "Chat room operations: create, join, leave and list rooms; send, poll and recall messages; list members, announcements and tasks; create, update and delete room tasks; manage reminders. Sent and polled messages carry full message IDs; recall takes roomId plus messageId and withdraws the message for everyone (agents their own, room admins any). Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. Resource actions need both roomId (the room UUID) and resourceId (the UUID in the marker); the marker alone does not identify the room. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads. Room joinPolicy \"approval\" makes join a pending request: you are not a member while pending, never claim otherwise, and use join_status to check whether a human administrator approved it.",
   args: roomArgs.shape,
   execute: roomExecute,
 });

@@ -89,11 +89,11 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
     expect(await page.locator(".code-toolbar svg:not(.fluent-icon)").count()).toBe(0);
     await assertIcons();
 
-    // The Options menu has exactly five icons, each painted beside its label.
+    // The Options menu has exactly six icons, each painted beside its label.
     await page.locator("#btnRoomOptions").click();
     await page.locator("#roomOptions").waitFor({ state: "visible" });
     await page.waitForTimeout(250);
-    expect(await page.locator("#roomOptions .menu-action svg.fluent-icon").count()).toBe(5);
+    expect(await page.locator("#roomOptions .menu-action svg.fluent-icon").count()).toBe(6);
     const desktopMenu = await page.evaluate(() => {
       const items = Array.from(document.querySelectorAll<HTMLElement>("#roomOptions .menu-action"));
       return items.map((item) => {
@@ -107,7 +107,7 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
         };
       });
     });
-    expect(desktopMenu).toHaveLength(5);
+    expect(desktopMenu).toHaveLength(6);
     for (const item of desktopMenu) {
       expect(item.iconWidth).toBeGreaterThanOrEqual(12);
       expect(item.iconHeight).toBeGreaterThanOrEqual(12);
@@ -133,7 +133,7 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
     await page.locator("#msgInput").click();
     await page.keyboard.press("Alt+Space");
     await page.locator("#paletteDialog[open]").waitFor();
-    expect(await page.locator("#paletteList .palette-icon svg.fluent-icon").count()).toBe(9);
+    expect(await page.locator("#paletteList .palette-icon svg.fluent-icon").count()).toBe(10);
     await assertIcons();
     const paletteIcons = await page.locator("#paletteList .palette-icon svg.fluent-icon").evaluateAll((icons: Element[]) => icons.map((icon) => {
       const box = icon.getBoundingClientRect();
@@ -147,6 +147,7 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
     for (const selector of [
       "#btnNewRoom", "#btnRefreshRooms", "#btnRefreshFiles", "#btnAddAttachments",
       "#btnCloseSettings", "#btnCloseCreateRoom", "#btnCloseEditRoom", "#btnCloseFiles",
+      "#btnCloseTasks", "#btnRefreshTasks",
       "#btnCloseReminder", "#btnCloseAnnouncement", "#btnCloseReaders", "#btnCloseImage",
       "#btnCloseOwnerOnly", "#btnClosePalette", "#btnCloseShortcuts", "#btnZoomIn", "#btnZoomOut",
     ]) {
@@ -179,7 +180,7 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
     });
     expect(mobile.menu.x).toBeGreaterThanOrEqual(0);
     expect(mobile.menu.right).toBeLessThanOrEqual(390);
-    expect(mobile.items).toHaveLength(5);
+    expect(mobile.items).toHaveLength(6);
     for (const item of mobile.items) {
       expect(item.iconWidth).toBeGreaterThanOrEqual(12);
       expect(item.iconHeight).toBeGreaterThanOrEqual(12);

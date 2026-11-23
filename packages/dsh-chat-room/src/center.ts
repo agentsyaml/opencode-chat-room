@@ -119,7 +119,7 @@ export function formatMessages(roomName: string, roomKind: "group" | "direct" | 
 }
 
 /** Actions the room tool exposes; kept in the schema enum and the switch together. */
-export const ROOM_ACTIONS = ["list", "create", "join", "join_status", "leave", "send", "poll", "recall", "members"] as const;
+export const ROOM_ACTIONS = ["list", "create", "join", "join_status", "leave", "send", "poll", "recall", "members", "task_list", "task_create", "task_update", "task_delete"] as const;
 export type RoomAction = (typeof ROOM_ACTIONS)[number];
 
 /** Validated model arguments for one room call. */
@@ -131,6 +131,15 @@ export interface RoomArgs {
   text?: string;
   isQuestion?: boolean;
   joinPolicy?: "open" | "approval";
+  taskId?: string;
+  title?: string;
+  description?: string;
+  assignee?: string;
+  status?: "todo" | "doing" | "done";
+  dueDate?: string;
+  participants?: string[];
+  conclusion?: string;
+  steps?: Array<string | { text: string; done?: boolean }>;
 }
 
 function optionalString(value: unknown, field: string, max: number): string | undefined {
@@ -138,6 +147,63 @@ function optionalString(value: unknown, field: string, max: number): string | un
   const trimmed = typeof value === "string" ? value.trim() : "";
   if (!trimmed || trimmed.length > max) throw new TypeError(`room: ${field} must be 1-${max} characters`);
   return trimmed;
+}
+
+function optionalText(value: unknown, field: string, max: number): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || Array.from(value).length > max) throw new TypeError(`room: ${field} must be a string of at most ${max} characters`);
+  return value;
+}
+
+function optionalAssignee(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || Array.from(value.trim()).length > 64) {
+    throw new TypeError("room: assignee must be a participant name of at most 64 characters");
+  }
+  return value.trim();
+}
+
+function optionalDueDate(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new TypeError("room: dueDate must be YYYY-MM-DD or empty");
+  const trimmed = value.trim();
+  if (trimmed === "") return "";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  const [year, month, day] = match ? [Number(match[1]), Number(match[2]), Number(match[3])] : [0, 0, 0];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (!match || date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    throw new TypeError("room: dueDate must be a real calendar date in YYYY-MM-DD form, for example 2026-12-31, or empty to clear it");
+  }
+  return trimmed;
+}
+
+function optionalParticipants(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 50) throw new TypeError("room: participants must be an array of at most 50 room participant names");
+  return value.map((name) => {
+    if (typeof name !== "string" || !name.trim() || Array.from(name.trim()).length > 64) {
+      throw new TypeError("room: participants must be room participant names of 1-64 characters");
+    }
+    return name.trim();
+  });
+}
+
+function optionalSteps(value: unknown): Array<string | { text: string; done?: boolean }> | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 30) throw new TypeError("room: steps must be an array of at most 30 steps");
+  return value.map((step) => {
+    if (typeof step === "string") {
+      const trimmed = step.trim();
+      if (!trimmed || Array.from(trimmed).length > 300) throw new TypeError("room: each step must be text of 1-300 characters or {text, done}");
+      return trimmed;
+    }
+    const item = record(step);
+    if (typeof item.text !== "string" || !item.text.trim() || Array.from(item.text.trim()).length > 300) {
+      throw new TypeError("room: each step must be text of 1-300 characters or {text, done}");
+    }
+    if (item.done !== undefined && typeof item.done !== "boolean") throw new TypeError("room: step done must be a boolean");
+    return { text: item.text.trim(), done: item.done === true };
+  });
 }
 
 /** Reject malformed model arguments before any network call. */
@@ -153,6 +219,18 @@ export function parseRoomArgs(value: unknown): RoomArgs {
   const messageId = optionalString(raw.messageId, "messageId", 128);
   const name = optionalString(raw.name, "name", 64);
   const message = optionalString(raw.text, "text", 5000);
+  const taskId = optionalString(raw.taskId, "taskId", 128);
+  const title = optionalString(raw.title, "title", 200);
+  const description = optionalText(raw.description, "description", 5000);
+  const assignee = optionalAssignee(raw.assignee);
+  const status = raw.status === "todo" || raw.status === "doing" || raw.status === "done" ? raw.status : undefined;
+  const dueDate = optionalDueDate(raw.dueDate);
+  const participants = optionalParticipants(raw.participants);
+  const conclusion = optionalText(raw.conclusion, "conclusion", 5000);
+  const steps = optionalSteps(raw.steps);
+  if (raw.status !== undefined && status === undefined) {
+    throw new TypeError("room: status must be todo, doing, or done");
+  }
   return {
     action,
     ...(roomId === undefined ? {} : { roomId }),
@@ -161,12 +239,47 @@ export function parseRoomArgs(value: unknown): RoomArgs {
     ...(message === undefined ? {} : { text: message }),
     ...(raw.isQuestion === true ? { isQuestion: true } : {}),
     ...(raw.joinPolicy === "approval" ? { joinPolicy: "approval" as const } : {}),
+    ...(taskId === undefined ? {} : { taskId }),
+    ...(title === undefined ? {} : { title }),
+    ...(description === undefined ? {} : { description }),
+    ...(assignee === undefined ? {} : { assignee }),
+    ...(status === undefined ? {} : { status }),
+    ...(dueDate === undefined ? {} : { dueDate }),
+    ...(participants === undefined ? {} : { participants }),
+    ...(conclusion === undefined ? {} : { conclusion }),
+    ...(steps === undefined ? {} : { steps }),
   };
 }
 
 function requireRoomId(args: RoomArgs): string {
   if (!args.roomId) throw new TypeError(`room: ${args.action} requires roomId`);
   return encodeURIComponent(args.roomId);
+}
+
+function formatTasks(value: unknown): string {
+  const tasks = Array.isArray(value) ? value.map(record) : [];
+  if (tasks.length === 0) return "no tasks";
+  return tasks.map((task) => {
+    const assignee = text(task.assignee);
+    const creator = text(task.creatorName);
+    const description = text(task.description);
+    const dueDate = text(task.dueDate);
+    const participants = Array.isArray(task.participants) ? task.participants.map(text).filter(Boolean) : [];
+    const steps = Array.isArray(task.steps) ? task.steps.flatMap((value) => {
+      if (typeof value === "string") return value ? [{ text: value, done: false }] : [];
+      const step = record(value);
+      const body = text(step.text);
+      return body ? [{ text: body, done: step.done === true }] : [];
+    }) : [];
+    const done = steps.filter((step) => step.done).length;
+    return `${text(task.id)} [${text(task.status)}] ${text(task.title)}` +
+      `${assignee ? ` (assignee: ${assignee})` : ""}${creator ? ` (creator: ${creator})` : ""}` +
+      `${dueDate ? ` (due: ${dueDate})` : ""}` +
+      `${participants.length ? ` (participants: ${participants.join(", ")})` : ""}` +
+      `${description ? `\n  ${description}` : ""}` +
+      `${steps.length ? `\n  steps: ${done}/${steps.length}${steps.map((step) => `\n  - [${step.done ? "x" : " "}] ${step.text}`).join("")}` : ""}` +
+      `${text(task.conclusion) ? `\n  conclusion: ${text(task.conclusion)}` : ""}`;
+  }).join("\n");
 }
 
 /** Run one validated action against the central server and return model-facing text. */
@@ -239,6 +352,56 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
       const data = record(await request(cfg, `/rooms/${id}`, {}, signal));
       const names = (Array.isArray(data.participants) ? data.participants : []).map((value) => text(record(value).name)).filter(Boolean);
       return names.length ? names.join("\n") : "no members";
+    }
+    case "task_list": {
+      const id = requireRoomId(args);
+      const data = record(await request(cfg, `/rooms/${id}/tasks?sessionID=${encodeURIComponent(sessionID)}`, {}, signal));
+      return formatTasks(data.tasks);
+    }
+    case "task_create": {
+      const id = requireRoomId(args);
+      if (!args.title) throw new TypeError("room: task_create requires title");
+      const data = record(await request(cfg, `/rooms/${id}/tasks`, {
+        method: "POST", body: {
+          sessionID, title: args.title,
+          ...(args.description === undefined ? {} : { description: args.description }),
+          ...(args.assignee === undefined ? {} : { assignee: args.assignee }),
+          ...(args.dueDate === undefined ? {} : { dueDate: args.dueDate }),
+          ...(args.participants === undefined ? {} : { participants: args.participants }),
+          ...(args.conclusion === undefined ? {} : { conclusion: args.conclusion }),
+          ...(args.steps === undefined ? {} : { steps: args.steps }),
+        },
+      }, signal));
+      const task = record(data.task);
+      return `task created: ${text(task.title)} (id: ${text(task.id)}, status: ${text(task.status)})`;
+    }
+    case "task_update": {
+      const id = requireRoomId(args);
+      if (!args.taskId) throw new TypeError("room: task_update requires taskId");
+      const fields = {
+        ...(args.title === undefined ? {} : { title: args.title }),
+        ...(args.description === undefined ? {} : { description: args.description }),
+        ...(args.assignee === undefined ? {} : { assignee: args.assignee }),
+        ...(args.status === undefined ? {} : { status: args.status }),
+        ...(args.dueDate === undefined ? {} : { dueDate: args.dueDate }),
+        ...(args.participants === undefined ? {} : { participants: args.participants }),
+        ...(args.conclusion === undefined ? {} : { conclusion: args.conclusion }),
+        ...(args.steps === undefined ? {} : { steps: args.steps }),
+      };
+      if (Object.keys(fields).length === 0) throw new TypeError("room: task_update requires title, description, assignee, status, dueDate, participants, conclusion, or steps");
+      const data = record(await request(cfg, `/rooms/${id}/tasks/${encodeURIComponent(args.taskId)}`, {
+        method: "PATCH", body: { sessionID, ...fields },
+      }, signal));
+      const task = record(data.task);
+      return `task updated: ${text(task.title)} (id: ${text(task.id)}, status: ${text(task.status)})`;
+    }
+    case "task_delete": {
+      const id = requireRoomId(args);
+      if (!args.taskId) throw new TypeError("room: task_delete requires taskId");
+      await request(cfg, `/rooms/${id}/tasks/${encodeURIComponent(args.taskId)}`, {
+        method: "DELETE", body: { sessionID },
+      }, signal);
+      return `task deleted: ${args.taskId}`;
     }
     case "poll": {
       requireRoomId(args);

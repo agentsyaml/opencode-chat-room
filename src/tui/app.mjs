@@ -7,6 +7,7 @@ import { attachReminders } from "./reminder-app.mjs";
 import { attachRoomSettings } from "./room-settings-app.mjs";
 import { attachMessageActions } from "./message-app.mjs";
 import { attachJoinRequests } from "./join-app.mjs";
+import { canonicalizeMentions } from "./mentions.mjs";
 import { mergeMessages, messageStamp, oldestSeq } from "./messages.mjs";
 
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
@@ -329,13 +330,14 @@ export class ChatApp {
   }
 
   async send() {
-    const text = String(this.state.draft ?? "").trim();
-    if (!text) return;
+    const raw = String(this.state.draft ?? "").trim();
+    if (!raw) return;
     const room = this.state.current;
     if (!room || !this.state.joined) {
       this.setStatus("join a room before sending", "error");
       return;
     }
+    const text = canonicalizeMentions(raw, room.participants);
     this.state.draft = "";
     this.touch();
     try {
@@ -348,7 +350,7 @@ export class ChatApp {
       this.setStatus("sent", "success");
       this.markRead();
     } catch (error) {
-      if (!this.state.draft) this.state.draft = text;
+      if (!this.state.draft) this.state.draft = raw;
       this.setStatus(`send failed: ${errorText(error)}`, "error");
     }
   }

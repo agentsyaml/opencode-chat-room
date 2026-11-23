@@ -38,6 +38,13 @@ test("joined changes translate every segment", () => {
     .toBe("Alex updated the room description; Alex opened this room to join without approval");
 });
 
+test("broadcast mentions use the current locale in previews", () => {
+  app.locale = "en";
+  expect(formatRoomPreview({ preview: "<at>@all</at> hello" }, null, app)).toBe("@Everyone hello");
+  app.locale = "zh-CN";
+  expect(formatRoomPreview({ preview: "<at>@all</at> hello" }, null, app)).toBe("@所有人 hello");
+});
+
 test("room previews do not expose resource markers", () => {
   app.locale = "en";
   expect(formatRoomPreview({ preview: "[[resource:0eebea95-8672-4aa1-a77a-0e9b6e3f39e1]]" }, null, app))

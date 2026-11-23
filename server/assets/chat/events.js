@@ -383,7 +383,7 @@ export function initEvents(app) {
     const fragment = copyRange.cloneContents();
     const selectedChips = fragment.querySelectorAll(".mention-chip");
     if (!selectedChips.length) return;
-    selectedChips.forEach((chip) => chip.replaceWith(document.createTextNode(`<at>@${chip.textContent?.slice(1) ?? ""}</at>`)));
+    selectedChips.forEach((chip) => chip.replaceWith(document.createTextNode(`<at>@${chip.dataset.mention ?? chip.textContent?.slice(1) ?? ""}</at>`)));
     const text = fragment.textContent ?? "";
     const html = `<div data-chatroom-mentions>${text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char])}</div>`;
     event.clipboardData?.setData("text/plain", text);

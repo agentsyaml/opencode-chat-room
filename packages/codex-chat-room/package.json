@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/codex-chat-room",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Codex plugin for the central opencode-chat-room server: room MCP tool plus queued delivery.",
   "type": "module",
   "repository": {

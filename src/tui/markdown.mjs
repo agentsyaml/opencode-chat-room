@@ -34,6 +34,21 @@ export function formatAttachments(text) {
   return `${clean} · Attachments`;
 }
 
+function closingBackticks(source, from, end, length) {
+  let i = from;
+  while (i < end) {
+    if (source[i] !== "`") {
+      i += 1;
+      continue;
+    }
+    let run = 0;
+    while (i + run < end && source[i + run] === "`") run += 1;
+    if (run === length) return i;
+    i += run;
+  }
+  return -1;
+}
+
 function inlineMentions(line) {
   let out = "";
   let index = 0;
@@ -41,8 +56,7 @@ function inlineMentions(line) {
     if (line[index] === "`") {
       let run = 0;
       while (line[index + run] === "`") run += 1;
-      const fence = "`".repeat(run);
-      const close = line.indexOf(fence, index + run);
+      const close = closingBackticks(line, index + run, line.length, run);
       if (close === -1) {
         out += line.slice(index);
         break;
@@ -66,16 +80,26 @@ function inlineMentions(line) {
 /** Rewrite <at>@name</at> in prose, leaving fenced and inline code untouched. */
 export function prepareMarkdown(text) {
   let fence = null;
+  let indented = false;
   return String(text ?? "")
     .split("\n")
     .map((line) => {
-      const marker = line.match(/^\s*(`{3,}|~{3,})/);
+      const marker = line.match(/^([ \t]*)(`{3,}|~{3,})/);
       if (fence) {
-        if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+        if (marker && marker[2][0] === fence.char && marker[2].length >= fence.length
+          && marker[1].length <= fence.indent + 3) fence = null;
         return line;
       }
+      if (indented) {
+        if (!line.trim() || /^(?: {4,}|\t)/.test(line)) return line;
+        indented = false;
+      }
       if (marker) {
-        fence = marker[1];
+        fence = { char: marker[2][0], length: marker[2].length, indent: marker[1].length };
+        return line;
+      }
+      if (/^(?: {4,}|\t)/.test(line)) {
+        indented = true;
         return line;
       }
       return inlineMentions(line);

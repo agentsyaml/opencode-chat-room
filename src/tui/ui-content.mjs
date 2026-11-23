@@ -3,6 +3,7 @@
 import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
 import { formatMessage, messageStamp, sanitizeText } from "./messages.mjs";
 import { addNotice, buildMessageBlock, hashText, markdownStyle } from "./message-view.mjs";
+import { syncMentionHighlights } from "./ui-mentions.mjs";
 import { connectionStyle } from "./ui-theme.mjs";
 
 const clear = (container) => {
@@ -256,7 +257,10 @@ export function syncComposer(ui, state) {
   ui.textarea.textColor = ui.theme.text;
   ui.textarea.focusedTextColor = ui.theme.text;
   ui.prompt.fg = ui.theme.accent;
-  if (ui.textarea.plainText === draft) return;
+  if (ui.textarea.plainText === draft) {
+    syncMentionHighlights(ui, state);
+    return;
+  }
   ui.syncingComposer = true;
   try {
     ui.textarea.setText(draft);
@@ -266,6 +270,8 @@ export function syncComposer(ui, state) {
   } finally {
     ui.syncingComposer = false;
   }
+  ui.mentionSignature = "";
+  syncMentionHighlights(ui, state);
 }
 
 export function syncStatus(ui, state) {
@@ -461,7 +467,8 @@ export function syncHelp(ui, state) {
     ["Enter", "send message"],
     ["Ctrl+J", "insert newline"],
     ["Esc", "clear / blur"],
-    ["/", "commands (empty composer)"],
+    ["/", "inline commands"],
+    ["@", "mention members"],
     ["Alt+Space", "palette / search"],
     ["Ctrl+R", "refresh rooms"],
     ["Ctrl+C", "quit"],

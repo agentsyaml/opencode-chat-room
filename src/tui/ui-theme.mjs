@@ -33,7 +33,8 @@ const PALETTES = {
 };
 
 export function themeFor(mode) {
-  return { ...(mode === "light" ? PALETTES.light : PALETTES.dark) };
+  const normalized = mode === "light" ? "light" : "dark";
+  return { mode: normalized, ...PALETTES[normalized] };
 }
 
 export function createTheme(renderer) {

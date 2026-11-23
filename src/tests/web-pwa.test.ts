@@ -45,6 +45,32 @@ test.skipIf(!browserModule)("installs as an app and starts from the shell while 
     // The second visit is the one a worker controls, which is what an offline start runs.
     await page.reload();
     await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+    const version = /const VERSION = "([^"]+)"/.exec(worker)?.[1] ?? "";
+    expect(version).not.toBe("");
+    const cached = await page.evaluate(async () => {
+      const urls: string[] = [];
+      for (const name of await caches.keys()) {
+        const cache = await caches.open(name);
+        for (const request of await cache.keys()) {
+          const url = new URL(request.url);
+          urls.push(`${url.pathname}${url.search}`);
+        }
+      }
+      return urls;
+    });
+    const assets = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLLinkElement | HTMLScriptElement>("link[rel=stylesheet], script[src]"))
+      .map((node) => node instanceof HTMLLinkElement ? node.href : node.src)
+      .map((url) => { const parsed = new URL(url); return `${parsed.pathname}${parsed.search}`; })
+      .filter((url) => url.startsWith("/assets/")));
+    expect(assets.length).toBeGreaterThan(0);
+    for (const asset of assets) {
+      const pathname = asset.split("?")[0] ?? asset;
+      const versioned = asset === pathname ? `${pathname}?v=${version}` : asset;
+      expect(cached.some((url: string) => url === asset || url === versioned)).toBe(true);
+    }
+    for (const module of ["/assets/chat/index.js", "/assets/chat/locales/index.js", "/assets/chat/locales/de.js", "/assets/chat/locales/ja.js", "/assets/chat/tasks.js", "/assets/chat/task-form.js", "/assets/chat/task-row.js"]) {
+      expect(cached).toContain(module);
+    }
     await context.setOffline(true);
     await page.reload();
     await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLElement>("#joinView, #restoreView, #chatView")).some((node) => !node.hidden), undefined, { timeout: 20000 });

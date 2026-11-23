@@ -17,6 +17,8 @@ const REPORT = [
   "",
   "<script>window.__docXss = 1</script>",
   "",
+  '<custom:widget data-id="7">kept text</custom:widget>',
+  "",
   '<img src="missing-image.png" alt="diagram" onerror="window.__docXss = 2">',
   "",
   "## Numbers",
@@ -130,6 +132,7 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
         tables: body.querySelectorAll("table").length,
         codeBlocks: body.querySelectorAll(".code-block pre code").length,
         images: body.querySelectorAll("img").length,
+        customTag: body.textContent?.includes('<custom:widget data-id="7">kept text</custom:widget>') || false,
       };
     });
     expect(safe.scripts).toBe(0);
@@ -140,6 +143,7 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     expect(safe.tables).toBe(1);
     expect(safe.codeBlocks).toBe(1);
     expect(safe.images).toBe(1);
+    expect(safe.customTag).toBe(true);
     await page.waitForTimeout(200);
     await page.screenshot({ path: path.join(artifacts, "web-doc-preview-wide-1280.png") });
 

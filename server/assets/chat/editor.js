@@ -4,7 +4,10 @@ const trustedChipNames = new Map();
 const autoSeparator = "\uE000\uE001";
 function mentionName(node) {
   const name = trustedChipNames.get(node.dataset?.chatChip);
-  return name !== undefined && node.dataset.mention === name && node.textContent === `@${name}` ? name : null;
+  return name !== undefined && node.dataset.mention === name ? name : null;
+}
+function chipLabel(editor, name) {
+  return editor.mentionLabel ? editor.mentionLabel(name) : name;
 }
 
 export function editorText(editor, draft = false) {
@@ -53,7 +56,7 @@ export function setEditorText(editor, value, draft = false) {
     if (draft && match[0] === autoSeparator) { editor.append(createAutoSeparator()); offset = pattern.lastIndex; continue; }
     if (draft && match[0] === "\uE000\uE000") { appendText(editor, "\uE000"); offset = pattern.lastIndex; continue; }
     if (draft && match[0].startsWith("\uE000")) { appendText(editor, match[0].slice(1)); offset = pattern.lastIndex; continue; }
-    editor.append(createMention(draft ? match[2] : match[1])); offset = pattern.lastIndex;
+    editor.append(createMention(editor, draft ? match[2] : match[1])); offset = pattern.lastIndex;
   }
   appendText(editor, String(value).slice(offset));
   editor.dataset.empty = value ? "false" : "true";
@@ -194,9 +197,9 @@ export function replaceEditorRange(editor, start, end, value, parseMentions = tr
   let html = "", cursor = 0, match;
   while (token && (match = token.exec(content))) {
     html += textHTML(content.slice(cursor, match.index));
-    const name = escapeHTML(match[1]);
+    const name = escapeHTML(match[1]), label = escapeHTML(chipLabel(editor, match[1]));
     const chipID = createRandomId(); trustedChipNames.set(chipID, match[1]);
-    html += `<span class="editor-mention" data-mention="${name}" data-chat-chip="${chipID}" data-insert-marker="${marker}" contenteditable="false" role="img" aria-label="Mention ${name}">@${name}</span>`;
+    html += `<span class="editor-mention" data-mention="${name}" data-chat-chip="${chipID}" data-insert-marker="${marker}" contenteditable="false" role="img" aria-label="Mention ${label}">@${label}</span>`;
     cursor = token.lastIndex;
   }
   html += textHTML(content.slice(cursor));
@@ -247,12 +250,12 @@ function knownMentions(editor, text) {
 function escapeHTML(text) { return String(text).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
 function textHTML(text) { return escapeHTML(text).replace(/\r\n|\r|\n/g, "<br>"); }
 
-function createMention(name) {
-  const chip = document.createElement("span");
+function createMention(editor, name) {
+  const chip = document.createElement("span"), label = chipLabel(editor, name);
   chip.className = "editor-mention"; chip.dataset.mention = name;
   chip.dataset.chatChip = createRandomId(); trustedChipNames.set(chip.dataset.chatChip, name);
   chip.contentEditable = "false"; chip.setAttribute("role", "img");
-  chip.setAttribute("aria-label", `Mention ${name}`); chip.textContent = `@${name}`;
+  chip.setAttribute("aria-label", `Mention ${label}`); chip.textContent = `@${label}`;
   return chip;
 }
 function createAutoSeparator() {

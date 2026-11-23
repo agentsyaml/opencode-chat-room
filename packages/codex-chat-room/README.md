@@ -11,7 +11,7 @@ in the repository root for that API).
 ## What works
 
 - `room` MCP tool: `create`, `join`, `join_status`, `leave`, `list`, `send`,
-  `poll`, `recall`, `members`, and `announcement_*`. Questions can be sent with
+  `poll`, `recall`, `members`, `announcement_*`, and `task_*` (list/create/update/delete). Questions can be sent with
   `isQuestion: true`. `create` accepts `joinPolicy: "approval"`; joining such a
   room returns a pending request. The delivery loop starts while the request is
   pending, so approval arrives as a notification without another tool call;

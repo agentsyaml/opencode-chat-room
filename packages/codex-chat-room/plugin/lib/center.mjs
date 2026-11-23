@@ -52,6 +52,45 @@ export function formatRoom(room) {
   return lines.join("\n");
 }
 
+function formatTasks(tasks) {
+  if (!Array.isArray(tasks) || tasks.length === 0) return "no tasks";
+  return tasks.map((task) => {
+    const steps = Array.isArray(task.steps) ? task.steps.flatMap((step) => {
+      if (typeof step === "string") return step ? [{ text: step, done: false }] : [];
+      return step && typeof step.text === "string" && step.text ? [{ text: step.text, done: step.done === true }] : [];
+    }) : [];
+    const done = steps.filter((step) => step.done).length;
+    return `${task.id} [${task.status}] ${task.title}` +
+      `${task.assignee ? ` (assignee: ${task.assignee})` : ""}` +
+      `${task.creatorName ? ` (creator: ${task.creatorName})` : ""}` +
+      `${task.dueDate ? ` (due: ${task.dueDate})` : ""}` +
+      `${Array.isArray(task.participants) && task.participants.length ? ` (participants: ${task.participants.join(", ")})` : ""}` +
+      `${task.description ? `\n  ${task.description}` : ""}` +
+      `${steps.length ? `\n  steps: ${done}/${steps.length}${steps.map((step) => `\n  - [${step.done ? "x" : " "}] ${step.text}`).join("")}` : ""}` +
+      `${task.conclusion ? `\n  conclusion: ${task.conclusion}` : ""}`;
+  }).join("\n");
+}
+
+function taskSteps(steps) {
+  return steps.map((step) => {
+    if (!step || typeof step !== "object" || Array.isArray(step)) return step;
+    return { text: step.text, done: step.done === true };
+  });
+}
+
+function taskFields(args) {
+  return {
+    ...(args.title !== undefined ? { title: args.title.trim() } : {}),
+    ...(args.description !== undefined ? { description: args.description } : {}),
+    ...(args.assignee !== undefined ? { assignee: args.assignee.trim() } : {}),
+    ...(args.status !== undefined ? { status: args.status } : {}),
+    ...(args.dueDate !== undefined ? { dueDate: String(args.dueDate).trim() } : {}),
+    ...(Array.isArray(args.participants) ? { participants: args.participants.map((name) => String(name).trim()) } : {}),
+    ...(args.conclusion !== undefined ? { conclusion: args.conclusion } : {}),
+    ...(Array.isArray(args.steps) ? { steps: taskSteps(args.steps) } : {}),
+  };
+}
+
 export async function centerAction(cfg, args, sessionID) {
   switch (args.action) {
     case "list": {
@@ -163,6 +202,36 @@ export async function centerAction(cfg, args, sessionID) {
       }
       await request(cfg, path, "DELETE", { sessionID });
       return `announcement deleted: ${args.announcementName}`;
+    }
+    case "task_list": {
+      if (!args.roomId) return "error: roomId is required";
+      const result = await request(cfg, `/rooms/${encodeURIComponent(args.roomId)}/tasks?sessionID=${encodeURIComponent(sessionID)}`, "GET");
+      return formatTasks(result.tasks);
+    }
+    case "task_create": {
+      if (!args.roomId) return "error: roomId is required";
+      if (typeof args.title !== "string" || !args.title.trim()) return "error: title is required to create a task";
+      const task = await request(cfg, `/rooms/${encodeURIComponent(args.roomId)}/tasks`, "POST", {
+        sessionID,
+        ...taskFields(args),
+      });
+      return `task created: ${task.task.title} (id: ${task.task.id}, status: ${task.task.status})`;
+    }
+    case "task_update": {
+      if (!args.roomId) return "error: roomId is required";
+      if (!args.taskId) return "error: taskId is required";
+      const fields = taskFields(args);
+      if (!Object.keys(fields).length) return "error: at least one of title, description, assignee, status, dueDate, participants, conclusion, or steps is required to update a task";
+      if (fields.status !== undefined && !["todo", "doing", "done"].includes(fields.status)) return "error: status must be todo, doing, or done";
+      if (fields.title !== undefined && !fields.title) return "error: title must contain 1 to 200 characters";
+      const result = await request(cfg, `/rooms/${encodeURIComponent(args.roomId)}/tasks/${encodeURIComponent(args.taskId)}`, "PATCH", { sessionID, ...fields });
+      return `task updated: ${result.task.title} (id: ${result.task.id}, status: ${result.task.status})`;
+    }
+    case "task_delete": {
+      if (!args.roomId) return "error: roomId is required";
+      if (!args.taskId) return "error: taskId is required";
+      await request(cfg, `/rooms/${encodeURIComponent(args.roomId)}/tasks/${encodeURIComponent(args.taskId)}`, "DELETE", { sessionID });
+      return `task deleted: ${args.taskId}`;
     }
     default:
       return "error: unknown action";

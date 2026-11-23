@@ -124,12 +124,23 @@ export function initShortcuts(app) {
     animateScroll(bottom ? thread.scrollHeight : 0);
   };
   app.animateRoomSwitch = (direction) => {
-    // Keep the motion in the room list: a vertical glide shows where the selection moved.
-    for (const row of document.querySelectorAll("#roomList .room-row.selected, #roomListChat .room-row.selected")) {
+    // Fluent motion lives in the selected indicator: the old bar collapses toward
+    // the direction of travel while the new bar expands from the opposite edge.
+    const oldId = app.state.previousRoomId;
+    const oldRows = oldId ? document.querySelectorAll(`#roomListChat .room-row[data-room-id="${CSS.escape(oldId)}"]`) : [];
+    for (const row of oldRows) {
+      row.classList.remove("room-switch-leave");
+      row.style.setProperty("--room-switch-origin", direction > 0 ? "bottom" : "top");
+      void row.offsetWidth;
+      row.classList.add("room-switch-leave");
+      setTimeout(() => row.classList.remove("room-switch-leave"), 220);
+    }
+    for (const row of document.querySelectorAll("#roomListChat .room-row.selected")) {
       row.classList.remove("room-switch-enter");
-      row.style.setProperty("--room-switch-shift", `${direction > 0 ? 3 : -3}px`);
+      row.style.setProperty("--room-switch-origin", direction > 0 ? "top" : "bottom");
       void row.offsetWidth;
       row.classList.add("room-switch-enter");
+      setTimeout(() => row.classList.remove("room-switch-enter"), 220);
       row.scrollIntoView({ block: "nearest" });
     }
   };

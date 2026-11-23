@@ -7,6 +7,7 @@ import {
   TextareaRenderable,
 } from "@opentui/core";
 import { createOverlays } from "./ui-overlay-view.mjs";
+import { createSuggestView } from "./ui-suggest-view.mjs";
 
 export function createView(renderer, theme) {
   const view = {};
@@ -259,6 +260,7 @@ export function createView(renderer, theme) {
   view.statusRow.add(view.statusHints);
 
   createOverlays(renderer, theme, view);
+  createSuggestView(renderer, theme, view);
 
   return view;
 }

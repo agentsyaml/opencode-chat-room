@@ -67,6 +67,48 @@ describe("central actions", () => {
     expect(() => parseRoomArgs({ action: "send", roomId: "r1", text: `${longest}x` })).toThrow(TypeError);
   });
 
+  test("task actions map to central routes and validate arguments", async () => {
+    const task = { id: "t1", roomId: "r1", title: "Fix", description: "details", assignee: "alice", status: "todo", creatorName: "agent",
+      dueDate: "2026-12-31", participants: ["alice", "bob"], conclusion: "shipped", steps: [{ text: "plan", done: false }, { text: "code", done: true }] };
+    const fake = center(({ method, path }) => {
+      if (method === "GET" && path === "/rooms/r1/tasks") return [200, { tasks: [task] }];
+      if (method === "POST" && path === "/rooms/r1/tasks") return [201, { task }];
+      if (method === "PATCH" && path === "/rooms/r1/tasks/t1") return [200, { task: { ...task, status: "doing" } }];
+      if (method === "DELETE" && path === "/rooms/r1/tasks/t1") return [200, { ok: true }];
+      return undefined;
+    });
+    const config = cfg(fake.url);
+    const listed = await roomAction(config, parseRoomArgs({ action: "task_list", roomId: "r1" }), "dsh:s1");
+    expect(listed).toContain("t1 [todo] Fix");
+    expect(listed).toContain("assignee: alice");
+    expect(listed).toContain("(creator: agent) (due: 2026-12-31) (participants: alice, bob)");
+    expect(listed).toContain("steps: 1/2\n  - [ ] plan\n  - [x] code");
+    expect(listed).toContain("conclusion: shipped");
+    expect(fake.requests[0]?.query.get("sessionID")).toBe("dsh:s1");
+    expect(await roomAction(config, parseRoomArgs({ action: "task_create", roomId: "r1", title: "Fix", assignee: "", dueDate: "2026-12-31", participants: ["alice"], conclusion: "c", steps: ["plan", { text: "code" }, { text: "review", done: false }] }), "dsh:s1"))
+      .toBe("task created: Fix (id: t1, status: todo)");
+    expect(await roomAction(config, parseRoomArgs({ action: "task_update", roomId: "r1", taskId: "t1", status: "doing", assignee: "", dueDate: "", participants: [], conclusion: "", steps: [] }), "dsh:s1"))
+      .toBe("task updated: Fix (id: t1, status: doing)");
+    expect(await roomAction(config, parseRoomArgs({ action: "task_delete", roomId: "r1", taskId: "t1" }), "dsh:s1"))
+      .toBe("task deleted: t1");
+    expect(fake.requests.find((request) => request.method === "POST")?.body).toEqual({ sessionID: "dsh:s1", title: "Fix", assignee: "", dueDate: "2026-12-31", participants: ["alice"], conclusion: "c", steps: ["plan", { text: "code", done: false }, { text: "review", done: false }] });
+    expect(fake.requests.find((request) => request.method === "PATCH")?.body).toEqual({ sessionID: "dsh:s1", status: "doing", assignee: "", dueDate: "", participants: [], conclusion: "", steps: [] });
+    expect(fake.requests.find((request) => request.method === "DELETE")?.body).toEqual({ sessionID: "dsh:s1" });
+    expect(parseRoomArgs({ action: "task_create", roomId: "r1", title: "x", assignee: "" }).assignee).toBe("");
+    expect(parseRoomArgs({ action: "task_create", roomId: "r1", title: "x", dueDate: " 2026-12-31 ", steps: [{ text: " code " }, { text: " verify ", done: false }] }).steps)
+      .toEqual([{ text: "code", done: false }, { text: "verify", done: false }]);
+    expect(() => parseRoomArgs({ action: "task_create", roomId: "r1", title: "x", assignee: "x".repeat(65) })).toThrow(TypeError);
+    expect(() => parseRoomArgs({ action: "task_update", roomId: "r1", taskId: "t1", status: "later" })).toThrow(TypeError);
+    expect(() => parseRoomArgs({ action: "task_create", roomId: "r1", title: "x", dueDate: "2026-02-30" })).toThrow(/dueDate/);
+    expect(() => parseRoomArgs({ action: "task_create", roomId: "r1", title: "x", participants: [""] })).toThrow(/participants/);
+    expect(() => parseRoomArgs({ action: "task_create", roomId: "r1", title: "x", conclusion: "x".repeat(5001) })).toThrow(/conclusion/);
+    expect(() => parseRoomArgs({ action: "task_create", roomId: "r1", title: "x", steps: Array.from({ length: 31 }, (_, index) => `step ${index}`) })).toThrow(/steps/);
+    expect(() => parseRoomArgs({ action: "task_create", roomId: "r1", title: "x", steps: [{ text: "ok", done: "yes" }] })).toThrow(/done/);
+    await expect(roomAction(config, parseRoomArgs({ action: "task_create", roomId: "r1" }), "dsh:s1")).rejects.toThrow(/title/);
+    await expect(roomAction(config, parseRoomArgs({ action: "task_update", roomId: "r1", taskId: "t1" }), "dsh:s1"))
+      .rejects.toThrow(/title, description/);
+  });
+
   test("server failures keep their status and message", async () => {
     const fake = center(() => [403, { error: "not a member" }]);
     await expect(roomAction(cfg(fake.url), parseRoomArgs({ action: "members", roomId: "r1" }), "dsh:s1"))

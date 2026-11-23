@@ -26,6 +26,12 @@ test("prepareMarkdown marks prose mentions and leaves code untouched", () => {
   assert.match(prepared, /`<at>@inline<\/at>`/);
   assert.match(prepared, /```\n<at>@code<\/at>\n```/);
   assert.equal(prepared.includes(`${MENTION_SENTINEL}@bare`), false);
+  assert.equal(
+    prepareMarkdown("- item\n\n    ~~~js\n    <at>@code</at>\n    ~~~").includes(MENTION_SENTINEL),
+    false,
+  );
+  assert.equal(prepareMarkdown("`a``` <at>@code</at>`").includes(MENTION_SENTINEL), false);
+  assert.equal(prepareMarkdown("    <at>@code</at>").includes(MENTION_SENTINEL), false);
 });
 
 test("attachment markers render as a label instead of leaking the UUID", async () => {

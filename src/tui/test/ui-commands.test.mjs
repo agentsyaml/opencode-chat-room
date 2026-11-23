@@ -136,28 +136,28 @@ async function settle(context, needle, attempts = 30) {
   await context.flush();
 }
 
-test("slash opens command mode and /quit quits", async () => {
+test("slash stays inline and /quit quits", async () => {
   const context = await setup();
   try {
     context.mockInput.pressTab();
     await context.renderOnce();
     await context.mockInput.typeText("/");
     await context.renderOnce();
-    assert.equal(context.app.state.palette?.mode, "commands");
-    assert.equal(context.app.state.palette?.query, "/");
+    assert.equal(context.app.state.palette, null);
+    assert.equal(context.app.state.draft, "/");
+    assert.equal(context.app.state.focus, "composer");
+    assert.equal(context.ui.suggestBox.visible, true);
     const frame = context.captureCharFrame();
-    assert.match(frame, /Palette/);
-    assert.match(frame, /Members/);
-    assert.match(frame, /Announcements/);
-    assert.match(frame, /Questions/);
-    assert.match(frame, /Files/);
-    assert.match(frame, /Reminders/);
-    assert.match(frame, /Settings/);
-    assert.match(frame, /Quit/);
+    assert.match(frame, /commands/);
+    assert.match(frame, /Refresh rooms/);
+    const ids = context.ui.suggestItems.map((command) => command.id);
+    for (const id of ["members", "announcements", "questions", "files", "reminders", "settings", "quit"]) {
+      assert.ok(ids.includes(id), id);
+    }
 
     await context.mockInput.typeText("quit");
-    await settle(context, "/quit");
-    assert.deepEqual(context.app.paletteCommands().map((command) => command.id), ["quit"]);
+    await context.renderOnce();
+    assert.deepEqual(context.ui.suggestItems.map((command) => command.id), ["quit"]);
     context.mockInput.pressEnter();
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(context.app.state.quit, true);
@@ -391,6 +391,7 @@ test("settings redact the token and every command frame stays clean", async () =
     assert.match(settings, /20s hold/);
     assert.match(settings, /Request timeout: 10s/);
     assert.match(settings, /Token: set \(redacted\)/);
+    assert.doesNotMatch(settings, /\*\*/, "markdown bold markers should be concealed");
     for (const frame of frames) assert.equal(frame.includes(TOKEN), false, "token leaked into a frame");
   } finally {
     await teardown(context);

@@ -85,6 +85,39 @@ test("poll excludes self, acknowledges the newest foreign message and reports er
   }
 });
 
+test("task actions use the central task routes", async () => {
+  const task = { id: "t1", roomId: "r1", title: "Fix", description: "details", assignee: "alice", status: "todo", creatorName: "alex@host", creatorSessionID: "codex:t1", createdAt: 1, updatedAt: 1,
+    dueDate: "2026-12-31", participants: ["alice", "bob"], conclusion: "shipped", steps: [{ text: "plan", done: false }, { text: "code", done: true }] };
+  const center = await startCenter(({ method, path }) => {
+    if (method === "GET" && path === "/rooms/r1/tasks") return [200, { tasks: [task] }];
+    if (method === "POST" && path === "/rooms/r1/tasks") return [201, { task }];
+    if (method === "PATCH" && path === "/rooms/r1/tasks/t1") return [200, { task: { ...task, status: "doing" } }];
+    if (method === "DELETE" && path === "/rooms/r1/tasks/t1") return [200, { ok: true }];
+    return undefined;
+  });
+  try {
+    const cfg = { url: center.url, token: "" };
+    const listed = await centerAction(cfg, { action: "task_list", roomId: "r1" }, "codex:t1");
+    assert.match(listed, /t1 \[todo\] Fix/);
+    assert.match(listed, /assignee: alice/);
+    assert.match(listed, /\(creator: alex@host\) \(due: 2026-12-31\) \(participants: alice, bob\)/);
+    assert.match(listed, /steps: 1\/2\n  - \[ \] plan\n  - \[x\] code/);
+    assert.match(listed, /conclusion: shipped/);
+    assert.equal(center.requests[0].query.sessionID, "codex:t1");
+    assert.equal(await centerAction(cfg, { action: "task_create", roomId: "r1", title: "Fix", assignee: "", dueDate: "2026-12-31", participants: ["alice"], conclusion: "c", steps: ["plan", { text: "code" }, { text: "review", done: false }] }, "codex:t1"), "task created: Fix (id: t1, status: todo)");
+    assert.deepEqual(center.requests.find((r) => r.method === "POST").body, { sessionID: "codex:t1", title: "Fix", assignee: "", dueDate: "2026-12-31", participants: ["alice"], conclusion: "c", steps: ["plan", { text: "code", done: false }, { text: "review", done: false }] });
+    assert.equal(await centerAction(cfg, { action: "task_update", roomId: "r1", taskId: "t1", status: "doing", dueDate: "", participants: [], conclusion: "", steps: [] }, "codex:t1"), "task updated: Fix (id: t1, status: doing)");
+    assert.deepEqual(center.requests.find((r) => r.method === "PATCH").body, { sessionID: "codex:t1", status: "doing", dueDate: "", participants: [], conclusion: "", steps: [] });
+    assert.equal(await centerAction(cfg, { action: "task_delete", roomId: "r1", taskId: "t1" }, "codex:t1"), "task deleted: t1");
+    assert.deepEqual(center.requests.find((r) => r.method === "DELETE").body, { sessionID: "codex:t1" });
+    assert.equal(await centerAction(cfg, { action: "task_create", roomId: "r1" }, "codex:t1"), "error: title is required to create a task");
+    assert.equal(await centerAction(cfg, { action: "task_update", roomId: "r1", taskId: "t1" }, "codex:t1"), "error: at least one of title, description, assignee, status, dueDate, participants, conclusion, or steps is required to update a task");
+    assert.equal(await centerAction(cfg, { action: "task_delete", roomId: "r1" }, "codex:t1"), "error: taskId is required");
+  } finally {
+    await center.close();
+  }
+});
+
 test("members, leave and announcements use the central routes", async () => {
   const center = await startCenter(({ method, path }) => {
     if (method === "GET" && path === "/rooms/r1") return [200, roomPayload({ participants: [{ id: "alice", name: "alice" }] })];
