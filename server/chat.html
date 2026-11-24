@@ -33,6 +33,7 @@
 <link rel="stylesheet" href="/assets/files.css?v={{version}}">
 <link rel="stylesheet" href="/assets/tasks.css?v={{version}}">
 <link rel="stylesheet" href="/assets/doc-preview.css?v={{version}}">
+<link rel="stylesheet" href="/assets/diagram-viewer.css?v={{version}}">
 </head>
 <body>
 
@@ -604,12 +605,14 @@
         <p id="draftCount" class="draft-count">0 / 5000</p>
       </div>
     </footer>
+    <!-- Drag or arrow-key resizes the preview/task pane; one separator serves both. -->
+    <div id="sidePaneHandle" class="side-pane-handle" role="separator" aria-orientation="vertical" aria-label="Resize side pane" data-i18n-aria-label="sidePaneResize" aria-valuemin="360" aria-valuemax="960" aria-valuenow="380" tabindex="0"></div>
     <dialog id="docPreview" class="doc-preview" aria-labelledby="docPreviewTitle">
       <header class="doc-preview-head">
         <div class="doc-preview-heading">
-          <p class="doc-preview-eyebrow"><svg class="fluent-icon doc-preview-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-document-24"></use></svg><span data-i18n="docPreviewEyebrow">Markdown preview</span></p>
+          <p class="doc-preview-eyebrow"><svg class="fluent-icon doc-preview-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-document-24"></use></svg><span id="docPreviewEyebrow" data-i18n="docPreviewEyebrow">Markdown preview</span></p>
           <h2 id="docPreviewTitle" tabindex="-1"></h2>
-          <p class="doc-preview-meta"><span id="docPreviewSize"></span><span id="docPreviewStatus" role="status" aria-live="polite"></span></p>
+          <p class="doc-preview-meta"><span id="docPreviewSize"></span><span id="docPreviewLanguage" class="doc-preview-language" hidden></span><span id="docPreviewStatus" role="status" aria-live="polite"></span></p>
         </div>
         <div class="doc-preview-actions">
           <button id="btnDocPreviewDownload" class="btn ghost small doc-preview-download" type="button" data-i18n="resourceDownload">Download</button>
@@ -618,6 +621,7 @@
       </header>
       <div class="doc-preview-scroll">
         <article id="docPreviewBody" class="doc-preview-body msg-text"></article>
+        <p id="docPreviewNotice" class="hint doc-preview-empty" role="status" hidden></p>
         <p id="docPreviewEmpty" class="hint doc-preview-empty" data-i18n="docPreviewEmpty" hidden>This document is empty.</p>
       </div>
     </dialog>
@@ -633,6 +637,23 @@
       <button id="btnZoomIn" class="image-dialog-tool" type="button" aria-label="Zoom in" data-i18n-aria-label="zoomIn"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-add-24"></use></svg></button>
     </div>
     <img id="imageDialogImage" alt="">
+  </dialog>
+
+   <!-- A rendered Mermaid diagram opens large enough to read, with zoom and pan. -->
+  <dialog id="diagramViewer" class="diagram-viewer" aria-labelledby="diagramViewerTitle">
+    <header class="diagram-viewer-toolbar">
+      <h2 id="diagramViewerTitle" data-i18n="diagramViewerTitle">Diagram</h2>
+      <div class="diagram-viewer-tools" role="group" aria-label="Diagram zoom" data-i18n-aria-label="diagramZoomControls">
+        <button id="btnDiagramZoomOut" class="diagram-viewer-tool" type="button" aria-label="Zoom out" data-i18n-aria-label="zoomOut"></button>
+        <span id="diagramZoomLevel" class="diagram-viewer-level" aria-live="polite">100%</span>
+        <button id="btnDiagramZoomIn" class="diagram-viewer-tool" type="button" aria-label="Zoom in" data-i18n-aria-label="zoomIn"></button>
+        <button id="btnDiagramFit" class="diagram-viewer-tool diagram-viewer-fit" type="button" data-i18n="diagramFit">Fit</button>
+      </div>
+      <button id="btnCloseDiagram" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button>
+    </header>
+    <div id="diagramViewerBody" class="diagram-viewer-body">
+      <div id="diagramViewerStage" class="diagram-viewer-stage"></div>
+    </div>
   </dialog>
 
    <!-- Shown when someone who is not the room owner reaches for the settings. -->

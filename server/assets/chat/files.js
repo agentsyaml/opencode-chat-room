@@ -2,7 +2,8 @@
 import { LS } from "./state.js";
 import { isRoomAdmin } from "./admin-badge.js";
 import { icon } from "./icons.js";
-import { isMarkdownResource } from "./markdown.js";
+import { docPreviewFormat, isDocPreviewResource, TEXT_PREVIEW_LIMIT } from "./resource-format.js";
+import { createCopyButton, copyResourceText } from "./copy-action.js";
 
 const PAGE_SIZE = 500;
 const UNKNOWN_UPLOADER = "__unknown_uploader__";
@@ -111,9 +112,12 @@ export function initFiles(app) {
     } catch { showError("filesDownloadFailed"); }
   };
 
+  const deleting = new Set();
   const removeResource = async (resource) => {
-    if (!(await app.confirmAction(app.t("resourceDeleteConfirm", { name: resource.name })))) return;
+    if (deleting.has(resource.id)) return;
+    deleting.add(resource.id);
     try {
+      if (!(await app.confirmAction(app.t("resourceDeleteConfirm", { name: resource.name })))) return;
       await app.api(`/rooms/${encodeURIComponent(resource.roomID)}/resources/${encodeURIComponent(resource.id)}`, {
         method: "DELETE", headers: { "x-session-id": LS.sessionID }, body: "{}",
       });
@@ -123,6 +127,7 @@ export function initFiles(app) {
       hideError();
       render();
     } catch { showError("resourceDeleteFailed"); }
+    finally { deleting.delete(resource.id); }
   };
 
   const actionButton = (action, label, iconName, extra = {}) => {
@@ -179,11 +184,18 @@ export function initFiles(app) {
     const actions = document.createElement("div");
     actions.className = "file-actions";
     const previewID = `file-preview-${resource.id}`;
-    if (mediaKind(resource.mimeType) || isMarkdownResource(resource)) {
+    const docPreview = isDocPreviewResource(resource);
+    const textPreview = docPreview && docPreviewFormat(resource)?.kind !== "pdf";
+    if (mediaKind(resource.mimeType) || docPreview) {
       const inline = mediaKind(resource.mimeType);
       actions.append(actionButton("preview", app.t("filesPreviewLabel", { name: resource.name }), ICONS.preview, inline
         ? { "aria-expanded": "false", "aria-controls": previewID }
         : {}));
+    }
+    if (textPreview) {
+      const copy = createCopyButton(app, "file-action");
+      copy.dataset.fileAction = "copy";
+      actions.append(copy);
     }
     actions.append(actionButton("download", app.t("filesDownloadLabel", { name: resource.name }), ICONS.download));
     if (canDelete(resource)) actions.append(actionButton("delete", app.t("filesDeleteLabel", { name: resource.name }), ICONS.trash));
@@ -265,7 +277,8 @@ export function initFiles(app) {
     if (!items.length) summary.textContent = app.t("filesLoading");
     try {
       const offset = reset ? 0 : items.length;
-      const page = await app.api(`/rooms/${encodeURIComponent(room.id)}/resources?limit=${PAGE_SIZE}&offset=${offset}`, {
+      const before = !reset && items.length ? `&before=${encodeURIComponent(items.at(-1).id)}` : "";
+      const page = await app.api(`/rooms/${encodeURIComponent(room.id)}/resources?limit=${PAGE_SIZE}&offset=${offset}${before}`, {
         headers: { "x-session-id": LS.sessionID },
       });
       if (request !== generation || app.state.room?.id !== room.id) return;
@@ -350,7 +363,15 @@ export function initFiles(app) {
     const resource = items.find((item) => item.id === row?.dataset.resourceId);
     if (!resource) return;
     const action = button.dataset.fileAction;
-    if (action === "preview" && isMarkdownResource(resource)) {
+    if (action === "copy") {
+      void copyResourceText(button, app, async () => {
+        if (Number(resource.size) > TEXT_PREVIEW_LIMIT) return "";
+        const blob = await app.apiBlob(contentURL(resource), { headers: { "x-session-id": LS.sessionID } });
+        return blob.text();
+      });
+      return;
+    }
+    if (action === "preview" && isDocPreviewResource(resource)) {
       // The document pane lives in the chat view; the modal file list would hide it.
       close();
       app.openDocPreview(resource.roomID, resource, null);

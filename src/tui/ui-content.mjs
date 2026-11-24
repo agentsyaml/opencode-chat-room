@@ -372,7 +372,9 @@ export function syncPalette(ui, state) {
   if (mode === "commands") {
     options = ui.app.paletteCommands().map((command) => ({ name: command.label, description: "", value: command.id }));
   } else if (mode === "search") {
-    options = !palette.results.length
+    options = !String(palette.query ?? "").trim()
+      ? [{ name: "Type to search messages", description: "", value: "" }]
+      : !palette.results.length
       ? [{ name: palette.searching ? "Searching..." : "No matches", description: "", value: "" }]
       : palette.results.map((result) => {
         const info = formatMessage(result.message, null);

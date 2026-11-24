@@ -32,6 +32,9 @@ test("prepareMarkdown marks prose mentions and leaves code untouched", () => {
   );
   assert.equal(prepareMarkdown("`a``` <at>@code</at>`").includes(MENTION_SENTINEL), false);
   assert.equal(prepareMarkdown("    <at>@code</at>").includes(MENTION_SENTINEL), false);
+  // An info string inside a fence is content, not a closer.
+  assert.equal(prepareMarkdown("```\n<at>@code</at>\n```js\n<at>@still</at>\n```\n<at>@tail</at>").includes(`${MENTION_SENTINEL}@still`), false);
+  assert.equal(prepareMarkdown("```\n<at>@code</at>\n```js\n<at>@still</at>\n```\n<at>@tail</at>").includes(`${MENTION_SENTINEL}@tail`), true);
 });
 
 test("attachment markers render as a label instead of leaking the UUID", async () => {

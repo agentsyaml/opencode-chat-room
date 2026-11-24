@@ -1,10 +1,15 @@
 import { createRandomId, LS } from "./state.js";
 import { isRoomAdmin } from "./admin-badge.js";
 import { iconNode } from "./icons.js";
+import { isUnsafeDiagram, rememberDiagramSource, renderDiagram, showDiagramFallback } from "./diagram-viewer.js";
+import { docPreviewFormat, TEXT_PREVIEW_LIMIT } from "./resource-format.js";
+import { copyTextToClipboard } from "./clipboard.js";
+import { createCopyButton, copyResourceText } from "./copy-action.js";
+
+export { copyTextToClipboard };
 
 const mentionPattern = /<at>@([^<]+)<\/at>/g;
 const resourcePattern = /\[\[resource:([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})\]\]/gi;
-let mermaidReady = false;
 const previewUrls = new Map();
 const sanitizerTags = new Map();
 let previewObserver;
@@ -19,22 +24,21 @@ function preserveRawHtml(value) {
   });
 }
 
+const SANITIZER_TAG_CACHE_MAX = 256;
 function sanitizerKeepsTag(name) {
   const key = name.toLowerCase();
-  if (!sanitizerTags.has(key)) {
-    const probe = `<${key}></${key}>`;
-    sanitizerTags.set(key, window.DOMPurify.sanitize(probe).toLowerCase().includes(`<${key}`));
-  }
-  return sanitizerTags.get(key);
+  if (sanitizerTags.has(key)) return sanitizerTags.get(key);
+  // A message with endless distinct tag names must not probe DOMPurify forever;
+  // past the cap, unknown tags simply stay literal text.
+  if (sanitizerTags.size >= SANITIZER_TAG_CACHE_MAX) return false;
+  const probe = `<${key}></${key}>`;
+  const keeps = window.DOMPurify.sanitize(probe).toLowerCase().includes(`<${key}`);
+  sanitizerTags.set(key, keeps);
+  return keeps;
 }
 
 function escapeHtmlText(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-}
-
-export function isMarkdownResource(resource) {
-  const mime = String(resource?.mimeType || "").split(";")[0].trim().toLowerCase();
-  return mime === "text/markdown" || mime === "text/x-markdown" || /\.(?:md|markdown)$/i.test(String(resource?.name || ""));
 }
 
 export function renderMarkdown(root, text, app) {
@@ -62,7 +66,11 @@ export function renderMarkdown(root, text, app) {
   for (const node of diagramNodes) {
     const source = diagrams.get(node.dataset.chatMermaid);
     node.removeAttribute("data-chat-mermaid"); node.className = "mermaid-diagram";
-    if (source !== undefined) showDiagramFallback(node, source, app, !isUnsafeDiagram(source));
+    if (source !== undefined) {
+      const unsafe = isUnsafeDiagram(source);
+      showDiagramFallback(node, source, app, !unsafe);
+      if (!unsafe) activateDiagram(node, source, app);
+    }
   }
   fragment.querySelectorAll("a").forEach((link) => {
     link.target = "_blank";
@@ -162,54 +170,26 @@ async function copyCode(button, code, app) {
   }, 1600);
 }
 
-async function initializeMermaid() {
-  if (mermaidReady) return;
-  if (!window.mermaid) await new Promise((resolve, reject) => {
-    const script = document.querySelector('script[src$="mermaid-11.12.2.min.js"]');
-    if (!script) return reject(new Error("Mermaid bundle is missing"));
-    script.addEventListener("load", resolve, { once: true });
-    script.addEventListener("error", reject, { once: true });
-    window.addEventListener("load", resolve, { once: true });
+// A rendered diagram is a button: click, Enter, or Space opens the readable overlay.
+function activateDiagram(node, source, app) {
+  node.tabIndex = 0;
+  node.setAttribute("role", "button");
+  node.dataset.i18nAriaLabel = "openDiagram";
+  node.setAttribute("aria-label", app.t("openDiagram"));
+  rememberDiagramSource(node, source);
+  const open = (event) => {
+    const svg = node.querySelector("svg");
+    if (!svg || !app.openDiagram) return;
+    event.preventDefault();
+    event.stopPropagation();
+    app.openDiagram(svg, source);
+  };
+  // Focus belongs in the viewer; closing returns it here.
+  node.addEventListener("mousedown", (event) => { if (node.querySelector("svg")) event.preventDefault(); });
+  node.addEventListener("click", open);
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") open(event);
   });
-  if (!window.mermaid) throw new Error("Mermaid bundle failed to load");
-  window.mermaid.initialize({
-    startOnLoad: false, securityLevel: "strict", htmlLabels: false,
-    theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default",
-    flowchart: { htmlLabels: false }, maxTextSize: 20000, maxEdges: 200, suppressErrorRendering: true,
-    secure: ["secure", "securityLevel", "startOnLoad", "htmlLabels", "flowchart", "theme", "themeCSS", "themeVariables", "dompurifyConfig", "maxTextSize", "maxEdges", "suppressErrorRendering"],
-  });
-  mermaidReady = true;
-}
-async function renderDiagram(node, source, app) {
-  if (source === undefined || isUnsafeDiagram(source)) return;
-  try {
-    await initializeMermaid();
-    const { svg } = await window.mermaid.render(`oc-chat-${createRandomId()}`, source);
-    if (!node.isConnected) return;
-    const fragment = window.DOMPurify.sanitize(svg, {
-      RETURN_DOM_FRAGMENT: true, USE_PROFILES: { svg: true, svgFilters: true },
-      FORBID_TAGS: ["foreignObject", "a", "script"], FORBID_ATTR: ["href", "xlink:href", "onclick", "onload"],
-      ALLOW_DATA_ATTR: false,
-    });
-    if (!fragment.querySelector("svg")) throw new Error("Diagram SVG was rejected");
-    const update = () => node.replaceChildren(fragment);
-    if (app.preserveReadingLayout) await app.preserveReadingLayout(update); else update();
-  } catch {
-    if (node.isConnected) showDiagramFallback(node, source, app, false);
-  }
-}
-function isUnsafeDiagram(source = "") {
-  return /%%\s*\{|^\s*---\s*(?:\r?\n)|\burl\s*\(|@import|@\s*\{[^}]*\b(?:img|image)\s*:/i.test(source);
-}
-function showDiagramFallback(node, source, app, loading) {
-  node.textContent = "";
-  const status = document.createElement("p"); status.className = "diagram-status";
-  status.setAttribute("role", "status"); status.textContent = app.t(loading ? "diagramLoading" : "diagramRenderFailed");
-  node.append(status);
-  if (!loading) {
-    const pre = document.createElement("pre"), code = document.createElement("code");
-    code.textContent = source; pre.append(code); node.append(pre);
-  }
 }
 
 function replaceResourceMarkers(fragment, app) {
@@ -251,14 +231,26 @@ async function loadResourceCard(card, roomId, app) {
       remove = resourceMenuItem("resourceDelete", () => deleteResource(card, roomId, id, resource, app, status, remove), app);
       actions.append(resourceSplit(app, resource, download, remove));
     } else actions.append(download);
-    const markdown = isMarkdownResource(resource);
-    if (previewKind(type) || markdown) {
-      const preview = resourceButton("resourcePreview", resource.name, () => markdown
+    const docFormat = docPreviewFormat(resource);
+    if (docFormat && docFormat.kind !== "pdf") {
+      const copy = createCopyButton(app, "resource-copy");
+      copy.dataset.copyAction = "card";
+      copy.addEventListener("click", () => {
+        void copyResourceText(copy, app, async () => {
+          if (Number(resource.size) > TEXT_PREVIEW_LIMIT) return "";
+          const data = await app.apiBlob(`/rooms/${encodeURIComponent(roomId)}/resources/${encodeURIComponent(id)}/content`);
+          return data.text();
+        });
+      });
+      actions.append(copy);
+    }
+    if (previewKind(type) || docFormat) {
+      const preview = resourceButton("resourcePreview", resource.name, () => docFormat
         ? app.openDocPreview(roomId, resource, preview)
         : previewResource(card, roomId, id, resource, type, preview, app, status), app);
       actions.append(preview);
       // Media you sent yourself is shown inline; other people's media stays collapsed.
-      if (!markdown && card.closest(".msg.own")) void previewResource(card, roomId, id, resource, type, preview, app, status);
+      if (!docFormat && card.closest(".msg.own")) void previewResource(card, roomId, id, resource, type, preview, app, status);
     }
   } catch (error) { if (card.isConnected) setResourceError(card, app, error?.status === 404 ? "resourceDeleted" : "resourceFailed"); }
 }
@@ -467,33 +459,4 @@ function replaceMentionTokens(fragment, mentions, app) {
     }
     node.replaceWith(replacement);
   }
-}
-
-export async function copyTextToClipboard(text, mentionSource = false) {
-  // The HTML marker lets a later paste rebuild mention chips; unmarked external text stays literal.
-  const html = mentionSource ? `<div data-chatroom-mentions>${String(text).replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char])}</div>` : "";
-  try {
-    if (html && navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
-      await navigator.clipboard.write([new ClipboardItem({ "text/plain": new Blob([text], { type: "text/plain" }), "text/html": new Blob([html], { type: "text/html" }) })]);
-      return true;
-    }
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch { /* Use the legacy clipboard command when permission is unavailable. */ }
-  const field = document.createElement(html ? "div" : "textarea"), selection = getSelection(), active = document.activeElement;
-  const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange()) : [];
-  if (html) { field.contentEditable = "true"; field.innerHTML = html; } else field.value = text;
-  field.setAttribute("readonly", "");
-  field.style.cssText = "position:fixed;left:-9999px;top:0";
-  document.body.append(field);
-  if (html && selection) { const range = document.createRange(); range.selectNodeContents(field); selection.removeAllRanges(); selection.addRange(range); }
-  else if (!html) field.select();
-  let copied = false;
-  try { copied = document.execCommand("copy"); } catch { /* Clipboard access may be disabled. */ }
-  field.remove();
-  if (selection) { selection.removeAllRanges(); ranges.forEach((range) => selection.addRange(range)); }
-  if (active instanceof HTMLElement) active.focus({ preventScroll: true });
-  return copied;
 }

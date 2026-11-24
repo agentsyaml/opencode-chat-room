@@ -87,10 +87,10 @@ test.skipIf(!browserModule)("attachments stage, upload, retry, and send as messa
     await page.waitForFunction(() => document.querySelectorAll("#msgList .chat-resource").length === 4);
     expect(await page.locator("#msgList .chat-resource").count()).toBe(4);
     for (const name of ["__Test_vector.svg", "__Test_untrusted.html"]) {
-      // Active content stays download-only; the admin delete action is the second button.
+      // Markup previews as escaped source text; it stays download-only for execution.
       const card = page.locator("#msgList .chat-resource").filter({ hasText: name });
       expect(await card.locator("button[data-i18n='resourceDownload']").count()).toBe(1);
-      expect(await card.locator("button[data-i18n='resourcePreview']").count()).toBe(0);
+      expect(await card.locator("button[data-i18n='resourcePreview']").count()).toBe(1);
       expect(await card.locator("button[data-i18n='resourceDelete']").count()).toBe(1);
     }
     await page.locator("#msgInput").fill("");

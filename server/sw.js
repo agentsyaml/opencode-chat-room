@@ -18,6 +18,7 @@ const STATIC = [
   "/assets/files.css",
   "/assets/tasks.css",
   "/assets/doc-preview.css",
+  "/assets/diagram-viewer.css",
   "/assets/highlight-10.7.3.min.js",
   "/assets/marked-18.0.4.js",
   "/assets/dompurify-3.4.7.js",
@@ -29,6 +30,28 @@ const STATIC = [
 ];
 const VERSIONED = new Set(STATIC.filter((path) => path.endsWith(".css") || /^\/assets\/(?:highlight|marked|dompurify|mermaid)-/.test(path)));
 const versioned = (path) => `${path}?v=${VERSION}`;
+
+// Recently viewed images live in their own cache: a release upgrades CACHE, but a photo
+// should survive until the person changes identity, it ages out, or the caps evict it.
+const MEDIA_CACHE = "oc-chat-media";
+const MEDIA_INDEX = "/__media-index__";
+const MEDIA_IDENTITY = "/__media-identity__";
+const MEDIA_PATH = /^\/rooms\/[^/]+\/resources\/[^/]+\/content$/;
+const IDENTITY_PATTERN = /^[0-9a-f]{16}$/;
+const REVALIDATE_MS = 10 * 60 * 1000;
+const MEDIA_LIMITS = { entries: 80, bytes: 64 * 1024 * 1024, age: 30 * 24 * 60 * 60 * 1000 };
+// Tests lower these numbers before seeding entries; production keeps the values above.
+self.__MEDIA_LIMITS__ = MEDIA_LIMITS;
+
+// The page owns the identity (a hash of its token and session ID); this worker only
+// partitions the cache by it. Unknown identity means network-only.
+let mediaIdentity;
+let mediaQueue = Promise.resolve();
+const queueMedia = (task) => {
+  const run = mediaQueue.then(task, task);
+  mediaQueue = run.catch(() => {});
+  return run;
+};
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
@@ -59,14 +82,29 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data?.type === "SKIP_WAITING") event.waitUntil(self.skipWaiting());
+  if (event.data?.type === "SKIP_WAITING") {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+  // The first message is a cheap moment to enforce the age policy even if the worker
+  // was already active when this release first loaded.
+  if (!self.__mediaPruned) {
+    self.__mediaPruned = true;
+    event.waitUntil(pruneMedia().catch(() => {}));
+  }
+  if (event.data?.type === "SET_MEDIA_IDENTITY") event.waitUntil(setMediaIdentity(event.data.identity).catch(() => {}));
+  else if (event.data?.type === "CLEAR_MEDIA_CACHE") event.waitUntil(clearMedia().catch(() => {}));
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
-    for (const key of await caches.keys()) if (key !== CACHE) await caches.delete(key);
+    for (const key of await caches.keys()) {
+      if (key !== CACHE && key !== MEDIA_CACHE && key.startsWith("oc-chat-")) await caches.delete(key);
+    }
     await self.clients.claim();
   })());
+  // Housekeeping must never delay or fail activation.
+  event.waitUntil(pruneMedia().catch(() => {}));
 });
 
 self.addEventListener("fetch", (event) => {
@@ -74,6 +112,12 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (MEDIA_PATH.test(url.pathname)) {
+    // Partial responses do not belong in a whole-body cache; leave ranges to the browser.
+    if (request.headers.has("range")) return;
+    event.respondWith(mediaResponse(event));
+    return;
+  }
   // Chat data never comes from a cache: a stale answer would show a room that was deleted
   // and messages that were already read.
   if (url.pathname !== SHELL && !url.pathname.startsWith("/assets/")) return;
@@ -98,3 +142,192 @@ self.addEventListener("fetch", (event) => {
     return cached || network;
   })());
 });
+
+// Cache Storage drops URL fragments, so the partition rides a reserved query parameter.
+// The index keeps the readable `${url}#${identity}` form.
+const mediaBodyKey = (url, identity) => `${url}${url.includes("?") ? "&" : "?"}__media_identity__=${identity}`;
+const mediaIndexKey = (url, identity) => `${url}#${identity}`;
+
+const isMediaEntry = (item) => Boolean(item)
+  && typeof item.url === "string" && typeof item.key === "string" && typeof item.identity === "string"
+  && Number.isFinite(item.size) && item.size >= 0
+  && Number.isFinite(item.usedAt) && Number.isFinite(item.revalidatedAt);
+
+const isCacheable = (response) => response.status !== 206
+  && response.ok && response.type === "basic"
+  && (response.headers.get("content-type") || "").startsWith("image/");
+
+const tagged = (response, state) => {
+  const headers = new Headers(response.headers);
+  headers.set("X-Media-Cache", state);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+};
+
+async function loadMediaIdentity() {
+  if (mediaIdentity !== undefined) return mediaIdentity;
+  mediaIdentity = null;
+  try {
+    const cache = await caches.open(MEDIA_CACHE);
+    const response = await cache.match(MEDIA_IDENTITY);
+    const value = response ? await response.json() : null;
+    if (typeof value?.identity === "string" && IDENTITY_PATTERN.test(value.identity)) mediaIdentity = value.identity;
+  } catch { /* No stored identity means network-only media. */ }
+  return mediaIdentity;
+}
+
+async function saveMediaIdentity(identity) {
+  const cache = await caches.open(MEDIA_CACHE);
+  await cache.put(MEDIA_IDENTITY, new Response(JSON.stringify({ identity }), { headers: { "Content-Type": "application/json" } }));
+}
+
+async function setMediaIdentity(identity) {
+  if (typeof identity !== "string" || !IDENTITY_PATTERN.test(identity)) return;
+  await queueMedia(async () => {
+    const previous = await loadMediaIdentity();
+    mediaIdentity = identity;
+    if (previous === identity) {
+      await saveMediaIdentity(identity);
+      return;
+    }
+    // A different browser identity must never read the previous one's cached images.
+    await caches.delete(MEDIA_CACHE);
+    await saveMediaIdentity(identity);
+  });
+}
+
+async function clearMedia() {
+  await queueMedia(async () => {
+    const identity = await loadMediaIdentity();
+    await caches.delete(MEDIA_CACHE);
+    if (identity) await saveMediaIdentity(identity);
+  });
+}
+
+async function readIndex(cache) {
+  const response = await cache.match(MEDIA_INDEX);
+  if (!response) return [];
+  try {
+    const value = await response.json();
+    if (!Array.isArray(value)) throw new Error("invalid index");
+    return value.filter(isMediaEntry);
+  } catch {
+    // A damaged index cannot account for bodies; drop them so the caps stay meaningful.
+    for (const request of await cache.keys()) {
+      const path = new URL(request.url).pathname;
+      if (path !== MEDIA_INDEX && path !== MEDIA_IDENTITY) await cache.delete(request);
+    }
+    await cache.delete(MEDIA_INDEX);
+    return [];
+  }
+}
+
+const writeIndex = (cache, items) => cache.put(MEDIA_INDEX, new Response(JSON.stringify(items), { headers: { "Content-Type": "application/json" } }));
+
+async function applyLimits(cache, items) {
+  const kept = [...items].sort((a, b) => a.usedAt - b.usedAt);
+  let bytes = kept.reduce((sum, item) => sum + item.size, 0);
+  const evicted = [];
+  while (kept.length > MEDIA_LIMITS.entries || (bytes > MEDIA_LIMITS.bytes && kept.length)) {
+    const item = kept.shift();
+    bytes -= item.size;
+    evicted.push(item);
+  }
+  for (const item of evicted) await cache.delete(mediaBodyKey(item.url, item.identity));
+  await writeIndex(cache, kept);
+}
+
+async function storeMedia(url, identity, response) {
+  const blob = await response.blob();
+  await queueMedia(async () => {
+    // An identity switch queued between fetch and put must not resurrect old bytes.
+    if (mediaIdentity !== identity) return;
+    const cache = await caches.open(MEDIA_CACHE);
+    await cache.put(mediaBodyKey(url, identity), new Response(blob, {
+      status: response.status, statusText: response.statusText, headers: response.headers,
+    }));
+    const key = mediaIndexKey(url, identity), now = Date.now();
+    const items = (await readIndex(cache)).filter((item) => item.key !== key);
+    items.push({ key, url, identity, size: blob.size, usedAt: now, revalidatedAt: now });
+    await applyLimits(cache, items);
+  });
+}
+
+const touchMedia = (url, identity) => queueMedia(async () => {
+  const cache = await caches.open(MEDIA_CACHE);
+  const items = await readIndex(cache);
+  const item = items.find((entry) => entry.url === url && entry.identity === identity);
+  if (!item) return;
+  item.usedAt = Date.now();
+  await writeIndex(cache, items);
+});
+
+const revalidating = new Set();
+function revalidateMedia(request, url, identity) {
+  const key = mediaIndexKey(url, identity);
+  if (revalidating.has(key)) return Promise.resolve();
+  revalidating.add(key);
+  return (async () => {
+    try {
+      const response = await fetch(request);
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        await queueMedia(async () => {
+          const cache = await caches.open(MEDIA_CACHE);
+          const items = await readIndex(cache);
+          const kept = items.filter((item) => item.key !== key);
+          await cache.delete(mediaBodyKey(url, identity));
+          if (kept.length !== items.length) await writeIndex(cache, kept);
+        });
+      } else if (response.status === 200 && isCacheable(response)) {
+        await storeMedia(url, identity, response);
+      }
+    } catch { /* A failed revalidation must not remove a working entry. */ }
+    finally { revalidating.delete(key); }
+  })();
+}
+
+async function pruneMedia() {
+  await queueMedia(async () => {
+    const cache = await caches.open(MEDIA_CACHE);
+    const items = await readIndex(cache);
+    const cutoff = Date.now() - MEDIA_LIMITS.age;
+    const fresh = items.filter((item) => item.usedAt >= cutoff);
+    for (const item of items) if (item.usedAt < cutoff) await cache.delete(mediaBodyKey(item.url, item.identity));
+    await applyLimits(cache, fresh);
+  });
+}
+
+async function mediaResponse(event) {
+  try {
+    return await serveMedia(event);
+  } catch {
+    // Cache Storage can be unavailable (private modes, quota). Media then stays network-only.
+    try { return tagged(await fetch(event.request), "bypass"); }
+    catch { return Response.error(); }
+  }
+}
+
+async function serveMedia(event) {
+  const request = event.request;
+  const identity = await loadMediaIdentity();
+  if (!identity) {
+    try { return tagged(await fetch(request), "bypass"); }
+    catch { return Response.error(); }
+  }
+  const url = request.url;
+  const cache = await caches.open(MEDIA_CACHE);
+  const cached = await cache.match(mediaBodyKey(url, identity));
+  if (cached) {
+    event.waitUntil(touchMedia(url, identity).catch(() => {}));
+    const entry = (await readIndex(cache)).find((item) => item.key === mediaIndexKey(url, identity));
+    // Serving stale is fine; revalidation is background hygiene for revocation/deletion.
+    if (!entry || Date.now() - entry.revalidatedAt > REVALIDATE_MS) event.waitUntil(revalidateMedia(request, url, identity).catch(() => {}));
+    return tagged(cached, "hit");
+  }
+  try {
+    const response = await fetch(request);
+    if (isCacheable(response)) await storeMedia(url, identity, response.clone()).catch(() => {});
+    return tagged(response, "miss");
+  } catch {
+    return Response.error();
+  }
+}

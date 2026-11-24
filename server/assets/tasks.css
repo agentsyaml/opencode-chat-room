@@ -24,7 +24,7 @@
 #tasksDialog.is-pane {
   position: relative;
   inset: auto;
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 1 / -1;
   width: auto;
   height: auto;
@@ -54,9 +54,6 @@
 #tasksDialog.is-pane .task-edit-form { grid-template-columns: minmax(0, 1fr); }
 #tasksDialog.is-pane .task-create-due, #tasksDialog.is-pane .task-create-assignee,
 #tasksDialog.is-pane .task-edit-due-field, #tasksDialog.is-pane .task-edit-assignee-field { grid-column: 1; }
-@media (min-width: 1100px) and (min-height: 560px) {
-  #chatView.has-tasks { grid-template-columns: 252px minmax(0, 1fr) clamp(380px, 30vw, 460px); }
-}
 
 .tasks-head {
   display: flex;

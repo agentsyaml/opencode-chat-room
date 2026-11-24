@@ -2,9 +2,24 @@
 // semantics mirror the root loader: file discovery, JSONC stripping, strict
 // types for known fields, and environment variables winning over file values.
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
+
+// Codex copies plugin files into a cache without node_modules, so YAML support
+// must stay optional: JSON/JSONC configs work even when `yaml` cannot resolve.
+let yamlParser;
+function parseYaml(text) {
+  if (yamlParser === undefined) {
+    try {
+      yamlParser = createRequire(import.meta.url)("yaml");
+    } catch {
+      yamlParser = null;
+    }
+  }
+  if (!yamlParser) throw new Error("chatroom config: YAML needs the yaml package; use chatroom.json");
+  return yamlParser.parse(text);
+}
 
 const FILE_NAMES = ["chatroom.json", "chatroom.jsonc", "chatroom.yaml", "chatroom.yml"];
 

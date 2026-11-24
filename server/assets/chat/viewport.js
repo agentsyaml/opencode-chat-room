@@ -5,7 +5,12 @@ export function initViewport() {
   if (!viewport) return;
   let lastHeight = viewport.height;
 
+  // Pinch zoom shrinks visualViewport.height while the layout stays the same
+  // size. Resizing the app then would collapse the whole UI under the fingers.
+  const zoomed = () => Math.abs((viewport.scale || 1) - 1) > 0.01;
+
   const sync = () => {
+    if (zoomed()) return;
     root.style.setProperty("--app-height", `${Math.round(viewport.height)}px`);
     if (viewport.height < lastHeight - 80 && document.activeElement?.id === "msgInput") {
       requestAnimationFrame(() => {

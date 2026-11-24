@@ -15,6 +15,8 @@ export function attachMessageActions(Class) {
         return null;
       }
       palette.mode = "prompt";
+      palette.roomId = this.state.current.id;
+      palette.roomParticipants = [...(this.state.current.participants || [])];
       palette.title = title;
       palette.subtitle = `#${this.state.current.name}`;
       palette.error = "";
@@ -42,15 +44,16 @@ export function attachMessageActions(Class) {
 
     async submitMessagePrompt(prompt, value) {
       const palette = this.state.palette;
-      const room = this.state.current;
+      const roomId = palette?.roomId || this.state.current?.id;
+      const participants = palette?.roomParticipants || this.state.current?.participants;
       if (!palette || palette.mode !== "prompt") return;
-      if (!room) {
+      if (!roomId) {
         palette.error = "open a joined room first";
         this.touch();
         return;
       }
       if (prompt.action === "message-ask") {
-        const question = canonicalizeMentions(String(value ?? "").trim(), room.participants);
+        const question = canonicalizeMentions(String(value ?? "").trim(), participants);
         if (!question) {
           palette.error = "question text is required";
           this.touch();
@@ -60,7 +63,7 @@ export function attachMessageActions(Class) {
         palette.error = "";
         this.touch();
         try {
-          const result = await this.api.send(room.id, this.sessionID, question, { isQuestion: true });
+          const result = await this.api.send(roomId, this.sessionID, question, { isQuestion: true });
           if (Array.isArray(result?.messages)) mergeMessages(this.state.messages, result.messages);
           else if (result?.id) mergeMessages(this.state.messages, [result]);
           this.state.connection = "online";
@@ -109,7 +112,7 @@ export function attachMessageActions(Class) {
         return;
       }
       if (prompt.action === "message-reply-text") {
-        const text = canonicalizeMentions(String(value ?? "").trim(), room.participants);
+        const text = canonicalizeMentions(String(value ?? "").trim(), participants);
         if (!text) {
           palette.error = "reply text is required";
           this.touch();
@@ -119,8 +122,8 @@ export function attachMessageActions(Class) {
         palette.error = "";
         this.touch();
         try {
-          const result = await this.api.send(room.id, this.sessionID, text, { replyToMessageID: prompt.data.id });
-          if (!this.isCurrent(room.id)) return;
+          const result = await this.api.send(roomId, this.sessionID, text, { replyToMessageID: prompt.data.id });
+          if (!this.isCurrent(roomId)) return;
           if (Array.isArray(result?.messages)) mergeMessages(this.state.messages, result.messages);
           else if (result?.id) mergeMessages(this.state.messages, [result]);
           this.state.connection = "online";
@@ -139,22 +142,22 @@ export function attachMessageActions(Class) {
 
     async runMessageConfirm(confirm) {
       const palette = this.state.palette;
-      const room = this.state.current;
-      if (!palette || !room) return;
+      const roomId = palette?.roomId || this.state.current?.id;
+      if (!palette || !roomId) return;
       const id = confirm.data.id;
       palette.searching = true;
       palette.error = "";
       this.touch();
       try {
         if (confirm.action === "message-recall") {
-          await this.api.recall(room.id, id, this.sessionID);
+          await this.api.recall(roomId, id, this.sessionID);
           const target = this.state.messages.find((message) => message.id === id);
           if (target) target.recalledAt = Date.now();
           this.closePalette();
           this.setStatus(`recalled ${id}`, "success");
           return;
         }
-        const revealed = await this.api.reveal(room.id, id, this.sessionID);
+        const revealed = await this.api.reveal(roomId, id, this.sessionID);
         palette.mode = "detail";
         palette.title = "Revealed message";
         palette.confirm = null;

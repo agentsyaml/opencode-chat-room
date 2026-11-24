@@ -301,6 +301,11 @@ export function initQuestions(app) {
   const activateRoom = app.activateRoom;
   app.activateRoom = (roomId, preserveRoomListGeneration = false) => {
     activateRoom(roomId, preserveRoomListGeneration);
+    // Error and too-long banners belong to the room that produced them.
+    delete status.dataset.error;
+    delete status.dataset.tooLong;
+    status.hidden = true;
+    status.textContent = "";
     void load(roomId);
   };
   const applyLocale = app.applyLocale;

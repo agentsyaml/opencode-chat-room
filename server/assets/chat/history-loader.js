@@ -17,7 +17,9 @@ export function initHistoryLoader(app) {
   spinner.append(wheel, label);
 
   const prependOlder = (older, thread, list) => {
-    const tailSep = list.firstElementChild;
+    // The loading spinner can be the first child; only a day separator at the
+    // boundary is a duplicate to drop.
+    const tailSep = list.firstElementChild?.classList.contains("day-sep") ? list.firstElementChild : null;
     const fragment = document.createDocumentFragment();
     let day = null;
     for (const message of older) {

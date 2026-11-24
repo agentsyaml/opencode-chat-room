@@ -322,6 +322,9 @@ export function initRooms(app) {
     clearTimeout(app.state.watcherTimer);
     if (!app.state.rooms.size && !app.state.restorePending?.size && !app.state.restoreRetry) return;
     app.state.watcherTimer = setTimeout(async () => {
+      // A hidden tab has no reader; skip background room polling until it is
+      // visible again (the next timer tick after visibility resumes).
+      if (typeof document !== "undefined" && document.hidden) { app.startRoomWatcher(); return; }
       const inactive = [...app.state.rooms.keys()].filter((id) => id !== app.state.room?.id);
       await bounded(inactive, 3, (roomId) => watchRoom(roomId, app));
       if (app.state.restorePending?.size || app.state.restoreRetry) void app.refreshRoomList(true);

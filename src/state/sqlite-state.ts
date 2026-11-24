@@ -133,10 +133,16 @@ export async function putResource(file: string, resource: StoredResource): Promi
     return true;
   });
 }
-export async function listResources(file: string, roomID: string, limit = 500, offset = 0): Promise<{ items: StoredResource[]; total: number }> {
+export async function listResources(file: string, roomID: string, limit = 500, offset = 0, beforeID?: string): Promise<{ items: StoredResource[]; total: number }> {
   const db = await initialize(file);
-  const items = db.query("SELECT id,room_id AS roomID,name,mime_type AS mimeType,size,created_at AS createdAt,uploader_session_id AS uploaderSessionID,uploader_name AS uploaderName FROM resources WHERE room_id=? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?")
-    .all(roomID, limit, offset) as StoredResource[];
+  const cursor = beforeID
+    ? db.query("SELECT created_at AS createdAt,id FROM resources WHERE room_id=? AND id=?").get(roomID, beforeID) as { createdAt: number; id: string } | null
+    : null;
+  const items = cursor
+    ? db.query("SELECT id,room_id AS roomID,name,mime_type AS mimeType,size,created_at AS createdAt,uploader_session_id AS uploaderSessionID,uploader_name AS uploaderName FROM resources WHERE room_id=? AND (created_at<? OR (created_at=? AND id<?)) ORDER BY created_at DESC, id DESC LIMIT ?")
+      .all(roomID, cursor.createdAt, cursor.createdAt, cursor.id, limit) as StoredResource[]
+    : db.query("SELECT id,room_id AS roomID,name,mime_type AS mimeType,size,created_at AS createdAt,uploader_session_id AS uploaderSessionID,uploader_name AS uploaderName FROM resources WHERE room_id=? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?")
+      .all(roomID, limit, offset) as StoredResource[];
   const total = Number((db.query("SELECT COUNT(*) AS count FROM resources WHERE room_id=?").get(roomID) as { count: number } | null)?.count ?? 0);
   return { items, total };
 }
@@ -221,6 +227,10 @@ async function ensureRoomColumns(db: Database): Promise<void> {
     if (!messageColumns.some((column) => column.name === "answered_by")) db.exec("ALTER TABLE messages ADD COLUMN answered_by TEXT");
     if (!messageColumns.some((column) => column.name === "recalled_at")) db.exec("ALTER TABLE messages ADD COLUMN recalled_at INTEGER");
     if (!messageColumns.some((column) => column.name === "recalled_by")) db.exec("ALTER TABLE messages ADD COLUMN recalled_by TEXT");
+    if (!messageColumns.some((column) => column.name === "client_msg_id")) db.exec("ALTER TABLE messages ADD COLUMN client_msg_id TEXT");
+    // A retry after a lost response must return the first insert, not add a twin.
+    db.exec("DROP INDEX IF EXISTS messages_client_id");
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS messages_client_id ON messages(room_id,sender_session_id,client_msg_id) WHERE client_msg_id IS NOT NULL");
     db.exec("CREATE INDEX IF NOT EXISTS messages_pending_questions ON messages(room_id,is_question,answered_by,seq)");
     db.exec("CREATE INDEX IF NOT EXISTS messages_room_recalled ON messages(room_id,recalled_at)");
     const taskColumns = db.query("PRAGMA table_info(room_tasks)").all() as Array<{ name: string }>;
@@ -545,37 +555,45 @@ export async function answerQuestion(file: string, roomID: string, questionID: s
   });
 }
 
-export async function appendRoomMessage(file: string, roomID: string, sessionID: string, text: string, isQuestion: boolean): Promise<{ status: "ok"; message: Message } | { status: "missing" | "member" }> {
+export async function appendRoomMessage(file: string, roomID: string, sessionID: string, text: string, isQuestion: boolean, clientMessageID?: string): Promise<{ status: "ok"; message: Message; duplicate?: true } | { status: "missing" | "member" }> {
   const db = await openStateDatabase(file);
   return immediate(db, () => {
     if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return { status: "missing" };
     const member = db.query("SELECT g.name,r.kind FROM registry g JOIN rooms r ON r.id=g.room_id JOIN participants p ON p.room_id=g.room_id AND p.id=CASE WHEN r.kind='direct' THEN g.session_id ELSE g.name END WHERE g.room_id=? AND g.session_id=?").get(roomID, sessionID) as { name: string; kind: string } | null;
     if (!member) return { status: "member" };
+    if (clientMessageID) {
+      const existing = db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? AND client_msg_id=? AND sender_session_id=?").get(roomID, clientMessageID, sessionID);
+      if (existing) return { status: "ok", message: rowMessage(existing as Record<string, string | number | null>), duplicate: true };
+    }
     const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(roomID) as { created_at: number } | null;
     const message: Message = {
       id: randomUUID(), roomId: roomID, senderId: member.kind === "direct" ? sessionID : member.name,
       senderSessionID: sessionID, text, createdAt: Math.max(Date.now(), (tail?.created_at ?? 0) + 1),
       ...(isQuestion ? { isQuestion: true } : {}),
     };
-    db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question) VALUES(?,?,?,?,?,?,?)")
-      .run(message.id, roomID, message.senderId, sessionID, text, message.createdAt, isQuestion ? 1 : 0);
+    db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,client_msg_id) VALUES(?,?,?,?,?,?,?,?)")
+      .run(message.id, roomID, message.senderId, sessionID, text, message.createdAt, isQuestion ? 1 : 0, clientMessageID ?? null);
     noteMessageInsert(db, roomID);
     return { status: "ok", message };
   });
 }
 
-export async function sendReply(file: string, roomID: string, targetID: string, sessionID: string, text: string): Promise<{ status: "ok"; message: Message } | { status: "missing" | "member" | "target" | "question" }> {
+export async function sendReply(file: string, roomID: string, targetID: string, sessionID: string, text: string, clientMessageID?: string): Promise<{ status: "ok"; message: Message; duplicate?: true } | { status: "missing" | "member" | "target" | "question" }> {
   const db = await openStateDatabase(file);
   return immediate(db, () => {
     if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return { status: "missing" };
     const member = db.query("SELECT g.name,r.kind FROM registry g JOIN rooms r ON r.id=g.room_id JOIN participants p ON p.room_id=g.room_id AND p.id=CASE WHEN r.kind='direct' THEN g.session_id ELSE g.name END WHERE g.room_id=? AND g.session_id=?").get(roomID, sessionID) as { name: string; kind: string } | null;
     if (!member) return { status: "member" };
+    if (clientMessageID) {
+      const existing = db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? AND client_msg_id=? AND sender_session_id=?").get(roomID, clientMessageID, sessionID);
+      if (existing) return { status: "ok", message: rowMessage(existing as Record<string, string | number | null>), duplicate: true };
+    }
     const target = db.query("SELECT is_question,recalled_at FROM messages WHERE room_id=? AND id=?").get(roomID, targetID) as { is_question: number; recalled_at: number | null } | null;
     if (!target || target.recalled_at !== null) return { status: "target" };
     if (target.is_question) return { status: "question" };
     const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(roomID) as { created_at: number } | null;
     const message: Message = { id: randomUUID(), roomId: roomID, senderId: member.kind === "direct" ? sessionID : member.name, senderSessionID: sessionID, text, createdAt: Math.max(Date.now(), (tail?.created_at ?? 0) + 1), answerToMessageID: targetID };
-    db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to) VALUES(?,?,?,?,?,?,0,?)").run(message.id, roomID, message.senderId, sessionID, text, message.createdAt, targetID);
+    db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,client_msg_id) VALUES(?,?,?,?,?,?,0,?,?)").run(message.id, roomID, message.senderId, sessionID, text, message.createdAt, targetID, clientMessageID ?? null);
     noteMessageInsert(db, roomID);
     return { status: "ok", message };
   });

@@ -56,6 +56,50 @@ test.skipIf(!browserModule)("a short viewport stays inside the visible height", 
   }
 }, 90000);
 
+// Pinch zoom shrinks the visual viewport; the layout must keep its size.
+test.skipIf(!browserModule)("pinch zoom does not resize the app", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-pinch-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], {
+    cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore",
+  });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#app").waitFor({ state: "visible" });
+    const height = () => page.evaluate(() => ({
+      app: document.querySelector<HTMLElement>("#app")!.getBoundingClientRect().height,
+      css: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-height")),
+      scale: visualViewport?.scale ?? 1,
+    }));
+    await page.waitForFunction(() => Math.abs(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--app-height")) - innerHeight) < 1);
+    const before = await height();
+
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
+    await page.waitForTimeout(250);
+    const zoomed = await height();
+    expect(zoomed.scale).toBeGreaterThan(1.5);
+    expect(zoomed.app).toBeCloseTo(before.app, 0);
+    expect(zoomed.css).toBeCloseTo(before.css, 0);
+
+    await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: 1 });
+    await page.waitForTimeout(250);
+    const restored = await height();
+    expect(restored.scale).toBeCloseTo(1, 1);
+    expect(restored.app).toBeCloseTo(before.app, 0);
+  } finally {
+    await browser?.close(); server.kill("SIGTERM");
+    await new Promise((resolve) => server.once("exit", resolve));
+    await rm(stateDir, { recursive: true, force: true });
+  }
+}, 90000);
+
 async function unusedPort() {
   const server = createServer(); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); if (!address || typeof address === "string") throw new Error("No local port");

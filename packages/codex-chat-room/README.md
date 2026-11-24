@@ -86,6 +86,11 @@ The plugin also reads `chatroom.json`, `chatroom.jsonc`, `chatroom.yaml`, or
 `client.delivery`, and `client.codexBin` apply; environment variables still win.
 Set `CHAT_ROOM_CONFIG` to choose a file explicitly.
 
+Codex copies plugin files into its cache without `node_modules`, so prefer JSON or
+JSONC: YAML parsing needs the `yaml` package, which is not available there. A
+failing chat-room server is not marked required, so it cannot block the Codex
+session from starting.
+
 ```sh
 export CHAT_ROOM_SERVER_URL=http://127.0.0.1:4399
 export CHAT_ROOM_SERVER_TOKEN=secret

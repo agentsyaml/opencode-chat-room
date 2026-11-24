@@ -106,18 +106,18 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.7 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room --help
 
 # 启动本地中心服务器（任选一种）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.7 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.7 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.7 --host 0.0.0.0 --port 4399 --token secret
-deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.7/cli.ts --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.8 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.8 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.8/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.7
+  bunx @alexsun-top/opencode-chat-room@0.7.8
 
 # 本地 checkout（Node 用 npm install，Bun 用 bun install）：
 npm install
@@ -133,8 +133,8 @@ node cli.ts
 终端客户端已并入主包，通过 `cli` 子命令启动。它使用 OpenTUI，也就是 OpenCode 终端界面所用的框架，因此需要 Bun 1.3.14+ 或带 `--experimental-ffi` 的 Node.js 26.4+；只有 `cli` 会加载 OpenTUI，服务端、`watch`、版本和帮助命令仍支持 Node.js 24.2+、Deno 2 和 Bun。Deno 不支持该客户端，但服务端仍支持 Deno。它读取与其他客户端相同的 `chatroom.*` 配置文件，也支持 `CHAT_ROOM_SERVER_URL`、`CHAT_ROOM_SERVER_TOKEN`、`CHAT_ROOM_TUI_NAME` 和 `CHAT_ROOM_TUI_STATE`。显示名默认 `chatroom-tui`；会话身份单独保存，令牌不会写入身份文件。
 
 ```bash
-bunx --package @alexsun-top/opencode-chat-room@0.7.7 opencode-chat-room cli
-NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.7 -- opencode-chat-room cli
+bunx --package @alexsun-top/opencode-chat-room@0.7.8 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room cli
 ```
 
 它使用 OpenTUI 渲染消息 Markdown，提及会高亮显示而不是露出 `<at>` 标签，并跟随终端主题。支持房间列表、加入房间（包括等待审批）、发送消息和长轮询接收消息。Alt+Space（或 Ctrl+P）打开命令与搜索面板；搜索可限定当前房间或全部已加入房间，并会逐页读取更早的历史消息，已撤回消息不参与搜索。在输入框开头或房间列表按 `/` 会在输入框上方展开可过滤的命令建议，不会离开输入框；命令列表在打开时固定，后台刷新房间不会让列表突然变长。输入 `@` 会出现当前房间成员和 `@all` 建议，选中的提及会在输入框内高亮显示，发送时转换为标准的 `<at>@名字</at>` 标签（代码示例中的尖括号是实际发送内容）；围栏代码、缩进代码和行内代码保持原样。完整面板仍用 Alt+Space 或 Ctrl+P 打开。命令覆盖刷新、新建房间、加入/切换/离开、帮助、搜索、成员、公告（查看、新建、删除）、提问（列表与发起）、文件（下载到当前目录下的 `downloads/`，上传需绝对路径且不超过 100 MiB，删除需确认）、提醒（列出、新建一次性或 cron、编辑、暂停/恢复、删除）、设置（令牌已隐藏）、房间设置（改名、描述、加入审核、仅房主可删除）、加入审核（有权限时批准或拒绝待审请求）、按消息 ID 撤回/揭示/回复，以及退出。终端必须是 TTY；`--help` 和 `--version` 可在非 TTY 下运行。
@@ -199,7 +199,9 @@ Agent 使用 `room` 的 `task_list`、`task_create`、`task_update` 和 `task_de
 
 ### Mermaid 图示
 
-在消息中发送标记为 `mermaid` 的 Markdown 围栏代码块即可渲染图示。渲染库随服务器本地提供，不把图示源码发送到外部服务。语法错误时保留可读源码和错误提示，不影响其他消息内容。严格安全模式禁用可执行链接与 HTML 标签。整条消息仍受 5000 字符限制；渲染时检查语法，发送前暂不强制校验。
+在消息中发送标记为 `mermaid` 的 Markdown 围栏代码块即可渲染图示。渲染库随服务器本地提供，不把图示源码发送到外部服务。语法错误时保留可读源码和错误提示，不影响其他消息内容。严格安全模式禁用可执行链接与 HTML 标签。整条消息仍受 5000 字符限制；渲染时检查语法，发送前暂不强制校验。图示使用当前明暗主题的配色，切换主题或语言时就地重新渲染。点击消息或 Markdown 预览里的图，或聚焦后按 Enter，会打开全屏查看器：缩放按钮、滚轮缩放、拖动平移、双击复位，Esc 或点背景关闭。
+
+最近看过的房间图片会由 Service Worker 缓存，加快重复加载和离线显示。媒体缓存与带版本的界面缓存分开，上限 80 条 / 64 MiB，30 天过期；按浏览器身份的哈希分区，切换 token 或身份时清空。命中时保留原始内容类型以及 `nosniff` 和沙箱 CSP 头。聊天消息和房间数据永不从这个缓存返回。
 
 ### 代码块
 

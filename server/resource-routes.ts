@@ -33,7 +33,9 @@ export async function resourceRoutes(req: Request, url: URL): Promise<Response |
       const rawOffset = Number(url.searchParams.get("offset") ?? 0);
       const limit = Number.isSafeInteger(rawLimit) ? Math.min(1000, Math.max(1, rawLimit)) : 500;
       const offset = Number.isSafeInteger(rawOffset) ? Math.max(0, rawOffset) : 0;
-      const page = await listRoomResources(roomID, limit, offset);
+      // A cursor keeps paging stable when a new upload shifts the offset window.
+      const before = url.searchParams.get("before");
+      const page = await listRoomResources(roomID, limit, offset, before && uuid.test(before) ? before : undefined);
       return json({ resources: page.items, total: page.total, limit, offset }, 200);
     }
     if (upload) {

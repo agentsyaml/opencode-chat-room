@@ -1,4 +1,4 @@
-import { app } from "./state.js";
+import { app, isMobileDevice } from "./state.js";
 import { initConfirmDialog } from "./confirm-dialog.js";
 import { initMentions } from "./mentions.js";
 import { initMessages } from "./messages.js";
@@ -25,11 +25,16 @@ import { initPalette } from "./palette.js";
 import { initFiles } from "./files.js";
 import { initTasks } from "./tasks.js";
 import { initDocPreview } from "./doc-preview.js";
+import { initSidePaneSplitter } from "./side-pane.js";
+import { initDiagramViewer } from "./diagram-viewer.js";
 import { initViewport } from "./viewport.js";
 import { initSettings } from "./settings.js";
 
+if (isMobileDevice()) document.documentElement.dataset.mobile = "true";
+
 initSettings(app);
 initConfirmDialog(app);
+initDiagramViewer(app);
 initMentions(app);
 initMessages(app);
 initAttachments(app);
@@ -56,3 +61,6 @@ initPalette(app);
 initFiles(app);
 initTasks(app);
 initDocPreview(app);
+initSidePaneSplitter(app);
+// A controlled page has its worker immediately; a first visit posts on controllerchange.
+void app.postMediaIdentity();

@@ -223,6 +223,28 @@ test("members list marks you and shows human and agent rows", async () => {
   }
 });
 
+test("an announcement prompt keeps writing to the room it was opened in", async () => {
+  const context = await setup();
+  try {
+    await context.app.openAnnouncements();
+    await settle(context, "rules");
+    context.mockInput.pressKeys(["n"]);
+    await context.renderOnce();
+    await context.mockInput.typeText("plan");
+    context.mockInput.pressEnter();
+    await context.renderOnce();
+    // A mouse click on another room must not retarget the pending prompt.
+    context.app.state.current = { id: "r2", name: "other", participants: [], kind: "group" };
+    await context.mockInput.typeText("kept for the first room");
+    context.mockInput.pressEnter();
+    await settle(context, "kept for the first room");
+    const save = context.api.calls.find((call) => call[0] === "saveAnnouncement");
+    assert.deepEqual(save, ["saveAnnouncement", "r1", "plan", "kept for the first room", "s1"]);
+  } finally {
+    await teardown(context);
+  }
+});
+
 test("announcements read, create and delete through the overlay", async () => {
   const context = await setup();
   try {

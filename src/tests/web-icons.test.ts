@@ -130,9 +130,12 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
     await page.locator("#chatSettings").waitFor({ state: "hidden" });
 
     // Palette commands carry one icon each, including the command fallback.
+    // The palette opens search-first, so type the command prefix first.
     await page.locator("#msgInput").click();
     await page.keyboard.press("Alt+Space");
     await page.locator("#paletteDialog[open]").waitFor();
+    await page.keyboard.type("/");
+    await page.locator("#paletteList .palette-icon svg.fluent-icon").first().waitFor();
     expect(await page.locator("#paletteList .palette-icon svg.fluent-icon").count()).toBe(10);
     await assertIcons();
     const paletteIcons = await page.locator("#paletteList .palette-icon svg.fluent-icon").evaluateAll((icons: Element[]) => icons.map((icon) => {

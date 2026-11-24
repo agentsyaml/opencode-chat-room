@@ -107,18 +107,18 @@ On the server machine, use Node.js 24.2+, Deno 2, or Bun. `npx`, `pnpx`, `bunx`,
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.7 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.7 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.7 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.7 --host 0.0.0.0 --port 4399 --token secret
-deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.7/cli.ts --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.7.8 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.7.8 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.8/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.7
+  bunx @alexsun-top/opencode-chat-room@0.7.8
 
 # Local checkout (use npm install for Node, bun install for Bun):
 npm install
@@ -134,8 +134,8 @@ Open `http://<server-ip>:4399/chat` in a browser to join or create a room and ch
 The terminal client is built into the main package and opens with the `cli` subcommand. It uses OpenTUI, the framework behind OpenCode's terminal interface, so it requires Bun 1.3.14+ or Node.js 26.4+ with `--experimental-ffi`. Only `cli` loads OpenTUI; the server, `watch`, version, and help commands stay on Node.js 24.2+, Deno 2, and Bun. Deno is not supported for this client; the server still runs on Deno. It accepts the same `chatroom.*` configuration file as the other clients, plus `CHAT_ROOM_SERVER_URL`, `CHAT_ROOM_SERVER_TOKEN`, `CHAT_ROOM_TUI_NAME`, and `CHAT_ROOM_TUI_STATE`. The display name defaults to `chatroom-tui`; the session identity is stored separately and the token is never written to it.
 
 ```bash
-bunx --package @alexsun-top/opencode-chat-room@0.7.7 opencode-chat-room cli
-NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.7 -- opencode-chat-room cli
+bunx --package @alexsun-top/opencode-chat-room@0.7.8 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room cli
 ```
 
 It renders message Markdown with OpenTUI, highlights mentions instead of showing `<at>` tags, and follows the terminal theme. It lists rooms, joins them (including approval-pending rooms), sends messages, and long-polls for new ones. Alt+Space or Ctrl+P opens commands and client-side search across the current room or all joined rooms, including older history fetched page by page; recalled messages are excluded. Typing `/` at the start of the composer or on the room list opens a filtered inline command popup without leaving the input; the command list is fixed when the popup opens, so a background room refresh cannot make it grow. Typing `@` suggests the current room's participants and `@all`; a selected mention stays highlighted inline in the composer and is sent as the canonical `<at>@Name</at>` tag, while fenced, indented, and inline code keep their original text. The full palette still opens with Alt+Space or Ctrl+P. Commands cover refresh, new room, join/switch/leave, help, search, members, announcements (read, create, delete), questions (list and ask), files (download to `downloads/` under the current directory, upload an absolute path up to 100 MiB, delete with confirmation), reminders (list, create one-time or cron, edit, pause/resume, delete), settings (token redacted), room settings (rename, description, join policy, owner-only delete), join approvals (approve or deny pending requests when permitted), recall/reveal/reply by message ID, and quit. The terminal must be a TTY; `--help` and `--version` work without one.
@@ -200,7 +200,9 @@ Recall hides the message from normal history, unread delivery, replies, and the 
 
 ### Mermaid diagrams
 
-Use a fenced code block tagged `mermaid` in a message to render a diagram. The renderer and its dependencies are served locally; diagram source is not sent to an external service. Invalid diagrams remain readable as source with an error indicator. Strict rendering disables executable links and HTML labels. The existing 5,000-character message limit still applies. Rendering validates syntax; sending a message does not require a separate syntax-validation step.
+Use a fenced code block tagged `mermaid` in a message to render a diagram. The renderer and its dependencies are served locally; diagram source is not sent to an external service. Invalid diagrams remain readable as source with an error indicator. Strict rendering disables executable links and HTML labels. The existing 5,000-character message limit still applies. Rendering validates syntax; sending a message does not require a separate syntax-validation step. Diagrams use the active light or dark palette and re-render in place when the theme or language changes. Click a diagram in a message or the Markdown preview, or focus it and press Enter, to open a full-screen viewer with zoom buttons, wheel zoom, drag pan, double-click reset, and Escape or backdrop dismissal.
+
+Recently viewed room images are also cached by the service worker for faster repeat and offline loads. The media cache is separate from the versioned shell cache, limited to 80 entries and 64 MiB with a 30-day prune, and partitioned by a hashed browser identity. Changing the token or identity clears it; a cached hit keeps the original content type and the `nosniff` and sandbox CSP headers. Chat messages and room data are never served from this cache.
 
 ### Code blocks
 

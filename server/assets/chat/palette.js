@@ -20,19 +20,19 @@ export function initPalette(app) {
 
   const commands = () => {
     const available = [
-      { id: "refresh", label: t("refreshRooms"), icon: "arrow_sync", keywords: "reload rooms", run: () => void app.refreshRoomList?.() },
-      { id: "create", label: t("createRoom"), icon: "add", keywords: "new room", focusComposer: false,
+      { id: "refresh", label: t("refreshRooms"), en: "Refresh rooms", icon: "arrow_sync", keywords: "reload rooms", run: () => void app.refreshRoomList?.() },
+      { id: "create", label: t("createRoom"), en: "New room", icon: "add", keywords: "new room", focusComposer: false,
         run: () => room() ? app.openCreateRoomDialog?.() : app.$("#inRoomName")?.focus({ preventScroll: true }) },
-      { id: "settings", label: t("settings"), icon: "options", keywords: "preferences theme language", focusComposer: false, run: () => app.openSettings?.() },
+      { id: "settings", label: t("settings"), en: "Settings", icon: "options", keywords: "preferences theme language", focusComposer: false, run: () => app.openSettings?.() },
     ];
     if (room()) available.push(
-      { id: "members", label: t("members"), icon: "people", keywords: "people roster", focusComposer: false, run: () => app.$("#btnMembers")?.click() },
-      { id: "questions", label: t("questions"), icon: "question_circle", keywords: "answers", focusComposer: false, run: () => app.$("#btnQuestions")?.click() },
-      { id: "announcements", label: t("announcements"), icon: "megaphone", keywords: "notice board", focusComposer: false, run: () => app.$("#btnAnnouncements")?.click() },
-      ...(room().kind === "direct" ? [] : [{ id: "tasks", label: t("tasksTitle"), icon: "checkmark", keywords: "todo checklist work", focusComposer: false, run: () => app.openTasksDialog?.() }]),
-      { id: "reminders", label: t("reminders"), icon: "alert", keywords: "schedule alarm", focusComposer: false, run: () => app.$("#btnReminders")?.click() },
-      { id: "leave", label: t("paletteLeaveRoom"), icon: "arrow_exit", keywords: "exit quit", focusComposer: false, run: () => app.leaveRoom?.(false) },
-      { id: "latest", label: t("paletteJumpLatest"), icon: "arrow_down", keywords: "bottom newest", run: () => app.jumpToBottom?.() },
+      { id: "members", label: t("members"), en: "Members", icon: "people", keywords: "people roster", focusComposer: false, run: () => app.$("#btnMembers")?.click() },
+      { id: "questions", label: t("questions"), en: "Questions", icon: "question_circle", keywords: "answers", focusComposer: false, run: () => app.$("#btnQuestions")?.click() },
+      { id: "announcements", label: t("announcements"), en: "Announcements", icon: "megaphone", keywords: "notice board", focusComposer: false, run: () => app.$("#btnAnnouncements")?.click() },
+      ...(room().kind === "direct" ? [] : [{ id: "tasks", label: t("tasksTitle"), en: "Tasks", icon: "checkmark", keywords: "todo checklist work", focusComposer: false, run: () => app.openTasksDialog?.() }]),
+      { id: "reminders", label: t("reminders"), en: "Reminders", icon: "alert", keywords: "schedule alarm", focusComposer: false, run: () => app.$("#btnReminders")?.click() },
+      { id: "leave", label: t("paletteLeaveRoom"), en: "Leave room", icon: "arrow_exit", keywords: "exit quit", focusComposer: false, run: () => app.leaveRoom?.(false) },
+      { id: "latest", label: t("paletteJumpLatest"), en: "Jump to latest", icon: "arrow_down", keywords: "bottom newest", run: () => app.jumpToBottom?.() },
     );
     return available;
   };
@@ -133,12 +133,24 @@ export function initPalette(app) {
     syncSelection();
   };
 
+  // Empty input is search, not a command wall: commands appear only after "/".
+  const showIdle = () => {
+    clearTimeout(searchTimer);
+    sequence++;
+    dialog.dataset.mode = "search";
+    dialog.dataset.state = "ready";
+    modeLabel.textContent = t("paletteSearchMode");
+    list.setAttribute("aria-busy", "false");
+    render([], null);
+    status.textContent = t("palettePlaceholder");
+  };
+
   const showCommands = (fragment = "") => {
     clearTimeout(searchTimer);
     sequence++;
     const needle = fragment.trim().toLowerCase();
     const available = commands()
-      .filter((command) => !needle || `${command.label} ${command.keywords || ""}`.toLowerCase().includes(needle))
+      .filter((command) => !needle || `${command.label} ${command.en || ""} ${command.keywords || ""} ${command.id}`.toLowerCase().includes(needle))
       .map((command) => ({ kind: "command", ...command }));
     dialog.dataset.mode = "commands";
     dialog.dataset.state = "ready";
@@ -232,7 +244,7 @@ export function initPalette(app) {
     clearTimeout(searchTimer);
     const token = ++sequence;
     const value = input.value;
-    if (!value.trim()) { showCommands(""); return; }
+    if (!value.trim()) { showIdle(); return; }
     if (value.startsWith("/")) { showCommands(value.slice(1)); return; }
     const wasSearch = dialog.dataset.mode === "search";
     dialog.dataset.mode = "search";
@@ -242,6 +254,7 @@ export function initPalette(app) {
     // Keep the previous hits visible while typing. Clearing them on every
     // keystroke is what makes the result list flicker.
     if (!wasSearch || !items.length) render([], null);
+    else { selected = -1; syncSelection(); }
     status.textContent = t("paletteSearching");
     const text = value.trim();
     searchTimer = setTimeout(() => { void executeSearch(text, token); }, SEARCH_DEBOUNCE_MS);
@@ -293,7 +306,7 @@ export function initPalette(app) {
     scope = scope === "room" ? "all" : "room";
     syncScope();
     const value = input.value;
-    if (!value.trim()) showCommands("");
+    if (!value.trim()) showIdle();
     else if (value.startsWith("/")) showCommands(value.slice(1));
     else scheduleSearch();
   };
@@ -311,13 +324,16 @@ export function initPalette(app) {
     input.value = "";
     scope = "room";
     syncScope();
-    showCommands("");
+    showIdle();
     dialog.showModal();
     input.focus();
   };
   app.openPalette = openPalette;
 
   input.addEventListener("input", (event) => { if (!event.isComposing) scheduleSearch(); });
+  // IME commits (Chinese, Japanese, Korean) may fire no plain input event after
+  // composition ends, so filter the committed text here as well.
+  input.addEventListener("compositionend", () => scheduleSearch());
   scopeButton.addEventListener("click", () => { toggleScope(); input.focus(); });
   app.$("#btnClosePalette")?.addEventListener("click", () => closePalette());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) closePalette(); });
@@ -399,7 +415,8 @@ export function initPalette(app) {
     syncScope();
     if (!dialog.open) return;
     const value = input.value;
-    if (!value.trim() || value.startsWith("/")) showCommands(value.startsWith("/") ? value.slice(1) : "");
+    if (!value.trim()) showIdle();
+    else if (value.startsWith("/")) showCommands(value.slice(1));
     else scheduleSearch();
   };
 }

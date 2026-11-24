@@ -84,10 +84,12 @@ export function prepareMarkdown(text) {
   return String(text ?? "")
     .split("\n")
     .map((line) => {
-      const marker = line.match(/^([ \t]*)(`{3,}|~{3,})/);
+      const clean = line.replace(/\r$/, "");
+      const marker = clean.match(/^([ \t]*)(`{3,}|~{3,})/);
+      const closing = clean.match(/^([ \t]*)(`{3,}|~{3,})[ \t]*$/);
       if (fence) {
-        if (marker && marker[2][0] === fence.char && marker[2].length >= fence.length
-          && marker[1].length <= fence.indent + 3) fence = null;
+        if (closing && closing[2][0] === fence.char && closing[2].length >= fence.length
+          && closing[1].length <= fence.indent + 3) fence = null;
         return line;
       }
       if (indented) {

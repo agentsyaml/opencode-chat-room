@@ -45,14 +45,14 @@ export function attachJoinRequests(Class) {
 
     async runJoinConfirm(confirm) {
       const palette = this.state.palette;
-      const room = this.state.current;
-      if (!palette || !room) return;
+      const roomId = palette?.roomId || this.state.current?.id;
+      if (!palette || !roomId) return;
       const decision = confirm.action === "join-approve" ? "approve" : "deny";
       palette.searching = true;
       palette.error = "";
       this.touch();
       try {
-        await this.api.decideJoin(room.id, confirm.data.sessionID, this.sessionID, decision);
+        await this.api.decideJoin(roomId, confirm.data.sessionID, this.sessionID, decision);
         this.setStatus(`${decision === "approve" ? "approved" : "denied"} ${confirm.data.name}`, "success");
         await this.openJoinRequests();
       } catch (error) {

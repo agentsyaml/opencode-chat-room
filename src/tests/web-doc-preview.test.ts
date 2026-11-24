@@ -97,12 +97,26 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
       };
     });
     expect(wide.hasDoc).toBe(true);
-    expect(wide.columns).toBe(3);
+    expect(wide.columns).toBe(4);
     expect(wide.position).toBe("relative");
     expect(wide.paneWidth).toBeGreaterThanOrEqual(379);
     expect(wide.paneWidth).toBeLessThanOrEqual(461);
     expect(Math.abs(wide.paneRight - wide.viewRight)).toBeLessThanOrEqual(2);
     expect(wide.paneLeft).toBeGreaterThan(openWidth);
+
+    // The preview header copies the raw Markdown, not the rendered document.
+    await page.evaluate(() => {
+      (window as any).__copies = [];
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (value: string) => { (window as any).__copies.push(value); } } });
+    });
+    const docCopy = page.locator("#btnDocPreviewCopy");
+    await docCopy.waitFor({ state: "visible" });
+    await docCopy.click();
+    await page.waitForFunction((source: string) => (window as any).__copies[0] === source, REPORT);
+    expect(await docCopy.getAttribute("aria-label")).toBe("Copied");
+    // The message card copies the same raw source.
+    await card.locator(".resource-copy").click();
+    await page.waitForFunction((source: string) => (window as any).__copies[1] === source, REPORT);
 
     // At the narrowest pane breakpoint the chat still has a usable column.
     await page.setViewportSize({ width: 1100, height: 800 });
@@ -168,6 +182,9 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await row.waitFor();
     expect(await row.locator('[data-file-action="preview"]').count()).toBe(1);
     expect(await row.locator('[data-file-action="download"]').count()).toBe(1);
+    expect(await row.locator('[data-file-action="copy"]').count()).toBe(1);
+    await row.locator('[data-file-action="copy"]').click();
+    await page.waitForFunction((source: string) => (window as any).__copies[2] === source, REPORT);
     await row.locator('[data-file-action="preview"]').click();
     await dialog.waitFor({ state: "visible" });
     await page.locator("#docPreviewBody h1").getByText("Quarterly Report").waitFor();
@@ -256,6 +273,95 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
 
+    // The pane splitter shares one width between both panes and never touches the rail.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await previewButton.click();
+    await dialog.waitFor({ state: "visible" });
+    const handle = page.locator("#sidePaneHandle");
+    await handle.waitFor({ state: "visible" });
+    expect(await handle.getAttribute("role")).toBe("separator");
+    expect(await handle.getAttribute("aria-orientation")).toBe("vertical");
+    expect(await handle.getAttribute("tabindex")).toBe("0");
+    const initial = await paneMetrics(page);
+    expect(initial.rail).toBe(252);
+    expect(initial.pane).toBeGreaterThanOrEqual(430);
+    expect(initial.pane).toBeLessThanOrEqual(434);
+    expect(initial.chat).toBeGreaterThanOrEqual(420);
+    expect(Number(await handle.getAttribute("aria-valuenow"))).toBe(Math.round(initial.pane));
+
+    const box = (await handle.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 - 120, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForFunction((expected: number) => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - expected) <= 2, initial.pane + 120);
+    const dragged = await paneMetrics(page);
+    expect(dragged.rail).toBe(252);
+    expect(dragged.pane).toBeGreaterThan(initial.pane + 100);
+    expect(dragged.chat).toBeLessThan(initial.chat - 100);
+    expect(Math.abs((initial.chat - dragged.chat) - (dragged.pane - initial.pane))).toBeLessThanOrEqual(2);
+    expect(Number(await page.evaluate(() => localStorage.getItem("chat.sidePaneWidth")))).toBe(Math.round(dragged.pane));
+
+    await handle.focus();
+    const max = Number(await handle.getAttribute("aria-valuemax"));
+    await page.keyboard.press("End");
+    await page.waitForFunction((width: number) => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - width) <= 1, max);
+    const widest = await paneMetrics(page);
+    expect(widest.pane).toBeGreaterThanOrEqual(700);
+    expect(widest.chat).toBeGreaterThanOrEqual(419);
+    expect(widest.rail).toBe(252);
+    await page.keyboard.press("ArrowRight");
+    await page.waitForFunction((width: number) => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - width) <= 1, max - 16);
+    await page.keyboard.press("Shift+ArrowRight");
+    await page.waitForFunction((width: number) => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - width) <= 1, max - 80);
+    await page.keyboard.press("Home");
+    await page.waitForFunction(() => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - 360) <= 1);
+    expect((await paneMetrics(page)).chat).toBeGreaterThan(widest.chat);
+
+    await handle.dblclick();
+    await page.waitForFunction(() => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - 432) <= 2);
+    expect(await page.evaluate(() => localStorage.getItem("chat.sidePaneWidth"))).toBeNull();
+    expect(await page.evaluate(() => document.querySelector<HTMLElement>("#chatView")!.style.getPropertyValue("--side-pane-width"))).toBe("");
+
+    // A stored width comes back after a reload and re-clamps to the current window.
+    await handle.focus();
+    await page.keyboard.press("End");
+    const stored = Number(await page.evaluate(() => localStorage.getItem("chat.sidePaneWidth")));
+    expect(stored).toBe(max);
+    await page.reload();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    await card.getByText("REPORT.md").waitFor();
+    await page.waitForFunction((width: number) => document.querySelector<HTMLElement>("#chatView")!.style.getPropertyValue("--side-pane-width") === `${width}px`, stored);
+    await previewButton.click();
+    await dialog.waitFor({ state: "visible" });
+    await handle.waitFor({ state: "visible" });
+    await page.waitForFunction((width: number) => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - width) <= 2, stored);
+    const restored = await paneMetrics(page);
+    expect(restored.rail).toBe(252);
+    expect(restored.chat).toBeGreaterThanOrEqual(419);
+
+    // Narrowing the window re-clamps the stored width instead of squeezing the chat.
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await page.waitForFunction(() => document.querySelector("#docPreview")!.getBoundingClientRect().width < 400);
+    const clamped = await paneMetrics(page);
+    expect(clamped.rail).toBe(252);
+    expect(clamped.pane).toBeGreaterThanOrEqual(379);
+    expect(clamped.pane).toBeLessThanOrEqual(384);
+    expect(clamped.chat).toBeGreaterThanOrEqual(419);
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+
+    // 900x700 is modal: the stored width is ignored and the separator is gone.
+    await page.setViewportSize({ width: 900, height: 700 });
+    await previewButton.click();
+    await dialog.waitFor({ state: "visible" });
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector("#docPreview")!).position)).toBe("fixed");
+    expect(await page.evaluate(() => document.querySelector("#chatView")!.classList.contains("has-doc"))).toBe(false);
+    expect(await handle.isVisible()).toBe(false);
+    expect(await paneMetrics(page).then((metrics) => metrics.rail)).toBe(252);
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+
     expect(pageErrors).toEqual([]);
   } finally {
     if (roomID && sessionID) await fetch(`${origin}/rooms/${encodeURIComponent(roomID)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ sessionID }) }).catch(() => {});
@@ -264,6 +370,13 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await rm(dir, { recursive: true, force: true });
   }
 }, 90000);
+
+async function paneMetrics(page: any) {
+  return page.evaluate(() => {
+    const width = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().width;
+    return { rail: width("#roomRail"), pane: width("#docPreview"), chat: width("#msgScroll") };
+  });
+}
 
 async function uploadMarkdown(origin: string, roomID: string, sessionID: string, name: string, content: string) {
   const response = await fetch(`${origin}/rooms/${encodeURIComponent(roomID)}/resources`, {

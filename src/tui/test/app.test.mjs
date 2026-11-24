@@ -129,6 +129,46 @@ test("composer draft sends and merges the response", async () => {
   assert.deepEqual(app.state.messages.map((item) => item.id), ["m1", "m9"]);
 });
 
+test("a failed send keeps text typed while the request was in flight", async () => {
+  const api = fakeApi();
+  let fail;
+  api.send = (id, sessionID, text) => {
+    api.calls.push(["send", id, sessionID, text]);
+    return new Promise((_resolve, reject) => { fail = reject; });
+  };
+  const { app } = makeApp(api);
+  await app.init();
+  await app.openRoom(0);
+  app.setDraft("hello");
+  const sending = app.send();
+  assert.equal(app.state.draft, "");
+  app.setDraft("x");
+  fail(new Error("offline"));
+  await sending;
+  assert.equal(app.state.draft, "hello\nx");
+});
+
+test("a retried send reuses the first attempt's client message id", async () => {
+  const api = fakeApi();
+  const attempts = [];
+  api.send = (id, sessionID, text, options) => {
+    attempts.push({ text, clientMessageID: options?.clientMessageID });
+    if (attempts.length === 1) return Promise.reject(new Error("offline"));
+    return Promise.resolve(message("m9", text, 4000, { senderId: "alex" }));
+  };
+  const { app } = makeApp(api);
+  await app.init();
+  await app.openRoom(0);
+  app.setDraft("hello");
+  await app.send();
+  assert.equal(app.state.draft, "hello");
+  await app.send();
+  assert.equal(attempts.length, 2);
+  assert.ok(attempts[0].clientMessageID);
+  assert.equal(attempts[1].clientMessageID, attempts[0].clientMessageID);
+  assert.equal(app.state.draft, "");
+});
+
 test("room selection, help and escape behave like the key bindings", async () => {
   const api = fakeApi();
   const { app } = makeApp(api);
@@ -202,6 +242,8 @@ test("palette opens from the composer, closes and restores focus", async () => {
   assert.equal(app.state.focus, "composer");
 
   app.openPalette();
+  assert.equal(app.state.palette.mode, "search");
+  app.openPalette({ slash: true });
   assert.equal(app.state.palette.mode, "commands");
   app.closePalette();
   assert.equal(app.state.palette, null);

@@ -64,7 +64,8 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
               viewport: [innerWidth, innerHeight], page: [root.scrollWidth - root.clientWidth, root.scrollHeight - root.clientHeight], chat: rect("#chatView"),
               header: rect(".chat-head"), headerParts: Array.from(document.querySelectorAll(".chat-head-main, .chat-head-actions")).map((node) => { const box = node.getBoundingClientRect(); return { left: box.left, right: box.right, top: box.top, bottom: box.bottom }; }),
               headerControls, thread: rect("#thread"), threadBottomGap: thread.scrollHeight - thread.clientHeight - thread.scrollTop,
-              composer: rect(".composer"), attachmentTray: rect("#attachmentTray"), rail: getComputedStyle(document.querySelector(".room-rail")!).display,
+              composer: rect(".composer"), attachmentTray: rect("#attachmentTray"),
+              rail: { display: getComputedStyle(document.querySelector(".room-rail")!).display, visibility: getComputedStyle(document.querySelector(".room-rail")!).visibility },
               attachmentActions: Array.from(document.querySelectorAll("#attachmentList button")).map((button) => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height, label: button.textContent?.trim() })),
               attachmentState: document.querySelector("#attachmentList .attachment-detail")?.textContent?.trim(),
             };
@@ -75,7 +76,7 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
           expect(metrics.headerParts[1].right).toBeLessThanOrEqual(metrics.header.x + metrics.header.width);
           expect(metrics.headerParts[0].left).toBeGreaterThanOrEqual(metrics.header.x);
           if (width <= 760) {
-            expect(metrics.headerParts[0].bottom).toBeLessThanOrEqual(metrics.headerParts[1].top + 1);
+            expect(metrics.headerParts[0].right).toBeLessThanOrEqual(metrics.headerParts[1].left + 1);
             expect(metrics.headerControls[0].right).toBeLessThanOrEqual(metrics.header.x + metrics.header.width);
           } else {
             expect(metrics.headerParts[0].right).toBeLessThanOrEqual(metrics.headerParts[1].left);
@@ -90,7 +91,7 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
           const visibleControls = metrics.headerControls.filter((control: any) => control.display !== "none");
           if (width <= 900) expect(visibleControls.every((control: any) => control.iconDisplay === "block" && control.iconWidth > 0 && control.iconHeight > 0)).toBe(true);
           if (width <= 760) {
-            const target = width <= 220 ? 28 : width <= 300 ? 36 : 44;
+            const target = width <= 220 ? 28 : width <= 300 ? 36 : width <= 380 ? 40 : 44;
             expect(visibleControls.every((control: any) => control.width >= target && control.height >= target)).toBe(true);
           }
           else if (width <= 900) expect(visibleControls.every((control: any) => control.width >= 38 && control.height >= 38)).toBe(true);
@@ -99,7 +100,7 @@ test.skipIf(!browserModule)("chat visual geometry stays composed across locale, 
           expect(metrics.attachmentActions.every((button: any) => button.width >= 44 && button.height >= 44)).toBe(true);
           expect(metrics.attachmentActions.some((button: any) => button.label === (locale === "en" ? "Remove" : "移除"))).toBe(true);
           expect(metrics.attachmentState?.endsWith(locale === "en" ? "Ready to send" : "可以发送")).toBe(true);
-          if (width <= 760) expect(metrics.rail).toBe("none");
+          if (width <= 760) { expect(metrics.rail.display).toBe("flex"); expect(metrics.rail.visibility).toBe("hidden"); }
           samples.push({ width, theme, locale, ...metrics });
           if (screenshotDir && ((width === 320 && theme === "light" && locale === "en") || (width === 375 && theme === "light" && locale === "zh-CN") || (width === 390 && theme === "dark" && locale === "en") || (width === 768 && theme === "dark" && locale === "zh-CN") || (width === 1440 && theme === "light" && locale === "en") || (width === 1440 && theme === "dark" && locale === "zh-CN"))) {
             await page.waitForTimeout(60); await page.screenshot({ path: path.join(screenshotDir, `visual-polish-${width}-${theme}-${locale}.png`) });

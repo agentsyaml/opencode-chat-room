@@ -23,6 +23,10 @@ export function attachReminders(Class) {
       return palette?.mode === "info" && palette.kind === "reminders" ? palette : null;
     },
 
+    reminderRoomId(palette) {
+      return palette?.roomId || this.state.current?.id;
+    },
+
     selectedReminder() {
       const palette = this.reminderPalette();
       return palette ? this.paletteItems()[palette.selected] : null;
@@ -57,13 +61,13 @@ export function attachReminders(Class) {
     async toggleReminder() {
       const palette = this.reminderPalette();
       const reminder = this.selectedReminder();
-      const room = this.state.current;
-      if (!palette || !reminder || !room) return;
+      const roomId = this.reminderRoomId(palette);
+      if (!palette || !reminder || !roomId) return;
       palette.searching = true;
       palette.error = "";
       this.touch();
       try {
-        await this.api.updateReminder(room.id, reminder.value, this.sessionID, { paused: !reminder.paused });
+        await this.api.updateReminder(roomId, reminder.value, this.sessionID, { paused: !reminder.paused });
         this.setStatus(`${reminder.paused ? "resumed" : "paused"} reminder`, "success");
         await this.openReminders();
       } catch (error) {
@@ -93,9 +97,9 @@ export function attachReminders(Class) {
 
     async submitReminderPrompt(prompt, value) {
       const palette = this.state.palette;
-      const room = this.state.current;
+      const roomId = this.reminderRoomId(palette);
       if (!palette || palette.mode !== "prompt") return;
-      if (!room) {
+      if (!roomId) {
         palette.error = "open a joined room first";
         this.touch();
         return;
@@ -131,7 +135,7 @@ export function attachReminders(Class) {
         palette.error = "";
         this.touch();
         try {
-          await this.api.createReminder(room.id, this.sessionID, prompt.data.text, schedule);
+          await this.api.createReminder(roomId, this.sessionID, prompt.data.text, schedule);
           this.setStatus("reminder created", "success");
           await this.openReminders();
         } catch (error) {
@@ -154,7 +158,7 @@ export function attachReminders(Class) {
         palette.error = "";
         this.touch();
         try {
-          await this.api.updateReminder(room.id, prompt.data.id, this.sessionID, { text });
+          await this.api.updateReminder(roomId, prompt.data.id, this.sessionID, { text });
           this.setStatus("reminder updated", "success");
           await this.openReminders();
         } catch (error) {
@@ -169,12 +173,12 @@ export function attachReminders(Class) {
 
     async runReminderConfirm(confirm) {
       const palette = this.state.palette;
-      const room = this.state.current;
-      if (!palette || !room) return;
+      const roomId = this.reminderRoomId(palette);
+      if (!palette || !roomId) return;
       palette.searching = true;
       this.touch();
       try {
-        await this.api.deleteReminder(room.id, confirm.data.id, this.sessionID);
+        await this.api.deleteReminder(roomId, confirm.data.id, this.sessionID);
         this.setStatus("reminder deleted", "success");
         await this.openReminders();
       } catch (error) {

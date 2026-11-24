@@ -41,8 +41,8 @@ export async function countOpenQuestions(roomID: string): Promise<number> { retu
 export function acknowledgeRead(roomID: string, sessionID: string, ts: number) { return sqliteAcknowledgeRead(databasePath(), roomID, sessionID, ts); }
 export function acknowledgeQueued(roomID: string, sessionID: string, ts: number) { return sqliteAcknowledgeQueued(databasePath(), roomID, sessionID, ts); }
 export async function answerQuestion(roomID: string, questionID: string, sessionID: string, text: string) { return sqliteAnswerQuestion(databasePath(), roomID, questionID, sessionID, text); }
-export async function sendReply(roomID: string, targetID: string, sessionID: string, text: string) { return sqliteSendReply(databasePath(), roomID, targetID, sessionID, text); }
-export function appendRoomMessage(roomID: string, sessionID: string, text: string, isQuestion: boolean) { return sqliteAppendRoomMessage(databasePath(), roomID, sessionID, text, isQuestion); }
+export async function sendReply(roomID: string, targetID: string, sessionID: string, text: string, clientMessageID?: string) { return sqliteSendReply(databasePath(), roomID, targetID, sessionID, text, clientMessageID); }
+export function appendRoomMessage(roomID: string, sessionID: string, text: string, isQuestion: boolean, clientMessageID?: string) { return sqliteAppendRoomMessage(databasePath(), roomID, sessionID, text, isQuestion, clientMessageID); }
 export async function readQuestionExcerpt(roomID: string, questionID: string) { return sqliteQuestionExcerpt(databasePath(), roomID, questionID); }
 export function readJoinRequest(roomID: string, sessionID: string): Promise<JoinRequest | undefined> { return sqliteReadJoinRequest(databasePath(), roomID, sessionID); }
 export function listJoinRequests(roomID: string, agentOnly = false): Promise<JoinRequest[]> { return sqliteListJoinRequests(databasePath(), roomID, agentOnly); }

@@ -25,6 +25,8 @@
   /* Room workspace */
   #app { max-width: 1440px; }
   #chatView {
+    /* One width source for the document preview and the task board. */
+    --side-pane-width: clamp(380px, 30vw, 560px);
     display: grid;
     grid-template-columns: 252px minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr) auto;
@@ -36,6 +38,43 @@
     margin: 18px auto;
     width: calc(100% - 36px);
     height: calc(100% - 36px);
+  }
+  @media (min-width: 1500px) and (min-height: 560px) {
+    #chatView { --side-pane-width: clamp(380px, 30vw, 640px); }
+  }
+  /* The separator owns one grid column of its own, so it never covers the chat. */
+  .side-pane-handle {
+    display: none;
+    grid-column: 3;
+    grid-row: 1 / -1;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+  }
+  .side-pane-handle::before {
+    content: "";
+    width: 2px;
+    height: 100%;
+    border-radius: 2px;
+    background: transparent;
+    transition: background .15s ease;
+  }
+  .side-pane-handle:hover::before,
+  .side-pane-handle.is-dragging::before { background: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+  .side-pane-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .side-pane-handle:focus-visible::before { background: var(--accent); }
+  body.is-resizing-pane { cursor: col-resize; user-select: none; }
+  @media (min-width: 1100px) and (min-height: 560px) {
+    #chatView.has-doc,
+    #chatView.has-tasks { grid-template-columns: 252px minmax(0, 1fr) 8px var(--side-pane-width); }
+    #chatView.has-doc > .side-pane-handle,
+    #chatView.has-tasks > .side-pane-handle { display: flex; }
   }
   .room-rail {
     position: relative;
@@ -245,10 +284,31 @@
 
   @media (max-width: 760px) {
     #chatView { width: 100%; height: 100%; margin: 0; border: 0; border-radius: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
-    .room-rail { display: none; position: fixed; inset: 0 auto 0 0; z-index: 50; width: min(300px, 88vw); height: 100dvh; min-height: 0; padding: 20px 14px 0; background: var(--surface); border-right: 1px solid var(--line); box-shadow: var(--shadow); }
-    .room-rail.drawer-open { display: flex; }
+    /* Off-canvas rail: transform only, so opening never reflows the chat. */
+    .room-rail {
+      display: flex;
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 50;
+      width: min(300px, 88vw);
+      height: 100dvh;
+      min-height: 0;
+      padding: 20px 14px 0;
+      background: var(--surface);
+      border-right: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      transform: translateX(-100%);
+      visibility: hidden;
+      transition: transform .2s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .2s;
+    }
+    .room-rail.drawer-open {
+      transform: translateX(0);
+      visibility: visible;
+      transition: transform .2s cubic-bezier(.2, .7, .3, 1), visibility 0s;
+    }
+    .room-rail.no-drawer-animation { transition: none !important; }
     .rail-brand { display: flex; margin-bottom: 22px; }
-    .rail-foot { display: flex; min-height: var(--composer-block, 93px); }
+    .rail-foot { display: flex; min-height: var(--composer-block, 88px); }
     .rail-install { display: grid; gap: 6px; padding: 8px 4px 10px; border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent); }
     .rail-install .rail-install-btn { width: 100%; min-height: 40px; }
     .rail-install svg { width: 16px; height: 16px; }
@@ -260,14 +320,14 @@
     #roomListChat .room-row { height: auto; padding: 10px 12px; }
     #roomListChat .r-meta { font-size: 12px; }
     #roomListChat .r-preview { display: block; }
-    #chatView > .chat-head { grid-column: 1; grid-row: 1; flex-wrap: wrap; align-items: center; padding: calc(6px + env(safe-area-inset-top)) 10px 6px; gap: 4px 8px; }
+    #chatView > .chat-head { grid-column: 1; grid-row: 1; flex-wrap: nowrap; align-items: center; padding: calc(4px + env(safe-area-inset-top)) 8px 4px; gap: 2px 6px; }
     #chatView > .conn-bar { grid-column: 1; grid-row: 2; }
     #chatView > .msg-scroll { grid-column: 1; grid-row: 3; }
     #chatView > .composer { grid-column: 1; grid-row: 4; }
-    .chat-head-actions { flex: none; flex-wrap: nowrap; justify-content: flex-end; gap: 4px; margin-left: auto; }
+    .chat-head-actions { flex: none; flex-wrap: nowrap; justify-content: flex-end; gap: 3px; margin-left: auto; }
     .chat-head-actions > .locale-control { display: none; }
-    .chat-head-main { display: flex; flex: 1 1 200px; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
-    .room-title-row { flex: 1 1 0; gap: 6px; min-width: 0; }
+    .chat-head-main { display: flex; flex: 1 1 0; flex-wrap: wrap; align-items: center; gap: 1px 6px; min-width: 0; }
+    .room-title-row { flex: 1 1 0; gap: 4px; min-width: 0; }
     .room-meta { flex: none; margin: 0; max-width: none; }
     .room-description { flex: 1 1 100%; margin: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .chat-head-main h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
@@ -279,19 +339,28 @@
     .room-options-panel { right: 0; left: auto; }
     .thread { padding: 14px 12px 6px; }
     .msg-text { max-width: 92%; font-size: 15px; }
-    .composer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
-    #msgInput { min-height: 0; padding: 9px 11px; line-height: 1.45; }
-    #btnSend { padding: 12px 15px; }
+    .composer { gap: 8px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
+    .composer-row { gap: 8px; }
+    #msgInput { min-height: 0; padding: 10px 11px; line-height: 1.5; }
+    /* Beat the short-window compaction so the input still matches the buttons. */
+    #chatView #msgInput[data-empty="true"] { height: 46px !important; }
+    #chatView #msgInput[data-empty="true"]::before { inset: 12px 11px auto; }
+    #btnSend { height: 44px; min-height: 44px; padding: 0 18px; }
+    .composer-meta { gap: 6px; min-height: 18px; }
+    .composer-meta .chip.keys-entry { height: 18px; padding: 0 6px; font-size: 11px; }
+    .composer-meta .draft-count { display: block; font-size: 11px; line-height: 1.3; }
   }
   @media (max-width: 480px) {
-    .chat-head-main { flex-basis: 100%; }
-    .chat-head-actions { flex-basis: 100%; margin-left: 0; }
-    #msgInput[data-empty="true"] { min-height: calc(2.9em + 20px); }
+    /* One row for the menu, title, and actions: secondary room details move out. */
+    .room-meta, .room-description { display: none; }
   }
   @media (max-width: 420px) {
     #chatView > .chat-head { align-items: center; }
     .chat-head-actions { justify-content: flex-end; gap: 4px; }
     .chat-head-actions .panel { max-height: min(70dvh, 520px); overflow: auto; }
+  }
+  @media (max-width: 380px) {
+    .chat-head-actions .chip { width: 40px; height: 40px; }
   }
   @media (max-width: 300px) {
     #chatView > .chat-head { padding: 8px; gap: 0; }

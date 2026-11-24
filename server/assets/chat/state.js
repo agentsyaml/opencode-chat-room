@@ -23,6 +23,13 @@ export const app = {
   failedRenderIds: new Set(),
 };
 
+// Phones and tablets lack the hardware keyboard the shortcut hint assumes.
+// iPadOS reports a desktop Macintosh UA, so touch points identify it there.
+export function isMobileDevice() {
+  const ua = navigator.userAgent || "";
+  return /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+}
+
 export function createRandomId() {
   const crypto = globalThis.crypto;
   if (crypto?.randomUUID) return crypto.randomUUID();
@@ -33,6 +40,12 @@ export function createRandomId() {
   const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+// Media cached by the service worker belongs to a browser identity; drop it whenever
+// that identity changes and keep only the current identity record.
+const clearMediaCache = () => {
+  try { globalThis.navigator?.serviceWorker?.controller?.postMessage({ type: "CLEAR_MEDIA_CACHE" }); } catch { /* Cache cleanup is best effort. */ }
+};
 
 export function createAuth(storage, fetcher, translate = (key) => key, sessionStore) {
   const memory = Object.create(null);
@@ -75,14 +88,21 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
   };
   const ensureIdentity = () => {
     if (browserIdentity) return browserIdentity;
+    const priorID = readSession("chat.sessionID");
     let store;
     try {
       store = storage ?? globalThis.localStorage;
       const canonical = parseIdentity(store.getItem(identityKey));
-      if (canonical) { browserIdentity = canonical; identityPersistent = true; syncTabIdentity(); return canonical; }
+      if (canonical) {
+        browserIdentity = canonical;
+        identityPersistent = true;
+        if (priorID && priorID !== canonical.sessionID) { clearMediaCache(); void postMediaIdentity(); }
+        syncTabIdentity();
+        return canonical;
+      }
     } catch { /* Keep this tab's identity in memory when storage is blocked. */ }
-    const previousID = readSession("chat.sessionID");
-    browserIdentity = { sessionID: validSessionID(previousID) ? previousID : createRandomId(), name: validSessionID(previousID) ? (readSession("chat.name") || "").slice(0, 64) : "" };
+    browserIdentity = { sessionID: validSessionID(priorID) ? priorID : createRandomId(), name: validSessionID(priorID) ? (readSession("chat.name") || "").slice(0, 64) : "" };
+    if (priorID && priorID !== browserIdentity.sessionID) { clearMediaCache(); void postMediaIdentity(); }
     syncTabIdentity();
     try {
       store ||= storage ?? globalThis.localStorage;
@@ -168,7 +188,15 @@ export function createAuth(storage, fetcher, translate = (key) => key, sessionSt
     },
     set failedMessages(value) { writeSession("chat.failedMessages", JSON.stringify(value)); },
   };
-  const saveToken = (value) => { auth.token = String(value ?? "").trim(); return auth.token; };
+  const saveToken = (value) => {
+    const next = String(value ?? "").trim();
+    const changed = next !== auth.token;
+    auth.token = next;
+    // A token change can change what the person may see, so cached images must not
+    // survive into the new identity. An empty value is the sign-out path.
+    if (changed) { clearMediaCache(); void postMediaIdentity(); }
+    return auth.token;
+  };
   const apiResponse = async (url, options = {}) => {
     assertIdentity();
     const headers = { ...options.headers };
@@ -248,7 +276,7 @@ export const messages = {
     reminderEdit: "Edit", reminderEditHeading: "Edit reminder", reminderSave: "Save changes",
     reminderCreated: "Reminder created.", reminderUpdated: "Reminder updated.", reminderDeleted: "Reminder deleted.",
     reminderInvalid: "Check the date, 5-field CRON expression, IANA timezone, and reminder text.", reminderLoadFailed: "Could not load reminders. Your draft is still here.",
-    diagramLoading: "Rendering diagram…", diagramRenderFailed: "Diagram unavailable; showing its source.", resourceLoading: "Loading file…", resourceFailed: "This file could not be loaded.", resourceDownload: "Download", resourceMoreActions: "More actions for {name}", resourcePreview: "Preview", resourceHide: "Hide preview", docPreviewEyebrow: "Markdown preview", docPreviewFailed: "This document could not be loaded.", docPreviewEmpty: "This document is empty.", zoomImage: "Open image", imagePreviewTitle: "Image preview", imageZoomControls: "Image zoom", zoomIn: "Zoom in", zoomOut: "Zoom out", zoomReset: "Reset zoom", installTitle: "Install OC Chat", installBody: "Add it to your home screen for a full-screen chat.", installAction: "Install", installHow: "How to install", installNotNow: "Not now", installIosGuide: "Tap Share, then Add to Home Screen.",
+    diagramLoading: "Rendering diagram…", diagramRenderFailed: "Diagram unavailable; showing its source.", resourceLoading: "Loading file…", resourceFailed: "This file could not be loaded.", resourceDownload: "Download", resourceMoreActions: "More actions for {name}", resourcePreview: "Preview", resourceHide: "Hide preview", docPreviewEyebrow: "Markdown preview", docPreviewFileEyebrow: "File preview", docPreviewFailed: "This document could not be loaded.", docPreviewEmpty: "This document is empty.", docPreviewTooLarge: "This file is too large to preview (over 2 MB). Download it instead.", sidePaneResize: "Resize side pane", zoomImage: "Open image", imagePreviewTitle: "Image preview", imageZoomControls: "Image zoom", zoomIn: "Zoom in", zoomOut: "Zoom out", zoomReset: "Reset zoom", openDiagram: "Open diagram", diagramViewerTitle: "Diagram", diagramZoomControls: "Diagram zoom", diagramFit: "Fit", installTitle: "Install OC Chat", installBody: "Add it to your home screen for a full-screen chat.", installAction: "Install", installHow: "How to install", installNotNow: "Not now", installIosGuide: "Tap Share, then Add to Home Screen.",
     pwaUpdateTitle: "Update available", pwaUpdateBody: "A new version is ready. Reload now, or update the next time you open the app.", pwaUpdateNow: "Update now", pwaUpdateLater: "Later",
     announcementDelete: "Delete announcement",
     announcementNew: "New announcement", announcementEmpty: "No announcements yet.", announcementLoading: "Loading announcements…",
@@ -299,7 +327,7 @@ export const messages = {
     filesUnknownUploader: "Unknown uploader", filesSummary: ({ count, size }) => `${count} file${count === 1 ? "" : "s"} · ${size}`,
     filesLoading: "Loading files…", filesLoadFailed: "Could not load files. Try again.", filesEmpty: "No files in this room yet.",
     filesEmptyFiltered: "No files from this uploader.", filesLoadMore: "Load more",
-    filesHint: "Preview images, audio, video, and Markdown. Download any file.",
+    filesHint: "Preview images, audio, video, Markdown, text, code, and PDF. Download any file.",
     filesPreviewFailed: "Could not load this preview.", filesDownloadFailed: "Could not download this file.",
     filesPreviewLabel: ({ name }) => `Preview ${name}`, filesDownloadLabel: ({ name }) => `Download ${name}`,
     filesDeleteLabel: ({ name }) => `Delete ${name}`, filesRefresh: "Refresh files",
@@ -400,7 +428,7 @@ export const messages = {
     reminderEdit: "编辑", reminderEditHeading: "编辑提醒", reminderSave: "保存修改",
     reminderCreated: "提醒已创建。", reminderUpdated: "提醒已更新。", reminderDeleted: "提醒已删除。",
     reminderInvalid: "请检查日期、5 字段 CRON 表达式、IANA 时区和提醒内容。", reminderLoadFailed: "无法加载提醒，草稿仍已保留。",
-    diagramLoading: "正在渲染图表…", diagramRenderFailed: "图表无法显示，以下为源代码。", resourceLoading: "正在加载文件…", resourceFailed: "无法加载此文件。", resourceDownload: "下载", resourceMoreActions: "{name} 的更多操作", resourcePreview: "预览", resourceHide: "收起预览", docPreviewEyebrow: "Markdown 预览", docPreviewFailed: "无法加载此文档。", docPreviewEmpty: "此文档为空。", zoomImage: "查看大图", imagePreviewTitle: "图片预览", imageZoomControls: "图片缩放", zoomIn: "放大", zoomOut: "缩小", zoomReset: "重置缩放", installTitle: "安装 OC Chat", installBody: "添加到主屏幕，获得全屏聊天体验。", installAction: "安装", installHow: "如何安装", installNotNow: "暂不", installIosGuide: "点击共享按钮，然后选择“添加到主屏幕”。",
+    diagramLoading: "正在渲染图表…", diagramRenderFailed: "图表无法显示，以下为源代码。", resourceLoading: "正在加载文件…", resourceFailed: "无法加载此文件。", resourceDownload: "下载", resourceMoreActions: "{name} 的更多操作", resourcePreview: "预览", resourceHide: "收起预览", docPreviewEyebrow: "Markdown 预览", docPreviewFileEyebrow: "文件预览", docPreviewFailed: "无法加载此文档。", docPreviewEmpty: "此文档为空。", docPreviewTooLarge: "文件太大，无法预览（超过 2 MB），请下载查看。", sidePaneResize: "调整侧边栏宽度", zoomImage: "查看大图", imagePreviewTitle: "图片预览", imageZoomControls: "图片缩放", zoomIn: "放大", zoomOut: "缩小", zoomReset: "重置缩放", openDiagram: "查看图表", diagramViewerTitle: "图表", diagramZoomControls: "图表缩放", diagramFit: "适应窗口", installTitle: "安装 OC Chat", installBody: "添加到主屏幕，获得全屏聊天体验。", installAction: "安装", installHow: "如何安装", installNotNow: "暂不", installIosGuide: "点击共享按钮，然后选择“添加到主屏幕”。",
     pwaUpdateTitle: "有可用更新", pwaUpdateBody: "新版本已准备好。可以立即刷新，或下次打开时再升级。", pwaUpdateNow: "立即升级", pwaUpdateLater: "稍后",
     announcementDelete: "删除公告",
     announcementNew: "新建公告", announcementEmpty: "暂无公告。", announcementLoading: "正在加载公告…",
@@ -447,7 +475,7 @@ export const messages = {
     filesUnknownUploader: "未知上传者", filesSummary: ({ count, size }) => `${count} 个文件 · ${size}`,
     filesLoading: "正在加载文件…", filesLoadFailed: "无法加载文件，请重试。", filesEmpty: "这个房间还没有文件。",
     filesEmptyFiltered: "此上传者没有文件。", filesLoadMore: "加载更多",
-    filesHint: "可预览图片、音频、视频和 Markdown，所有文件都可下载。",
+    filesHint: "可预览图片、音频、视频、Markdown、文本、代码和 PDF，所有文件都可下载。",
     filesPreviewFailed: "无法加载预览。", filesDownloadFailed: "无法下载此文件。",
     filesPreviewLabel: ({ name }) => `预览 ${name}`, filesDownloadLabel: ({ name }) => `下载 ${name}`,
     filesDeleteLabel: ({ name }) => `删除 ${name}`, filesRefresh: "刷新文件",
@@ -514,6 +542,19 @@ app.LS = LS;
 app.api = api;
 app.apiBlob = apiBlob;
 app.setToken = saveToken;
+// The service worker partitions its image cache by this hash; raw credentials never
+// leave the page. A missing controller is fine: the identity is posted on controllerchange.
+async function postMediaIdentity() {
+  try {
+    const controller = globalThis.navigator?.serviceWorker?.controller;
+    const subtle = globalThis.crypto?.subtle;
+    if (!controller || !subtle) return;
+    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(`${LS.token}\n${LS.sessionID}`));
+    const identity = [...new Uint8Array(digest).slice(0, 8)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    controller.postMessage({ type: "SET_MEDIA_IDENTITY", identity });
+  } catch { /* Image caching stays disabled until an identity can be posted. */ }
+}
+app.postMediaIdentity = postMediaIdentity;
 export const SUPPORTED_LOCALES = ["en", "zh-CN", "ja", "ko", "fr", "de", "es", "it"];
 const intlLocales = { en: "en-US", "zh-CN": "zh-CN", ja: "ja-JP", ko: "ko-KR", fr: "fr-FR", de: "de-DE", es: "es-ES", it: "it-IT" };
 app.locale = messages[LS.locale] ? LS.locale : "en";

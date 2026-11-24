@@ -11,7 +11,7 @@
         "CHAT_ROOM_DELIVERY",
         "CHAT_ROOM_CODEX_BIN"
       ],
-      "required": true
+      "required": false
     }
   }
 }

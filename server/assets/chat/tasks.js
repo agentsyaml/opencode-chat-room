@@ -70,7 +70,9 @@ export function initTasks(app) {
   const setBusy = (busy) => {
     loading = busy;
     dialog.setAttribute("aria-busy", String(busy));
-    refresh.disabled = busy;
+    // A reload that finishes while an editor is open must not re-enable the
+    // refresh control the editor has locked.
+    refresh.disabled = busy || Boolean(editingId);
     createButton.disabled = busy;
     syncClear();
   };
@@ -86,6 +88,8 @@ export function initTasks(app) {
   };
 
   const toggleStep = async (task, index, input) => {
+    // render() rebuilds the open edit form; keep unsaved edits alive.
+    if (editingId) return;
     const roomId = app.state.room?.id;
     if (!roomId) return;
     const steps = stepsOf(task).map((step, position) => position === index ? { ...step, done: input.checked } : step);
@@ -109,6 +113,8 @@ export function initTasks(app) {
   };
 
   const changeStatus = async (task, select) => {
+    // render() rebuilds the open edit form; keep unsaved edits alive.
+    if (editingId) return;
     const roomId = app.state.room?.id, next = select.value;
     if (!roomId || next === statusOf(task)) return;
     select.disabled = true;
@@ -193,6 +199,8 @@ export function initTasks(app) {
   const view = {
     app, statusOf, updatedOf, canEdit, canStatus, stepsOf, participantsOf, dateValue, formatDue, isOverdue,
     isEditing: (task) => task.id === editingId,
+    // One open editor owns the board; other rows stay visible but inert.
+    isLocked: () => Boolean(editingId),
     onStatus: changeStatus, onEdit: startEdit, onDelete: removeTask, onToggleStep: toggleStep,
     showError, onCancel: cancelEdit, onSave: saveEdit,
   };
@@ -231,6 +239,7 @@ export function initTasks(app) {
     if (!empty.hidden) app.setText(empty, items.length ? "tasksEmptyFiltered" : "tasksEmpty");
     summary.textContent = items.length ? app.t("tasksSummary", { count: visible.length }) : "";
     syncClear();
+    refresh.disabled = loading || Boolean(editingId);
     if (editingId && focusEdit) {
       focusEdit = false;
       groups.querySelector(".task-edit-title")?.focus();
@@ -394,7 +403,7 @@ export function initTasks(app) {
 
   trigger.addEventListener("click", () => { app.closePanels(); open(); });
   $("#btnCloseTasks")?.addEventListener("click", () => close());
-  refresh.addEventListener("click", () => void load());
+  refresh.addEventListener("click", () => { if (!editingId) void load(); });
   $("#btnRetryTasks")?.addEventListener("click", () => void load());
   filter.addEventListener("change", render);
   createDetails.addEventListener("toggle", () => {
@@ -470,6 +479,24 @@ export function initTasks(app) {
     close();
   });
   document.addEventListener("chat-room-activated", () => {
+    // A modal blocks the room switch, so only the side pane survives it.
+    if (dialog.open && dialog.classList.contains("is-pane") && app.state.room?.kind !== "direct") {
+      items = [];
+      editingId = "";
+      filter.value = "all";
+      // A draft typed for the previous room must not be created in the new one.
+      createDetails.open = false;
+      resetCreate();
+      generation++;
+      // The previous room's load may still be in flight and will bail on the
+      // newer generation without clearing its busy flag; reset it here.
+      setBusy(false);
+      failed = false;
+      render();
+      syncHead();
+      void load();
+      return;
+    }
     close(false);
     items = [];
     editingId = "";

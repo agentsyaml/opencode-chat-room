@@ -73,7 +73,7 @@ function codeSegments(source) {
   while (lineStart < source.length) {
     const lineEnd = source.indexOf("\n", lineStart);
     const end = lineEnd < 0 ? source.length : lineEnd;
-    const line = source.slice(lineStart, end);
+    const line = source.slice(lineStart, end).replace(/\r$/, "");
     const opener = /^([ \t]*)(`{3,}|~{3,})/.exec(line);
     if (opener) {
       if (lineStart > proseStart) splitInlineCode(source, proseStart, lineStart, segments);
@@ -84,7 +84,7 @@ function codeSegments(source) {
       while (scan < source.length) {
         const nextEnd = source.indexOf("\n", scan);
         const stop = nextEnd < 0 ? source.length : nextEnd;
-        const close = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/.exec(source.slice(scan, stop));
+        const close = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/.exec(source.slice(scan, stop).replace(/\r$/, ""));
         if (close && close[2][0] === fence[0] && close[2].length >= fence.length
           && close[1].length <= indent + 3) {
           closed = nextEnd < 0 ? source.length : nextEnd + 1;
@@ -106,7 +106,7 @@ function codeSegments(source) {
       while (scan < source.length) {
         const nextEnd = source.indexOf("\n", scan);
         const stop = nextEnd < 0 ? source.length : nextEnd;
-        const current = source.slice(scan, stop);
+        const current = source.slice(scan, stop).replace(/\r$/, "");
         if (current.trim() && !/^(?: {4,}|\t)/.test(current)) {
           closed = scan;
           break;

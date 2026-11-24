@@ -100,7 +100,8 @@ export function initEvents(app) {
   };
   const roomRail = $("#roomRail"), drawerTrigger = $("#btnRoomsDrawer"), backdrop = $("#roomDrawerBackdrop");
   const smallScreen = () => matchMedia("(max-width: 760px)").matches;
-  let readingPosition = null, resizeFrame = 0, resizeGeneration = 0, scrollGeneration = 0, resizeResetTimer = 0;
+  let drawerWasSmall = smallScreen(), drawerAnimationTimer = 0;
+  let readingPosition = null, resizeFrame = 0, resizeGeneration = 0, scrollGeneration = 0, resizeResetTimer = 0, backdropTimer = 0;
   function captureReadingPosition() {
     const thread = $("#thread"), edge = thread.getBoundingClientRect(), top = edge.top + thread.clientTop;
     const anchor = [...$("#msgList").querySelectorAll("[data-msg-id]")].find((row) => row.getBoundingClientRect().bottom > top);
@@ -153,11 +154,31 @@ export function initEvents(app) {
   };
   function closeRoomDrawer(restore = true) {
     roomRail.classList.remove("drawer-open"); roomRail.inert = true; roomRail.setAttribute("aria-hidden", "true");
-    backdrop.hidden = true; drawerTrigger.setAttribute("aria-expanded", "false");
+    hideBackdrop(); drawerTrigger.setAttribute("aria-expanded", "false");
     if (restore && smallScreen()) drawerTrigger.focus({ preventScroll: true });
   }
+  function showBackdrop() {
+    clearTimeout(backdropTimer);
+    backdrop.hidden = false;
+    requestAnimationFrame(() => backdrop.classList.add("is-open"));
+  }
+  function hideBackdrop(immediate = false) {
+    clearTimeout(backdropTimer);
+    backdrop.classList.remove("is-open");
+    if (immediate) { backdrop.hidden = true; return; }
+    backdropTimer = setTimeout(() => { backdrop.hidden = true; }, 200);
+  }
   function syncRoomDrawer() {
-    if (!smallScreen()) { roomRail.classList.remove("drawer-open"); roomRail.inert = false; roomRail.removeAttribute("aria-hidden"); backdrop.hidden = true; drawerTrigger.setAttribute("aria-expanded", "false"); }
+    // Crossing the drawer breakpoint jumps straight to the target layout instead
+    // of animating a rail that is no longer a drawer.
+    const small = smallScreen();
+    if (small !== drawerWasSmall) {
+      drawerWasSmall = small;
+      roomRail.classList.add("no-drawer-animation");
+      clearTimeout(drawerAnimationTimer);
+      drawerAnimationTimer = setTimeout(() => roomRail.classList.remove("no-drawer-animation"), 260);
+    }
+    if (!small) { roomRail.classList.remove("drawer-open"); roomRail.inert = false; roomRail.removeAttribute("aria-hidden"); hideBackdrop(true); drawerTrigger.setAttribute("aria-expanded", "false"); }
     else if (!roomRail.classList.contains("drawer-open")) {
       if (roomRail.contains(document.activeElement)) drawerTrigger.focus({ preventScroll: true });
       roomRail.inert = true; roomRail.setAttribute("aria-hidden", "true");
@@ -193,7 +214,7 @@ export function initEvents(app) {
   drawerTrigger.addEventListener("click", () => {
     if (roomRail.classList.contains("drawer-open")) return closeRoomDrawer();
     app.closePanels(); roomRail.inert = false; roomRail.removeAttribute("aria-hidden"); roomRail.classList.add("drawer-open");
-    backdrop.hidden = false; drawerTrigger.setAttribute("aria-expanded", "true");
+    showBackdrop(); drawerTrigger.setAttribute("aria-expanded", "true");
     (roomRail.querySelector('.room-row[aria-current="page"]') || $("#btnRefreshRooms")).focus();
   });
   backdrop.addEventListener("click", () => closeRoomDrawer());

@@ -81,13 +81,34 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
       };
     });
     expect(wide.hasTasks).toBe(true);
-    expect(wide.columns).toBe(3);
+    expect(wide.columns).toBe(4);
     expect(wide.position).toBe("relative");
-    expect(wide.column).toBe("3");
+    expect(wide.column).toBe("4");
     expect(wide.paneWidth).toBeGreaterThanOrEqual(379);
     expect(wide.paneWidth).toBeLessThanOrEqual(461);
     expect(Math.abs(wide.paneRight - wide.viewRight)).toBeLessThanOrEqual(2);
     expect(wide.chatWidth).toBeGreaterThan(300);
+    // The shared separator is the only width control; the room rail stays fixed.
+    const handle = page.locator("#sidePaneHandle");
+    await handle.waitFor({ state: "visible" });
+    expect(await page.evaluate(() => document.querySelector<HTMLElement>("#roomRail")!.getBoundingClientRect().width)).toBe(252);
+    const handleBox = (await handle.boundingBox())!;
+    await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handleBox.x + handleBox.width / 2 - 120, handleBox.y + handleBox.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForFunction((expected: number) => Math.abs(document.querySelector("#tasksDialog")!.getBoundingClientRect().width - expected) <= 2, wide.paneWidth + 120);
+    const resized = await page.evaluate(() => ({
+      rail: document.querySelector<HTMLElement>("#roomRail")!.getBoundingClientRect().width,
+      pane: document.querySelector<HTMLElement>("#tasksDialog")!.getBoundingClientRect().width,
+      chat: document.querySelector<HTMLElement>("#msgScroll")!.getBoundingClientRect().width,
+    }));
+    expect(resized.rail).toBe(252);
+    expect(resized.chat).toBeLessThan(wide.chatWidth - 100);
+    expect(Number(await page.evaluate(() => localStorage.getItem("chat.sidePaneWidth")))).toBe(Math.round(resized.pane));
+    // Double-click restores the default width so the rest of the run uses it.
+    await handle.dblclick();
+    await page.waitForFunction((expected: number) => Math.abs(document.querySelector("#tasksDialog")!.getBoundingClientRect().width - expected) <= 2, wide.paneWidth);
     // The pane is not modal: the conversation stays usable beside it.
     await page.locator("#msgInput").click();
     await page.keyboard.type("Message while tasks open");
@@ -166,6 +187,10 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     await page.locator(".task-edit-description").fill("Updated acceptance notes.");
     await page.locator(".task-edit-due").fill("2027-01-15");
     await page.locator(".task-edit-conclusion").fill("Signed off after review.");
+    // An unrelated refresh must not discard the open edit form: the control is
+    // inert while editing, and the draft keeps its value.
+    expect(await page.locator("#btnRefreshTasks").isDisabled()).toBe(true);
+    expect(await page.locator(".task-edit-title").inputValue()).toBe("Review launch checklist v2");
     await page.locator(".task-edit-participants-field .task-person").filter({ hasText: ownerName }).locator("input").check();
     await page.locator(".task-edit-steps-field .task-add-step").click();
     await page.locator(".task-edit-steps-field .task-step-text").nth(2).fill("Announce the release");
@@ -182,15 +207,17 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     expect(await row.locator(".task-conclusion").textContent()).toContain("Signed off after review.");
 
     // Crossing the pane breakpoint keeps the list, switching between pane and modal.
-    await page.setViewportSize({ width: 900, height: 800 });
+    await page.setViewportSize({ width: 900, height: 700 });
     await page.waitForFunction(() => !document.querySelector("#tasksDialog")!.classList.contains("is-pane"));
     expect(await page.evaluate(() => getComputedStyle(document.querySelector("#tasksDialog")!).position)).toBe("fixed");
     expect(await page.locator("#taskGroups .task-row").count()).toBe(1);
     expect(await page.evaluate(() => document.querySelector("#chatView")!.classList.contains("has-tasks"))).toBe(false);
+    expect(await handle.isVisible()).toBe(false);
     await page.setViewportSize({ width: 1280, height: 850 });
     await page.waitForFunction(() => document.querySelector("#chatView")!.classList.contains("has-tasks"));
     expect(await page.evaluate(() => getComputedStyle(document.querySelector("#tasksDialog")!).position)).toBe("relative");
     expect(await page.locator("#taskGroups .task-row").count()).toBe(1);
+    expect(await handle.isVisible()).toBe(true);
 
     // Markdown preview wins the third column; closing it brings the open task pane back.
     const resource = await uploadMarkdown(origin, roomId, ownerSession, "TASKS-NOTES.md", "# Notes\n\nTask context.");
@@ -204,6 +231,9 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     await page.locator("#docPreview[open]").waitFor();
     await page.waitForFunction(() => document.querySelector("#chatView")!.classList.contains("has-doc"));
     expect(await page.evaluate(() => getComputedStyle(document.querySelector("#tasksDialog")!).display)).toBe("none");
+    // One separator still serves the visible preview while Tasks waits underneath.
+    expect(await page.locator("#sidePaneHandle").count()).toBe(1);
+    expect(await handle.isVisible()).toBe(true);
     // Opening Tasks while the preview owns the column must take the column back.
     await openTasks(page);
     await page.locator("#docPreview").waitFor({ state: "hidden" });
@@ -213,6 +243,25 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("tasksHeading");
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(screenshotDir, "web-tasks-wide-list-1280.png") });
+
+    // The side pane stays open across room switches and reloads the new room's tasks.
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      app.openCreateRoomDialog();
+      document.querySelector<HTMLInputElement>("#inRoomNameChat")!.value = "__Test_TasksRoomTwo";
+      await app.createRoom();
+    }, "/assets/chat/state.js");
+    await page.waitForFunction(() => document.querySelectorAll("#taskGroups .task-row").length === 0);
+    expect(await page.evaluate(() => document.querySelector("#tasksDialog")?.hasAttribute("open"))).toBe(true);
+    await page.evaluate(async ({ url, id }: any) => {
+      const { app } = await import(url);
+      app.activateRoom(id);
+    }, { url: "/assets/chat/state.js", id: roomId });
+    await page.waitForFunction(() => document.querySelectorAll("#taskGroups .task-row").length === 1);
+    expect(await page.evaluate(() => document.querySelector("#tasksDialog")?.hasAttribute("open"))).toBe(true);
+    // A switch during an in-flight load must not leave the pane stuck busy.
+    expect(await page.locator("#btnRefreshTasks").isEnabled()).toBe(true);
+    expect(await page.locator("#tasksDialog").getAttribute("aria-busy")).toBe("false");
 
     // The pane close button and Escape restore focus to Options.
     await page.locator("#btnCloseTasks").click();
@@ -228,6 +277,7 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     await page.locator("#msgInput").click();
     await page.keyboard.press("Alt+Space");
     await page.locator("#paletteDialog[open]").waitFor();
+    await page.locator("#paletteInput").fill("/");
     expect(await page.locator("#paletteList .palette-command .palette-label").allTextContents()).toContain("Tasks");
     await page.locator("#paletteList .palette-command").filter({ hasText: "Tasks" }).click();
     await page.locator("#tasksDialog[open]").waitFor();

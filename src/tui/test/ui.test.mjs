@@ -160,10 +160,10 @@ test("Alt+Space opens the palette and typing searches", async () => {
     context.mockInput.pressKeys(["\x1b "]);
     await context.renderOnce();
     assert.ok(context.app.state.palette);
-    assert.match(context.captureCharFrame(), /Palette/);
-    assert.match(context.captureCharFrame(), /commands/);
-    assert.match(context.captureCharFrame(), /Refresh rooms/);
-    assert.match(context.captureCharFrame(), /Search all joined rooms/);
+    assert.equal(context.app.state.palette.mode, "search");
+    assert.match(context.captureCharFrame(), /Search messages/);
+    // Empty input must not show a command wall; commands appear only after "/".
+    assert.doesNotMatch(context.captureCharFrame(), /Refresh rooms/);
 
     await context.mockInput.typeText("hello");
     await context.waitFor(() => context.app.state.palette?.mode === "search");
@@ -207,8 +207,9 @@ test("palette command execution and Esc focus restore", async () => {
     context.mockInput.pressKeys(["\x1b "]);
     await context.renderOnce();
     assert.ok(context.app.state.palette);
-    for (let index = 0; index < 4; index += 1) context.mockInput.pressArrow("down");
+    await context.mockInput.typeText("/help");
     await context.renderOnce();
+    assert.equal(context.app.state.palette.mode, "commands");
     context.mockInput.pressEnter();
     await context.waitFor(() => context.app.state.palette === null);
     assert.equal(context.app.state.help, true);

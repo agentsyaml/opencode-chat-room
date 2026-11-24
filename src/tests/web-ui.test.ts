@@ -276,10 +276,11 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     const mobileHead = await alice.evaluate(() => {
       const head = document.querySelector<HTMLElement>("#chatView > .chat-head")!, main = document.querySelector<HTMLElement>(".chat-head-main")!, actions = document.querySelector<HTMLElement>(".chat-head-actions")!;
       const chips = Array.from(document.querySelectorAll<HTMLElement>(".chat-head-actions .chip"));
-      return { headBottom: head.getBoundingClientRect().bottom, mainBottom: main.getBoundingClientRect().bottom, actionsTop: actions.getBoundingClientRect().top, missingIcons: chips.filter((chip) => !chip.querySelector("svg")).map((chip) => chip.id) };
+      return { headBottom: head.getBoundingClientRect().bottom, mainTop: main.getBoundingClientRect().top, mainBottom: main.getBoundingClientRect().bottom, actionsTop: actions.getBoundingClientRect().top, missingIcons: chips.filter((chip) => !chip.querySelector("svg")).map((chip) => chip.id) };
     });
     expect(mobileHead.missingIcons).toEqual([]);
-    expect(mobileHead.actionsTop).toBeGreaterThanOrEqual(mobileHead.mainBottom - 1);
+    // The header is one row: the actions share the title row's vertical band.
+    expect(Math.abs(mobileHead.actionsTop - mobileHead.mainTop)).toBeLessThanOrEqual(2);
     for (const [trigger, panel] of [["#btnQuestions", "#questionPanel"], ["#btnReminders", "#reminderPanel"], ["#btnMembers", "#memberPanel"], ["#btnRoomOptions", "#roomOptions"]]) {
       await alice.locator(trigger).click();
       const panelBox = await alice.locator(panel).boundingBox();
@@ -303,7 +304,8 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     await alice.setViewportSize({ width: 320, height: 700 });
     const narrow = await alice.evaluate(() => ({ pageX: document.documentElement.scrollWidth - innerWidth, title: document.querySelector<HTMLElement>("#roomName")!.getBoundingClientRect().width }));
     expect(narrow.pageX).toBeLessThanOrEqual(1);
-    expect(narrow.title).toBeGreaterThan(100);
+    // The one-row mobile header trades title width for height; it still keeps a readable stub.
+    expect(narrow.title).toBeGreaterThan(40);
     await alice.setViewportSize({ width: 375, height: 812 });
     await alice.screenshot({ path: path.join(screenshotDir, "chat-mobile.png"), fullPage: true });
     await alice.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");

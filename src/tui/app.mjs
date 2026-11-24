@@ -338,11 +338,18 @@ export class ChatApp {
       return;
     }
     const text = canonicalizeMentions(raw, room.participants);
+    // Reuse the attempt's id when the same failed text is sent again, so a lost
+    // response cannot produce two messages.
+    const attempt = this.pendingSend && this.pendingSend.text === raw
+      ? this.pendingSend
+      : { text: raw, clientMessageID: globalThis.crypto.randomUUID() };
+    this.pendingSend = attempt;
     this.state.draft = "";
     this.touch();
     try {
-      const result = await this.api.send(room.id, this.sessionID, text);
+      const result = await this.api.send(room.id, this.sessionID, text, { clientMessageID: attempt.clientMessageID });
       if (!this.isCurrent(room.id)) return;
+      this.pendingSend = null;
       if (Array.isArray(result?.messages)) this.merge(result.messages);
       else if (result?.id) this.merge([result]);
       this.state.highlight = null;
@@ -350,7 +357,8 @@ export class ChatApp {
       this.setStatus("sent", "success");
       this.markRead();
     } catch (error) {
-      if (!this.state.draft) this.state.draft = raw;
+      // Keep text typed while the request was in flight; dropping it loses work.
+      this.state.draft = this.state.draft ? `${raw}\n${this.state.draft}` : raw;
       this.setStatus(`send failed: ${errorText(error)}`, "error");
     }
   }

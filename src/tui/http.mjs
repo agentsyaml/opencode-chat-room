@@ -87,10 +87,10 @@ export function createApi({ url, token, requestTimeoutMs = 10000 }) {
     async leave(roomId, sessionID) {
       await call(`${room(roomId)}/leave`, { method: "POST", body: { sessionID } });
     },
-    async send(roomId, sessionID, text, { replyToMessageID, isQuestion } = {}) {
+    async send(roomId, sessionID, text, { replyToMessageID, isQuestion, clientMessageID } = {}) {
       return (await call(`${room(roomId)}/messages`, {
         method: "POST",
-        body: { sessionID, text, ...(replyToMessageID ? { replyToMessageID } : {}), ...(isQuestion ? { isQuestion: true } : {}) },
+        body: { sessionID, text, ...(replyToMessageID ? { replyToMessageID } : {}), ...(isQuestion ? { isQuestion: true } : {}), ...(clientMessageID ? { clientMessageID } : {}) },
       })).data;
     },
     async poll(roomId, sessionID, afterTs, { signal, timeoutMs = 20000 } = {}) {

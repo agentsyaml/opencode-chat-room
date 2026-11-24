@@ -6,7 +6,7 @@ export function initJoinRequests(app) {
   const $ = app.$;
   const pendingIds = (app.state.pendingJoinIds ??= new Set());
   let pending = { roomId: "", name: "", status: "", timer: 0, generation: 0, checking: false, cancelling: false };
-  let requests = [], requestsRoomId = "", requestsGeneration = 0, requestsLoading = false, deniedRoomId = "";
+  let requests = [], requestsRoomId = "", requestsGeneration = 0, requestsLoading = false, loadingRoomId = "", deniedRoomId = "";
   let requestSignature = "";
 
   const panel = $("#memberPanel"), section = $("#joinRequests"), list = $("#joinRequestList");
@@ -169,9 +169,12 @@ export function initJoinRequests(app) {
       renderRequests();
       return;
     }
-    if (requestsLoading) return;
+    // A refresh for another room must not be skipped by the previous room's
+    // in-flight request, or the list stays empty until the next poll.
+    if (requestsLoading && loadingRoomId === room.id) return;
     const generation = ++requestsGeneration, roomId = room.id;
     requestsLoading = true;
+    loadingRoomId = roomId;
     try {
       const data = await app.api(`/rooms/${encodeURIComponent(roomId)}/join-requests?sessionID=${encodeURIComponent(LS.sessionID)}`);
       if (generation !== requestsGeneration || app.state.room?.id !== roomId) return;
@@ -185,7 +188,7 @@ export function initJoinRequests(app) {
       if (error.status === 403) { deniedRoomId = roomId; requests = []; renderRequests(); }
       else $("#joinRequestsStatus").textContent = app.t("joinRequestsLoadFailed");
     } finally {
-      requestsLoading = false;
+      if (loadingRoomId === roomId) { requestsLoading = false; loadingRoomId = ""; }
     }
   }
 

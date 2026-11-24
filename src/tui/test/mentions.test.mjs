@@ -28,6 +28,11 @@ test("canonical mentions convert prose but leave fenced and inline code alone", 
   assert.equal(canonicalizeMentions("    const s = '@Bob';", people), "    const s = '@Bob';");
   // A one-backtick span may contain a longer backtick run as literal text.
   assert.equal(canonicalizeMentions("`a``` @Bob`", people), "`a``` @Bob`");
+  // CRLF pastes keep the fence open/close behavior of LF text.
+  assert.equal(
+    canonicalizeMentions("```\r\n@Bob\r\n```\r\n@Bob", people),
+    "```\r\n@Bob\r\n```\r\n<at>@Bob</at>",
+  );
 });
 
 test("mention ranges skip code spans and mark the inner raw tag", () => {

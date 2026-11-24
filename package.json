@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "description": "A chat-room server, web client, terminal client, and OpenCode/Codex/dsh plugins.",
   "repository": {
     "type": "git",
@@ -67,7 +67,7 @@
     "server": "node cli.ts",
     "server:bun": "bun cli.ts",
     "server:deno": "deno run --allow-env --allow-read --allow-write --allow-net cli.ts",
-    "test": "for file in src/tests/*.test.ts server/*.test.ts; do bun test \"$file\" || exit; done && bun test src/tui/test",
+    "test": "for file in src/tests/*.test.ts server/*.test.ts; do bun test \"$file\" || exit; done && bun test src/tui/test --isolate",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

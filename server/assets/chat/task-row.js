@@ -17,6 +17,7 @@ const statusSelect = (view, task) => {
     select.append(option);
   }
   select.value = view.statusOf(task);
+  select.disabled = view.isLocked();
   select.addEventListener("change", () => void view.onStatus(task, select));
   return select;
 };
@@ -96,7 +97,7 @@ export const buildTaskRow = (view, task, index) => {
       toggle.type = "checkbox";
       toggle.className = "task-step-toggle";
       toggle.checked = step.done;
-      toggle.disabled = !view.canStatus(task);
+      toggle.disabled = !view.canStatus(task) || view.isLocked();
       toggle.dataset.stepIndex = String(position);
       toggle.setAttribute("aria-label", `${app.t("tasksStepDoneLabel")}: ${step.text}`);
       toggle.addEventListener("change", () => void view.onToggleStep(task, position, toggle));

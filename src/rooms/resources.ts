@@ -134,9 +134,9 @@ export function resourcePath(resource: Pick<Resource, "id" | "roomID">): string 
   if (!uuid.test(resource.roomID) || !uuid.test(resource.id)) throw new ResourceError(404, "resource not found");
   return path.join(roomDirectory(resource.roomID), resource.id);
 }
-export async function listRoomResources(roomID: string, limit = 500, offset = 0): Promise<{ items: Resource[]; total: number }> {
+export async function listRoomResources(roomID: string, limit = 500, offset = 0, beforeID?: string): Promise<{ items: Resource[]; total: number }> {
   if (!uuid.test(roomID)) throw new ResourceError(404, "room not found");
-  return listResources(databasePath(), roomID, limit, offset);
+  return listResources(databasePath(), roomID, limit, offset, beforeID);
 }
 export async function findResource(roomID: string, id: string): Promise<Resource | undefined> {
   if (!uuid.test(id)) return undefined;

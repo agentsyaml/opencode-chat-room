@@ -70,6 +70,8 @@ export function initMessages(app) {
     app.saveFailedMessages(roomId, (app.state.failedMessages.get(roomId) || []).filter((item) => item.id !== failedId));
     app.renderFailedMessages();
   };
+  // A retry reuses the first attempt's clientMessageID so a lost response
+  // cannot create a twin.
   app.retryFailedMessage = async (roomId, failedId) => {
     const item = app.state.failedMessages.get(roomId)?.find((message) => message.id === failedId);
     if (!item || app.state.retryingFailedIds.has(failedId)) return;
@@ -78,7 +80,7 @@ export function initMessages(app) {
     try {
       const questionTarget = item.replyTarget?.isQuestion, entry = app.state.rooms.get(roomId);
       const updated = questionTarget ? (await app.answerQuestionFromReply(roomId, item.replyToMessageID, item.text), entry?.room)
-        : await app.api(`/rooms/${encodeURIComponent(roomId)}/messages`, { method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text: item.text, isQuestion: Boolean(item.isQuestion), ...(item.replyToMessageID ? { replyToMessageID: item.replyToMessageID } : {}) }) });
+        : await app.api(`/rooms/${encodeURIComponent(roomId)}/messages`, { method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text: item.text, isQuestion: Boolean(item.isQuestion), ...(item.clientMessageID ? { clientMessageID: item.clientMessageID } : {}), ...(item.replyToMessageID ? { replyToMessageID: item.replyToMessageID } : {}) }) });
       app.completeAttachmentsFromText?.(roomId, item.text);
       if (entry) {
         if (!questionTarget) entry.room = mergeRoom(entry.room, updated);
@@ -370,6 +372,7 @@ export function initMessages(app) {
     // keep the caret in the composer or the next keystrokes go nowhere.
     input.focus({ preventScroll: true });
     const text = message.text;
+    const clientMessageID = createRandomId();
     const thread = $("#thread"), followedBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80;
     const revision = app.state.draftRevision.get(room.id) || 0;
     app.state.sendingRooms ||= new Set(); app.state.sendingRooms.add(room.id);
@@ -394,7 +397,7 @@ export function initMessages(app) {
       let updated;
       if (replyTarget?.isQuestion) { await app.answerQuestionFromReply(room.id, replyTarget.id, text); updated = app.state.rooms.get(room.id)?.room || room; }
       else updated = await app.api(`/rooms/${encodeURIComponent(room.id)}/messages`, {
-        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, ...(replyTarget ? { replyToMessageID: replyTarget.id } : {}) }),
+        method: "POST", body: JSON.stringify({ sessionID: LS.sessionID, text, clientMessageID, ...(replyTarget ? { replyToMessageID: replyTarget.id } : {}) }),
       });
       // A successful request proves the connection is usable, even if a stale
       // long-poll is still waiting to time out.
@@ -441,7 +444,7 @@ export function initMessages(app) {
       if (staleReply) app.saveDraft(room.id, text);
       else {
         const failures = app.state.failedMessages.get(room.id) || [];
-        app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, ...(replyTarget ? { replyToMessageID: replyTarget.id, replyTarget } : {}) }]);
+        app.saveFailedMessages(room.id, [...failures, { id: createRandomId(), text, clientMessageID, ...(replyTarget ? { replyToMessageID: replyTarget.id, replyTarget } : {}) }]);
         app.renderFailedMessages();
       }
       app.completeAttachments?.(room.id, message.ids);

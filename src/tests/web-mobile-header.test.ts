@@ -36,29 +36,38 @@ test.skipIf(!browserModule)("the mobile chat header stays compact with usable co
       const metrics = await page.evaluate(() => {
         const box = (selector: string) => { const rect = document.querySelector<HTMLElement>(selector)!.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom }; };
         const head = document.querySelector<HTMLElement>(".chat-head")!, title = document.querySelector<HTMLElement>("#roomName")!, meta = box(".room-meta"), drawer = box("#btnRoomsDrawer");
-        const chips = Array.from(document.querySelectorAll<HTMLElement>(".chat-head-actions .chip")).map((chip) => { const rect = chip.getBoundingClientRect(); return { width: rect.width, height: rect.height }; });
+        const actions = box(".chat-head-actions"), main = box(".chat-head-main");
+        const rows = Array.from(document.querySelectorAll<HTMLElement>(".chat-head-actions .chip")).map((chip) => { const rect = chip.getBoundingClientRect(); return { width: rect.width, height: rect.height, center: rect.y + rect.height / 2 }; });
         return {
-          head: box(".chat-head"), drawer, chips, meta,
-          title: { ...box("#roomName"), scroll: title.scrollWidth, client: title.clientWidth, ellipsis: getComputedStyle(title).textOverflow },
+          head: box(".chat-head"), drawer, chips: rows, meta, actions, main,
+          title: { ...box("#roomName"), scroll: title.scrollWidth, client: title.clientWidth, ellipsis: getComputedStyle(title).textOverflow, center: box("#roomName").y + box("#roomName").height / 2 },
           roomId: document.querySelector("#roomIdShort")?.textContent || "",
-          actionsBelowMain: box(".chat-head-actions").y >= box(".chat-head-main").bottom - 1,
+          sameRow: rows.every((chip) => Math.abs(chip.center - (box("#roomName").y + box("#roomName").height / 2)) <= 2),
+          actionsAfterTitle: actions.x >= box("#roomName").right - 1,
           overflow: document.documentElement.scrollWidth <= innerWidth && head.scrollWidth <= head.clientWidth,
         };
       });
-      expect(metrics.head.height).toBeLessThanOrEqual(width === 549 ? 65 : 112);
+      expect(metrics.head.height).toBeLessThanOrEqual(width === 549 ? 65 : width <= 380 ? 60 : 64);
       expect(metrics.head.bottom).toBeLessThanOrEqual(130);
       expect(metrics.overflow).toBe(true);
       expect(metrics.roomId.length).toBeGreaterThan(0);
-      expect(metrics.meta.width).toBeGreaterThan(0);
+      if (width <= 480) expect(metrics.meta.width).toBe(0);
+      else {
+        expect(metrics.meta.width).toBeGreaterThan(0);
+        expect(metrics.title.right).toBeLessThanOrEqual(metrics.meta.x - 1);
+      }
       expect(metrics.title.width).toBeGreaterThan(0);
-      expect(metrics.title.right).toBeLessThanOrEqual(metrics.meta.x - 1);
       expect(metrics.title.ellipsis).toBe("ellipsis");
+      expect(metrics.actionsAfterTitle).toBe(true);
       if (metrics.title.scroll > metrics.title.client) expect(metrics.title.scroll).toBeGreaterThan(metrics.title.client);
       expect(metrics.drawer.width).toBeGreaterThanOrEqual(44);
       expect(metrics.drawer.height).toBeGreaterThanOrEqual(44);
       expect(metrics.chips.length).toBe(4);
-      expect(metrics.chips.every((chip: { width: number; height: number }) => chip.width >= 44 && chip.height >= 44)).toBe(true);
-      expect(metrics.actionsBelowMain).toBe(width <= 480);
+      const chipMin = width <= 380 ? 40 : 44;
+      expect(metrics.chips.every((chip: { width: number; height: number }) => chip.width >= chipMin && chip.height >= chipMin)).toBe(true);
+      expect(metrics.sameRow).toBe(true);
+      expect(metrics.actions.y + metrics.actions.height / 2).toBeLessThanOrEqual(metrics.title.center + 2);
+      expect(metrics.actions.y + metrics.actions.height / 2).toBeGreaterThanOrEqual(metrics.title.center - 2);
       if (width === 390 || width === 549) await page.screenshot({ path: path.join(artifacts, `chat-mobile-header-${width}.png`) });
     }
     expect(pageErrors).toEqual([]);

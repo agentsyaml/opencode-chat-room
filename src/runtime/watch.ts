@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { appendFile, chmod, link, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -212,6 +212,26 @@ function sameController(value: unknown, record: WatchRecord, status: string): bo
     body.instanceID === record.instanceID && body.nonce === record.nonce;
 }
 
+// Run the same entry script that started this process. A relative ../cli.ts
+// only exists in the source layout; inside dist/cli.js it would point outside
+// the package (and Node cannot run a .ts daemon from node_modules).
+function cliEntryPath(): string {
+  // Installed packages run through a bin shim (node_modules/.bin/...), so resolve
+  // the symlink before checking the file name; the shim itself is not cli.js.
+  const argv = process.argv[1];
+  if (argv) {
+    let resolved = path.resolve(argv);
+    try { resolved = realpathSync(resolved); } catch { /* keep the resolved path */ }
+    if (/^cli\.(?:ts|js)$/.test(path.basename(resolved))) return resolved;
+  }
+  const candidates = [
+    fileURLToPath(new URL("../../dist/cli.js", import.meta.url)),
+    fileURLToPath(new URL("../../cli.ts", import.meta.url)),
+    fileURLToPath(new URL("../cli.js", import.meta.url)),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+}
+
 export async function watchStatus(): Promise<"running" | "stopped" | "unavailable" | "starting"> {
   const record = await readRecord();
   if (!record) {
@@ -241,9 +261,9 @@ export async function startWatcher(beforePublish?: () => Promise<void>): Promise
     }
     throw new Error("watcher state exists or is starting; no process was signaled");
   }
-  const cli = fileURLToPath(new URL("../../cli.ts", import.meta.url));
+  const cli = cliEntryPath();
   let childError: Error | undefined;
-  const child = spawn(process.execPath, [path.resolve(cli), "watch", "run"], {
+  const child = spawn(process.execPath, [cli, "watch", "run"], {
     detached: true, stdio: "ignore",
     env: { ...process.env, CHAT_ROOM_WATCH_CONTROL_TOKEN: own.token, CHAT_ROOM_WATCH_START_NONCE: own.nonce, CHAT_ROOM_WATCH_INSTANCE_ID: own.instanceID },
   });
@@ -251,7 +271,7 @@ export async function startWatcher(beforePublish?: () => Promise<void>): Promise
   child.unref();
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-  if (childError) { await removeRecord(own.token, own.nonce); releaseWatcherClaim(profile(), own.instanceID); throw childError; }
+    if (childError) { await removeRecord(own.token, own.nonce); releaseWatcherClaim(profile(), own.instanceID); throw childError; }
     const record = await readRecord();
     if (record?.token === own.token && record.nonce === own.nonce && record.phase === "running" && await control(record)) {
       return "watcher started";
@@ -263,7 +283,20 @@ export async function startWatcher(beforePublish?: () => Promise<void>): Promise
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error("watcher did not become ready; its process was not signaled");
+  // Leaving the child alive would keep the pid claim and block every later
+  // start, so stop it and release this attempt instead of only throwing.
+  child.kill("SIGTERM");
+  if (child.exitCode === null) {
+    // Give the dying daemon a bounded moment to finish its shutdown sweep so a
+    // new start cannot overlap it while the old pid still holds leases.
+    await Promise.race([
+      new Promise((resolve) => child.once("exit", resolve)),
+      new Promise((resolve) => setTimeout(resolve, 1000)),
+    ]);
+  }
+  await removeRecord(own.token, own.nonce);
+  releaseWatcherClaim(profile(), own.instanceID);
+  throw new Error("watcher did not become ready; its process was stopped");
 }
 
 export async function stopWatcher(): Promise<string> {

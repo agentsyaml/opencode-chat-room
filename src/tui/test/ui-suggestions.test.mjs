@@ -206,7 +206,7 @@ test("inline slash suggestions also keep their creation-time snapshot", async ()
 test("full palette commands are snapshotted until it is reopened", async () => {
   const context = await setup();
   try {
-    context.app.openPalette();
+    context.app.openPalette({ slash: true });
     await context.renderOnce();
     const before = context.app.state.palette.commands.length;
     context.app.state.rooms.push({ id: "r2", name: "designer", participants: [], joined: false });
@@ -217,7 +217,7 @@ test("full palette commands are snapshotted until it is reopened", async () => {
     assert.doesNotMatch(context.captureCharFrame(), /Join #designer/);
 
     context.app.closePalette();
-    context.app.openPalette();
+    context.app.openPalette({ slash: true });
     await context.renderOnce();
     assert.equal(context.app.state.palette.commands.length, before + 1);
     assert.match(context.captureCharFrame(), /Join #designer/);

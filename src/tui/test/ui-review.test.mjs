@@ -205,7 +205,9 @@ test("/ask sends a question message and keeps normal sends untouched", async () 
     await context.app.setDraft("normal message");
     await context.app.send();
     const sends = context.api.calls.filter((item) => item[0] === "send");
-    assert.deepEqual(sends.at(-1).slice(1), ["r1", "s1", "normal message"]);
+    const last = sends.at(-1).slice(1);
+    assert.deepEqual(last.slice(0, 3), ["r1", "s1", "normal message"]);
+    assert.equal(typeof last[3]?.clientMessageID, "string");
   } finally {
     await teardown(context);
   }

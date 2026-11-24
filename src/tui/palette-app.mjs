@@ -10,8 +10,10 @@ export function attachPalette(Class) {
     openPalette({ slash = false } = {}) {
       this.historyPages.clear();
       this.state.help = false;
+      // Same rule as the web palette: only "/" means commands; empty input
+      // waits for a search query instead of showing a command wall.
       this.state.palette = {
-        mode: "commands",
+        mode: slash ? "commands" : "search",
         query: slash ? "/" : "",
         scope: "room",
         selected: 0,
@@ -88,16 +90,17 @@ export function attachPalette(Class) {
         this.historyInflight.add(room.id);
         try {
           await this.fetchHistoryPage(room.id);
+          // A failed page must not consume the room's search budget.
+          this.historyPages.set(room.id, (this.historyPages.get(room.id) ?? 0) + 1);
         } catch (error) {
-          if (this.state.palette) this.state.palette.error = `history: ${error.message ?? error}`;
+          if (this.state.palette === palette) palette.error = `history: ${error.message ?? error}`;
         } finally {
           this.historyInflight.delete(room.id);
-          this.historyPages.set(room.id, (this.historyPages.get(room.id) ?? 0) + 1);
         }
-        if (this.state.palette) this.refreshPaletteResults();
+        if (this.state.palette === palette) this.refreshPaletteResults();
       }
-      if (this.state.palette) {
-        this.state.palette.searching = this.historyInflight.size > 0;
+      if (this.state.palette === palette) {
+        palette.searching = this.historyInflight.size > 0;
         this.refreshPaletteResults();
       }
     },
@@ -306,7 +309,7 @@ export function attachPalette(Class) {
       const query = String(value ?? "");
       palette.error = "";
       if (!query.trim()) {
-        palette.mode = "commands";
+        palette.mode = "search";
         palette.query = "";
         palette.results = [];
         palette.selected = 0;

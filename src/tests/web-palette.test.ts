@@ -43,6 +43,10 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     await page.locator("#paletteDialog[open]").waitFor();
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("paletteInput");
     expect(await page.locator("#paletteCombo").textContent()).toContain("Ctrl + P");
+    // Empty input is search: no command wall until the user types "/".
+    expect(await page.locator("#paletteList .palette-command").count()).toBe(0);
+    expect(await page.locator("#paletteStatus").textContent()).toBe("Search messages, or type / for commands");
+    await page.locator("#paletteInput").fill("/");
     const commands = await page.locator("#paletteList .palette-command .palette-label").allTextContents();
     expect(commands).toEqual([
       "Refresh rooms", "Create room", "Settings", "Members", "Questions",
@@ -161,6 +165,13 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     await page.screenshot({ path: path.join(screenshotDir, "web-palette-desktop-results-1280.png") });
 
     // Arrow selection and Enter open the hit and leave it highlighted.
+    // A stale hit must not activate while a newer query is still debouncing.
+    await page.locator("#paletteInput").fill("violet-orchid-42");
+    await page.locator("#paletteList .palette-result").first().waitFor();
+    await page.locator("#paletteInput").fill("violet-orchid-43");
+    await page.keyboard.press("Enter");
+    expect(await page.locator("#paletteDialog").isVisible()).toBe(true);
+    expect(await page.locator("#paletteInput").inputValue()).toBe("violet-orchid-43");
     await page.keyboard.press("ArrowDown");
     expect(await result.getAttribute("aria-selected")).toBe("true");
     expect(await page.locator("#paletteInput").getAttribute("aria-activedescendant")).toBe(await result.getAttribute("id"));
@@ -210,6 +221,20 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     const filtered = await page.locator("#paletteList .palette-command .palette-label").allTextContents();
     expect(filtered).toEqual(["Leave room"]);
     expect(await page.evaluate(() => (document.querySelector<HTMLElement>("#paletteDialog")!).dataset.mode)).toBe("commands");
+    // Command filtering matches the localized label and the English alias in any UI language.
+    await page.evaluate(async (url: string) => { const { app } = await import(url); (app as any).setLocale("zh-CN"); }, "/assets/chat/state.js");
+    await page.locator("#paletteInput").fill("/设置");
+    expect(await page.locator("#paletteList .palette-command .palette-label").allTextContents()).toEqual(["设置"]);
+    await page.locator("#paletteInput").fill("/leave");
+    expect(await page.locator("#paletteList .palette-command .palette-label").allTextContents()).toEqual(["离开房间"]);
+    // IME commits can end without a plain input event; compositionend must filter too.
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>("#paletteInput")!;
+      input.value = "/成员";
+      input.dispatchEvent(new Event("compositionend", { bubbles: true }));
+    });
+    expect(await page.locator("#paletteList .palette-command .palette-label").allTextContents()).toEqual(["成员"]);
+    await page.evaluate(async (url: string) => { const { app } = await import(url); (app as any).setLocale("en"); }, "/assets/chat/state.js");
     // A bare slash lists every command.
     await page.locator("#paletteInput").fill("/");
     expect(await page.locator("#paletteList .palette-command .palette-label").allTextContents()).toEqual([

@@ -445,8 +445,13 @@ async function handle(req: Request): Promise<Response> {
         }
         const replyTo = (body as Record<string, unknown>).replyToMessageID;
         if (replyTo !== undefined && (typeof replyTo !== "string" || !replyTo)) return json({ error: "replyToMessageID must be a non-empty message ID" }, 400);
+        // Optional retry key: a lost response may be retried without creating a twin.
+        const clientMessageID = (body as Record<string, unknown>).clientMessageID;
+        if (clientMessageID !== undefined && (typeof clientMessageID !== "string" || !clientMessageID || clientMessageID.length > 100)) {
+          return json({ error: "clientMessageID must be a non-empty string (max 100)" }, 400);
+        }
         if (replyTo !== undefined) {
-          const result = await sendReply(roomId, replyTo, sessionID, text);
+          const result = await sendReply(roomId, replyTo, sessionID, text, clientMessageID);
           if (result.status !== "ok") {
             if (result.status === "missing") return json({ error: "room not found" }, 404);
             if (result.status === "target") return json({ error: "reply target not found in room" }, 404);
@@ -455,10 +460,10 @@ async function handle(req: Request): Promise<Response> {
           }
           touchActive(sessionID);
           const room = await read((svc) => svc.getRoom(roomId));
-          void wakeMentionedSessions(serveWakeUrl, roomId, room.name, text, sessionID, result.message);
+          if (!result.duplicate) void wakeMentionedSessions(serveWakeUrl, roomId, room.name, text, sessionID, result.message);
           return json(await roomPayload(room), 201);
         }
-        const result = await appendRoomMessage(roomId, sessionID, text, isQuestion === true);
+        const result = await appendRoomMessage(roomId, sessionID, text, isQuestion === true, clientMessageID);
         if (result.status !== "ok") {
           if (result.status === "missing") return json({ error: "room not found" }, 404);
           return json({ error: "session is not a room member" }, 409);
@@ -466,7 +471,7 @@ async function handle(req: Request): Promise<Response> {
         touchActive(sessionID); // 发送者活跃
         const room = await read((svc) => svc.getRoom(roomId));
         // ponytail: 即时唤起——仅 @ 点名成员时（核心需求）
-        void wakeMentionedSessions(serveWakeUrl, roomId, room.name, text, sessionID, result.message);
+        if (!result.duplicate) void wakeMentionedSessions(serveWakeUrl, roomId, room.name, text, sessionID, result.message);
         return json(await roomPayload(room), 201);
       }
     }

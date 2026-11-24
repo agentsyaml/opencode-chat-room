@@ -32,6 +32,14 @@ test("resource API keeps uploads member-gated and serves safe ranged content", a
     const listed = await req("/rooms/"+room.id+"/resources?limit=1","GET",{"X-Session-ID":"member"});
     const listedBody = await listed.json();
     if (listed.status !== 200 || listedBody.total !== 1 || listedBody.resources.length !== 1 || listedBody.resources[0].id !== resource.id) throw new Error("resource list was incorrect: "+listed.status+" "+JSON.stringify(listedBody));
+    const uploadNamed = async (name) => (await (await req("/rooms/"+room.id+"/resources","POST",{"X-Session-ID":"member","X-File-Name":encodeURIComponent(name),"Content-Type":"application/octet-stream"},new Uint8Array([1]))).json()).resource;
+    const olderA = await uploadNamed("a.bin");
+    await uploadNamed("b.bin");
+    const secondPage = await (await req("/rooms/"+room.id+"/resources?limit=2&before="+encodeURIComponent(olderA.id),"GET",{"X-Session-ID":"member"})).json();
+    if (secondPage.resources.some((item) => item.id === olderA.id)) throw new Error("cursor page repeated the cursor resource");
+    await uploadNamed("newest.bin");
+    const afterUpload = await (await req("/rooms/"+room.id+"/resources?limit=2&before="+encodeURIComponent(olderA.id),"GET",{"X-Session-ID":"member"})).json();
+    if (JSON.stringify(afterUpload.resources.map((item) => item.id)) !== JSON.stringify(secondPage.resources.map((item) => item.id))) throw new Error("an upload shifted the cursor window");
     const unauthGet = await server.fetch(new Request("http://local/rooms/"+room.id+"/resources/"+resource.id));
     if (unauthGet.status !== 401) throw new Error("unauthenticated resource read was accepted");
     const unauthContent = await server.fetch(new Request("http://local/rooms/"+room.id+"/resources/"+resource.id+"/content"));

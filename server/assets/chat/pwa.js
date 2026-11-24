@@ -52,6 +52,8 @@ export function initPwa(app) {
   // next open; otherwise this page keeps running without interruption.
   later.addEventListener("click", hide);
   navigator.serviceWorker.addEventListener("controllerchange", () => {
+    // A new worker lost the in-memory identity; the cache partition must follow this page.
+    void app.postMediaIdentity?.();
     if (reloading && !reloaded) {
       reloaded = true;
       location.reload();

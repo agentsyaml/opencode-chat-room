@@ -45,6 +45,18 @@ export function attachInfo(Class) {
       return null;
     },
 
+    // A palette acts on the room it was opened for, even if the rail has since
+    // switched rooms; otherwise an announcement prompt could overwrite the new
+    // room's same-named announcement.
+    paletteRoomId(palette) {
+      const roomId = palette.roomId || this.state.current?.id;
+      if (!roomId) {
+        palette.error = "open a joined room first";
+        this.touch();
+      }
+      return roomId;
+    },
+
     async openInfo(kind, title, hint, load) {
       const room = this.currentInfoRoom();
       if (!room) return;
@@ -172,13 +184,14 @@ export function attachInfo(Class) {
 
     async runFileDeleteConfirm(confirm) {
       const palette = this.state.palette;
-      const room = this.state.current;
-      if (!palette || !room) return;
+      if (!palette) return;
+      const roomId = this.paletteRoomId(palette);
+      if (!roomId) return;
       palette.searching = true;
       palette.error = "";
       this.touch();
       try {
-        await this.api.deleteResource(room.id, confirm.data.id, this.sessionID);
+        await this.api.deleteResource(roomId, confirm.data.id, this.sessionID);
         this.setStatus(`deleted ${confirm.data.name}`, "success");
         await this.openFiles();
       } catch (error) {
@@ -292,13 +305,13 @@ export function attachInfo(Class) {
     },
 
     async downloadFile(item) {
-      const room = this.state.current;
-      if (!room || !item?.resource) return;
       const palette = this.state.palette;
+      const roomId = palette ? this.paletteRoomId(palette) : this.state.current?.id;
+      if (!roomId || !item?.resource) return;
       if (palette) palette.searching = true;
       this.touch();
       try {
-        const payload = await this.api.resourceContent(room.id, item.resource.id);
+        const payload = await this.api.resourceContent(roomId, item.resource.id);
         const [{ mkdir, writeFile, access }, path] = await Promise.all([
           import("node:fs/promises"),
           import("node:path"),
@@ -341,12 +354,8 @@ export function attachInfo(Class) {
         await this.submitMessagePrompt(prompt, value);
         return;
       }
-      const room = this.state.current;
-      if (!room) {
-        palette.error = "open a joined room first";
-        this.touch();
-        return;
-      }
+      const roomId = this.paletteRoomId(palette);
+      if (!roomId) return;
       if (prompt.action === "announcement-name") {
         const name = String(value ?? "").trim();
         if (!name) {
@@ -365,7 +374,7 @@ export function attachInfo(Class) {
         palette.searching = true;
         this.touch();
         try {
-          await this.api.saveAnnouncement(room.id, name, String(value ?? ""), this.sessionID);
+          await this.api.saveAnnouncement(roomId, name, String(value ?? ""), this.sessionID);
           this.setStatus(`saved announcement "${name}"`, "success");
           await this.openAnnouncements();
         } catch (error) {
@@ -387,7 +396,7 @@ export function attachInfo(Class) {
         palette.searching = true;
         this.touch();
         try {
-          await this.api.answerQuestion(room.id, prompt.data?.id, this.sessionID, answer);
+          await this.api.answerQuestion(roomId, prompt.data?.id, this.sessionID, answer);
           this.setStatus("answer posted", "success");
           await this.openQuestions();
         } catch (error) {
@@ -419,7 +428,7 @@ export function attachInfo(Class) {
             return;
           }
           const bytes = new Uint8Array(await fs.readFile(file));
-          await this.api.uploadResource(room.id, this.sessionID, path.basename(file), bytes);
+          await this.api.uploadResource(roomId, this.sessionID, path.basename(file), bytes);
           this.setStatus(`uploaded ${path.basename(file)}`, "success");
           await this.openFiles();
         } catch (error) {

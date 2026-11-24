@@ -118,10 +118,12 @@ export function initAnnouncements(app) {
   });
   $("#btnNewAnnouncement").addEventListener("click", () => openEditor(null));
   $("#btnDeleteAnnouncement").addEventListener("click", async () => {
-    const id = roomId(), name = selected;
-    if (!id || !name || !(await app.confirmAction(app.t("announcementDeleteConfirm", { name })))) return;
+    const id = roomId(), name = selected, button = $("#btnDeleteAnnouncement");
+    if (!id || !name || button.disabled) return;
+    button.disabled = true;
     const context = roomGeneration, captured = editorSnapshot();
     try {
+      if (!(await app.confirmAction(app.t("announcementDeleteConfirm", { name })))) return;
       await app.api(`/rooms/${encodeURIComponent(id)}/announcements/${encodeURIComponent(name)}`, { method: "DELETE", body: JSON.stringify({ sessionID: LS.sessionID }) });
       if (currentRoom(id, context)) {
         generation++; items = items.filter((item) => item.name !== name); render();
@@ -129,6 +131,7 @@ export function initAnnouncements(app) {
         if (editorMatches(captured)) { select(null); status(app.t("announcementDeleted")); formStatus(""); dialog.close(); }
       }
     } catch (error) { if (currentRoom(id, context) && editorMatches(captured)) formStatus(error.message); }
+    finally { button.disabled = false; }
   });
   $("#btnRefreshAnnouncements").addEventListener("click", () => void load());
   $("#btnCloseAnnouncement").addEventListener("click", () => dialog.close());

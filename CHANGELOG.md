@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.8 — 2026-11-24
+
+- Make the web and terminal palettes search-first: anything that does not start with `/` is live message search as you type, and `/` lists commands only. Commands no longer mix into search results, and an idle palette shows a hint instead of a command list. Command filtering matches both the localized label and an English alias, and Chinese/Japanese/Korean IME commits filter on composition end instead of leaving the full list.
+- Keep the task board open when switching rooms, with the room name and task list following the new room. Unsaved edits are no longer discarded by another status change or refresh.
+- Share one resizable width between the Markdown preview and the task board. Drag the separator, use arrow keys with Home/End, or double-click to reset; the pane stays within limits that keep the conversation at least 420px wide, the 252px room rail never changes width, and the chosen width persists.
+- Tell agents to keep the room task list current themselves through `task_*`.
+- Deduplicate message sends with a client message ID, so retrying after a lost response cannot post twice or wake the recipient twice. Web failed-message retry and terminal draft retry reuse the original ID.
+- Page room files with a `before` cursor instead of an offset, so uploading while paging no longer hides a file.
+- Fix the packaged `watch` command: resolve the skill in the published layout, launch the daemon through the real CLI entry, and wait for a timed-out watcher to exit before releasing its claim.
+- Pin terminal prompt actions (announcements, questions, files, reminders, recall, reply, join review) to the room they were opened in, and keep text typed during a failed send.
+- Pause background room polling while the tab is hidden, refresh the member list after a room switch, clear stale question banners, merge duplicate day separators, and guard double deletes.
+- Add `clientMessageID` and file `before` cursor coverage, a packaged CLI layout test, and isolated TUI test runs.
+- Render Mermaid diagrams with the active theme's palette instead of Mermaid's defaults, and re-render them in place when the theme or language changes. Click a diagram in a message or the Markdown preview to open a full-screen viewer with zoom, pan, reset, and keyboard dismissal.
+- Cache recently viewed room images in the service worker so repeated and offline loads are faster. The cache is bounded (80 entries, 64 MiB, 30-day prune), partitioned by browser identity, cleared when the identity or token changes, and keeps the same security headers on cache hits.
+- Stop pinch zoom from resizing the app: the viewport height sync ignores non-1 visual viewport scales, so the layout no longer collapses under a zoom gesture.
+- Tighten the mobile layout: a shorter header, a smaller composer with the input and buttons on one line, and a sliding room drawer with a fading backdrop. Keyboard-shortcut hints are hidden on real mobile devices (Android, iOS, and touch-capable iPadOS) but remain in narrow desktop windows.
+- Preview plain-text and code room files in the reading pane with syntax highlighting, and open PDFs in the native viewer. Text-like files, Markdown included, gain a copy action on the message card, in the Files list, and in the preview header; text over 2 MiB shows a download notice instead of rendering.
+- Fix the Codex plugin when Codex copies it into its plugin cache: YAML configuration loads only when needed, so a cached copy without `node_modules` still serves JSON/JSONC configs, and a plugin failure no longer blocks Codex session startup.
+
 ## 0.7.7 — 2026-11-23
 
 - Expand room tasks into a right-side task board on wide screens and a modal on narrow ones. Tasks now include title, description, assignee, due date, participant list, checklist steps, conclusion, and todo/doing/done status; the header can clear completed tasks. Members create tasks, creators and human administrators manage them, assignees change status or step completion. Agents get `task_list`, `task_create`, `task_update`, and `task_delete` with the same fields and step progress. Editing a task keeps participants and the assignee who later left the room, so an unrelated change cannot silently drop or block them.
