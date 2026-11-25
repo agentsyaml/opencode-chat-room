@@ -19,7 +19,6 @@ const STATIC = [
   "/assets/tasks.css",
   "/assets/doc-preview.css",
   "/assets/diagram-viewer.css",
-  "/assets/highlight-10.7.3.min.js",
   "/assets/marked-18.0.4.js",
   "/assets/dompurify-3.4.7.js",
   "/assets/mermaid-11.12.2.min.js",
@@ -28,7 +27,7 @@ const STATIC = [
   "/assets/icons/apple-touch-icon.png",
   "/manifest.webmanifest",
 ];
-const VERSIONED = new Set(STATIC.filter((path) => path.endsWith(".css") || /^\/assets\/(?:highlight|marked|dompurify|mermaid)-/.test(path)));
+const VERSIONED = new Set(STATIC.filter((path) => path.endsWith(".css") || /^\/assets\/(?:marked|dompurify|mermaid)-/.test(path)));
 const versioned = (path) => `${path}?v=${VERSION}`;
 
 // Recently viewed images live in their own cache: a release upgrades CACHE, but a photo

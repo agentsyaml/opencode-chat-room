@@ -21,7 +21,9 @@ test.skipIf(!browserModule)("the split resource menu closes with Escape from its
     await waitForServer(origin);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const page = await browser.newPage({ viewport: { width: 900, height: 800 } });
+    const pageErrors: string[] = [];
     page.setDefaultTimeout(15000);
+    page.on("pageerror", (error: Error) => pageErrors.push(error.message));
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
     await page.goto(`${origin}/chat`);
     await page.locator("#inName").fill("__Test_MenuOwner");
@@ -48,6 +50,27 @@ test.skipIf(!browserModule)("the split resource menu closes with Escape from its
     const toggle = card.locator(".resource-split-toggle"), menu = card.getByRole("menu");
     await toggle.click();
     await menu.getByRole("menuitem", { name: "Delete file" }).waitFor();
+    // Text actions carry a 16px Fluent icon while the labels and control heights stay put.
+    const download = card.locator('button[data-i18n="resourceDownload"]');
+    const preview = card.locator('button[data-i18n="resourcePreview"]');
+    const deleteItem = menu.getByRole("menuitem", { name: "Delete file" });
+    for (const control of [download, preview, toggle, deleteItem]) {
+      const icon = control.locator("svg.fluent-icon");
+      expect(await icon.count()).toBe(1);
+      const iconBox = (await icon.boundingBox())!;
+      expect(Math.abs(iconBox.width - 16)).toBeLessThanOrEqual(1);
+      expect(Math.abs(iconBox.height - 16)).toBeLessThanOrEqual(1);
+    }
+    for (const control of [download, preview, toggle]) {
+      expect(Math.abs((await control.boundingBox())!.height - 35)).toBeLessThanOrEqual(2);
+    }
+    expect((await deleteItem.boundingBox())!.height).toBeLessThan(46);
+    expect(await download.getAttribute("aria-label")).toBe("Download: notes.txt");
+    expect(await preview.getAttribute("aria-label")).toBe("Preview: notes.txt");
+    expect(await toggle.getAttribute("aria-label")).toBe("More actions for notes.txt");
+    expect(await download.textContent()).toContain("Download");
+    expect(await preview.textContent()).toContain("Preview");
+    expect(await deleteItem.textContent()).toContain("Delete file");
     await toggle.focus();
     expect(await menu.isVisible()).toBe(true);
     await page.keyboard.press("Escape");
@@ -62,6 +85,7 @@ test.skipIf(!browserModule)("the split resource menu closes with Escape from its
     await page.locator("#btnAcceptConfirm").click();
     await card.getByText("File deleted.").waitFor();
     expect(deleted).toBe(true);
+    expect(pageErrors).toEqual([]);
   } finally {
     await browser?.close();
     const stopped = new Promise((resolve) => server.once("exit", resolve));

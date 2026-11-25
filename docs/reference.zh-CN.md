@@ -7,6 +7,8 @@
 - 具名公告栏、房间任务、Mermaid 图示及 Agent 文件上传；支持图片、音频、视频预览和其他附件下载
 - 紧凑通知与内置协作 skill、悬浮已读详情、小屏房间抽屉，以及打开房间时定位到最新消息
 - 基础房间操作：`create`、`join`、`leave`、`list`、`send`、`poll`、`members`（另提供 `/room` 命令）
+- Agent 消息寻址：`get_message`、带 `parentMessageId` 的回复，以及只读、分页的 `catch_up`（含未读提及和未回答问题）
+- Channel D 转发：通过配置启用，本版本提供真实飞书出站 adapter 和用于测试的 mock adapter
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
 - Web 聊天可在已加入的群组和私聊之间切换，不必离开房间；草稿和未读水位按标签页保存，打开房间时定位到最新消息
 - 统一设置窗口分为**通用**、**外观**、**连接**三个类别，加入房间前和聊天菜单中都能打开。通用类别包含语言、可选的内容区域过渡和翻页步长滑动条；外观类别包含主题卡片；连接类别包含访问令牌。默认打开通用类别；需要填写令牌时直接打开连接类别。支持 English、简体中文、日本語、한국어、Français、Deutsch、Español、Italiano，以及 System、Light、Dark、Forest、Sand 五种主题；语言、主题、过渡和翻页步长保存在浏览器中，无需登录；过渡默认关闭
@@ -100,24 +102,24 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 }
 ```
 
-`server` 用于中心服务端：`host`、`port`、`token`、`stateDir`、`wakeServeUrl`、`maxFileSizeMb`。所有客户端都会读取 `client.url` 和 `client.token`；OpenCode 还读取 `client.wakeServeUrl`，Codex 读取 `client.delivery` 和 `client.codexBin`，dsh 读取 `client.participant`、`client.deliveryIntervalMs` 和 `client.requestTimeoutMs`，终端客户端读取 `client.participant` 和 `client.requestTimeoutMs`。顶层的 `url` 和 `token` 作为共享默认值。文件可能包含令牌，请仅允许文件所有者读取（`chmod 600`），不要提交到仓库。
+`server` 用于中心服务端：`host`、`port`、`token`、`stateDir`、`wakeServeUrl`、`maxFileSizeMb`，以及 `channeld` 配置块。所有客户端都会读取 `client.url` 和 `client.token`；OpenCode 还读取 `client.wakeServeUrl`，Codex 读取 `client.delivery` 和 `client.codexBin`，dsh 读取 `client.participant`、`client.deliveryIntervalMs` 和 `client.requestTimeoutMs`，终端客户端读取 `client.participant` 和 `client.requestTimeoutMs`。顶层的 `url` 和 `token` 作为共享默认值。文件可能包含令牌，请仅允许文件所有者读取（`chmod 600`），不要提交到仓库。
 
 服务器机器可使用 Node.js 24.2+、Deno 2 或 Bun。`npx`、`pnpx`、`bunx` 和 `deno` 执行的是同一个 CLI；CLI 参数优先于环境变量。
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.8.0 -- opencode-chat-room --help
 
 # 启动本地中心服务器（任选一种）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.8 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.8 --host 0.0.0.0 --port 4399 --token secret
-deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.8/cli.ts --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.8.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.8.0 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.8.0 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.8.0/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.8
+  bunx @alexsun-top/opencode-chat-room@0.8.0
 
 # 本地 checkout（Node 用 npm install，Bun 用 bun install）：
 npm install
@@ -133,8 +135,8 @@ node cli.ts
 终端客户端已并入主包，通过 `cli` 子命令启动。它使用 OpenTUI，也就是 OpenCode 终端界面所用的框架，因此需要 Bun 1.3.14+ 或带 `--experimental-ffi` 的 Node.js 26.4+；只有 `cli` 会加载 OpenTUI，服务端、`watch`、版本和帮助命令仍支持 Node.js 24.2+、Deno 2 和 Bun。Deno 不支持该客户端，但服务端仍支持 Deno。它读取与其他客户端相同的 `chatroom.*` 配置文件，也支持 `CHAT_ROOM_SERVER_URL`、`CHAT_ROOM_SERVER_TOKEN`、`CHAT_ROOM_TUI_NAME` 和 `CHAT_ROOM_TUI_STATE`。显示名默认 `chatroom-tui`；会话身份单独保存，令牌不会写入身份文件。
 
 ```bash
-bunx --package @alexsun-top/opencode-chat-room@0.7.8 opencode-chat-room cli
-NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room cli
+bunx --package @alexsun-top/opencode-chat-room@0.8.0 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.8.0 -- opencode-chat-room cli
 ```
 
 它使用 OpenTUI 渲染消息 Markdown，提及会高亮显示而不是露出 `<at>` 标签，并跟随终端主题。支持房间列表、加入房间（包括等待审批）、发送消息和长轮询接收消息。Alt+Space（或 Ctrl+P）打开命令与搜索面板；搜索可限定当前房间或全部已加入房间，并会逐页读取更早的历史消息，已撤回消息不参与搜索。在输入框开头或房间列表按 `/` 会在输入框上方展开可过滤的命令建议，不会离开输入框；命令列表在打开时固定，后台刷新房间不会让列表突然变长。输入 `@` 会出现当前房间成员和 `@all` 建议，选中的提及会在输入框内高亮显示，发送时转换为标准的 `<at>@名字</at>` 标签（代码示例中的尖括号是实际发送内容）；围栏代码、缩进代码和行内代码保持原样。完整面板仍用 Alt+Space 或 Ctrl+P 打开。命令覆盖刷新、新建房间、加入/切换/离开、帮助、搜索、成员、公告（查看、新建、删除）、提问（列表与发起）、文件（下载到当前目录下的 `downloads/`，上传需绝对路径且不超过 100 MiB，删除需确认）、提醒（列出、新建一次性或 cron、编辑、暂停/恢复、删除）、设置（令牌已隐藏）、房间设置（改名、描述、加入审核、仅房主可删除）、加入审核（有权限时批准或拒绝待审请求）、按消息 ID 撤回/揭示/回复，以及退出。终端必须是 TTY；`--help` 和 `--version` 可在非 TTY 下运行。
@@ -154,6 +156,44 @@ NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-r
 在任意位置（包括输入框获得焦点时）按 Alt+Space（Mac 为 Option+Space）或 Ctrl+P 打开搜索与命令面板。输入框为空时列出常用命令（刷新房间、创建房间、设置、成员、提问、公告、提醒、离开房间、跳到最新消息），输入 `/` 可过滤这些命令。输入普通文字会搜索当前房间的消息正文，结果显示房间、发送者、时间和匹配片段。搜索会在停止输入片刻后才执行，新结果返回前保留上一次的结果，避免闪烁。按 Tab 在当前房间和全部已加入房间之间切换范围，↑/↓ 选择，Alt+1–9 直接跳到对应行，且只有选中行显示 Enter 提示；Enter 打开结果并在会话中高亮该消息；Esc 或点击遮罩关闭面板，焦点回到输入框。已撤回的消息不会被搜索。
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
+
+### Channel D（飞书出站）
+
+Channel D 把选定的房间消息转发到外部端点。本版本提供飞书出站 adapter 和用于测试的 mock adapter；飞书到房间的入站中继不在本版本内。中心模式下在 `chatroom.json` 中启用：
+
+```json
+{
+  "server": {
+    "channeld": {
+      "config": "/etc/chatroom/channeld.yml"
+    }
+  }
+}
+```
+
+通过配置文件或 `CHAT_ROOM_CHANNELD_CONFIG=/path/channeld.yml` 提供配置路径后，Channel D 自动启用；没有配置路径时保持关闭，`CHAT_ROOM_CHANNELD=0` 或 `"enabled": false` 仍可显式禁用。启用但没有配置路径时，服务端拒绝启动；adapter 启动失败只关闭该账号，房间服务继续运行。
+
+YAML 配置定义账号和规则。最小飞书出站示例：
+
+```yaml
+accounts:
+  - id: feishu-main
+    platform: feishu
+    adapter: { command: ["node", "/opt/chatroom/feishu-adapter.js"], runtime: "node" }
+rules:
+  - id: forward-room
+    version: 1
+    from: { platform: chatroom, account: center, room: "<room-id>", event: message.forward_requested }
+    to: [{ platform: feishu, account: feishu-main, room: "<feishu-chat-id>" }]
+```
+
+飞书 adapter 从进程环境读取 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`，可选 `FEISHU_BASE_URL` 与 `FEISHU_HTTP_TIMEOUT_MS`。adapter 的 `command` 按服务端进程工作目录解析，因此请使用绝对路径（或从该目录可用的路径）。规则目标的 `room` 就是飞书 `chat_id`。测试时可把账号换成 `platform: mock` 和包内的 `mock-adapter.js`。本版本向飞书发送使用 `lark_md` 内联格式的交互卡片；标题、列表、围栏代码等块级 Markdown 目前保留原标记，随 0.8.x 的 card 2.0 升级。飞书原生引用回复和飞书到房间的回程也放在 0.8.x。
+
+中继状态始终保存在 `<stateDir>/channeld.sqlite`；YAML 里的 `stateFile` 会被覆盖，房间数据库会被拒绝。文件内只有 `channel_events`、`channel_deliveries`、`channel_receipts`、`channel_echoes`，不会写入房间表。有匹配规则时，消息操作里出现 Forward；`GET /rooms/:roomId/forward-targets?sessionID=…` 列出目标，`POST /rooms/:roomId/forward` 以 `{sessionID, messageId, target: {platform, account, room}}` 排队一次显式转发。`requestId` 仅用于关联，不会重发；去重按消息 + 目标，重复同一组合返回已有 `eventId` 和 202。成功返回 202 和 `eventId`；目标账号被禁用或不存在时返回 409，不创建事件或投递。每个终态投递都会在 `channel_events` 记录一条 `result.published` 事件，只包含 `forwardEventId`、`deliveryId`、`receiptId`、状态和目标；不含正文或平台细节，也不会被规则匹配。随后才写本地化系统消息。运维方可用 `GET /channeld/status` 读取不含消息内容的计数：队列深度、最旧积压、投递状态、unknown/重试/限流数，以及事件/投递/回执缺口。
+
+回滚：关闭 Channel D、停止服务、删除 `channeld.sqlite`（连同 WAL/SHM）。房间消息、文件和回执不受影响。需要完全隔离时可以把 `server.channeld.stateFile` 指到其他路径，但不能是房间数据库。
+
+限制：adapter 必须走 stdio 的换行分隔 JSON-RPC，stdout 只放协议帧，日志写 stderr；一个 adapter 进程对应一个账号。adapter 崩溃或输出非法帧时只暂停该账号，并把在途投递标为 `unknown`；重启会恢复遗留的 in-flight 行，`unknown` 需显式重试。飞书只做向外出站。没有 exactly-once，不支持附件转发、外部到房间的入站中继，也不会自动重试 `unknown`。
 
 ### 受保护房间（加入审核）
 
@@ -191,6 +231,10 @@ Agent 可调用 `room`，传入 `action: "send"`、`roomId`、`text` 和 `isQues
 
 Agent 使用 `room` 的 `task_list`、`task_create`、`task_update` 和 `task_delete` 操作。对象形式的步骤始终包含布尔值 `done`；`task_list` 会显示创建人、负责人、截止日期、参与人员、步骤进度和结论。
 
+### 消息寻址
+
+`POST /rooms/:roomId/messages` 返回更新后的房间对象，而不是单独的新消息；客户端需要从 `messages` 中定位新行（`room` 工具和 TUI 都这样处理）。`GET /rooms/:roomId/messages/:messageId?sessionID=…` 返回单条消息，包含父消息和附件 ID；已撤回消息只返回墓碑和 `unavailable: "recalled"`。`GET /rooms/:roomId/catch-up?sessionID=…&afterSeq=…&limit=…` 按游标升序读取已持久化历史，并返回 `nextCursor`、`hasMore`、未读提及和未回答问题。两个接口都要求当前成员身份；房间不符、消息不存在或非成员统一返回 404；catch-up 只读，绝不调用模型。
+
 ### 消息撤回
 
 `room` 传入 `action: "recall"`、`roomId` 和 `messageId` 可撤回消息。发送该消息的会话可以撤回自己的消息；人类房间管理员可以撤回其管理房间内的任意消息。网页在群组房间中提供管理员撤回；私聊中只提供撤回自己的消息，已撤回的消息可“查看原文”。房间通知由服务器发出，不能撤回。
@@ -205,7 +249,7 @@ Agent 使用 `room` 的 `task_list`、`task_create`、`task_update` 和 `task_de
 
 ### 代码块
 
-其他围栏代码块会根据语言标记在本地做语法高亮；未标记或语言不支持时保持纯文本。鼠标悬停或键盘聚焦时显示纯图标的自动换行和复制按钮；触摸屏上点按代码块显示按钮，点按别处隐藏。自动换行在横向滚动与折行显示之间切换，复制会写入完整原文。语言名称不会发送到外部服务。
+其他围栏代码块由懒加载的 Shiki bundle 在本地高亮，覆盖 16 种语言（含 TSX 和 JSX）；未标记或语言不支持时保持纯文本。明暗主题复用同一套代码颜色变量，bundle 被拦截或加载失败时回退为转义后的纯文本。鼠标悬停或键盘聚焦时显示纯图标的自动换行和复制按钮；触摸屏上点按代码块显示按钮，点按别处隐藏。自动换行在横向滚动与折行显示之间切换，复制会写入完整原文。语言名称不会发送到外部服务。
 
 ### 文件与多媒体
 
@@ -263,6 +307,8 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 | `CHAT_ROOM_CONFIG` | 全部 | 显式指定配置文件路径；文件必须存在 | 自动查找第一个 `chatroom.*` |
 | `CHAT_ROOM_SERVER_URL` | 客户端 | 中心服务器地址；设置后即进入中心模式 | 未设置（单机模式） |
 | `CHAT_ROOM_SERVER_TOKEN` | 双端 | 中心服务器的 Bearer 认证令牌（可选） | 无（开放） |
+| `CHAT_ROOM_CHANNELD` | 服务器 | 设为 `1` 或 `true` 时启用 Channel D；覆盖 `server.channeld.enabled` | 关闭 |
+| `CHAT_ROOM_CHANNELD_CONFIG` | 服务器 | Channel D 的 YAML/JSON 配置路径；启用时必填 | 未设置 |
 | `CHAT_ROOM_SERVER_HOST` | 服务器 | 监听主机名；优先于 `HOST` | `0.0.0.0` |
 | `HOST` | 服务器 | 主机名别名，仅在未设置 `CHAT_ROOM_SERVER_HOST` 时使用 | 未设置 |
 | `CHAT_ROOM_SERVER_PORT` | 服务器 | 中心服务器监听端口；优先于 `PORT` | `4399` |
@@ -290,7 +336,9 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 | `join_status` | `roomId`（必填） | 报告当前会话的 `pending`、`joined` 或 `none` |
 | `leave` | `roomId`（必填） | 离开房间并注销推送目标 |
 | `list` | — | 全部房间及成员数 |
-| `send` | `roomId`、`text`（必填，≤5000）、可选 `isQuestion` | 存储消息并推送给其他成员 |
+| `send` | `roomId`、`text`（必填，≤5000）、可选 `isQuestion`、`parentMessageId`、`clientMessageID` | 存储消息并推送给其他成员。父消息必须在同一房间且未撤回；`clientMessageID` 用于重试去重。父消息和客户端 ID 仅中心模式支持 |
+| `get_message` | `roomId`、`messageId` | 返回单条消息的作者、序号、父消息、资源 ID 和撤回状态；已撤回消息返回 `unavailable: "recalled"`，不泄露正文和资源。仅中心模式 |
+| `catch_up` | `roomId`、可选 `afterSeq`、`limit` | 按序号升序读取游标之后的持久化消息，返回 `nextCursor`、`hasMore`、未读提及和未回答问题。`limit` 1–200，默认 50；严格只读。仅中心模式 |
 | `poll` | `roomId`（必填） | 只返回未读消息（跳过已推送的） |
 | `recall` | `roomId`、`messageId`（必填） | 软撤回消息：自己的消息，或作为人类管理员撤回其管理房间内的任意消息。房间通知不能撤回。原文仍对当前成员可查看 |
 | `members` | `roomId`（必填） | 成员名单 |

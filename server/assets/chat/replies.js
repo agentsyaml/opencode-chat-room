@@ -33,7 +33,7 @@ function bindMessageActions(app) {
   const render = app.renderMessage;
   app.renderMessage = (message, live) => {
     const row = render(message, live);
-    if (message.senderId === "system" || message.pending) return row;
+    if (message.senderId === "system" || message.pending || message.recalledAt) return row;
     if (message.answerToMessageID) row.querySelector(".msg-meta")?.after(quoteButton(message, app));
     const copy = row.querySelector("[data-copy-message]");
     if (copy) {
@@ -42,6 +42,12 @@ function bindMessageActions(app) {
       reply.type = "button"; reply.className = "message-reply"; reply.innerHTML = icon("arrow_reply", "message-reply-icon");
       reply.setAttribute("aria-label", app.t("replyMessage")); reply.dataset.i18nAriaLabel = "replyMessage"; reply.dataset.replyMessage = message.id;
       copy.before(actions); actions.append(copy, reply);
+      if (document.body.dataset.channeld === "on") {
+        const forward = document.createElement("button");
+        forward.type = "button"; forward.className = "message-reply message-forward"; forward.innerHTML = icon("arrow_right", "message-reply-icon");
+        forward.setAttribute("aria-label", app.t("forwardMessage")); forward.dataset.i18nAriaLabel = "forwardMessage"; forward.dataset.forwardMessage = message.id;
+        actions.append(forward);
+      }
     }
     return row;
   };

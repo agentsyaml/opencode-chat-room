@@ -136,6 +136,24 @@ export async function centerAction(cfg, args, sessionID) {
       await request(cfg, `/rooms/${encodeURIComponent(args.roomId)}/leave`, "POST", { sessionID });
       return `left room ${args.roomId}`;
     }
+    case "get_message": {
+      if (!args.roomId) return "error: roomId is required";
+      if (!args.messageId) return "error: messageId is required";
+      const message = await request(cfg,
+        `/rooms/${encodeURIComponent(args.roomId)}/messages/${encodeURIComponent(args.messageId)}?sessionID=${encodeURIComponent(sessionID)}`,
+        "GET");
+      return JSON.stringify(message);
+    }
+    case "catch_up": {
+      if (!args.roomId) return "error: roomId is required";
+      const afterSeq = args.afterSeq ?? 0;
+      const limit = args.limit ?? 50;
+      if (!Number.isSafeInteger(afterSeq) || afterSeq < 0) return "error: afterSeq must be a non-negative integer";
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) return "error: limit must be 1-200";
+      const query = new URLSearchParams({ sessionID, afterSeq: String(afterSeq), limit: String(limit) });
+      const page = await request(cfg, `/rooms/${encodeURIComponent(args.roomId)}/catch-up?${query}`, "GET");
+      return JSON.stringify(page);
+    }
     case "members": {
       if (!args.roomId) return "error: roomId is required";
       const room = await request(cfg, `/rooms/${encodeURIComponent(args.roomId)}`, "GET");
@@ -150,6 +168,7 @@ export async function centerAction(cfg, args, sessionID) {
         sessionID,
         text,
         ...(args.isQuestion ? { isQuestion: true } : {}),
+        ...(args.parentMessageId ? { parentMessageId: args.parentMessageId } : {}),
       });
       const messages = room.messages || [];
       const sentID = [...messages].reverse().find((message) => message.senderSessionID === sessionID && message.text === text)?.id

@@ -1,7 +1,8 @@
 {
   "name": "@alexsun-top/codex-chat-room",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Codex plugin for the central opencode-chat-room server: room MCP tool plus queued delivery.",
+  "license": "MIT",
   "type": "module",
   "repository": {
     "type": "git",

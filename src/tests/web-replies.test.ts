@@ -40,6 +40,19 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
     await page.evaluate(async (url: string) => { const { app } = await import(url); await app.loadManageableMembers(); }, "/assets/chat/state.js");
     await page.locator(`#msgList [data-msg-id="${original.messages.at(-1).id}"] .message-reply`).waitFor();
     await page.locator(`#msgList [data-msg-id="${otherMessage.messages.at(-1).id}"] .message-reply`).waitFor();
+    expect(await page.locator("#msgList [data-forward-message]").count()).toBe(0);
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      document.body.dataset.channeld = "on";
+      app.rerenderMessages();
+    }, "/assets/chat/state.js");
+    await page.locator(`#msgList [data-msg-id="${original.messages.at(-1).id}"] [data-forward-message]`).waitFor();
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      document.body.dataset.channeld = "off";
+      app.rerenderMessages();
+    }, "/assets/chat/state.js");
+    expect(await page.locator("#msgList [data-forward-message]").count()).toBe(0);
     const replyAction = page.locator(`#msgList [data-msg-id="${original.messages.at(-1).id}"] .message-reply`);
     expect(await replyAction.getAttribute("aria-label")).toBe("Reply");
     expect(await replyAction.locator("svg[aria-hidden=true]").count()).toBe(1);
@@ -120,18 +133,42 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
     await page.locator("#btnSend").click();
     await page.locator(`.failed-message[data-reply-target-id="${originalId}"]`).waitFor();
     expect(replyPayload).toMatchObject({ replyToMessageID: originalId, text: "<at>@Peer</at> Thanks for sharing." });
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      app.stopPolling?.();
+    }, "/assets/chat/state.js");
+    // Drain any room-list refresh that started before polling stopped; otherwise
+    // its stale snapshot can replace the room after the retry commits.
+    await page.waitForLoadState("networkidle");
+    const retryResponse = page.waitForResponse((response: any) =>
+      response.request().method() === "POST" && /\/rooms\/[^/]+\/messages/.test(response.url()));
     await page.locator(`.failed-message[data-reply-target-id="${originalId}"] [data-failed-action="retry"]`).click();
-    await page.waitForFunction(async ({ url, target }: { url: string; target: string }) => {
-      const { app } = await import(url); return app.state.room.messages.at(-1)?.answerToMessageID === target;
-    }, { url: "/assets/chat/state.js", target: originalId });
+    const retry = await retryResponse;
+    expect(retry.status()).toBeLessThan(400);
     expect(retryPayload).toMatchObject({ replyToMessageID: originalId, text: "<at>@Peer</at> Thanks for sharing." });
-    await page.evaluate(async ({ url, target }: { url: string; target: string }) => {
-      const { app } = await import(url), room = app.state.room;
-      room.messages = room.messages.filter((message: any) => message.id !== target);
-      app.state.rooms.get(room.id).room = room; app.rerenderMessages();
+    const quoteState = await page.evaluate(async ({ url, target }: { url: string; target: string }) => {
+      const { app, LS } = await import(url);
+      app.stopPolling?.();
+      const rooms = await app.api(`/rooms?sessionID=${encodeURIComponent(LS.sessionID)}`);
+      const serverRoom = rooms.find((room: any) => room.id === app.state.room?.id) ??
+        rooms.find((room: any) => room.messages?.some((message: any) => message.answerToMessageID === target));
+      const reply = serverRoom?.messages?.find((message: any) => message.text.includes("Thanks for sharing."));
+      if (!reply || reply.answerToMessageID !== target) {
+        return { replyParent: reply?.answerToMessageID ?? null, quote: null };
+      }
+      app.state.room = serverRoom;
+      const entry = app.state.rooms.get(serverRoom.id);
+      if (entry) entry.room = serverRoom;
+      serverRoom.messages = serverRoom.messages.filter((message: any) => message.id !== target);
+      app.rerenderMessages();
+      return {
+        replyParent: reply.answerToMessageID,
+        quote: document.querySelector(`#msgList [data-reply-target-id="${target}"]`)?.textContent ?? null,
+      };
     }, { url: "/assets/chat/state.js", target: originalId });
+    expect(quoteState.replyParent).toBe(originalId);
+    expect(quoteState.quote).toBe("View original message");
     const quote = page.locator(`#msgList [data-reply-target-id="${originalId}"]`);
-    expect(await quote.textContent()).toBe("View original message");
     let failHistoryOnce = true;
     const historyRoute = async (route: any) => {
       if (failHistoryOnce) { failHistoryOnce = false; return route.fulfill({ status: 503, json: { error: "history temporarily unavailable" } }); }

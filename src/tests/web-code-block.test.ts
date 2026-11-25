@@ -62,6 +62,8 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     const blocks = page.locator(".msg-text .code-block");
     await blocks.first().waitFor();
     expect(await blocks.count()).toBe(2);
+    // The bundle loads lazily; wait for the enhancer instead of the first paint.
+    await page.evaluate(async (modulePath: string) => (await import(modulePath)).whenShikiIdle(), "/assets/chat/shiki.js");
 
     const first = blocks.nth(0), second = blocks.nth(1);
     const firstCode = first.locator("pre > code"), secondCode = second.locator("pre > code");
@@ -69,9 +71,10 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     const secondText = await secondCode.evaluate((node: HTMLElement) => node.textContent!);
     expect(firstText.replace(/\n$/, "")).toBe(expectedJS);
     expect(secondText.replace(/\n$/, "")).toBe(expectedPlain);
-    expect(await firstCode.evaluate((node: Element) => node.classList.contains("hljs"))).toBe(true);
-    expect(await firstCode.locator("span.hljs-keyword").count()).toBeGreaterThan(0);
+    expect(await firstCode.evaluate((node: Element) => node.classList.contains("shiki"))).toBe(true);
+    expect(await firstCode.locator("span[style*='--shiki-token']").count()).toBeGreaterThan(0);
     expect(await secondCode.locator("span").count()).toBe(0);
+    expect(await secondCode.evaluate((node: Element) => node.classList.contains("shiki"))).toBe(false);
 
     const contrast = await first.evaluate((block: Element) => {
       const parse = (value: string) => {
@@ -83,21 +86,20 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
         return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
       }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index]!, 0);
       const root = document.documentElement, pre = block.querySelector("pre")!, original = root.dataset.theme;
+      const tokens = Array.from(block.querySelectorAll('span[style*="--shiki-token"]'));
       const ratios: Record<string, number> = {};
       for (const theme of ["light", "dark", "forest", "sand"]) {
         root.dataset.theme = theme;
         const background = luminance(parse(getComputedStyle(pre).backgroundColor));
-        for (const token of [".hljs-keyword", ".hljs-string", ".hljs-number", ".hljs-comment"]) {
-          const node = block.querySelector(token);
-          if (!node) continue;
+        tokens.forEach((node, index) => {
           const foreground = luminance(parse(getComputedStyle(node).color));
-          ratios[`${theme} ${token}`] = (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05);
-        }
+          ratios[`${theme} ${index}`] = (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05);
+        });
       }
       root.dataset.theme = original;
       return ratios;
     });
-    expect(Object.keys(contrast)).toHaveLength(16);
+    expect(Object.keys(contrast).length).toBeGreaterThanOrEqual(4);
     expect(Object.entries(contrast).filter(([, ratio]) => Number(ratio) < 4.5)).toEqual([]);
 
     const toolbar = first.locator(".code-toolbar");

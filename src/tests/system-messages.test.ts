@@ -23,6 +23,8 @@ const samples: Array<[string, string, string]> = [
   ["Alex handed the room to Peer", "Alex handed the room to Peer", "Alex 将房间移交给了 Peer"],
   ["Alex set join approval to approval", "Alex now requires approval to join this room", "Alex 开启了加入审核，新成员需要管理员批准"],
   ["Alex set join approval to open", "Alex opened this room to join without approval", "Alex 关闭了加入审核，新成员可以直接加入"],
+  ["Forwarded to telegram/test/chat", "Forwarded to telegram/test/chat", "已转发到 telegram/test/chat"],
+  ["Forward to telegram/test/chat failed: timeout", "Forward to telegram/test/chat failed: timeout", "转发到 telegram/test/chat 失败：timeout"],
 ];
 
 test.each(samples)("%s", (input, en, zh) => {

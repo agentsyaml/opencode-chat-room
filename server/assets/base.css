@@ -375,7 +375,7 @@
   .resource-split { position: relative; display: inline-flex; align-items: stretch; }
   .resource-split .resource-download { border-right: 0; border-radius: 10px 0 0 10px; }
   .resource-split .resource-split-toggle { display: grid; place-items: center; width: 34px; min-height: 34px; padding: 0; border-radius: 0 10px 10px 0; color: var(--ink-2); }
-  .resource-split .resource-split-toggle svg { width: 15px; height: 15px; }
+  .resource-split .resource-split-toggle svg { width: 16px; height: 16px; }
   .resource-split .resource-split-toggle[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
   .resource-split-menu { position: absolute; z-index: 30; top: calc(100% + 5px); right: 0; min-width: 160px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
 
@@ -441,5 +441,13 @@
     .join-policy input { appearance: auto; width: auto; height: auto; }
     .join-policy input::after { display: none; }
   }
+
+  /* Footnotes from Markdown definitions render as an endnote list. */
+  .footnotes { margin-top: 14px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent); color: var(--ink-2); font-size: .88em; }
+  .footnotes ol { margin: 0; padding-left: 20px; }
+  .footnotes li { margin: 3px 0; }
+  .footnote-ref { font-size: .78em; line-height: 0; }
+  .footnote-ref a { text-decoration: none; }
+  .footnote-backref { margin-left: 2px; text-decoration: none; }
 
 /* Conversation layout */

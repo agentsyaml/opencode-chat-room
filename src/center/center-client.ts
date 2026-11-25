@@ -132,6 +132,50 @@ export async function request(
   return data;
 }
 
+/** Fetch one message by stable ID; a recalled message returns the server tombstone. */
+export async function getMessage(opts: CenterOpts, roomId: string, messageId: string, sessionID: string): Promise<Json> {
+  return request(
+    opts,
+    `/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}?sessionID=${encodeURIComponent(sessionID)}`,
+    "GET",
+  );
+}
+
+export type CatchUpOptions = { sessionID: string; afterSeq?: number; limit?: number };
+export type CatchUpPage = {
+  messages: Array<Record<string, unknown>>;
+  nextCursor: number;
+  hasMore: boolean;
+  unreadMentions: Array<{ id: string; seq: number }>;
+  unreadMentionCount: number;
+  unansweredQuestions: Array<{ id: string; seq: number }>;
+  unansweredQuestionCount: number;
+};
+
+/** Page forward from a persisted seq. Strictly read-only: no receipts, read
+ * watermark, wake, or model call happens on this path. */
+export async function catchUp(
+  opts: CenterOpts,
+  roomId: string,
+  params: CatchUpOptions,
+): Promise<CatchUpPage> {
+  const { sessionID, afterSeq, limit } = params;
+  if (afterSeq !== undefined && (!Number.isSafeInteger(afterSeq) || afterSeq < 0)) {
+    throw new Error("afterSeq must be a non-negative integer");
+  }
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)) {
+    throw new Error("limit must be between 1 and 200");
+  }
+  const query = new URLSearchParams({ sessionID });
+  if (afterSeq !== undefined) query.set("afterSeq", String(afterSeq));
+  if (limit !== undefined) query.set("limit", String(limit));
+  return (await request(
+    opts,
+    `/rooms/${encodeURIComponent(roomId)}/catch-up?${query}`,
+    "GET",
+  )) as unknown as CatchUpPage;
+}
+
 export async function markQueued(
   opts: CenterOpts,
   roomId: string,
@@ -163,6 +207,11 @@ export async function centerAction(
     name?: string;
     roomId?: string;
     messageId?: string;
+    parentMessageId?: string;
+    replyToMessageID?: string;
+    clientMessageID?: string;
+    afterSeq?: number;
+    limit?: number;
     text?: string;
     announcementName?: string;
     content?: string;
@@ -335,6 +384,26 @@ export async function centerAction(
       await request(opts, `/rooms/${encodeURIComponent(args.roomId)}/tasks/${encodeURIComponent(args.taskId)}`, "DELETE", { sessionID });
       return `task deleted: ${args.taskId}`;
     }
+    case "get_message": {
+      if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
+      if (!args.messageId) return "error: messageId is required; use the full message ID returned by send, poll, or catch_up";
+      return JSON.stringify(await getMessage(opts, args.roomId, args.messageId, sessionID));
+    }
+    case "catch_up": {
+      if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";
+      if (args.afterSeq !== undefined && (!Number.isSafeInteger(args.afterSeq) || args.afterSeq < 0)) {
+        return "error: afterSeq must be a non-negative integer";
+      }
+      if (args.limit !== undefined && (!Number.isSafeInteger(args.limit) || args.limit < 1 || args.limit > 200)) {
+        return "error: limit must be between 1 and 200";
+      }
+      const page = await catchUp(opts, args.roomId, {
+        sessionID,
+        ...(args.afterSeq === undefined ? {} : { afterSeq: args.afterSeq }),
+        ...(args.limit === undefined ? {} : { limit: args.limit }),
+      });
+      return JSON.stringify(page);
+    }
     case "send": {
       if (!args.roomId) {
         return "error: roomId is required; use a room UUID from the room list, not the room name";
@@ -346,7 +415,16 @@ export async function centerAction(
         opts,
         `/rooms/${encodeURIComponent(args.roomId)}/messages`,
         "POST",
-        { sessionID, text: args.text.trim(), ...(args.isQuestion ? { isQuestion: true } : {}) },
+        {
+          sessionID,
+          text: args.text.trim(),
+          ...(args.isQuestion ? { isQuestion: true } : {}),
+          // replyToMessageID stays for old callers; parentMessageId is the alias
+          // the server and the newer agent surfaces use.
+          ...(args.replyToMessageID ? { replyToMessageID: args.replyToMessageID } : {}),
+          ...(args.parentMessageId ? { parentMessageId: args.parentMessageId } : {}),
+          ...(args.clientMessageID ? { clientMessageID: args.clientMessageID } : {}),
+        },
       );
       const parsed = toRoom(room);
       const sentID = [...parsed.messages].reverse()

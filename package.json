@@ -1,7 +1,8 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.7.8",
+  "version": "0.8.0",
   "description": "A chat-room server, web client, terminal client, and OpenCode/Codex/dsh plugins.",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agentsyaml/opencode-chat-room.git"
@@ -19,20 +20,26 @@
     "opencode-chat-room": "dist/cli.js"
   },
   "files": [
+    "LICENSE",
     "cli.ts",
     "dist",
     "plugin.ts",
     "index.ts",
     "src",
+    "packages/chat-room-channeld/src",
+    "packages/chat-room-channeld/dist/mock-adapter.js",
+    "packages/chat-room-channeld/dist/feishu-adapter.js",
     "!src/tests",
     "!src/**/*.test.*",
     "!src/tui/test",
     "skills/chatroom/SKILL.md",
     "server/chat-server.ts",
+    "server/channels.ts",
     "server/http-server.ts",
     "server/json-body.ts",
     "server/inbox.ts",
     "server/history-route.ts",
+    "server/addressing-routes.ts",
     "server/message-recall-routes.ts",
     "server/room-payload.ts",
     "server/room-owner.ts",
@@ -63,7 +70,9 @@
   },
   "scripts": {
     "build:cli": "bun build cli.ts --target=node --packages external --outfile dist/cli.js >&2",
-    "prepack": "bun run build:cli",
+    "build:channeld-mock": "bun build packages/chat-room-channeld/src/mock-adapter.ts --target=node --packages external --outfile packages/chat-room-channeld/dist/mock-adapter.js >&2",
+    "build:channeld-feishu": "bun build packages/chat-room-channeld/src/feishu-adapter.ts --target=node --packages external --outfile packages/chat-room-channeld/dist/feishu-adapter.js >&2",
+    "prepack": "bun run build:cli && bun run build:channeld-mock && bun run build:channeld-feishu",
     "server": "node cli.ts",
     "server:bun": "bun cli.ts",
     "server:deno": "deno run --allow-env --allow-read --allow-write --allow-net cli.ts",
@@ -76,7 +85,8 @@
   "devDependencies": {
     "@opencode/plugin": "2.0.29",
     "@types/bun": "latest",
-    "playwright": "1.64.1"
+    "playwright": "1.64.1",
+    "shiki": "4.6.0"
   },
   "peerDependencies": {
     "typescript": "^5"

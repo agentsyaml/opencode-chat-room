@@ -5,6 +5,8 @@ A chat-room plugin for [opencode](https://opencode.ai) that lets multiple sessio
 ## Features
 
 - Room messaging, membership, named announcements, room tasks, and central-server file uploads through the `room` tool and `/room` command
+- Message addressing for agents: `get_message`, replies with `parentMessageId`, and bounded read-only `catch_up` with unread mentions and open questions
+- Channel D forwarding to an external endpoint, enabled by a config and shipping real Feishu outbound plus a mock adapter for tests
 - **Human web chat UI** served at `GET /chat` (central mode): humans join rooms in the browser and chat with agents on equal footing
 - Web chat supports switching among joined group rooms and direct conversations without leaving them; drafts and unread watermarks are stored per tab, and a room opens at its latest message
 - One Settings dialog with **General**, **Appearance**, and **Connection** categories opens before joining or from the chat menu. General holds language, the optional room content transition, and the PageUp/PageDown step slider; Appearance holds theme cards; Connection holds the access token. It defaults to General and opens Connection when a token is needed. English, 简体中文, 日本語, 한국어, Français, Deutsch, Español, and Italiano are available, with System, Light, Dark, Forest, and Sand themes. Language, theme, the transition, and the page step persist in the browser without signing in; the transition is off by default
@@ -101,24 +103,24 @@ The server and the OpenCode, Codex, and dsh clients can read the same optional `
 }
 ```
 
-`server` applies to the central server: `host`, `port`, `token`, `stateDir`, `wakeServeUrl`, and `maxFileSizeMb`. All clients read `client.url` and `client.token`; OpenCode also reads `client.wakeServeUrl`, Codex reads `client.delivery` and `client.codexBin`, dsh reads `client.participant`, `client.deliveryIntervalMs`, and `client.requestTimeoutMs`, and the terminal client reads `client.participant` and `client.requestTimeoutMs`. Top-level `url` and `token` are shared fallbacks. The file may contain a token, so keep it readable only by its owner (`chmod 600`) and never commit it.
+`server` applies to the central server: `host`, `port`, `token`, `stateDir`, `wakeServeUrl`, `maxFileSizeMb`, and the `channeld` block. All clients read `client.url` and `client.token`; OpenCode also reads `client.wakeServeUrl`, Codex reads `client.delivery` and `client.codexBin`, dsh reads `client.participant`, `client.deliveryIntervalMs`, and `client.requestTimeoutMs`, and the terminal client reads `client.participant` and `client.requestTimeoutMs`. Top-level `url` and `token` are shared fallbacks. The file may contain a token, so keep it readable only by its owner (`chmod 600`) and never commit it.
 
 On the server machine, use Node.js 24.2+, Deno 2, or Bun. `npx`, `pnpx`, `bunx`, and `deno` execute the same CLI. CLI options override environment variables.
 
 ```bash
 # Show CLI options:
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.8.0 -- opencode-chat-room --help
 
 # Start the local central server (choose any one runner):
-npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.7.8 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.7.8 --host 0.0.0.0 --port 4399 --token secret
-deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.7.8/cli.ts --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.8.0 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.8.0 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.8.0 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.8.0/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # Environment variables also work; CLI options take precedence:
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.7.8
+  bunx @alexsun-top/opencode-chat-room@0.8.0
 
 # Local checkout (use npm install for Node, bun install for Bun):
 npm install
@@ -134,8 +136,8 @@ Open `http://<server-ip>:4399/chat` in a browser to join or create a room and ch
 The terminal client is built into the main package and opens with the `cli` subcommand. It uses OpenTUI, the framework behind OpenCode's terminal interface, so it requires Bun 1.3.14+ or Node.js 26.4+ with `--experimental-ffi`. Only `cli` loads OpenTUI; the server, `watch`, version, and help commands stay on Node.js 24.2+, Deno 2, and Bun. Deno is not supported for this client; the server still runs on Deno. It accepts the same `chatroom.*` configuration file as the other clients, plus `CHAT_ROOM_SERVER_URL`, `CHAT_ROOM_SERVER_TOKEN`, `CHAT_ROOM_TUI_NAME`, and `CHAT_ROOM_TUI_STATE`. The display name defaults to `chatroom-tui`; the session identity is stored separately and the token is never written to it.
 
 ```bash
-bunx --package @alexsun-top/opencode-chat-room@0.7.8 opencode-chat-room cli
-NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.7.8 -- opencode-chat-room cli
+bunx --package @alexsun-top/opencode-chat-room@0.8.0 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.8.0 -- opencode-chat-room cli
 ```
 
 It renders message Markdown with OpenTUI, highlights mentions instead of showing `<at>` tags, and follows the terminal theme. It lists rooms, joins them (including approval-pending rooms), sends messages, and long-polls for new ones. Alt+Space or Ctrl+P opens commands and client-side search across the current room or all joined rooms, including older history fetched page by page; recalled messages are excluded. Typing `/` at the start of the composer or on the room list opens a filtered inline command popup without leaving the input; the command list is fixed when the popup opens, so a background room refresh cannot make it grow. Typing `@` suggests the current room's participants and `@all`; a selected mention stays highlighted inline in the composer and is sent as the canonical `<at>@Name</at>` tag, while fenced, indented, and inline code keep their original text. The full palette still opens with Alt+Space or Ctrl+P. Commands cover refresh, new room, join/switch/leave, help, search, members, announcements (read, create, delete), questions (list and ask), files (download to `downloads/` under the current directory, upload an absolute path up to 100 MiB, delete with confirmation), reminders (list, create one-time or cron, edit, pause/resume, delete), settings (token redacted), room settings (rename, description, join policy, owner-only delete), join approvals (approve or deny pending requests when permitted), recall/reveal/reply by message ID, and quit. The terminal must be a TTY; `--help` and `--version` work without one.
@@ -155,6 +157,44 @@ A compact shortcut chip under the composer shows the only shortcut entry, Alt+/ 
 Press Alt+Space (Option+Space on Mac) or Ctrl+P to open the search and command palette from anywhere, including while the composer has focus. The empty field lists common commands (refresh rooms, create room, settings, members, questions, announcements, reminders, leave room, jump to latest); type `/` to filter them. Typing ordinary text searches message bodies in the current room and shows the room, sender, time, and matching snippet. Search waits briefly for typing to pause and keeps the previous results visible until the new ones arrive. Tab switches the scope between the current room and all joined rooms, Up and Down select, Alt+1–9 jumps the selection to that row, and only the selected row shows the Enter hint. Enter opens the hit and leaves the message highlighted, and Escape or a backdrop click closes the palette and returns focus to the composer. Recalled messages are not searched.
 
 The central server uses a trusted shared-token model, not per-user authorization or private DMs: anyone holding the token can read messages, manage rooms, remove members, and delete rooms. The server and its SQLite database can read direct-message content. Removing a member requires confirmation; deleting a room requires confirmation and permanently deletes its messages and history.
+
+### Channel D (Feishu outbound)
+
+Channel D forwards selected room messages to an external endpoint. This release ships an outbound Feishu adapter and a mock adapter for tests; inbound Feishu-to-room relay is not included. Enable it in central mode with a `channeld` block in `chatroom.json`:
+
+```json
+{
+  "server": {
+    "channeld": {
+      "config": "/etc/chatroom/channeld.yml"
+    }
+  }
+}
+```
+
+Setting a config path, in the file or with `CHAT_ROOM_CHANNELD_CONFIG=/path/channeld.yml`, enables Channel D. No config path leaves it off; `CHAT_ROOM_CHANNELD=0` or `"enabled": false` disables it explicitly. With the feature enabled but no config path, the server refuses to start. An invalid adapter start only disables that account and leaves the room server running.
+
+The YAML config defines accounts and rules. A minimal Feishu outbound setup:
+
+```yaml
+accounts:
+  - id: feishu-main
+    platform: feishu
+    adapter: { command: ["node", "/opt/chatroom/feishu-adapter.js"], runtime: "node" }
+rules:
+  - id: forward-room
+    version: 1
+    from: { platform: chatroom, account: center, room: "<room-id>", event: message.forward_requested }
+    to: [{ platform: feishu, account: feishu-main, room: "<feishu-chat-id>" }]
+```
+
+The Feishu adapter reads `FEISHU_APP_ID` and `FEISHU_APP_SECRET`, plus optional `FEISHU_BASE_URL` and `FEISHU_HTTP_TIMEOUT_MS`, from its process environment. The adapter `command` is resolved from the server process working directory, so use an absolute path (or a path valid from that directory). The rule target `room` is the Feishu `chat_id`. For tests, replace the account with `platform: mock` and the bundled `mock-adapter.js`. This release sends Feishu interactive cards using `lark_md` inline formatting; block Markdown such as headings, lists, and fenced code keeps its markers until the card 2.0 upgrade planned for 0.8.x. Native Feishu reply/quote and Feishu-to-room inbound relay are also planned for 0.8.x.
+
+Relay state is always stored in `<stateDir>/channeld.sqlite`; a `stateFile` in the YAML is overridden, and the room database is rejected. The file contains `channel_events`, `channel_deliveries`, `channel_receipts`, and `channel_echoes`, never room tables. With at least one matching rule, messages gain a Forward action. `GET /rooms/:roomId/forward-targets?sessionID=…` lists matching targets and `POST /rooms/:roomId/forward` with `{sessionID, messageId, target: {platform, account, room}}` queues one explicit forward. `requestId` is an optional correlation value and does not resend; deduplication is by message and target, so repeating the same pair returns the existing `eventId` with a 202. The server returns 202 with an `eventId`, or 409 when the target account is disabled or absent. Each terminal delivery records one `result.published` event in `channel_events` containing only `forwardEventId`, `deliveryId`, `receiptId`, state, and target; it carries no message text or provider details and is never evaluated by rules. The localized system message is written after that event. Operators can read counts without message content from `GET /channeld/status`: queue depth, oldest backlog, delivery states, unknown/retry/rate-limit counts, and event/delivery/receipt gaps.
+
+To roll back, disable Channel D, stop the server, and delete `channeld.sqlite` (plus its WAL/SHM files). Room messages, files, and receipts are unaffected. Deployments that need a clean separation can point `server.channeld.stateFile` at another path, but it must not be the room database.
+
+Limits: the adapter must speak newline-delimited JSON-RPC on stdio with protocol frames on stdout and logs on stderr; one adapter process owns one account. A crashed or invalid adapter pauses that account and marks in-flight deliveries `unknown`; a restart recovers stale in-flight rows and leaves unknown deliveries for an explicit retry. Feishu delivery is outbound only. There is no exactly-once guarantee, no attachment forwarding, no inbound external-to-room relay, and no automatic retry of `unknown` results.
 
 ### Protected rooms (join approval)
 
@@ -192,6 +232,10 @@ The member API uses `GET /rooms/:roomId/tasks?sessionID=…`, `POST /rooms/:room
 
 Agents use `task_list`, `task_create`, `task_update`, and `task_delete` on the `room` tool. Object steps always include a boolean `done`; `task_list` shows creator, assignee, due date, participants, step progress, and conclusion.
 
+### Message addressing
+
+`POST /rooms/:roomId/messages` returns the updated room object rather than the created message alone; clients locate the new row in `messages` (the room tool and TUI do this). `GET /rooms/:roomId/messages/:messageId?sessionID=…` returns one message with its parent and resource IDs; a recalled message keeps only its tombstone and `unavailable: "recalled"`. `GET /rooms/:roomId/catch-up?sessionID=…&afterSeq=…&limit=…` reads persisted history after a cursor, ascending, with `nextCursor`, `hasMore`, unread mentions, and open questions. Both routes require current membership and return 404 for a wrong room, missing message, or non-member; catch-up is read-only and never calls the model.
+
 ### Message recall
 
 `room` with `action: "recall"`, `roomId`, and `messageId` soft-hides a message. The authoring session can recall its own message; a human room administrator can recall any message in a room they administer. The web interface offers administrator recall in group rooms; in a direct conversation it offers only your own messages, and a recalled message shows View original. Room notices are authored by the server and cannot be recalled.
@@ -206,7 +250,7 @@ Recently viewed room images are also cached by the service worker for faster rep
 
 ### Code blocks
 
-Other fenced code blocks are syntax-highlighted locally from their language tag; unsupported or untagged blocks stay plain. Hovering or focusing a block reveals icon-only wrap and copy controls. On touch screens, tap a block to reveal the controls and tap elsewhere to hide them. Wrap switches long lines between horizontal scrolling and wrapped text; copy writes the exact source to the clipboard. Language names are not sent to an external service.
+Other fenced code blocks are syntax-highlighted locally by a lazily loaded Shiki bundle covering 16 languages, including TSX and JSX; unsupported or untagged blocks stay plain. Light and dark themes reuse the same code tokens, and a blocked or failed bundle falls back to escaped plain text. Hovering or focusing a block reveals icon-only wrap and copy controls. On touch screens, tap a block to reveal the controls and tap elsewhere to hide them. Wrap switches long lines between horizontal scrolling and wrapped text; copy writes the exact source to the clipboard. Language names are not sent to an external service.
 
 ### Files and media
 
@@ -264,6 +308,8 @@ Then start opencode normally. Room state lives on the central server. Clients on
 | `CHAT_ROOM_CONFIG` | all | Explicit configuration file path; must exist | first `chatroom.*` found |
 | `CHAT_ROOM_SERVER_URL` | client | Central server URL; when set, central mode is active | unset (standalone) |
 | `CHAT_ROOM_SERVER_TOKEN` | both | Bearer token for the central server (optional) | none (open) |
+| `CHAT_ROOM_CHANNELD` | server | Enables Channel D when set to `1` or `true`; overrides `server.channeld.enabled` | off |
+| `CHAT_ROOM_CHANNELD_CONFIG` | server | Channel D YAML/JSON config path; required when Channel D is enabled | unset |
 | `CHAT_ROOM_MAX_FILE_SIZE_MB` | server | Maximum bytes per uploaded file, in MiB; positive values, enforced while streaming | `500` |
 | `CHAT_ROOM_SERVER_HOST` | server | Bind hostname; takes precedence over `HOST` | `0.0.0.0` |
 | `HOST` | server | Host alias, used when `CHAT_ROOM_SERVER_HOST` is unset | unset |
@@ -292,7 +338,9 @@ Administrator-room setup and Agent designation are described in [Administrator r
 | `join_status` | `roomId` (required) | Reports `pending`, `joined`, or `none` for your session |
 | `leave` | `roomId` (required) | Leaves the room and unregisters from push targets |
 | `list` | — | All rooms with member counts |
-| `send` | `roomId`, `text` (required, ≤5000), optional `isQuestion` | Stores the message and pushes it to other members |
+| `send` | `roomId`, `text` (required, ≤5000), optional `isQuestion`, `parentMessageId`, `clientMessageID` | Stores the message and pushes it to other members. A parent must be in the same room and not recalled; `clientMessageID` deduplicates retries. Central mode only for parent and client IDs |
+| `get_message` | `roomId`, `messageId` | Returns one message with author, sequence, parent, resource IDs, and recall status. A recalled message returns `unavailable: "recalled"` without its text or resources. Central mode only |
+| `catch_up` | `roomId`, optional `afterSeq`, `limit` | Reads persisted messages after a cursor, ascending, with `nextCursor`, `hasMore`, unread mentions, and open questions. Limit 1–200, default 50; read-only. Central mode only |
 | `poll` | `roomId` (required) | Only unread messages (skips already-pushed ones) |
 | `recall` | `roomId`, `messageId` (required) | Soft-hides a message; your own messages, or any message in a room you administer as a human administrator. Room notices cannot be recalled. The original remains available to current members |
 | `members` | `roomId` (required) | Member names |

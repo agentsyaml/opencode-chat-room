@@ -271,14 +271,19 @@ function actionableError(error: unknown): string {
 }
 
 export const roomArgs = z.object({
-  action: z.enum(["create", "join", "join_status", "leave", "list", "send", "poll", "recall", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete", "task_list", "task_create", "task_update", "task_delete"]),
+  action: z.enum(["create", "join", "join_status", "leave", "list", "send", "poll", "recall", "get_message", "catch_up", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete", "task_list", "task_create", "task_update", "task_delete"]),
   name: z.string().max(64).optional().describe("For join: your own participant display name, NOT the room name (required). For create: the new room name."),
   roomId: z.string().optional().describe("Room UUID, not the room name. Required for resource actions and every room-scoped action."),
-  messageId: z.string().optional().describe("For recall: the full message ID returned by send or poll; required for recall."),
+  messageId: z.string().optional().describe("For recall and get_message: the full message ID returned by send, poll, or catch_up."),
   resourceId: z.string().optional().describe("Resource UUID returned by upload_resource. read_resource and delete_resource also require roomId."),
   filePath: z.string().optional().describe("Absolute path to a regular local file to upload; central mode only; requires host read permission."),
   text: z.string().max(5000).optional().describe("Message text, at most 5000 characters; required for send."),
   isQuestion: z.boolean().optional().describe("For send: mark the message as a question awaiting an answer."),
+  parentMessageId: z.string().optional().describe("For send: the ID of the message this one answers or replies to."),
+  replyToMessageID: z.string().optional().describe("Legacy alias of parentMessageId for send."),
+  clientMessageID: z.string().max(100).optional().describe("For send: idempotency key; retrying with the same ID and parent creates one message."),
+  afterSeq: z.number().int().min(0).optional().describe("For catch_up: return messages with seq greater than this cursor; omit to start at 0."),
+  limit: z.number().int().min(1).max(200).optional().describe("For catch_up: page size from 1 to 200; the server default is 50."),
   announcementName: z.string().optional().describe("Exact announcement name from announcement_list; distinct from participant or room name."),
   content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters; required for announcement_write."),
   taskId: z.string().optional().describe("Task UUID from task_list; required for task_update and task_delete."),
@@ -327,8 +332,9 @@ const roomExecute = async (
       if (runtime.center.center) {
         // ponytail: central mode — self-pull inbox first, then act via HTTP
         // (skipped for poll: poll itself pulls the inbox, so racing the
-        // fire-and-forget check would read the position it just advanced)
-        if (args.action !== "poll") {
+        // fire-and-forget check would read the position it just advanced;
+        // get_message and catch_up stay read-only: no delivery, ack or wake)
+        if (args.action !== "poll" && args.action !== "get_message" && args.action !== "catch_up") {
           void checkCenterInbox(runtime.center, context.sessionID, runtime.transport);
         }
         return await centerAction(runtime.center, {
@@ -475,6 +481,14 @@ const roomExecute = async (
             if (!args.roomId) {
               return "error: roomId is required; use a room UUID from the room list, not the room name";
             }
+            // Local rooms can neither thread replies nor dedupe retries; fail
+            // loudly instead of silently dropping the caller's intent.
+            if (args.parentMessageId || args.replyToMessageID) {
+              return "error: replies require central server mode (CHAT_ROOM_SERVER_URL)";
+            }
+            if (args.clientMessageID) {
+              return "error: clientMessageID requires central server mode (CHAT_ROOM_SERVER_URL)";
+            }
             if (!args.text?.trim()) {
               return "error: text is required; pass a non-empty message body";
             }
@@ -519,6 +533,9 @@ const roomExecute = async (
               )
               .join("\n") + (pollPage?.hasMore ? "\nMore unread messages remain; poll again." : "");
           }
+          case "get_message":
+          case "catch_up":
+            return `error: ${args.action} requires central server mode (CHAT_ROOM_SERVER_URL)`;
           default:
             return "error: unsupported room action";
         }
@@ -537,7 +554,7 @@ const roomExecute = async (
     }
 };
 const room = tool({
-  description: "Chat room operations: create, join, leave and list rooms; send, poll and recall messages; list members, announcements and tasks; create, update and delete room tasks; manage reminders. Sent and polled messages carry full message IDs; recall takes roomId plus messageId and withdraws the message for everyone (agents their own, room admins any). Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. Resource actions need both roomId (the room UUID) and resourceId (the UUID in the marker); the marker alone does not identify the room. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads. Room joinPolicy \"approval\" makes join a pending request: you are not a member while pending, never claim otherwise, and use join_status to check whether a human administrator approved it.",
+  description: "Chat room operations: create, join, leave and list rooms; send, poll and recall messages; get_message fetches one message by ID (recalled messages come back as tombstones); catch_up pages messages after a seq cursor and is read-only (no read receipt or wake). Send accepts parentMessageId to reply to a message. List members, announcements and tasks; create, update and delete room tasks; manage reminders. Sent and polled messages carry full message IDs; recall takes roomId plus messageId and withdraws the message for everyone (agents their own, room admins any). Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. Resource actions need both roomId (the room UUID) and resourceId (the UUID in the marker); the marker alone does not identify the room. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads. Room joinPolicy \"approval\" makes join a pending request: you are not a member while pending, never claim otherwise, and use join_status to check whether a human administrator approved it.",
   args: roomArgs.shape,
   execute: roomExecute,
 });

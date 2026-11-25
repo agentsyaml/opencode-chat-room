@@ -119,7 +119,7 @@ export function formatMessages(roomName: string, roomKind: "group" | "direct" | 
 }
 
 /** Actions the room tool exposes; kept in the schema enum and the switch together. */
-export const ROOM_ACTIONS = ["list", "create", "join", "join_status", "leave", "send", "poll", "recall", "members", "task_list", "task_create", "task_update", "task_delete"] as const;
+export const ROOM_ACTIONS = ["list", "create", "join", "join_status", "leave", "send", "poll", "recall", "get_message", "catch_up", "members", "task_list", "task_create", "task_update", "task_delete"] as const;
 export type RoomAction = (typeof ROOM_ACTIONS)[number];
 
 /** Validated model arguments for one room call. */
@@ -130,6 +130,9 @@ export interface RoomArgs {
   name?: string;
   text?: string;
   isQuestion?: boolean;
+  parentMessageId?: string;
+  afterSeq?: number;
+  limit?: number;
   joinPolicy?: "open" | "approval";
   taskId?: string;
   title?: string;
@@ -217,6 +220,15 @@ export function parseRoomArgs(value: unknown): RoomArgs {
   }
   const roomId = optionalString(raw.roomId, "roomId", 128);
   const messageId = optionalString(raw.messageId, "messageId", 128);
+  const parentMessageId = optionalString(raw.parentMessageId, "parentMessageId", 128);
+  const afterSeq = raw.afterSeq === undefined ? undefined : Number(raw.afterSeq);
+  if (afterSeq !== undefined && (!Number.isSafeInteger(afterSeq) || afterSeq < 0)) {
+    throw new TypeError("room: afterSeq must be a non-negative integer");
+  }
+  const limit = raw.limit === undefined ? undefined : Number(raw.limit);
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)) {
+    throw new TypeError("room: limit must be an integer between 1 and 200");
+  }
   const name = optionalString(raw.name, "name", 64);
   const message = optionalString(raw.text, "text", 5000);
   const taskId = optionalString(raw.taskId, "taskId", 128);
@@ -238,6 +250,9 @@ export function parseRoomArgs(value: unknown): RoomArgs {
     ...(name === undefined ? {} : { name }),
     ...(message === undefined ? {} : { text: message }),
     ...(raw.isQuestion === true ? { isQuestion: true } : {}),
+    ...(parentMessageId === undefined ? {} : { parentMessageId }),
+    ...(afterSeq === undefined ? {} : { afterSeq }),
+    ...(limit === undefined ? {} : { limit }),
     ...(raw.joinPolicy === "approval" ? { joinPolicy: "approval" as const } : {}),
     ...(taskId === undefined ? {} : { taskId }),
     ...(title === undefined ? {} : { title }),
@@ -331,7 +346,11 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
       const id = requireRoomId(args);
       if (!args.text) throw new TypeError("room: send requires text");
       const room = record(await request(cfg, `/rooms/${id}/messages`, {
-        method: "POST", body: { sessionID, text: args.text, ...(args.isQuestion ? { isQuestion: true } : {}) },
+        method: "POST", body: {
+          sessionID, text: args.text,
+          ...(args.isQuestion ? { isQuestion: true } : {}),
+          ...(args.parentMessageId ? { parentMessageId: args.parentMessageId } : {}),
+        },
       }, signal));
       const messages = Array.isArray(room.messages) ? room.messages.map(record) : [];
       const sentID = [...messages].reverse()
@@ -346,6 +365,20 @@ export async function roomAction(cfg: RoomConfig, args: RoomArgs, sessionID: str
         method: "POST", body: { sessionID },
       }, signal);
       return `recalled message ${args.messageId}`;
+    }
+    case "get_message": {
+      const id = requireRoomId(args);
+      if (!args.messageId) throw new TypeError("room: get_message requires messageId");
+      return JSON.stringify(await request(cfg,
+        `/rooms/${id}/messages/${encodeURIComponent(args.messageId)}?sessionID=${encodeURIComponent(sessionID)}`,
+        {}, signal));
+    }
+    case "catch_up": {
+      const id = requireRoomId(args);
+      const query = new URLSearchParams({ sessionID });
+      if (args.afterSeq !== undefined) query.set("afterSeq", String(args.afterSeq));
+      if (args.limit !== undefined) query.set("limit", String(args.limit));
+      return JSON.stringify(await request(cfg, `/rooms/${id}/catch-up?${query}`, {}, signal));
     }
     case "members": {
       const id = requireRoomId(args);

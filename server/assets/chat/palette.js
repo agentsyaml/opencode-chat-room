@@ -2,7 +2,7 @@ import { icon } from "./icons.js";
 
 // Alt+Space or Ctrl+P opens one keyboard-first surface: message search plus common room commands.
 
-const SEARCH_DEBOUNCE_MS = 220;
+const SEARCH_DEBOUNCE_MS = 120;
 
 export function initPalette(app) {
   const dialog = app.$("#paletteDialog");

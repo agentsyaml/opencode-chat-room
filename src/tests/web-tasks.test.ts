@@ -109,6 +109,20 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     // Double-click restores the default width so the rest of the run uses it.
     await handle.dblclick();
     await page.waitForFunction((expected: number) => Math.abs(document.querySelector("#tasksDialog")!.getBoundingClientRect().width - expected) <= 2, wide.paneWidth);
+    // At 1500x900 the board widens while the chat keeps a 700px column; 1440 stays compact.
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await page.waitForTimeout(120);
+    const large = await page.evaluate(() => { const width = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().width; return { pane: width("#tasksDialog"), chat: width("#msgScroll"), rail: width("#roomRail"), overflow: document.documentElement.scrollWidth - innerWidth }; });
+    expect(large).toMatchObject({ rail: 252, overflow: 0 });
+    expect(large.pane).toBeGreaterThanOrEqual(500);
+    expect(large.chat).toBeGreaterThanOrEqual(700);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(120);
+    const medium = await page.evaluate(() => { const width = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().width; return { pane: width("#tasksDialog"), chat: width("#msgScroll") }; });
+    expect(medium.pane).toBeGreaterThanOrEqual(430);
+    expect(medium.pane).toBeLessThanOrEqual(434);
+    expect(medium.chat).toBeGreaterThanOrEqual(700);
+    await page.setViewportSize({ width: 1280, height: 850 });
     // The pane is not modal: the conversation stays usable beside it.
     await page.locator("#msgInput").click();
     await page.keyboard.type("Message while tasks open");

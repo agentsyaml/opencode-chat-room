@@ -4,6 +4,7 @@
 const STORAGE_KEY = "chat.sidePaneWidth";
 const MIN_WIDTH = 360;
 const MIN_CHAT = 420;
+const WIDE_TASKS_MIN_CHAT = 700;
 const RAIL_WIDTH = 252;
 const GUTTER = 8;
 const MAX_WIDTH = 960;
@@ -24,8 +25,14 @@ export function initSidePaneSplitter(app) {
   const activePane = () => view.classList.contains("has-doc") ? preview
     : view.classList.contains("has-tasks") ? tasks : null;
 
+  // A wide task board must leave the conversation a full working column; the
+  // Markdown preview keeps the normal minimum.
+  const wideTasks = () => view.classList.contains("has-tasks") && !view.classList.contains("has-doc")
+    && window.matchMedia("(min-width: 1500px) and (min-height: 900px)").matches;
+  const minChat = () => wideTasks() ? WIDE_TASKS_MIN_CHAT : MIN_CHAT;
+
   const maxWidth = () => {
-    const available = view.clientWidth - RAIL_WIDTH - GUTTER - MIN_CHAT;
+    const available = view.clientWidth - RAIL_WIDTH - GUTTER - minChat();
     return Math.max(MIN_WIDTH, Math.min(window.innerWidth * 0.7, MAX_WIDTH, available));
   };
   const clamp = (width) => Math.max(MIN_WIDTH, Math.min(width, maxWidth()));

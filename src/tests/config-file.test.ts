@@ -130,6 +130,21 @@ client:
     });
   });
 
+  test("channeld is opt-in and a config path enables it unless explicitly disabled", () => {
+    const root = temp();
+    const file = write(root, "chatroom.json", JSON.stringify({
+      server: { channeld: { config: "/srv/channeld.yml" } },
+    }));
+    const config = loadRoomConfig({ ...envFor(root), CHAT_ROOM_CONFIG: file }, root);
+    expect(resolveServerSettings(config, envFor(root)).channeld).toEqual({
+      enabled: true,
+      config: "/srv/channeld.yml",
+      stateFile: undefined,
+    });
+    expect(resolveServerSettings(config, { ...envFor(root), CHAT_ROOM_CHANNELD: "0" }).channeld?.enabled).toBe(false);
+    expect(resolveServerSettings(null, envFor(root)).channeld?.enabled).toBe(false);
+  });
+
   test("explicit config path must exist", () => {
     const root = temp();
     expect(() => loadRoomConfig({ ...envFor(root), CHAT_ROOM_CONFIG: path.join(root, "missing.json") }, root))

@@ -530,6 +530,16 @@ export async function readQuestions(file: string, roomID: string): Promise<Messa
   return (db.query("SELECT id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by FROM messages WHERE room_id=? AND is_question=1 AND answered_by IS NULL AND recalled_at IS NULL ORDER BY seq").all(roomID) as Array<Record<string, string | number | null>>).map(rowMessage);
 }
 
+// Open questions as seq references for catch-up; room-wide, excluding recalled.
+// Capped so a room with a large question backlog cannot bloat a catch-up page.
+export const MAX_OPEN_QUESTION_REFS = 200;
+export async function readOpenQuestionRefs(file: string, roomID: string, limit = MAX_OPEN_QUESTION_REFS): Promise<Array<{ id: string; seq: number }>> {
+  const db = await openStateDatabase(file);
+  const take = Number.isSafeInteger(limit) ? Math.min(MAX_OPEN_QUESTION_REFS, Math.max(1, limit)) : MAX_OPEN_QUESTION_REFS;
+  return (db.query("SELECT id,seq FROM messages WHERE room_id=? AND is_question=1 AND answered_by IS NULL AND recalled_at IS NULL ORDER BY seq LIMIT ?").all(roomID, take) as Array<{ id: string; seq: number }>)
+    .map((row) => ({ id: String(row.id), seq: Number(row.seq) }));
+}
+
 export async function countOpenQuestions(file: string, roomID: string): Promise<number> {
   const db = await openStateDatabase(file);
   const row = db.query("SELECT COUNT(*) AS count FROM messages WHERE room_id=? AND is_question=1 AND answered_by IS NULL AND recalled_at IS NULL").get(roomID) as { count: number };
@@ -578,7 +588,7 @@ export async function appendRoomMessage(file: string, roomID: string, sessionID:
   });
 }
 
-export async function sendReply(file: string, roomID: string, targetID: string, sessionID: string, text: string, clientMessageID?: string): Promise<{ status: "ok"; message: Message; duplicate?: true } | { status: "missing" | "member" | "target" | "question" }> {
+export async function sendReply(file: string, roomID: string, targetID: string, sessionID: string, text: string, clientMessageID?: string): Promise<{ status: "ok"; message: Message; duplicate?: true } | { status: "missing" | "member" | "target" | "recalled" | "question" }> {
   const db = await openStateDatabase(file);
   return immediate(db, () => {
     if (!db.query("SELECT 1 FROM rooms WHERE id=?").get(roomID)) return { status: "missing" };
@@ -589,7 +599,8 @@ export async function sendReply(file: string, roomID: string, targetID: string, 
       if (existing) return { status: "ok", message: rowMessage(existing as Record<string, string | number | null>), duplicate: true };
     }
     const target = db.query("SELECT is_question,recalled_at FROM messages WHERE room_id=? AND id=?").get(roomID, targetID) as { is_question: number; recalled_at: number | null } | null;
-    if (!target || target.recalled_at !== null) return { status: "target" };
+    if (!target) return { status: "target" };
+    if (target.recalled_at !== null) return { status: "recalled" };
     if (target.is_question) return { status: "question" };
     const tail = db.query("SELECT created_at FROM messages WHERE room_id=? ORDER BY seq DESC LIMIT 1").get(roomID) as { created_at: number } | null;
     const message: Message = { id: randomUUID(), roomId: roomID, senderId: member.kind === "direct" ? sessionID : member.name, senderSessionID: sessionID, text, createdAt: Math.max(Date.now(), (tail?.created_at ?? 0) + 1), answerToMessageID: targetID };
@@ -749,22 +760,42 @@ export async function readInboxPage(file: string, sessionID: string, roomFilter:
   }).deferred();
 }
 
-export async function readHistoryPage(file: string, roomID: string, beforeSeq?: number, limit = 100, excludeSessionID?: string, excludeName = ""): Promise<{ messages: HistoryMessage[]; nextBeforeSeq: number | null; hasMore: boolean; recallVersion: number }> {
+const HISTORY_COLUMNS = "seq,id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,recalled_at,recalled_by";
+
+function historyRowMessage(row: Record<string, string | number | null>): HistoryMessage {
+  const message = rowMessage(row);
+  const recalledAt = row.recalled_at === null || row.recalled_at === undefined ? undefined : Number(row.recalled_at);
+  // Recalled rows keep their original text in storage for member reveal; history
+  // surfaces only a tombstone.
+  return { ...message, ...(recalledAt !== undefined ? { text: "", recalledAt, ...(row.recalled_by ? { recalledBy: String(row.recalled_by) } : {}) } : {}), seq: Number(row.seq) };
+}
+
+// afterSeq switches the page to ascending order, exclusive cursor semantics,
+// for catch-up from a persisted seq. beforeSeq is ignored in that branch.
+export async function readHistoryPage(file: string, roomID: string, beforeSeq?: number, limit = 100, excludeSessionID?: string, excludeName = "", afterSeq?: number): Promise<{ messages: HistoryMessage[]; nextBeforeSeq: number | null; hasMore: boolean; recallVersion: number }> {
   const db = await openStateDatabase(file);
   return db.transaction(() => {
   const take = Math.min(200, Math.max(1, limit));
-  const rows = db.query(`SELECT seq,id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,recalled_at,recalled_by FROM messages WHERE room_id=? ${beforeSeq === undefined ? "" : "AND seq<? "}AND
-    (? IS NULL OR (sender_session_id IS NOT NULL AND sender_session_id!=?) OR (sender_session_id IS NULL AND sender_id!=?))
-    ORDER BY seq DESC LIMIT ?`).all(...(beforeSeq === undefined ? [roomID] : [roomID, beforeSeq]),
+  const exclude = `(? IS NULL OR (sender_session_id IS NOT NULL AND sender_session_id!=?) OR (sender_session_id IS NULL AND sender_id!=?))`;
+  if (afterSeq !== undefined) {
+    const rows = db.query(`SELECT ${HISTORY_COLUMNS} FROM messages WHERE room_id=? AND seq>? AND ${exclude} ORDER BY seq ASC LIMIT ?`)
+      .all(roomID, afterSeq, excludeSessionID ?? null, excludeSessionID ?? null, excludeName, take + 1) as Array<Record<string, string | number | null>>;
+    const hasMore = rows.length > take;
+    return { messages: rows.slice(0, take).map(historyRowMessage), nextBeforeSeq: null, hasMore, recallVersion: recallVersion(db, roomID) };
+  }
+  const rows = db.query(`SELECT ${HISTORY_COLUMNS} FROM messages WHERE room_id=? ${beforeSeq === undefined ? "" : "AND seq<? "}AND
+    ${exclude} ORDER BY seq DESC LIMIT ?`).all(...(beforeSeq === undefined ? [roomID] : [roomID, beforeSeq]),
     excludeSessionID ?? null, excludeSessionID ?? null, excludeName, take + 1) as Array<Record<string, string | number | null>>;
   const hasMore = rows.length > take;
-  const messages = rows.slice(0, take).reverse().map((row) => {
-    const message = rowMessage(row);
-    const recalledAt = row.recalled_at === null || row.recalled_at === undefined ? undefined : Number(row.recalled_at);
-    return { ...message, ...(recalledAt !== undefined ? { text: "", recalledAt, ...(row.recalled_by ? { recalledBy: String(row.recalled_by) } : {}) } : {}), seq: Number(row.seq) };
-  });
+  const messages = rows.slice(0, take).reverse().map(historyRowMessage);
   return { messages, nextBeforeSeq: hasMore ? messages[0]?.seq ?? null : null, hasMore, recallVersion: recallVersion(db, roomID) };
   }).deferred();
+}
+
+export async function readMessage(file: string, roomID: string, messageID: string): Promise<HistoryMessage | undefined> {
+  const db = await openStateDatabase(file);
+  const row = db.query(`SELECT ${HISTORY_COLUMNS} FROM messages WHERE room_id=? AND id=?`).get(roomID, messageID) as Record<string, string | number | null> | null;
+  return row ? historyRowMessage(row) : undefined;
 }
 
 export async function readMessageReceipts(file: string, roomID: string, messageIDs?: string[]): Promise<MessageReceipt[] | undefined> {

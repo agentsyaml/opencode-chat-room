@@ -11,6 +11,8 @@ const patterns = [
   [/^(.*?) updated the room description$/, "systemDescribed", (m) => ({ actor: m[1] })],
   [/^(.*?) set join approval to (open|approval)$/, "systemJoinPolicy", (m) => ({ actor: m[1], policy: m[2] })],
   [/^(.*?) handed the room to (.*)$/, "systemHanded", (m) => ({ actor: m[1], name: m[2] })],
+  [/^Forwarded to (.*)$/, "systemForwarded", (m) => ({ target: m[1] })],
+  [/^Forward to (.*?) failed: (.*)$/, "systemForwardFailed", (m) => ({ target: m[1], reason: m[2] })],
 ];
 
 function formatLine(line, app) {

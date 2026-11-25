@@ -20,6 +20,7 @@ import { readInbox } from "./inbox.ts";
 import { isReceiverOwnerID } from "../src/state/receiver-owner.ts";
 import { claimWake, touchActive, wakeMentionedSessions } from "./wake.ts";
 import { historyRoute } from "./history-route.ts";
+import { addressingRoutes } from "./addressing-routes.ts";
 import { messageRecallRoutes } from "./message-recall-routes.ts";
 import { roomPayload } from "./room-payload.ts";
 import { isUser, settleAdmins, settleOwner } from "./room-owner.ts";
@@ -32,6 +33,7 @@ import { adminRoutes } from "./admin-routes.ts";
 import { joinRequestRoutes } from "./join-requests.ts";
 import { joinRoomMember } from "./room-join.ts";
 import { roomReminderRoutes, startRoomReminderScheduler } from "./room-reminders.ts";
+import { channelRoutes, startChannels, stopChannels, type ChannelsRuntime } from "./channels.ts";
 import { loadRoomConfig, resolveServerSettings } from "../src/config/file-config.ts";
 import { startServer } from "./http-server.ts";
 
@@ -60,6 +62,8 @@ const hostname = settings.host;
 const displayHostname = hostname.includes(":") ? `[${hostname}]` : hostname;
 const port = parsePort(settings.port);
 const token = settings.token;
+// Set before the request handler runs; the forward routes stay absent when off.
+let channels: ChannelsRuntime | undefined;
 
 // The state directory and upload limit are read lazily from the environment;
 // publish the file values before the first database or upload call.
@@ -104,7 +108,7 @@ async function handle(req: Request): Promise<Response> {
       return json({ error: "chat page not found" }, 404);
     }
     const version = await chatVersionTag();
-    return new Response(html.replaceAll("{{version}}", version), {
+    return new Response(html.replaceAll("{{version}}", version).replaceAll("{{channeld}}", channels ? "on" : "off"), {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
@@ -163,8 +167,12 @@ async function handle(req: Request): Promise<Response> {
     if (resource) return resource;
     const history = await historyRoute(url);
     if (history) return history;
+    const addressing = await addressingRoutes(req, url);
+    if (addressing) return addressing;
     const recall = await messageRecallRoutes(req, url);
     if (recall) return recall;
+    const channel = await channelRoutes(req, url, channels);
+    if (channel) return channel;
     if (req.method === "GET" && p === "/rooms/summary") {
       // ponytail: 轻量房间摘要（不含消息）——wakeSessions 每 10s 用它计算
       // latest，避免下载全部房间历史（orc-1 #5）
@@ -443,8 +451,9 @@ async function handle(req: Request): Promise<Response> {
         if (text.length > 5000) {
           return json({ error: "text too long (max 5000)" }, 400);
         }
-        const replyTo = (body as Record<string, unknown>).replyToMessageID;
-        if (replyTo !== undefined && (typeof replyTo !== "string" || !replyTo)) return json({ error: "replyToMessageID must be a non-empty message ID" }, 400);
+        // parentMessageId is the addressing alias of the web client's reply field.
+        const replyTo = (body as Record<string, unknown>).replyToMessageID ?? (body as Record<string, unknown>).parentMessageId;
+        if (replyTo !== undefined && (typeof replyTo !== "string" || !replyTo)) return json({ error: "parentMessageId must be a non-empty message ID" }, 400);
         // Optional retry key: a lost response may be retried without creating a twin.
         const clientMessageID = (body as Record<string, unknown>).clientMessageID;
         if (clientMessageID !== undefined && (typeof clientMessageID !== "string" || !clientMessageID || clientMessageID.length > 100)) {
@@ -455,8 +464,10 @@ async function handle(req: Request): Promise<Response> {
           if (result.status !== "ok") {
             if (result.status === "missing") return json({ error: "room not found" }, 404);
             if (result.status === "target") return json({ error: "reply target not found in room" }, 404);
+            if (result.status === "recalled") return json({ error: "reply target was recalled" }, 409);
             if (result.status === "question") return json({ error: "use the question answers endpoint to reply to a question" }, 409);
-            return json({ error: "session is not a room member" }, 409);
+            // Reply addressing is member-only and uniformly missing otherwise.
+            return json({ error: "not found" }, 404);
           }
           touchActive(sessionID);
           const room = await read((svc) => svc.getRoom(roomId));
@@ -557,6 +568,18 @@ const config = {
 };
 
 export default config;
+
+// Channel D is opt-in. A missing config aborts startup; a failed adapter start
+// only logs and leaves the forward routes absent.
+channels = await startChannels(settings);
+if (channels) {
+  let stopping: Promise<void> | undefined;
+  const stop = () => {
+    stopping ??= stopChannels(channels).finally(() => process.exit(0));
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
 
 // Bun auto-serves the default export when this file is the entrypoint. Node and
 // Deno have no such convention, so they start the shared adapter explicitly.

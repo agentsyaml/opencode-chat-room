@@ -7,6 +7,22 @@
   --code-number: color-mix(in srgb, var(--warning) 68%, var(--ink));
   --code-title: color-mix(in srgb, var(--accent) 72%, var(--ink));
   --code-comment: color-mix(in srgb, var(--ink-3) 78%, var(--ink));
+  /* Shiki renders token colors as var(--shiki-token-*) inline styles. Mapping them
+     to the palette tokens lets every theme (light, dark, forest, sand) switch live. */
+  --shiki-foreground: var(--ink);
+  --shiki-background: var(--code-bg);
+  --shiki-token-comment: var(--code-comment);
+  --shiki-token-constant: var(--code-number);
+  --shiki-token-keyword: var(--code-keyword);
+  --shiki-token-parameter: var(--ink-2);
+  --shiki-token-function: var(--code-title);
+  --shiki-token-string: var(--code-string);
+  --shiki-token-string-expression: var(--code-string);
+  --shiki-token-punctuation: var(--ink-2);
+  --shiki-token-link: var(--mention-blue);
+  --shiki-token-inserted: var(--accent);
+  --shiki-token-deleted: var(--danger);
+  --shiki-token-changed: var(--warning);
 }
 
 .code-block { position: relative; min-width: 0; }
@@ -18,7 +34,7 @@
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--code-bg);
+  background: var(--shiki-background);
   overflow-x: auto;
 }
 
@@ -84,33 +100,6 @@
 .code-tool-button.is-copied .code-copy-icon { display: none; }
 .code-tool-button.is-copied .code-check-icon { display: block; }
 
-/* highlight.js tokens use palette tokens, so dark, forest, and sand stay legible. */
-.code-block .hljs { color: var(--ink); }
-.code-block .hljs-comment,
-.code-block .hljs-quote { color: var(--code-comment); font-style: italic; }
-.code-block .hljs-keyword,
-.code-block .hljs-selector-tag,
-.code-block .hljs-literal,
-.code-block .hljs-section,
-.code-block .hljs-doctag { color: var(--code-keyword); font-weight: 650; }
-.code-block .hljs-string,
-.code-block .hljs-regexp,
-.code-block .hljs-addition,
-.code-block .hljs-template-tag,
-.code-block .hljs-template-variable { color: var(--code-string); }
-.code-block .hljs-number,
-.code-block .hljs-symbol,
-.code-block .hljs-bullet,
-.code-block .hljs-built_in,
-.code-block .hljs-type { color: var(--code-number); }
-.code-block .hljs-title,
-.code-block .hljs-title.function_,
-.code-block .hljs-title.class_,
-.code-block .hljs-attr,
-.code-block .hljs-attribute,
-.code-block .hljs-property,
-.code-block .hljs-selector-class,
-.code-block .hljs-selector-id { color: var(--code-title); }
-.code-block .hljs-deletion { color: var(--danger); }
-.code-block .hljs-emphasis { font-style: italic; }
-.code-block .hljs-strong { font-weight: 700; }
+/* Shiki tokens use palette variables, so dark, forest, and sand stay legible. */
+.code-block .shiki { color: var(--shiki-foreground); }
+.code-block .shiki [style*="--shiki-token-comment"] { font-style: italic; }

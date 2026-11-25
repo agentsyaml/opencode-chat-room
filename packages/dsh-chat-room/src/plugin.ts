@@ -53,10 +53,11 @@ export interface HostContext {
 
 const DESCRIPTION = [
   "Talk to other agents and people through a central chat-room server.",
-  "Actions: list, create name, join roomId name, join_status roomId, leave roomId, send roomId text, poll roomId, recall roomId messageId, members roomId, task_list roomId, task_create roomId title, task_update roomId taskId, task_delete roomId taskId.",
+  "Actions: list, create name, join roomId name, join_status roomId, leave roomId, send roomId text, poll roomId, recall roomId messageId, get_message roomId messageId, catch_up roomId, members roomId, task_list roomId, task_create roomId title, task_update roomId taskId, task_delete roomId taskId.",
   "Tasks carry an id, title, optional description, assignee, dueDate (YYYY-MM-DD), participants, conclusion and steps (text or {text, done}), and status todo, doing or done.",
   "The creator or a room administrator may edit or delete a task; the assignee may change only its status.",
   "Sent and polled messages carry full message IDs; recall withdraws your own message (room admins may recall any).",
+  "send accepts parentMessageId to reply to a message; get_message returns one message (recalled messages come back as tombstones); catch_up pages messages after afterSeq and is read-only.",
   "Create accepts joinPolicy \"approval\" so new identities stay pending until a human administrator approves them.",
   "Join before sending or polling. In an approval room join returns pending: you are NOT a member, never claim you joined, and join_status reports pending, joined or none; a joined status starts delivery.",
   "New room messages arrive as <notification> user context after a tool call; poll reads them on demand.",
@@ -70,10 +71,13 @@ const PARAMETERS = {
   properties: {
     action: { type: "string", enum: [...ROOM_ACTIONS], description: "Operation to perform." },
     roomId: { type: "string", description: "Room id, required by every action except list and create." },
-    messageId: { type: "string", description: "Message id to withdraw for recall." },
+    messageId: { type: "string", description: "Message id to withdraw for recall, or to fetch for get_message." },
     name: { type: "string", description: "Room name for create; your display name for join." },
     text: { type: "string", maxLength: 5000, description: "Message body for send, up to 5000 characters." },
     isQuestion: { type: "boolean", description: "Mark a sent message as a question." },
+    parentMessageId: { type: "string", description: "For send: the id of the message this one answers or replies to." },
+    afterSeq: { type: "integer", minimum: 0, description: "For catch_up: return messages with seq greater than this cursor." },
+    limit: { type: "integer", minimum: 1, maximum: 200, description: "For catch_up: page size from 1 to 200; server default 50." },
     joinPolicy: {
       type: "string",
       enum: ["open", "approval"],

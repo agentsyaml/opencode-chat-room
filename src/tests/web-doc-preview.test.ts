@@ -29,10 +29,19 @@ const REPORT = [
   "",
   "```js",
   "const total = 42;",
+  'const literal = "[^sdk]";',
   "```",
+  "",
+  '    const indented = "[^sdk]";',
   "",
   "- First item",
   "- Second item",
+  "",
+  "Footnote reference.[^sdk]",
+  "",
+  "[relative API link](/rooms/summary)",
+  "",
+  "[^sdk]: OpenCode SDK, <https://opencode.ai/docs/build/sdk>.",
 ].join("\n");
 
 test.skipIf(!browserModule)("markdown resources preview in a right pane and a mobile overlay", async () => {
@@ -72,7 +81,13 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await card.getByText("REPORT.md").waitFor();
     const previewButton = card.getByRole("button", { name: "Preview: REPORT.md" });
     await previewButton.waitFor();
-    expect(await card.getByRole("button", { name: /Download/ }).count()).toBe(1);
+    const cardDownload = card.getByRole("button", { name: /Download/ });
+    expect(await cardDownload.count()).toBe(1);
+    expect(await previewButton.locator("svg.fluent-icon").count()).toBe(1);
+    expect(await cardDownload.locator("svg.fluent-icon").count()).toBe(1);
+    for (const control of [cardDownload, previewButton]) {
+      expect(Math.abs((await control.boundingBox())!.height - 35)).toBeLessThanOrEqual(2);
+    }
     // Markdown never previews inline the way media does.
     expect(await card.locator("img, audio, video").count()).toBe(0);
 
@@ -114,9 +129,8 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await docCopy.click();
     await page.waitForFunction((source: string) => (window as any).__copies[0] === source, REPORT);
     expect(await docCopy.getAttribute("aria-label")).toBe("Copied");
-    // The message card copies the same raw source.
-    await card.locator(".resource-copy").click();
-    await page.waitForFunction((source: string) => (window as any).__copies[1] === source, REPORT);
+    // Resource cards intentionally have no copy action; the preview header owns it.
+    expect(await card.locator(".resource-copy").count()).toBe(0);
 
     // At the narrowest pane breakpoint the chat still has a usable column.
     await page.setViewportSize({ width: 1100, height: 800 });
@@ -137,14 +151,28 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     const safe = await page.evaluate(() => {
       const body = document.querySelector<HTMLElement>("#docPreviewBody")!;
       const link = body.querySelector("a");
+      const relative = Array.from(body.querySelectorAll<HTMLAnchorElement>("a")).find((anchor) => anchor.textContent === "relative API link");
+      const footnoteRef = body.querySelector<HTMLAnchorElement>(".footnote-ref a");
+      const footnoteItem = body.querySelector<HTMLElement>(".footnotes li");
+      const footnoteBackref = footnoteItem?.querySelector<HTMLAnchorElement>(".footnote-backref");
       return {
         scripts: body.querySelectorAll("script").length,
         handlers: body.querySelectorAll("[onclick], [onerror], [onload]").length,
         xss: (window as any).__docXss,
         target: link?.getAttribute("target"),
         rel: link?.getAttribute("rel"),
+        relativeTarget: relative?.getAttribute("target"),
+        relativeHref: relative?.getAttribute("href"),
+        footnoteHref: footnoteRef?.getAttribute("href"),
+        footnoteTarget: footnoteRef?.getAttribute("target"),
+        footnoteId: footnoteItem?.id,
+        footnoteText: footnoteItem?.textContent || "",
+        footnoteBackref: footnoteBackref?.getAttribute("href"),
         tables: body.querySelectorAll("table").length,
         codeBlocks: body.querySelectorAll(".code-block pre code").length,
+        codeText: body.querySelector(".code-block pre code")?.textContent || "",
+        indentedCode: Array.from(body.querySelectorAll<HTMLElement>("pre code")).find((code) => code.textContent?.includes("const indented"))?.textContent || "",
+        tokenLeak: (body.textContent || "").includes("CHATFOOTNOTE"),
         images: body.querySelectorAll("img").length,
         customTag: body.textContent?.includes('<custom:widget data-id="7">kept text</custom:widget>') || false,
       };
@@ -154,14 +182,34 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     expect(safe.xss).toBeUndefined();
     expect(safe.target).toBe("_blank");
     expect(safe.rel).toContain("noopener");
+    expect(safe.relativeTarget).toBeNull();
+    expect(safe.relativeHref).toBe("/rooms/summary");
+    expect(safe.footnoteHref).toMatch(/^#fn-[0-9a-f-]+-1$/);
+    expect(safe.footnoteTarget).toBeNull();
+    expect(safe.footnoteId).toBe(safe.footnoteHref?.slice(1));
+    expect(safe.footnoteText).toContain("OpenCode SDK");
+    expect(safe.footnoteBackref).toMatch(/^#fn-[0-9a-f-]+-ref-1$/);
+    const urlBeforeRelative = page.url();
+    await page.locator("#docPreviewBody a", { hasText: "relative API link" }).click();
+    await page.waitForTimeout(50);
+    expect(page.url()).toBe(urlBeforeRelative);
     expect(safe.tables).toBe(1);
-    expect(safe.codeBlocks).toBe(1);
+    expect(safe.codeBlocks).toBe(2);
+    expect(safe.codeText).toContain("[^sdk]");
+    expect(safe.indentedCode).toContain("[^sdk]");
+    expect(safe.indentedCode).not.toContain("CHATFOOTNOTE");
+    expect(safe.tokenLeak).toBe(false);
     expect(safe.images).toBe(1);
     expect(safe.customTag).toBe(true);
     await page.waitForTimeout(200);
     await page.screenshot({ path: path.join(artifacts, "web-doc-preview-wide-1280.png") });
 
     // Download stays available from the pane.
+    const headerDownload = page.locator("#btnDocPreviewDownload");
+    expect(await headerDownload.locator("svg.fluent-icon").count()).toBe(1);
+    expect(await headerDownload.textContent()).toContain("Download");
+    expect(Math.abs((await headerDownload.boundingBox())!.height - 36)).toBeLessThanOrEqual(2);
+    expect(await page.locator("#btnDocPreviewCopy svg.copy-icon").count()).toBe(1);
     const downloadPromise = page.waitForEvent("download");
     await page.locator("#btnDocPreviewDownload").click();
     const download = await downloadPromise;
@@ -184,7 +232,7 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     expect(await row.locator('[data-file-action="download"]').count()).toBe(1);
     expect(await row.locator('[data-file-action="copy"]').count()).toBe(1);
     await row.locator('[data-file-action="copy"]').click();
-    await page.waitForFunction((source: string) => (window as any).__copies[2] === source, REPORT);
+    await page.waitForFunction((source: string) => (window as any).__copies.at(-1) === source && (window as any).__copies.length === 2, REPORT);
     await row.locator('[data-file-action="preview"]').click();
     await dialog.waitFor({ state: "visible" });
     await page.locator("#docPreviewBody h1").getByText("Quarterly Report").waitFor();

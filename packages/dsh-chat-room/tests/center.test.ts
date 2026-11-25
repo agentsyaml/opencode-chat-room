@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { CenterError, parseRoomArgs, roomAction } from "../src/center.ts";
+import { CenterError, ROOM_ACTIONS, parseRoomArgs, roomAction } from "../src/center.ts";
 import { resolveConfig } from "../src/config.ts";
 import { startFakeCenter } from "./fake-center.ts";
 
@@ -40,6 +40,41 @@ describe("central actions", () => {
     expect(fake.requests.every((request) => request.authorization === "Bearer secret")).toBe(true);
     expect(fake.requests.find((request) => request.path === "/rooms/r1/messages")?.body).toEqual({ sessionID: "dsh:s1", text: "hi", isQuestion: true });
     expect(fake.requests.find((request) => request.method === "POST" && request.path === "/rooms")?.body).toMatchObject({ sessionID: "dsh:s1", name: "dev" });
+  });
+
+  test("get_message, catch_up and parent replies use the addressing routes", async () => {
+    const fake = center(({ method, path }) => {
+      if (method === "GET" && path === "/rooms/r1/messages/m1") {
+        return [200, { id: "m1", roomId: "r1", seq: 2, senderId: "bob", createdAt: 5, recalled: true, recalledAt: 6, recalledBy: "bob", text: null, unavailable: "recalled", resourceIDs: [] }];
+      }
+      if (method === "GET" && path === "/rooms/r1/catch-up") {
+        return [200, { messages: [], nextCursor: 9, hasMore: true, unreadMentions: [], unreadMentionCount: 0, unansweredQuestions: [], unansweredQuestionCount: 0 }];
+      }
+      if (method === "POST" && path === "/rooms/r1/messages") return [200, { messages: [{ id: "m-reply" }] }];
+      return undefined;
+    });
+    const config = cfg(fake.url);
+    expect(ROOM_ACTIONS).toContain("get_message");
+    expect(ROOM_ACTIONS).toContain("catch_up");
+    const tombstone = JSON.parse(await roomAction(config,
+      parseRoomArgs({ action: "get_message", roomId: "r1", messageId: "m1" }), "dsh:s1"));
+    expect(tombstone).toMatchObject({ recalled: true, text: null, unavailable: "recalled" });
+    const page = JSON.parse(await roomAction(config,
+      parseRoomArgs({ action: "catch_up", roomId: "r1", afterSeq: 4, limit: 2 }), "dsh:s1"));
+    expect(page.nextCursor).toBe(9);
+    const catchUpRequest = fake.requests.find((request) => request.path === "/rooms/r1/catch-up")!;
+    expect(catchUpRequest.query.get("afterSeq")).toBe("4");
+    expect(catchUpRequest.query.get("limit")).toBe("2");
+    expect(catchUpRequest.query.get("sessionID")).toBe("dsh:s1");
+    expect(fake.requests.every((request) => request.method === "GET")).toBe(true);
+
+    expect(await roomAction(config,
+      parseRoomArgs({ action: "send", roomId: "r1", text: "answer", parentMessageId: "m1" }), "dsh:s1"))
+      .toBe("sent to room r1 (id: m-reply)");
+    expect(fake.requests.find((request) => request.method === "POST")?.body)
+      .toEqual({ sessionID: "dsh:s1", text: "answer", parentMessageId: "m1" });
+    expect(() => parseRoomArgs({ action: "catch_up", roomId: "r1", limit: 201 })).toThrow(/limit/);
+    expect(() => parseRoomArgs({ action: "catch_up", roomId: "r1", afterSeq: -1 })).toThrow(/afterSeq/);
   });
 
   test("poll reads unread messages and advances the read watermark", async () => {

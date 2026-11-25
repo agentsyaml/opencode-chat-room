@@ -1,0 +1,40 @@
+{
+  "name": "@alexsun-top/chat-room-channeld",
+  "version": "0.1.0",
+  "description": "Channel D relay core: a host that relays chat-room events to external IM accounts through adapter child processes.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentsyaml/opencode-chat-room.git",
+    "directory": "packages/chat-room-channeld"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "bin": {
+    "chat-room-channeld": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "tests",
+    "tsconfig.build.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "bun test tests/*.test.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "license": "MIT"
+}

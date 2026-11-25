@@ -353,6 +353,10 @@ export const messages = {
     savedMemory: "Saved for this tab only", copyFailed: ({ id }) => `Copy failed. Copy manually: ${id}`,
     copyMessage: "Copy", copiedMessage: "Copied", copyMessageFailed: "Could not copy. Select and copy the message manually.", wrapCode: "Wrap code",
     replyMessage: "Reply", replyingTo: "Replying to", cancelReply: "Cancel reply", replyOpenOriginal: "View original message", replyOriginalUnavailable: "Original message is unavailable.", replyOriginalRecalled: "Original message was recalled.",
+    forwardMessage: "Forward", forwardTitle: "Forward message", forwardHint: "Choose where to forward this message.",
+    forwardConfirm: ({ target }) => `Forward this message to ${target}?`, forwardNoTargets: "No forward targets are configured for this room.",
+    forwardUnavailable: "Forwarding is not available on this server.", forwardLoadFailed: "Could not load forward targets.",
+    forwardFailed: ({ message }) => `Forward failed: ${message}`,
     recallMessage: "Recall", recallSystemMessage: "Recall this room notice", recallSystemConfirm: "Recall this room notice? Everyone will see it as recalled.", recallConfirm: "Recall this message? Everyone will see it as recalled.", recallAdminConfirm: ({ name }) => `Recall ${name}'s message? Everyone will see it as recalled.`, recallFailed: "Could not recall this message.", messageRecalled: "Message recalled", recalledBy: ({ name }) => `Recalled by ${name}`, showRecalled: "View original", hideRecalled: "Hide original", revealFailed: "Load failed. Retry",
     identityChanged: "This browser identity changed in another tab. Reload this tab before continuing.",
     networkError: "Network connection failed", requestFailed: ({ status }) => `Request failed (HTTP ${status})`,
@@ -379,6 +383,7 @@ export const messages = {
     resourceDelete: "Delete file", resourceDeleting: "Deleting…", resourceDeleteConfirm: ({ name }) => `Delete “${name}”? This cannot be undone.`, resourceDeleted: "File deleted.", resourceDeleteFailed: "Could not delete this file.",
     systemJoined: ({ name }) => `${name} joined the room`, systemLeft: ({ name }) => `${name} left the room`, systemRemoved: ({ name }) => `${name} was removed from the room`,
     systemDesignated: ({ actor, name }) => `${actor} designated ${name} as administrator`, systemRevoked: ({ actor }) => `${actor} revoked the administrator designation`, systemRenamed: ({ actor, from, to }) => `${actor} renamed the room from "${from}" to "${to}"`, systemDescribed: ({ actor }) => `${actor} updated the room description`, systemHanded: ({ actor, name }) => `${actor} handed the room to ${name}`, systemAdminsUpdated: ({ actor }) => `${actor} updated the room administrators`, systemSuccessorNamed: ({ actor, name }) => `${actor} named ${name} as the room successor`, systemSuccessorCleared: ({ actor }) => `${actor} cleared the room successor`, systemJoinPolicy: ({ actor, policy }) => policy === "approval" ? `${actor} now requires approval to join this room` : `${actor} opened this room to join without approval`,
+    systemForwarded: ({ target }) => `Forwarded to ${target}`, systemForwardFailed: ({ target, reason }) => `Forward to ${target} failed: ${reason}`,
     activity_working: "Working", activity_idle: "Foreground idle", activity_waiting: "Waiting", activity_unknown: "Status unknown", activity_offline: "Status stale",
     activityHint_working: "The agent reports active work.", activityHint_idle: "Foreground is idle; background work may continue.", activityHint_waiting: "The agent reports that it is waiting.", activityHint_unknown: "No activity report is available.", activityHint_offline: "The last status is stale; this does not prove the agent is offline.",
     receiptCount: ({ count }) => `Read by ${count}`, receiptNone: "No readers yet", receiptNotLoaded: "Read status not loaded", readerPanelTitle: "Message readers", close: "Close", departedMember: "left",
@@ -502,6 +507,10 @@ export const messages = {
     savedMemory: "仅保存于当前标签页", copyFailed: ({ id }) => `复制失败，请手动复制：${id}`,
     copyMessage: "复制", copiedMessage: "已复制", copyMessageFailed: "复制失败，请手动选择并复制消息。", wrapCode: "自动换行",
     replyMessage: "回复", replyingTo: "回复给", cancelReply: "取消回复", replyOpenOriginal: "查看原始消息", replyOriginalUnavailable: "原始消息不可用。", replyOriginalRecalled: "原消息已撤回。",
+    forwardMessage: "转发", forwardTitle: "转发消息", forwardHint: "选择把这条消息转发到哪里。",
+    forwardConfirm: ({ target }) => `把这条消息转发到 ${target}？`, forwardNoTargets: "这个房间没有配置转发目标。",
+    forwardUnavailable: "此服务器未开启转发功能。", forwardLoadFailed: "无法加载转发目标。",
+    forwardFailed: ({ message }) => `转发失败：${message}`,
     recallMessage: "撤回", recallSystemMessage: "撤回这条房间通知", recallSystemConfirm: "撤回这条房间通知？所有人都会看到“消息已撤回”。", recallConfirm: "撤回这条消息？所有人都会看到“消息已撤回”。", recallAdminConfirm: ({ name }) => `撤回 ${name} 的消息？所有人都会看到“消息已撤回”。`, recallFailed: "撤回失败，请重试。", messageRecalled: "消息已撤回", recalledBy: ({ name }) => `${name} 撤回`, showRecalled: "查看原文", hideRecalled: "收起原文", revealFailed: "加载失败，重试",
     identityChanged: "此浏览器身份已在另一个标签页中更改，请重新加载此标签页后继续。",
     networkError: "网络连接失败", requestFailed: ({ status }) => `请求失败（HTTP ${status}）`,
@@ -523,6 +532,7 @@ export const messages = {
     privacyNote: "持有共享令牌的人都可以读取私聊内容和管理房间；服务器也可以读取私聊内容。", resourceDelete: "删除文件", resourceDeleting: "正在删除…", resourceDeleteConfirm: ({ name }) => `确定删除“${name}”？此操作无法撤销。`, resourceDeleted: "文件已删除。", resourceDeleteFailed: "无法删除此文件。",
     systemJoined: ({ name }) => `${name} 加入了房间`, systemLeft: ({ name }) => `${name} 离开了房间`, systemRemoved: ({ name }) => `${name} 被移出了房间`,
     systemDesignated: ({ actor, name }) => `${actor} 指定 ${name} 为管理员`, systemRevoked: ({ actor }) => `${actor} 撤销了管理员指定`, systemRenamed: ({ actor, from, to }) => `${actor} 将房间名称从“${from}”改为“${to}”`, systemDescribed: ({ actor }) => `${actor} 更新了房间描述`, systemHanded: ({ actor, name }) => `${actor} 将房间移交给了 ${name}`, systemAdminsUpdated: ({ actor }) => `${actor} 更新了房间管理员`, systemSuccessorNamed: ({ actor, name }) => `${actor} 指定 ${name} 为房间继任者`, systemSuccessorCleared: ({ actor }) => `${actor} 清除了房间继任者`, systemJoinPolicy: ({ actor, policy }) => policy === "approval" ? `${actor} 开启了加入审核，新成员需要管理员批准` : `${actor} 关闭了加入审核，新成员可以直接加入`,
+    systemForwarded: ({ target }) => `已转发到 ${target}`, systemForwardFailed: ({ target, reason }) => `转发到 ${target} 失败：${reason}`,
     activity_working: "工作中", activity_idle: "前台空闲", activity_waiting: "等待中", activity_unknown: "状态未知", activity_offline: "状态已过期",
     activityHint_working: "Agent 正在报告工作状态。", activityHint_idle: "前台空闲；后台任务仍可能继续。", activityHint_waiting: "Agent 正在报告等待状态。", activityHint_unknown: "暂无活动状态报告。", activityHint_offline: "最近的状态已过期；这不能证明 Agent 已离线。",
     receiptCount: ({ count }) => `已读 ${count} 人`, receiptNone: "尚无人已读", receiptNotLoaded: "尚未加载已读状态", readerPanelTitle: "消息已读情况", close: "关闭", departedMember: "已离开",
@@ -601,9 +611,12 @@ app.setText = (element, key, values = {}) => {
 app.applyLocale = () => {
   document.documentElement.lang = app.locale;
   document.querySelectorAll("[data-i18n]").forEach((element) => {
-    element.textContent = element._flashKey
+    const text = element._flashKey
       ? app.t(element._flashKey)
       : app.t(element.dataset.i18n, element._i18nValues || {});
+    // Controls with icons keep the graphic and swap only the text label.
+    const label = element.querySelector(":scope > .i18n-label");
+    if (label) label.textContent = text; else element.textContent = text;
   });
   for (const attribute of ["aria-label", "aria-placeholder", "title", "placeholder"]) {
     document.querySelectorAll(`[data-i18n-${attribute}]`).forEach((element) => {

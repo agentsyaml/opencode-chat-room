@@ -64,6 +64,33 @@ test.skipIf(!browserModule)("the room file browser filters, previews, downloads,
     for (const date of await rows.locator(".file-date").allTextContents()) expect(date).toMatch(/\d/);
     expect(await page.locator("#filesSummary").textContent()).toContain("3 files");
     expect(await page.locator('#fileList [data-file-action="delete"]').count()).toBe(3);
+    // Icon-only row actions stay accessible and keep the 34px square target.
+    for (const action of ["preview", "download", "delete"] as const) {
+      const control = page.locator(`#fileList [data-file-action="${action}"]`).first();
+      const label = { preview: "Preview", download: "Download", delete: "Delete" }[action];
+      expect(await control.locator("svg.fluent-icon").count()).toBe(1);
+      expect(await control.getAttribute("aria-label")).toContain(label);
+      const box = (await control.boundingBox())!;
+      expect(Math.abs(box.height - 34)).toBeLessThanOrEqual(2);
+    }
+    // Icons inherit the themed text color instead of carrying their own palette.
+    const themed = await page.evaluate(() => {
+      const svg = document.querySelector<SVGElement>('#fileList [data-file-action="download"] svg')!;
+      const button = svg.closest("button")!, root = document.documentElement, previous = root.dataset.theme;
+      const values = ["light", "dark"].map((theme) => {
+        root.dataset.theme = theme;
+        return { fill: getComputedStyle(svg).fill, color: getComputedStyle(button).color };
+      });
+      if (previous === undefined) delete root.dataset.theme; else root.dataset.theme = previous;
+      return values;
+    });
+    for (const value of themed) expect(value.fill).toBe(value.color);
+    await page.emulateMedia({ forcedColors: "active" });
+    expect(await page.evaluate(() => {
+      const svg = document.querySelector<SVGElement>('#fileList [data-file-action="download"] svg')!;
+      return getComputedStyle(svg).fill === getComputedStyle(svg.closest("button")!).color;
+    })).toBe(true);
+    await page.emulateMedia({ forcedColors: "none" });
     const filters = await page.locator("#filesUploader option").allTextContents();
     expect(filters).toEqual(expect.arrayContaining(["Everyone", "__Test_FilesOwner", "__Test_FilesAgent"]));
     await page.waitForTimeout(200);

@@ -42,6 +42,11 @@
   @media (min-width: 1500px) and (min-height: 560px) {
     #chatView { --side-pane-width: clamp(380px, 30vw, 640px); }
   }
+  /* Wide task boards use the extra desktop width and leave the chat a 700px column. */
+  @media (min-width: 1500px) and (min-height: 900px) {
+    #app:has(#chatView.has-tasks) { max-width: 1600px; }
+    #chatView.has-tasks { --side-pane-width: min(560px, calc(100% - 960px)); }
+  }
   /* The separator owns one grid column of its own, so it never covers the chat. */
   .side-pane-handle {
     display: none;

@@ -94,6 +94,28 @@ test.skipIf(!browserModule)("Alt+Space palette searches messages, switches scope
     await page.keyboard.press("Escape");
     await page.locator("#paletteDialog").waitFor({ state: "hidden" });
 
+    // Non-slash text is always message search, even when it matches a command name.
+    await page.locator("#msgInput").fill("A foo marker for palette search.");
+    await page.locator("#btnSend").click();
+    await page.locator("#msgList .msg-text").filter({ hasText: "foo marker" }).waitFor();
+    await page.locator("#msgInput").click();
+    await page.keyboard.press("Alt+Space");
+    await page.locator("#paletteDialog[open]").waitFor();
+    await page.locator("#paletteInput").fill("foo");
+    await page.locator("#paletteList .palette-result").filter({ hasText: "foo marker" }).waitFor();
+    expect(await page.locator("#paletteList .palette-command").count()).toBe(0);
+    expect(await page.locator("#paletteDialog").getAttribute("data-mode")).toBe("search");
+    // "settings" names a command but is still a message query with no hits.
+    await page.locator("#paletteInput").fill("settings");
+    await page.locator("#paletteStatus").filter({ hasText: "No messages found." }).waitFor();
+    expect(await page.locator("#paletteList .palette-command").count()).toBe(0);
+    // Results arrive from typing alone; Tab only changes the search scope.
+    await page.locator("#paletteInput").fill("violet");
+    await page.locator("#paletteList .palette-result").filter({ hasText: "violet-orchid-42" }).waitFor();
+    expect(await page.locator("#paletteList .palette-command").count()).toBe(0);
+    await page.keyboard.press("Escape");
+    await page.locator("#paletteDialog").waitFor({ state: "hidden" });
+
     // A pending search reports its state; the app.searchMessages hook is used when present.
     await page.evaluate(async (url: string) => {
       const { app } = await import(url);

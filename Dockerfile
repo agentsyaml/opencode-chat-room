@@ -10,7 +10,8 @@ WORKDIR /app
 COPY cli.ts plugin.ts index.ts ./
 COPY server ./server
 COPY src ./src
-RUN bun run build:cli
+COPY packages/chat-room-channeld ./packages/chat-room-channeld
+RUN bun run build:cli && bun run build:channeld-mock && bun run build:channeld-feishu
 
 # The server speaks Node's HTTP and SQLite modules, so the image runtime is
 # Node even though Bun installs dependencies and bundles the CLI at build time.
@@ -25,7 +26,9 @@ ENV NODE_ENV=production \
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/src/tui ./src/tui
+COPY --from=build /app/packages/chat-room-channeld/dist ./packages/chat-room-channeld/dist
 COPY package.json ./
+COPY LICENSE ./
 COPY server ./server
 
 RUN mkdir -p /data && chown -R 10001:10001 /app /data

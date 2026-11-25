@@ -81,7 +81,7 @@ export function createV2Setup(deps: {
       });
       toolRegistration = await context.tool.transform((editor) => editor.add({
         name: "room",
-        description: "Chat room operations: create, join, join_status, leave and list rooms; send and poll messages; list members, announcements and tasks; create, update and delete room tasks; manage reminders. In an approval room join returns pending: you are not a member yet; call join_status to check whether an administrator approved you. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads.",
+        description: "Chat room operations: create, join, join_status, leave and list rooms; send and poll messages; get_message fetches one message by ID (recalled messages come back as tombstones); catch_up pages messages after a seq cursor and is read-only (no read receipt or wake); send accepts parentMessageId to reply. List members, announcements and tasks; create, update and delete room tasks; manage reminders. In an approval room join returns pending: you are not a member yet; call join_status to check whether an administrator approved you. Reminder schedules use the server timezone unless an IANA timezone is provided; once schedules require an ISO datetime. Upload files and media; upload_resource returns a [[resource:UUID]] marker, and the attachment renders only when that exact marker is included in a send message. read_resource saves files to a private temporary path and leaves them there until removed or system cleanup. delete_resource removes an uploaded file; servers allow human room administrators any resource and agents only their own uploads.",
         options: { codemode: false },
         input: roomSchema(),
         execute: async (args, toolContext) => {
@@ -169,13 +169,19 @@ export function createV2Setup(deps: {
 
 export function roomSchema() {
   return z.object({
-    action: z.enum(["create", "join", "join_status", "leave", "list", "send", "poll", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete", "task_list", "task_create", "task_update", "task_delete"]),
+    action: z.enum(["create", "join", "join_status", "leave", "list", "send", "poll", "get_message", "catch_up", "members", "upload_resource", "read_resource", "delete_resource", "announcement_list", "announcement_read", "announcement_write", "announcement_delete", "reminder_list", "reminder_create", "reminder_update", "reminder_delete", "task_list", "task_create", "task_update", "task_delete"]),
     name: z.string().max(64).optional().describe("For join: your own participant display name, NOT the room name (required). For create: the new room name."),
     roomId: z.string().optional(),
+    messageId: z.string().optional().describe("For get_message: the full message ID returned by send, poll, or catch_up."),
     resourceId: z.string().optional(),
     filePath: z.string().optional().describe("Local regular file to upload; central mode only; requires host read permission."),
     text: z.string().max(5000).optional(),
     isQuestion: z.boolean().optional(),
+    parentMessageId: z.string().optional().describe("For send: the ID of the message this one answers or replies to."),
+    replyToMessageID: z.string().optional().describe("Legacy alias of parentMessageId for send."),
+    clientMessageID: z.string().max(100).optional().describe("For send: idempotency key; retrying with the same ID and parent creates one message."),
+    afterSeq: z.number().int().min(0).optional().describe("For catch_up: return messages with seq greater than this cursor; omit to start at 0."),
+    limit: z.number().int().min(1).max(200).optional().describe("For catch_up: page size from 1 to 200; the server default is 50."),
     announcementName: z.string().optional().describe("Name of a room announcement; distinct from participant or room name."),
     content: z.string().optional().describe("Announcement content, at most 5000 Unicode characters."),
     taskId: z.string().optional().describe("Task UUID from task_list; required for task_update and task_delete."),

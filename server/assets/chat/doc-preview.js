@@ -3,6 +3,7 @@
 import { formatBytes, renderMarkdown } from "./markdown.js";
 import { docPreviewFormat, TEXT_PREVIEW_LIMIT } from "./resource-format.js";
 import { createCopyButton, copyResourceText } from "./copy-action.js";
+import { enhanceCodeElement } from "./shiki.js";
 
 const PANE_QUERY = "(min-width: 1100px) and (min-height: 560px)";
 
@@ -76,14 +77,12 @@ export function initDocPreview(app) {
     const pre = document.createElement("pre");
     pre.className = "code-block doc-code";
     const code = document.createElement("code");
-    code.className = format.language ? `hljs language-${format.language}` : "hljs";
+    code.className = format.language ? `language-${format.language}` : "";
     code.textContent = text;
-    if (format.language && window.hljs?.getLanguage?.(format.language)) {
-      try { code.innerHTML = window.hljs.highlight(text, { language: format.language }).value; } catch { /* Keep escaped text. */ }
-    }
     pre.append(code);
     body.append(pre);
     empty.hidden = true;
+    void enhanceCodeElement(code);
   };
 
   const showTooLarge = (format) => {

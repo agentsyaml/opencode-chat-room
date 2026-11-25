@@ -5,7 +5,7 @@ import { startDelivery } from "./deliver.mjs";
 import readline from "node:readline";
 
 export const ROOM_ACTIONS = [
-  "create", "join", "join_status", "leave", "list", "send", "poll", "recall", "members",
+  "create", "join", "join_status", "leave", "list", "send", "poll", "recall", "get_message", "catch_up", "members",
   "announcement_list", "announcement_read", "announcement_write", "announcement_delete",
   "task_list", "task_create", "task_update", "task_delete",
 ];
@@ -13,7 +13,7 @@ export const ROOM_ACTIONS = [
 export const ROOM_TOOL = {
   name: "room",
   description:
-    "Chat room operations on a central opencode-chat-room server: create, join, leave and list rooms; send, poll and recall messages; list members, announcements and tasks; create, update and delete room tasks. " +
+    "Chat room operations on a central opencode-chat-room server: create, join, leave and list rooms; send, poll and recall messages; get_message fetches one message by ID (recalled messages come back as tombstones); catch_up pages messages after a seq cursor and is read-only (no read receipt or wake); send accepts parentMessageId to reply. List members, announcements and tasks; create, update and delete room tasks. " +
     "Tasks also carry dueDate (YYYY-MM-DD), participants, conclusion and steps (text or {text, done}). " +
     "Sent and polled messages carry full message IDs; recall takes roomId plus messageId and withdraws the message for everyone (agents their own, room admins any). " +
     "Join before sending or polling. Rooms created with joinPolicy \"approval\" answer join with a pending request: you are not a member while pending, never claim you joined, and check join_status. A joined join_status also starts delivery after approval. " +
@@ -29,9 +29,12 @@ export const ROOM_TOOL = {
         description: "For join: your participant display name (required). For create: the new room name.",
       },
       roomId: { type: "string" },
-      messageId: { type: "string", description: "For recall: the full ID of the message to withdraw." },
+      messageId: { type: "string", description: "For recall or get_message: the full ID of the message." },
       text: { type: "string", maxLength: 5000 },
       isQuestion: { type: "boolean", description: "Send as a question message." },
+      parentMessageId: { type: "string", description: "For send: the ID of the message this one answers or replies to." },
+      afterSeq: { type: "integer", minimum: 0, description: "For catch_up: return messages with seq greater than this cursor." },
+      limit: { type: "integer", minimum: 1, maximum: 200, description: "For catch_up: page size from 1 to 200; server default 50." },
       announcementName: { type: "string" },
       content: { type: "string", description: "Announcement content, at most 5000 characters." },
       taskId: { type: "string", description: "Task ID from task_list; required for task_update and task_delete." },
@@ -122,7 +125,7 @@ export function startServer(options = {}) {
         result: {
           protocolVersion: params?.protocolVersion ?? "2025-06-18",
           capabilities: { tools: {} },
-          serverInfo: { name: "chat_room", version: "0.1.5" },
+          serverInfo: { name: "chat_room", version: "0.1.6" },
           instructions: INSTRUCTIONS,
         },
       });

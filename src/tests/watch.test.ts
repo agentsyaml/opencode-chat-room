@@ -171,6 +171,26 @@ describe.serial("resident V2 watcher", () => {
     await stopWatcher();
   });
 
+  test("a watcher that never becomes ready is stopped and leaves no state behind", async () => {
+    const fixture = mkdtempSync(path.join(tmpdir(), "chat-room-watch-hang-"));
+    const cli = path.join(fixture, "cli.js");
+    const pidFile = path.join(fixture, "pid");
+    await fs.writeFile(cli, `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`);
+    const argv = process.argv[1];
+    process.argv[1] = cli;
+    try {
+      await expect(startWatcher(undefined, 2000)).rejects.toThrow("its process was stopped");
+      const pid = Number(await fs.readFile(pidFile, "utf8"));
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      process.argv[1] = argv!;
+      await fs.rm(fixture, { recursive: true, force: true });
+    }
+    expect(await watchStatus()).toBe("stopped");
+    expect(await startWatcher()).toBe("watcher started");
+    await stopWatcher();
+  }, 15_000);
+
   test("stale control state never signals its recorded pid", async () => {
     const file = watcherStatePath();
     const stale = { phase: "running", token: "stale-token", nonce: "stale-nonce", instanceID: "stale-instance", pid: process.pid, port: 65534 };

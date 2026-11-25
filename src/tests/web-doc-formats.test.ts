@@ -89,31 +89,10 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     const lastCopied = () => page.evaluate(() => (window as any).__copied.at(-1) as string);
     const copyFailedText = await page.evaluate(async (url: string) => (await import(url)).app.t("copyMessageFailed"), "/assets/chat/state.js");
 
-    // Card copy stays lazy and copies the raw file, not the rendered document.
-    const txtCopy = cardFor("sample.txt").locator(".resource-copy");
-    await txtCopy.waitFor();
+    // Resource cards intentionally have no copy action; copying lives in the
+    // preview header and the Files dialog.
+    expect(await page.locator("#msgList .resource-copy").count()).toBe(0);
     expect(contentCount("sample.txt")).toBe(0);
-    expect(await txtCopy.getAttribute("aria-label")).toBe("Copy");
-    expect(await txtCopy.locator("svg.copy-icon").evaluate((node: SVGElement) => node.getBoundingClientRect().width)).toBe(16);
-    expect(await txtCopy.locator("svg.copy-icon use").getAttribute("href")).toBe("/assets/fluent-icons.svg#fluent-copy-24");
-    await txtCopy.click();
-    await page.waitForFunction(() => (window as any).__copied.length === 1);
-    expect(await lastCopied()).toBe(text);
-    expect(await txtCopy.getAttribute("aria-label")).toBe("Copied");
-    expect(await txtCopy.locator(".copy-feedback").textContent()).toBe("Copied");
-    expect(contentCount("sample.txt")).toBe(1);
-    await cardFor("notes.md").locator(".resource-copy").click();
-    await page.waitForFunction(() => (window as any).__copied.length === 2);
-    expect(await lastCopied()).toBe(markdown);
-    expect(contentCount("notes.md")).toBe(1);
-    expect(await cardFor("sample.pdf").locator(".resource-copy").count()).toBe(0);
-    expect(await cardFor("pixel.png").locator(".resource-copy").count()).toBe(0);
-    expect(await cardFor("sample.bin").locator(".resource-copy").count()).toBe(0);
-    const beforeBigCard = await copiedLength();
-    await cardFor("too-big.txt").locator(".resource-copy").click();
-    await cardFor("too-big.txt").locator(".resource-copy.is-copy-failed").waitFor();
-    expect(await copiedLength()).toBe(beforeBigCard);
-    expect(contentCount("too-big.txt")).toBe(0);
     await page.screenshot({ path: path.join(artifacts, "web-doc-formats-cards-1440.png") });
 
     const dialog = page.locator("#docPreview");
@@ -149,13 +128,14 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     await page.waitForFunction((count: number) => (window as any).__copied.length === count + 1, beforeHeaderCopy);
     expect(await lastCopied()).toBe(text);
     expect(await txtHeaderCopy.getAttribute("aria-label")).toBe("Copied");
-    expect(contentCount("sample.txt")).toBe(2);
+    expect(contentCount("sample.txt")).toBe(1);
     await closePreview();
 
     // TypeScript gets a real highlight token and a readable language label.
     await openPreview("sample.ts");
     await page.locator("#docPreviewBody code.language-typescript").waitFor();
-    expect(await page.locator("#docPreviewBody .doc-code [class*='hljs-']").count()).toBeGreaterThan(0);
+    await page.locator("#docPreviewBody code.language-typescript.shiki").waitFor();
+    expect(await page.locator("#docPreviewBody .doc-code span[style*='--shiki-token']").count()).toBeGreaterThan(0);
     expect(await page.locator("#docPreviewLanguage").textContent()).toBe("TypeScript");
     expect(await page.locator("#docPreviewBody").textContent()).toContain("answer");
     const beforeTsCopy = await copiedLength();
@@ -165,9 +145,9 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     await closePreview();
 
     await openPreview("sample.json");
-    await page.locator("#docPreviewBody .doc-code").waitFor();
+    await page.locator("#docPreviewBody .doc-code code.shiki").waitFor();
     expect(await page.locator("#docPreviewLanguage").textContent()).toBe("JSON");
-    expect(await page.locator("#docPreviewBody .doc-code [class*='hljs-']").count()).toBeGreaterThan(0);
+    expect(await page.locator("#docPreviewBody .doc-code span[style*='--shiki-token']").count()).toBeGreaterThan(0);
     await closePreview();
 
     // Markup previews as escaped source: no script nodes and no execution.
@@ -214,7 +194,11 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
     await page.waitForFunction(() => document.querySelector("#docPreviewNotice")?.textContent?.includes("2 MB"));
     expect(await page.locator("#docPreviewNotice").textContent()).toContain("文件太大");
+    // Switching language swaps the label and keeps the download icon in place.
+    expect(await page.locator("#btnDocPreviewDownload .i18n-label").textContent()).toBe("下载");
+    expect(await page.locator("#btnDocPreviewDownload svg.fluent-icon").count()).toBe(1);
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
+    expect(await page.locator("#btnDocPreviewDownload .i18n-label").textContent()).toBe("Download");
     await closePreview();
 
     // A failed content load leaves the copy action hidden.

@@ -5,7 +5,7 @@ import path from "node:path";
 import { createApp } from "./app.mjs";
 
 const NAME = "opencode-chat-room cli";
-const FALLBACK_VERSION = "0.7.8";
+const FALLBACK_VERSION = "0.8.0";
 
 export const HELP = `opencode-chat-room cli - terminal client for a chat-room server
 

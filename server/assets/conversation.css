@@ -282,6 +282,7 @@
   .message-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .message-copy-feedback { position: absolute; z-index: 25; left: 0; bottom: calc(100% + 5px); width: max-content; max-width: min(260px, calc(100vw - 32px)); padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow); font-size: 11px; font-weight: 500; line-height: 1.4; text-align: left; white-space: normal; overflow-wrap: anywhere; }
   .message-actions { display: flex; align-items: center; gap: 2px; }
+  .forward-targets { display: grid; gap: 8px; }
   .message-reply { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 8px; color: var(--ink-3); background: transparent; cursor: pointer; }
   .message-reply-icon { display: block; width: 16px; height: 16px; }
   .message-reply:hover, .message-reply:focus-visible { border-color: var(--line); color: var(--accent); background: var(--accent-soft); }
@@ -326,7 +327,8 @@
   .resource-name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
   .resource-size, .resource-status { color: var(--ink-3); font-size: 12px; }
   .resource-status { margin: 0; }
-  .resource-button { min-height: 34px; }
+  .resource-button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; white-space: nowrap; }
+  .resource-button .fluent-icon { width: 16px; height: 16px; }
   .copy-action { position: relative; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid transparent; border-radius: 8px; color: var(--ink-3); background: transparent; cursor: pointer; transition: color .12s, border-color .12s, background .12s; }
   .copy-action svg { width: 16px; height: 16px; }
   .copy-action:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 24%, transparent); background: var(--accent-soft); }
@@ -336,7 +338,6 @@
   .copy-action .copy-check { display: none; }
   .copy-action.is-copied .copy-icon { display: none; }
   .copy-action.is-copied .copy-check { display: block; }
-  .resource-copy { border-color: var(--line); background: var(--surface); }
   .copy-feedback { position: absolute; top: calc(100% + 6px); right: 0; z-index: 6; width: max-content; max-width: 200px; padding: 3px 7px; border-radius: 6px; background: var(--ink); color: var(--surface); font: 600 10.5px/1.35 var(--font-sans); text-align: center; opacity: 0; transform: translateY(-2px); pointer-events: none; transition: opacity .12s ease, transform .12s ease; }
   .copy-action.is-copied .copy-feedback, .copy-action.is-copy-failed .copy-feedback { opacity: 1; transform: none; }
   .chat-resource img, .chat-resource video { display: block; max-width: 100%; max-height: 420px; border-radius: 7px; }

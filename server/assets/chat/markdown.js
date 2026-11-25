@@ -2,9 +2,10 @@ import { createRandomId, LS } from "./state.js";
 import { isRoomAdmin } from "./admin-badge.js";
 import { iconNode } from "./icons.js";
 import { isUnsafeDiagram, rememberDiagramSource, renderDiagram, showDiagramFallback } from "./diagram-viewer.js";
-import { docPreviewFormat, TEXT_PREVIEW_LIMIT } from "./resource-format.js";
+import { docPreviewFormat } from "./resource-format.js";
 import { copyTextToClipboard } from "./clipboard.js";
-import { createCopyButton, copyResourceText } from "./copy-action.js";
+import { enhanceCodeElement } from "./shiki.js";
+import { appendFootnotes, decorateLinks, prepareFootnotes, replaceFootnoteTokens } from "./markdown-footnotes.js";
 
 export { copyTextToClipboard };
 
@@ -44,7 +45,8 @@ function escapeHtmlText(value) {
 export function renderMarkdown(root, text, app) {
   const mentions = [], diagrams = new Map();
   const nonce = createRandomId();
-  const source = String(text).replace(mentionPattern, (_, name) => {
+  const notes = prepareFootnotes(text, nonce);
+  const source = notes.source.replace(mentionPattern, (_, name) => {
     const token = `CHATMENTION${nonce}${mentions.length}END`;
     mentions.push({ token, name, literal: `<at>@${name}</at>` });
     return token;
@@ -61,6 +63,8 @@ export function renderMarkdown(root, text, app) {
   const parsed = window.marked.parse(source, { gfm: true, breaks: true, async: false, renderer });
   const fragment = window.DOMPurify.sanitize(parsed, { RETURN_DOM_FRAGMENT: true });
   replaceMentionTokens(fragment, mentions, app);
+  replaceFootnoteTokens(fragment, notes);
+  appendFootnotes(fragment, notes);
   const resources = replaceResourceMarkers(fragment, app);
   const diagramNodes = [...fragment.querySelectorAll("[data-chat-mermaid]")];
   for (const node of diagramNodes) {
@@ -72,13 +76,13 @@ export function renderMarkdown(root, text, app) {
       if (!unsafe) activateDiagram(node, source, app);
     }
   }
-  fragment.querySelectorAll("a").forEach((link) => {
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-  });
+  decorateLinks(fragment);
   fragment.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.disabled = true; });
-  for (const code of fragment.querySelectorAll("pre > code")) decorateCodeBlock(code, app);
+  const codeBlocks = [...fragment.querySelectorAll("pre > code")];
+  for (const code of codeBlocks) decorateCodeBlock(code, app);
   root.appendChild(fragment);
+  // Highlight after insertion: the escaped text is readable while the bundle loads.
+  for (const code of codeBlocks) void enhanceCodeElement(code);
   for (let i = 0; i < diagramNodes.length; i++) {
     const source = diagrams.get(`CHATDIAGRAM${nonce}${i}END`);
     if (!isUnsafeDiagram(source)) void renderDiagram(diagramNodes[i], source, app);
@@ -89,7 +93,6 @@ export function renderMarkdown(root, text, app) {
 function decorateCodeBlock(code, app) {
   const pre = code.parentElement;
   if (!pre || pre.closest(".mermaid-diagram") || pre.parentElement?.classList.contains("code-block")) return;
-  highlightCode(code);
   const block = document.createElement("div");
   block.className = "code-block";
   pre.replaceWith(block);
@@ -101,17 +104,6 @@ function decorateCodeBlock(code, app) {
       if (!event.target.closest?.(".code-tool-button")) block.focus({ preventScroll: true });
     });
   }
-}
-
-function highlightCode(code) {
-  const language = (/language-(\S+)/.exec(code.className) || [])[1]?.toLowerCase();
-  if (!language || language === "mermaid" || !window.hljs?.getLanguage?.(language)) return;
-  try {
-    const markup = window.hljs.highlight(code.textContent, { language }).value;
-    const fragment = window.DOMPurify.sanitize(markup, { RETURN_DOM_FRAGMENT: true, ALLOWED_TAGS: ["span"], ALLOWED_ATTR: ["class"] });
-    code.replaceChildren(fragment);
-    code.classList.add("hljs");
-  } catch { /* Keep the escaped text when a grammar rejects its input. */ }
 }
 
 function codeToolbar(code, pre, block, app) {
@@ -232,18 +224,6 @@ async function loadResourceCard(card, roomId, app) {
       actions.append(resourceSplit(app, resource, download, remove));
     } else actions.append(download);
     const docFormat = docPreviewFormat(resource);
-    if (docFormat && docFormat.kind !== "pdf") {
-      const copy = createCopyButton(app, "resource-copy");
-      copy.dataset.copyAction = "card";
-      copy.addEventListener("click", () => {
-        void copyResourceText(copy, app, async () => {
-          if (Number(resource.size) > TEXT_PREVIEW_LIMIT) return "";
-          const data = await app.apiBlob(`/rooms/${encodeURIComponent(roomId)}/resources/${encodeURIComponent(id)}/content`);
-          return data.text();
-        });
-      });
-      actions.append(copy);
-    }
     if (previewKind(type) || docFormat) {
       const preview = resourceButton("resourcePreview", resource.name, () => docFormat
         ? app.openDocPreview(roomId, resource, preview)
@@ -255,19 +235,28 @@ async function loadResourceCard(card, roomId, app) {
   } catch (error) { if (card.isConnected) setResourceError(card, app, error?.status === 404 ? "resourceDeleted" : "resourceFailed"); }
 }
 function setResourceButton(button, key, name, app) {
-  button.dataset.i18n = key; button.textContent = app.t(key);
+  button.dataset.i18n = key;
+  const label = button.querySelector(".i18n-label");
+  if (label) label.textContent = app.t(key); else button.textContent = app.t(key);
   button.setAttribute("aria-label", `${app.t(key)}: ${name}`);
 }
 function resourceButton(key, name, action, app) {
   const button = document.createElement("button");
   button.type = "button"; button.className = "btn ghost small resource-button";
+  const label = document.createElement("span");
+  label.className = "i18n-label"; label.textContent = app.t(key);
+  button.append(iconNode(key === "resourceDownload" ? "arrow_download" : "eye"), label);
+  button.addEventListener("click", action);
   setResourceButton(button, key, name, app);
-  button.addEventListener("click", action); return button;
+  return button;
 }
 function resourceMenuItem(key, action, app) {
   const button = document.createElement("button");
   button.type = "button"; button.className = "menu-action danger-text"; button.setAttribute("role", "menuitem");
-  button.dataset.i18n = key; button.textContent = app.t(key);
+  button.dataset.i18n = key;
+  const label = document.createElement("span");
+  label.className = "i18n-label"; label.textContent = app.t(key);
+  button.append(iconNode("delete"), label);
   button.addEventListener("click", action); return button;
 }
 function resourceSplit(app, resource, download, item) {

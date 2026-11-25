@@ -242,7 +242,8 @@ export async function watchStatus(): Promise<"running" | "stopped" | "unavailabl
   return await control(record) ? "running" : "unavailable";
 }
 
-export async function startWatcher(beforePublish?: () => Promise<void>): Promise<string> {
+// readyTimeoutMs is a test seam so the timeout cleanup can be exercised quickly.
+export async function startWatcher(beforePublish?: () => Promise<void>, readyTimeoutMs = 20_000): Promise<string> {
   await privateDirectory();
   const own: WatchRecord = { phase: "starting", token: randomBytes(32).toString("base64url"), nonce: randomBytes(16).toString("hex"), instanceID: randomBytes(16).toString("hex"), pid: process.pid, createdAt: Date.now() };
   const reservation = await reserveWatcher(own, beforePublish);
@@ -269,7 +270,7 @@ export async function startWatcher(beforePublish?: () => Promise<void>): Promise
   });
   child.once("error", (error) => { childError = error; });
   child.unref();
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + readyTimeoutMs;
   while (Date.now() < deadline) {
     if (childError) { await removeRecord(own.token, own.nonce); releaseWatcherClaim(profile(), own.instanceID); throw childError; }
     const record = await readRecord();

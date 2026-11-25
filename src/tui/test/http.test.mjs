@@ -155,6 +155,49 @@ test("leave, send and markRead use the documented paths and bodies", async () =>
   }
 });
 
+test("getMessage, catchUp and parent replies use the addressing routes", async () => {
+  const server = await fake((call, res) => {
+    if (call.method === "GET" && call.url.includes("/catch-up?")) {
+      return reply(res, 200, { messages: [], nextCursor: 4, hasMore: false, unreadMentions: [], unreadMentionCount: 0, unansweredQuestions: [], unansweredQuestionCount: 0 });
+    }
+    if (call.method === "GET" && call.url.includes("/messages/m")) {
+      return reply(res, 200, { id: "m1", recalled: true, recalledAt: 2, recalledBy: "bob", text: null, unavailable: "recalled", resourceIDs: [] });
+    }
+    return reply(res, 200, { id: "r1", messages: [] });
+  });
+  try {
+    const api = createApi({ url: server.url, token: "t" });
+    const recalled = await api.getMessage("r 1", "m/1", "s 1");
+    assert.equal(recalled.unavailable, "recalled");
+    assert.equal(recalled.text, null);
+    assert.equal(server.calls[0].url, "/rooms/r%201/messages/m%2F1?sessionID=s%201");
+    assert.equal(server.calls[0].headers.authorization, "Bearer t");
+
+    const page = await api.catchUp("r1", "s1", { afterSeq: 3, limit: 500 });
+    assert.equal(page.nextCursor, 4);
+    assert.equal(server.calls[1].url, "/rooms/r1/catch-up?sessionID=s1&afterSeq=3&limit=200");
+
+    await api.send("r1", "s1", "reply", { parentMessageId: "m1", clientMessageID: "c1" });
+    assert.equal(server.calls[2].url, "/rooms/r1/messages");
+    assert.deepEqual(server.calls[2].body, { sessionID: "s1", text: "reply", parentMessageId: "m1", clientMessageID: "c1" });
+  } finally {
+    await server.close();
+  }
+});
+
+test("getMessage surfaces the uniform 404 as an ApiError", async () => {
+  const server = await fake((call, res) => reply(res, 404, { error: "not found" }));
+  try {
+    const api = createApi({ url: server.url, token: "t" });
+    const error = await api.getMessage("other-room", "m1", "s1").then(() => null, (reason) => reason);
+    assert.ok(error instanceof ApiError);
+    assert.equal(error.status, 404);
+    assert.match(error.message, /not found/);
+  } finally {
+    await server.close();
+  }
+});
+
 test("poll forwards a finite afterTs and long-poll timeout", async () => {
   const server = await fake((call, res) =>
     reply(res, 200, { member: true, items: [], hasMore: false, recallVersion: 4 }));

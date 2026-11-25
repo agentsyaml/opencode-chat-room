@@ -15,6 +15,11 @@ export type RoomFileConfig = {
     stateDir?: string;
     wakeServeUrl?: string;
     maxFileSizeMb?: number;
+    channeld?: {
+      enabled?: boolean;
+      config?: string;
+      stateFile?: string;
+    };
   };
   client?: {
     url?: string;
@@ -32,6 +37,12 @@ export type RoomFileConfig = {
   };
 };
 
+export type ChannelDSettings = {
+  enabled: boolean;
+  config?: string;
+  stateFile?: string;
+};
+
 export type ServerSettings = {
   host: string;
   port: string;
@@ -39,6 +50,7 @@ export type ServerSettings = {
   stateDir?: string;
   wakeServeUrl: string;
   maxFileSizeMb?: number;
+  channeld: ChannelDSettings;
 };
 
 export type ClientSettings = {
@@ -78,6 +90,16 @@ function optionalBoolean(value: unknown, where: string): boolean | undefined {
   return value;
 }
 
+function parseChanneld(value: unknown): NonNullable<RoomFileConfig["server"]>["channeld"] {
+  const raw = asRecord(value, "server.channeld");
+  if (!raw) return undefined;
+  return {
+    enabled: optionalBoolean(raw.enabled, "server.channeld.enabled"),
+    config: optionalString(raw.config, "server.channeld.config"),
+    stateFile: optionalString(raw.stateFile, "server.channeld.stateFile"),
+  };
+}
+
 function parseServer(value: unknown): RoomFileConfig["server"] {
   const raw = asRecord(value, "server");
   if (!raw) return undefined;
@@ -96,6 +118,7 @@ function parseServer(value: unknown): RoomFileConfig["server"] {
     stateDir: optionalString(raw.stateDir, "server.stateDir"),
     wakeServeUrl: optionalString(raw.wakeServeUrl, "server.wakeServeUrl"),
     maxFileSizeMb,
+    channeld: parseChanneld(raw.channeld),
   };
 }
 
@@ -274,6 +297,12 @@ export function resolveServerSettings(file: RoomFileConfig | null, env: NodeJS.P
   if (maxFileSizeMb !== undefined && (!Number.isFinite(maxFileSizeMb) || maxFileSizeMb <= 0)) {
     throw new Error("CHAT_ROOM_MAX_FILE_SIZE_MB must be a positive finite number");
   }
+  // A configured Channel D config implies opt-in; CHAT_ROOM_CHANNELD=0 still forces it off.
+  const channeldRaw = envValue(env, "CHAT_ROOM_CHANNELD");
+  const channeldConfig = envValue(env, "CHAT_ROOM_CHANNELD_CONFIG") ?? file?.server?.channeld?.config;
+  const channeldEnabled = channeldRaw === undefined
+    ? file?.server?.channeld?.enabled ?? Boolean(channeldConfig)
+    : channeldRaw === "1" || channeldRaw === "true";
   return {
     host: envValue(env, "CHAT_ROOM_SERVER_HOST") ?? envValue(env, "HOST") ?? file?.server?.host ?? "0.0.0.0",
     port,
@@ -281,6 +310,11 @@ export function resolveServerSettings(file: RoomFileConfig | null, env: NodeJS.P
     stateDir: envValue(env, "CHAT_ROOM_STATE_DIR") ?? file?.server?.stateDir,
     wakeServeUrl: envValue(env, "CHAT_ROOM_WAKE_SERVE_URL") ?? file?.server?.wakeServeUrl ?? "",
     maxFileSizeMb,
+    channeld: {
+      enabled: channeldEnabled,
+      config: channeldConfig,
+      stateFile: file?.server?.channeld?.stateFile,
+    },
   };
 }
 
