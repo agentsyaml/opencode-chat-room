@@ -14,6 +14,7 @@ import {
   strikethrough,
   underline,
 } from "@opentui/core";
+import { t } from "./i18n.mjs";
 
 export const MENTION_SENTINEL = "\u200B";
 const MENTION_TAG = /^<at>(@[^\n<>`\\]{1,64})<\/at>/u;
@@ -30,8 +31,8 @@ export function formatAttachments(text) {
     .replace(/\n[ \t]+/g, "\n")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
-  if (!clean) return "Attachments";
-  return `${clean} · Attachments`;
+  if (!clean) return t("markdown.attachments");
+  return `${clean} · ${t("markdown.attachments")}`;
 }
 
 function closingBackticks(source, from, end, length) {

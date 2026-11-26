@@ -1,7 +1,7 @@
 // Markdown resources open in a reading pane on wide screens, or in a modal overlay
 // when the window is too narrow or too short to give the chat a usable column.
 import { formatBytes, renderMarkdown } from "./markdown.js";
-import { docPreviewFormat, TEXT_PREVIEW_LIMIT } from "./resource-format.js";
+import { docPreviewFormat, OFFICE_KINDS, OFFICE_PREVIEW_LIMIT, TEXT_PREVIEW_LIMIT } from "./resource-format.js";
 import { createCopyButton, copyResourceText } from "./copy-action.js";
 import { enhanceCodeElement } from "./shiki.js";
 
@@ -15,9 +15,11 @@ export function initDocPreview(app) {
   const empty = app.$("#docPreviewEmpty"), download = app.$("#btnDocPreviewDownload");
   const languageLabel = app.$("#docPreviewLanguage"), notice = app.$("#docPreviewNotice");
   const eyebrow = app.$("#docPreviewEyebrow");
+  const fullscreenButton = app.$("#btnDocPreviewFullscreen");
   const chatView = app.$("#chatView"), pane = matchMedia(PANE_QUERY);
   let current = null, blob = null, objectUrl = null, token = 0, opener = null, pendingReopen = false, restoreOnClose = true;
-  let rawText = "";
+  let rawText = "", fullscreen = false, paneMode = false;
+  let officeKind = null, officeRender = 0, pptxWidth = 0, pptxTimer = 0;
 
   const copyButton = createCopyButton(app, "doc-preview-copy");
   copyButton.id = "btnDocPreviewCopy";
@@ -41,23 +43,55 @@ export function initDocPreview(app) {
     if (feedback) feedback.textContent = "";
   };
 
+  const updateFullscreenButton = () => {
+    if (!fullscreenButton) return;
+    const key = fullscreen ? "docPreviewExitFullscreen" : "docPreviewFullscreen";
+    fullscreenButton.dataset.i18nAriaLabel = key;
+    fullscreenButton.dataset.i18nTitle = key;
+    fullscreenButton.setAttribute("aria-label", app.t(key));
+    fullscreenButton.title = app.t(key);
+    fullscreenButton.querySelector("use")?.setAttribute("href", `/assets/fluent-icons.svg#fluent-${fullscreen ? "arrow_minimize" : "arrow_maximize"}-24`);
+  };
+
   const show = () => {
-    if (pane.matches) {
-      dialog.classList.add("is-pane");
-      chatView.classList.add("has-doc");
-      if (!dialog.open) dialog.show();
-    } else {
-      dialog.classList.remove("is-pane");
-      chatView.classList.remove("has-doc");
-      if (!dialog.open) dialog.showModal();
+    const targetPane = pane.matches && !fullscreen;
+    dialog.classList.toggle("is-pane", targetPane);
+    dialog.classList.toggle("is-fullscreen", fullscreen);
+    chatView.classList.toggle("has-doc", targetPane);
+    if (dialog.open && paneMode !== targetPane) {
+      pendingReopen = true;
+      dialog.close();
     }
+    if (!dialog.open) {
+      if (targetPane) dialog.show();
+      else dialog.showModal();
+    }
+    paneMode = targetPane;
+  };
+
+  // Full screen is always a modal so the chat behind it stays inert; leaving it
+  // returns to the pane or the plain modal according to the current window.
+  const setFullscreen = (next) => {
+    if (!dialog.open || fullscreen === next) return;
+    fullscreen = next;
+    document.body.classList.toggle("doc-preview-fullscreen", next);
+    updateFullscreenButton();
+    show();
+    if (!dialog.open) return;
+    if (next) title.focus({ preventScroll: true });
+    else fullscreenButton?.focus({ preventScroll: true });
+  };
+
+  const leaveFullscreen = () => {
+    fullscreen = false;
+    document.body.classList.remove("doc-preview-fullscreen");
+    dialog.classList.remove("is-fullscreen");
+    updateFullscreenButton();
   };
 
   // Crossing the breakpoint keeps the document: the pane becomes an overlay, or back.
   const syncMode = () => {
-    if (!dialog.open || pane.matches === dialog.classList.contains("is-pane")) return;
-    pendingReopen = true;
-    dialog.close();
+    if (!dialog.open || fullscreen || pane.matches === paneMode) return;
     show();
     title.focus({ preventScroll: true });
   };
@@ -66,7 +100,7 @@ export function initDocPreview(app) {
 
   const clearFrame = () => {
     if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
-    dialog.classList.remove("is-pdf");
+    dialog.classList.remove("is-pdf", "is-office");
   };
 
   const renderText = (text, format) => {
@@ -87,18 +121,58 @@ export function initDocPreview(app) {
 
   const showTooLarge = (format) => {
     clearFrame();
-    copyButton.hidden = false;
+    const office = OFFICE_KINDS.has(format.kind);
+    copyButton.hidden = office;
     body.textContent = "";
     empty.hidden = true;
-    languageLabel.textContent = format.label || "";
-    languageLabel.hidden = !format.label;
-    notice.textContent = app.t("docPreviewTooLarge");
-    notice.dataset.i18n = "docPreviewTooLarge";
+    languageLabel.textContent = office ? "" : format.label || "";
+    languageLabel.hidden = office || !format.label;
+    const key = office ? "docPreviewOfficeTooLarge" : "docPreviewTooLarge";
+    notice.textContent = app.t(key);
+    notice.dataset.i18n = key;
     notice.hidden = false;
     status.textContent = "";
     // The blob is fetched on click, so a huge file still downloads.
     download.disabled = false;
   };
+
+  const renderOfficeDocument = async (kind, data, request, width = 0) => {
+    officeKind = kind;
+    const render = ++officeRender;
+    dialog.classList.add("is-office");
+    copyButton.hidden = true;
+    languageLabel.hidden = true;
+    body.textContent = "";
+    empty.hidden = true;
+    notice.hidden = true;
+    // The blob is already here, so download stays available while parsing or after a failure.
+    download.disabled = false;
+    const module = await import("/assets/chat/office-preview.js");
+    if (request !== token || render !== officeRender) return;
+    await module.renderOffice(kind, data, body, {
+      width: width || undefined,
+      onProgress: () => { if (request === token && render === officeRender) status.textContent = app.t("resourceLoading"); },
+    });
+    if (request !== token || render !== officeRender) return;
+    if (kind === "pptx") pptxWidth = Math.round(width || body.clientWidth);
+    status.textContent = "";
+    empty.hidden = body.children.length > 0;
+  };
+
+  // A fixed-width slide deck must be laid out again when the reading pane grows
+  // (full screen, splitter drag, breakpoint change), or it stays pane-sized.
+  const resizePptx = () => {
+    if (!dialog.open || officeKind !== "pptx" || !blob) return;
+    const width = Math.round(body.clientWidth);
+    if (width < 200 || Math.abs(width - pptxWidth) < 8) return;
+    clearTimeout(pptxTimer);
+    pptxTimer = setTimeout(() => {
+      if (dialog.open && officeKind === "pptx" && blob) {
+        void renderOfficeDocument("pptx", blob, token, width);
+      }
+    }, 150);
+  };
+  if (typeof ResizeObserver === "function") new ResizeObserver(resizePptx).observe(body);
 
   const renderPdf = (resource, data) => {
     copyButton.hidden = true;
@@ -136,6 +210,9 @@ export function initDocPreview(app) {
     copyButton.hidden = true;
     resetCopy();
     clearFrame();
+    officeKind = null;
+    pptxWidth = 0;
+    clearTimeout(pptxTimer);
     const eyebrowKey = format.kind === "markdown" ? "docPreviewEyebrow" : "docPreviewFileEyebrow";
     eyebrow.dataset.i18n = eyebrowKey;
     eyebrow.textContent = app.t(eyebrowKey);
@@ -154,14 +231,17 @@ export function initDocPreview(app) {
     else show();
     if (request !== token) return;
     title.focus({ preventScroll: true });
-    const textual = format.kind !== "pdf";
-    if (textual && Number(resource.size) > TEXT_PREVIEW_LIMIT) { showTooLarge(format); return; }
+    const office = OFFICE_KINDS.has(format.kind);
+    officeKind = office ? format.kind : null;
+    const limit = office ? OFFICE_PREVIEW_LIMIT : TEXT_PREVIEW_LIMIT;
+    if (format.kind !== "pdf" && Number(resource.size) > limit) { showTooLarge(format); return; }
     try {
       const data = await app.apiBlob(contentPath(roomId, resource.id));
       if (request !== token) return;
       blob = data;
-      if (textual && data.size > TEXT_PREVIEW_LIMIT) { showTooLarge(format); return; }
+      if (format.kind !== "pdf" && data.size > limit) { showTooLarge(format); return; }
       if (format.kind === "pdf") { renderPdf(resource, data); return; }
+      if (office) { await renderOfficeDocument(format.kind, data, request); return; }
       const text = await data.text();
       if (request !== token) return;
       rawText = text;
@@ -176,8 +256,16 @@ export function initDocPreview(app) {
     } catch {
       if (request === token) {
         clearFrame();
+        body.textContent = "";
+        empty.hidden = true;
         copyButton.hidden = true;
-        status.textContent = app.t("docPreviewFailed");
+        if (office) {
+          status.textContent = "";
+          notice.textContent = app.t("docPreviewOfficeFailed");
+          notice.dataset.i18n = "docPreviewOfficeFailed";
+          notice.hidden = false;
+          download.disabled = false;
+        } else status.textContent = app.t("docPreviewFailed");
       }
     }
   };
@@ -185,6 +273,8 @@ export function initDocPreview(app) {
   const close = (restoreFocus = true) => {
     restoreOnClose = restoreFocus;
     if (!restoreFocus) opener = null;
+    // Closing from full screen leaves the locked page as part of the same step.
+    if (fullscreen) leaveFullscreen();
     // Remove the column class now; the queued close event must not leave Tasks
     // hidden behind a column the task pane is about to take back.
     chatView.classList.remove("has-doc");
@@ -218,15 +308,22 @@ export function initDocPreview(app) {
 
   app.openDocPreview = (roomId, resource, source) => { void open(roomId, resource, source); };
   app.closeDocPreview = (restoreFocus = true) => close(restoreFocus);
+  updateFullscreenButton();
 
   app.$("#btnCloseDocPreview")?.addEventListener("click", () => close());
+  fullscreenButton?.addEventListener("click", () => setFullscreen(!fullscreen));
   download.addEventListener("click", downloadDocument);
   dialog.addEventListener("click", (event) => {
-    if (event.target === dialog && !dialog.classList.contains("is-pane")) close();
+    if (event.target === dialog && !fullscreen && !dialog.classList.contains("is-pane")) close();
   });
-  dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    // The first Esc leaves full screen; the next one closes the preview.
+    if (fullscreen) setFullscreen(false);
+    else close();
+  });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !dialog.open || !dialog.classList.contains("is-pane")) return;
+    if (event.key !== "Escape" || !dialog.open || fullscreen || !dialog.classList.contains("is-pane")) return;
     event.preventDefault();
     close();
   });
@@ -237,6 +334,11 @@ export function initDocPreview(app) {
     const shouldRestore = restoreOnClose;
     restoreOnClose = true;
     token++;
+    leaveFullscreen();
+    officeRender++;
+    officeKind = null;
+    pptxWidth = 0;
+    clearTimeout(pptxTimer);
     current = null; blob = null; rawText = "";
     copyButton.hidden = true;
     resetCopy();

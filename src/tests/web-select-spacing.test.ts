@@ -72,11 +72,15 @@ test.skipIf(!browserModule)("select controls keep the chevron gap equal to the t
     for (const selector of ["#editRoomAdmin", "#editRoomOwner"]) await expectSelect(page, selector, 10);
     await page.locator("#btnCloseEditRoom").click();
 
-    await page.locator("#btnReminders").click(); await page.locator("#btnNewReminder").click();
+    await page.locator("#btnRoomOptions").click(); await page.locator("#btnReminders").click();
+    await page.locator("#remindersDialog[open]").waitFor();
+    await page.locator("#btnNewReminder").click();
     await page.locator("#reminderDialog[open]").waitFor();
     await expectSelect(page, "#reminderType", 13);
     expect(await page.locator("#reminderType").evaluate((element: HTMLSelectElement) => getComputedStyle(element).fontSize)).toBe("16px");
     await page.locator("#btnCloseReminder").click();
+    await page.locator("#btnCloseReminders").click();
+    await page.locator("#remindersDialog").waitFor({ state: "hidden" });
 
     // The same control stays usable and aligned inside the mobile rail drawer.
     await page.setViewportSize({ width: 390, height: 844 });
@@ -94,7 +98,9 @@ test.skipIf(!browserModule)("select controls keep the chevron gap equal to the t
     await expectSelect(page, "#editRoomSuccessor", 10);
     await page.locator("#editRoomSuccessor").screenshot({ path: path.join(artifacts, "select-admin-mobile.png") });
     await page.locator("#btnCloseEditRoom").click();
-    await page.locator("#btnReminders").click(); await page.locator("#btnNewReminder").click();
+    await page.locator("#btnRoomOptions").click(); await page.locator("#btnReminders").click();
+    await page.locator("#remindersDialog[open]").waitFor();
+    await page.locator("#btnNewReminder").click();
     await page.locator("#reminderDialog[open]").waitFor();
     await expectSelect(page, "#reminderType", 13);
   } finally {

@@ -42,10 +42,13 @@
   @media (min-width: 1500px) and (min-height: 560px) {
     #chatView { --side-pane-width: clamp(380px, 30vw, 640px); }
   }
-  /* Wide task boards use the extra desktop width and leave the chat a 700px column. */
+  /* Wide side panes use the extra desktop width and keep the chat a 700px column.
+     The task board and every file preview follow the same rule. */
   @media (min-width: 1500px) and (min-height: 900px) {
-    #app:has(#chatView.has-tasks) { max-width: 1600px; }
-    #chatView.has-tasks { --side-pane-width: min(560px, calc(100% - 960px)); }
+    #app:has(#chatView.has-doc),
+    #app:has(#chatView.has-pane) { max-width: 1600px; }
+    #chatView.has-doc,
+    #chatView.has-pane { --side-pane-width: min(560px, calc(100% - 960px)); }
   }
   /* The separator owns one grid column of its own, so it never covers the chat. */
   .side-pane-handle {
@@ -77,10 +80,32 @@
   body.is-resizing-pane { cursor: col-resize; user-select: none; }
   @media (min-width: 1100px) and (min-height: 560px) {
     #chatView.has-doc,
-    #chatView.has-tasks { grid-template-columns: 252px minmax(0, 1fr) 8px var(--side-pane-width); }
+    #chatView.has-pane { grid-template-columns: 252px minmax(0, 1fr) 8px var(--side-pane-width); }
     #chatView.has-doc > .side-pane-handle,
-    #chatView.has-tasks > .side-pane-handle { display: flex; }
+    #chatView.has-pane > .side-pane-handle { display: flex; }
   }
+  /* Any room tool promoted to the right-hand pane shares one column and frame. */
+  #chatView > dialog.pane-surface.is-pane {
+    position: relative;
+    inset: auto;
+    grid-column: 4;
+    grid-row: 1 / -1;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    border: 0;
+    border-left: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+    border-radius: 0;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 84%, var(--accent-soft)), var(--surface) 32%);
+    box-shadow: none;
+    animation: none;
+  }
+  #chatView > dialog.pane-surface.is-pane[open] { display: flex; flex-direction: column; }
+  #chatView.has-doc > dialog.pane-surface.is-pane { display: none; }
   .room-rail {
     position: relative;
     grid-column: 1;
@@ -244,7 +269,12 @@
   .admin-dialog .admin-select { display: block; box-sizing: border-box; width: 100%; min-width: 0; min-height: 40px; padding: 6px 32px 6px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background-color: var(--surface); font: inherit; }
   .admin-dialog .admin-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .admin-enrollment { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border-radius: 10px; background: var(--accent-soft); }
-  @media (max-width: 620px) { .admin-dialog { padding: 15px; } }
+  @media (max-width: 620px) {
+    .admin-dialog { padding: 15px; }
+    #announcementsDialog, #remindersDialog { width: calc(100vw - 12px); max-height: calc(100dvh - 16px); border-radius: 16px; }
+    #announcementsDialog .admin-dialog-head, #remindersDialog .admin-dialog-head { padding: 13px 13px 9px; }
+    .announcements-body, .reminders-body { padding: 0 13px 13px; }
+  }
   .rail-avatar { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; color: var(--accent); background: var(--accent-soft); }
   .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #609773; box-shadow: 0 0 0 3px color-mix(in srgb, #609773 16%, transparent); }
   #chatView > .chat-head { grid-column: 2; grid-row: 1; min-width: 0; }
@@ -266,13 +296,8 @@
   .member-action { border: 0; background: transparent; padding: 2px 4px; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; }
   .member-action:hover { text-decoration: underline; }
   #memberList li { align-items: center; }
-  .msg-text table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-  .msg-text th, .msg-text td { padding: 5px 9px; border: 1px solid var(--line); text-align: left; }
-  .msg-text td { overflow-wrap: normal; }
-  .msg-text th { white-space: nowrap; background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
   .msg-text input[type="checkbox"] { accent-color: var(--accent); }
   .msg-text del { color: var(--ink-3); }
-  .msg-text hr { border: 0; border-top: 1px solid var(--line); }
   .mermaid-diagram { max-width: 100%; overflow-x: auto; }
   .mermaid-diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
   .diagram-status { margin: 0 0 6px; color: var(--ink-3); font-size: 12px; }
@@ -384,4 +409,18 @@
   @media (max-width: 900px) {
     #btnMembers { position: relative; }
     #joinRequestBadge { position: absolute; top: -5px; right: -5px; margin: 0; font-size: 10px; }
+  }
+
+  /* Borderless PWA: drop the inset card without moving the rail/chat/pane grid. */
+  :root[data-window-frame="borderless"] body { background: var(--surface); }
+  :root[data-window-frame="borderless"] #app,
+  :root[data-window-frame="borderless"] #app:has(#chatView.has-doc),
+  :root[data-window-frame="borderless"] #app:has(#chatView.has-pane) { max-width: none; }
+  :root[data-window-frame="borderless"] #chatView {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }

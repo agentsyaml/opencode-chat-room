@@ -43,6 +43,15 @@ test("command filtering is case-insensitive and empty keeps all", () => {
   assert.ok(matches.every((command) => command.label.toLowerCase().includes("search")));
 });
 
+test("slash-prefixed exit and quit resolve to the quit command", () => {
+  const commands = buildCommands({ rooms, current: null, joined: false });
+  for (const query of ["/exit", "\\quit"]) {
+    const matches = filterCommands(commands, query);
+    assert.deepEqual(matches.map((command) => command.id), ["quit"]);
+  }
+  assert.ok(filterCommands(commands, "/q").some((command) => command.id === "quit"));
+});
+
 test("scope toggles between current room and all joined rooms", () => {
   assert.equal(nextScope("room"), "all");
   assert.equal(nextScope("all"), "room");

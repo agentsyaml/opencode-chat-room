@@ -332,6 +332,9 @@ export function initEvents(app) {
   // Stop wheel overscroll at the ends. Without this, some layouts let the
   // document absorb the leftover delta and the view jumps a few pixels.
   thread.addEventListener("wheel", (event) => {
+    // Trackpad pinch arrives as Ctrl/Cmd + wheel. Blocking it at a scroll
+    // edge would also block browser zoom-out.
+    if (event.ctrlKey || event.metaKey) return;
     markScrollIntent();
     const gap = thread.scrollHeight - thread.clientHeight - thread.scrollTop;
     if (event.deltaY < 0 && thread.scrollTop <= 0 || event.deltaY > 0 && gap <= 2) event.preventDefault();

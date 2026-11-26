@@ -281,7 +281,7 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     expect(mobileHead.missingIcons).toEqual([]);
     // The header is one row: the actions share the title row's vertical band.
     expect(Math.abs(mobileHead.actionsTop - mobileHead.mainTop)).toBeLessThanOrEqual(2);
-    for (const [trigger, panel] of [["#btnQuestions", "#questionPanel"], ["#btnReminders", "#reminderPanel"], ["#btnMembers", "#memberPanel"], ["#btnRoomOptions", "#roomOptions"]]) {
+    for (const [trigger, panel] of [["#btnQuestions", "#questionPanel"], ["#btnMembers", "#memberPanel"], ["#btnRoomOptions", "#roomOptions"]]) {
       await alice.locator(trigger).click();
       const panelBox = await alice.locator(panel).boundingBox();
       expect(panelBox).not.toBeNull();
@@ -294,13 +294,13 @@ test.skipIf(!browserModule)("local browser covers room, GFM, and moderation flow
     // Announcements live in the Options menu now.
     await alice.locator("#btnRoomOptions").click();
     await alice.locator("#btnAnnouncements").click();
-    const announcementBox = await alice.locator("#announcementPanel").boundingBox();
+    const announcementBox = await alice.locator("#announcementsDialog").boundingBox();
     expect(announcementBox).not.toBeNull();
     expect(announcementBox!.x).toBeGreaterThanOrEqual(0);
     expect(announcementBox!.x + announcementBox!.width).toBeLessThanOrEqual(376);
     expect(announcementBox!.y).toBeGreaterThanOrEqual(mobileHead.headBottom);
     await alice.keyboard.press("Escape");
-    await alice.locator("#announcementPanel").waitFor({ state: "hidden" });
+    await alice.locator("#announcementsDialog").waitFor({ state: "hidden" });
     await alice.setViewportSize({ width: 320, height: 700 });
     const narrow = await alice.evaluate(() => ({ pageX: document.documentElement.scrollWidth - innerWidth, title: document.querySelector<HTMLElement>("#roomName")!.getBoundingClientRect().width }));
     expect(narrow.pageX).toBeLessThanOrEqual(1);

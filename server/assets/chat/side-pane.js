@@ -13,7 +13,6 @@ export function initSidePaneSplitter(app) {
   const view = app.$("#chatView");
   const handle = app.$("#sidePaneHandle");
   const preview = app.$("#docPreview");
-  const tasks = app.$("#tasksDialog");
   if (!view || !handle) return;
 
   let stored = readStored();
@@ -23,7 +22,7 @@ export function initSidePaneSplitter(app) {
   let drag = null;
 
   const activePane = () => view.classList.contains("has-doc") ? preview
-    : view.classList.contains("has-tasks") ? tasks : null;
+    : view.classList.contains("has-pane") ? view.querySelector(":scope > dialog.is-pane[open]") : null;
 
   // A wide task board must leave the conversation a full working column; the
   // Markdown preview keeps the normal minimum.

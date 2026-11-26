@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { isRoomAdmin, type RoleEntry, type RoleRoom } from "../state/roles.ts";
-import { ROOM_TASK_STATUSES, deleteCompletedRoomTasks, deleteRoomTask, insertRoomTask, listRoomTasks, patchRoomTask, readRoomTask, type RoomTask, type RoomTaskPatch, type RoomTaskStatus, type RoomTaskStep } from "../state/sqlite-state.ts";
-import type { Database } from "../state/sqlite.ts";
+import { ROOM_TASK_STATUSES, countRoomTasks, deleteCompletedRoomTasks, deleteRoomTask, insertRoomTask, listRoomTasks, patchRoomTask, readRoomTask, type RoomTask, type RoomTaskPatch, type RoomTaskStatus, type RoomTaskStep } from "../state/sqlite-state.ts";
+import type { StateDatabase } from "../state/sqlite.ts";
 import { databasePath } from "../state/store.ts";
 import { withStateTransaction } from "../state/sqlite-state.ts";
 
 export type { RoomTask, RoomTaskStatus };
 export type TaskFailure = { status: 400 | 403 | 404 | 409; error: string };
-export type TaskListResult = { tasks: RoomTask[] } | TaskFailure;
+export type TaskListResult = { tasks: RoomTask[]; limit: number } | TaskFailure;
 export type TaskWriteResult = { task: RoomTask } | TaskFailure;
 export type TaskDeleteResult = { ok: true } | TaskFailure;
 export type TaskClearResult = { ok: true; count: number } | TaskFailure;
@@ -22,7 +22,19 @@ const MAX_CONCLUSION = 5000;
 const MAX_PARTICIPANTS = 50;
 const MAX_STEPS = 30;
 const MAX_STEP_TEXT = 300;
+const DEFAULT_MAX_ROOM_TASKS = 10;
 const invalid = (error: string): TaskFailure => ({ status: 400, error });
+
+/** The per-room task limit, read from CHAT_ROOM_MAX_ROOM_TASKS on every use. */
+export function maxRoomTasks(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.CHAT_ROOM_MAX_ROOM_TASKS?.trim();
+  if (!raw) return DEFAULT_MAX_ROOM_TASKS;
+  const limit = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(limit) || limit < 1) {
+    throw new Error("CHAT_ROOM_MAX_ROOM_TASKS must be a positive integer");
+  }
+  return limit;
+}
 
 type Context = { room: RoleRoom; entry: RoleEntry; name: string; participants: Set<string> };
 type RoomRow = {
@@ -36,7 +48,7 @@ type MemberRow = {
 
 // The session must be a current participant and a registry entry; roles come
 // from the stored room, never from a client-supplied name.
-function context(db: Database, roomID: string, sessionID: string): Context | TaskFailure {
+function context(db: StateDatabase, roomID: string, sessionID: string): Context | TaskFailure {
   const room = db.query("SELECT kind,owner_id,owner_membership_id,admin_names,admin_membership_ids FROM rooms WHERE id=?").get(roomID) as RoomRow | null;
   if (!room) return { status: 404, error: "room not found" };
   if (room.kind === "direct") return { status: 409, error: "tasks are not available in direct rooms" };
@@ -121,7 +133,7 @@ export function listTasks(roomID: string, sessionID: string): Promise<TaskListRe
   return withStateTransaction(databasePath(), (db) => {
     const ctx = context(db, roomID, sessionID);
     if (isFailure(ctx)) return ctx;
-    return { tasks: listRoomTasks(db, roomID) };
+    return { tasks: listRoomTasks(db, roomID), limit: maxRoomTasks() };
   });
 }
 
@@ -143,6 +155,10 @@ export function createTask(roomID: string, sessionID: string, input: TaskFields)
     if (conclusion === undefined) return invalid(`conclusion must be a string of at most ${MAX_CONCLUSION} characters`);
     const steps = input.steps === undefined ? [] : readSteps(input.steps);
     if (steps === undefined) return invalid(`steps must be at most ${MAX_STEPS} items, each text 1 to ${MAX_STEP_TEXT} characters with a boolean done`);
+    const limit = maxRoomTasks();
+    if (countRoomTasks(db, roomID) >= limit) {
+      return { status: 409, error: `room task limit reached (${limit}); delete a completed task before adding another` };
+    }
     const now = Date.now();
     const task: RoomTask = {
       id: randomUUID(), roomId: roomID, title, description, assignee, status: "todo",

@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 import path from "node:path";
 import os from "node:os";
 import RoomService, { type Message, type Room } from "../rooms/room-service.ts";
-import { acknowledgeQueued as sqliteAcknowledgeQueued, acknowledgeRead as sqliteAcknowledgeRead, answerQuestion as sqliteAnswerQuestion, appendRoomMessage as sqliteAppendRoomMessage, sendReply as sqliteSendReply, readHistoryPage, readMessage as sqliteReadMessage, readOpenQuestionRefs as sqliteReadOpenQuestionRefs, MAX_OPEN_QUESTION_REFS, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestionExcerpt as sqliteQuestionExcerpt, readQuestions as sqliteReadQuestions, countOpenQuestions as sqliteCountOpenQuestions, readSqliteState, readUnreadPage, recallMessage as sqliteRecallMessage, revealMessageContent as sqliteRevealMessageContent, isMessageRecalled, recalledMessageIDs as sqliteRecalledMessageIDs, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage, type JoinRequest, listJoinRequests as sqliteListJoinRequests, readJoinRequest as sqliteReadJoinRequest, type RecallMessageResult, type RevealMessageResult } from "./sqlite-state.ts";
+import { acknowledgeQueued as sqliteAcknowledgeQueued, acknowledgeRead as sqliteAcknowledgeRead, answerQuestion as sqliteAnswerQuestion, appendRoomMessage as sqliteAppendRoomMessage, sendReply as sqliteSendReply, readHistoryPage, readMessage as sqliteReadMessage, readOpenQuestionRefs as sqliteReadOpenQuestionRefs, MAX_OPEN_QUESTION_REFS, readInboxPage as sqliteInboxPage, readMessageReceipts, readQuestionExcerpt as sqliteQuestionExcerpt, readQuestions as sqliteReadQuestions, countOpenQuestions as sqliteCountOpenQuestions, readSqliteRoomSummaries, readSqliteState, readUnreadPage, recallMessage as sqliteRecallMessage, revealMessageContent as sqliteRevealMessageContent, isMessageRecalled, recalledMessageIDs as sqliteRecalledMessageIDs, writeMessageReceipts, writePresenceState, writeSqliteState, type HistoryMessage, type JoinRequest, listJoinRequests as sqliteListJoinRequests, readJoinRequest as sqliteReadJoinRequest, type RecallMessageResult, type RevealMessageResult, type RoomSummary } from "./sqlite-state.ts";
 export type { JoinRequest, RecallMessageResult, RevealMessageResult } from "./sqlite-state.ts";
 
 export function statePath(): string {
@@ -71,6 +71,10 @@ export async function recalledMessageIDs(roomID: string, messageIDs: string[]): 
 
 export async function loadRooms(): Promise<Room[]> {
   return (await readSqliteState(databasePath())).rooms;
+}
+
+export function readRoomSummaries(): Promise<RoomSummary[]> {
+  return readSqliteRoomSummaries(databasePath());
 }
 
 export async function readReceipts(roomID: string, messageIDs?: string[]): Promise<MessageReceipt[] | undefined> {

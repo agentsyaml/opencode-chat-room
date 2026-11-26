@@ -3,9 +3,9 @@
 // name, description and join-policy patches through api.updateRoom.
 import { roomSettingsMarkdown } from "./info-content.mjs";
 import { createInfoPalette } from "./info-app.mjs";
+import { t } from "./i18n.mjs";
 
 const errorText = (error) => (error instanceof Error ? error.message : String(error ?? "unknown error"));
-const EDIT_HINT = "r rename · d desc · j policy · Esc close";
 
 export function attachRoomSettings(Class) {
   Object.assign(Class.prototype, {
@@ -13,15 +13,15 @@ export function attachRoomSettings(Class) {
       const current = this.state.current;
       if (!current || !this.state.joined) {
         this.state.palette = null;
-        this.setStatus("open a joined room first", "error");
+        this.setStatus(t("info.joinFirst"), "error");
         return;
       }
       this.roomSettings = null;
       const palette = {
-        ...createInfoPalette("room-settings", "Room settings", `#${current.name}`),
+        ...createInfoPalette("room-settings", t("room.title"), `#${current.name}`),
         mode: "detail",
-        detail: { title: "Room settings", markdown: "Loading...", kind: "room-settings" },
-        hint: "Esc close",
+        detail: { title: t("room.title"), markdown: t("common.loading"), kind: "room-settings" },
+        hint: t("palette.detailHint"),
       };
       this.state.palette = palette;
       this.touch();
@@ -39,7 +39,7 @@ export function attachRoomSettings(Class) {
         this.roomSettings = { room, canEdit, canDelete };
         palette.roomMeta = room;
         palette.detail = {
-          title: "Room settings",
+          title: t("room.title"),
           markdown: roomSettingsMarkdown(room, {
             participant: this.participant,
             sessionID: this.sessionID,
@@ -48,20 +48,22 @@ export function attachRoomSettings(Class) {
           }),
           kind: "room-settings",
         };
-        palette.hint = canEdit ? EDIT_HINT : "Read-only · Esc close";
+        palette.hint = canEdit ? t("room.editHint") : t("room.readOnlyHint");
         if (canDelete) {
-          palette.hint = canEdit
-            ? "r rename · d desc · j policy · x delete · Esc close"
-            : "x delete room · Esc close";
+          palette.hint = canEdit ? t("room.editDeleteHint") : t("room.deleteOnlyHint");
         }
         palette.error = "";
         this.touch();
       } catch (error) {
         if (this.state.palette !== palette) return;
         this.roomSettings = null;
-        palette.detail = { title: "Room settings", markdown: `**Unable to load room settings**\n\n${errorText(error)}`, kind: "room-settings" };
+        palette.detail = {
+          title: t("room.title"),
+          markdown: `${t("room.loadFailed")}\n\n${errorText(error)}`,
+          kind: "room-settings",
+        };
         palette.error = errorText(error);
-        palette.hint = "Esc close";
+        palette.hint = t("room.readOnlyHint");
         this.touch();
       }
     },
@@ -75,7 +77,7 @@ export function attachRoomSettings(Class) {
         || settings.room.id !== this.state.current?.id
       ) {
         if (palette) {
-          palette.error = "only the room owner or an admin can edit these settings";
+          palette.error = t("room.guardEdit");
           this.touch();
         }
         return null;
@@ -88,9 +90,9 @@ export function attachRoomSettings(Class) {
       const palette = this.state.palette;
       if (!settings || !palette) return;
       palette.mode = "prompt";
-      palette.prompt = { label: "Room name", value: settings.room.name, action: "room-name", data: {} };
+      palette.prompt = { label: t("room.namePrompt"), value: settings.room.name, action: "room-name", data: {} };
       palette.error = "";
-      palette.hint = "Enter save · Esc cancel";
+      palette.hint = t("palette.enterSaveHint");
       this.touch();
     },
 
@@ -100,13 +102,13 @@ export function attachRoomSettings(Class) {
       if (!settings || !palette) return;
       palette.mode = "prompt";
       palette.prompt = {
-        label: "Room description",
+        label: t("room.descriptionPrompt"),
         value: settings.room.description ?? "",
         action: "room-description",
         data: {},
       };
       palette.error = "";
-      palette.hint = "Enter save · empty clears · Esc cancel";
+      palette.hint = t("room.descriptionHint");
       this.touch();
     },
 
@@ -118,12 +120,12 @@ export function attachRoomSettings(Class) {
       palette.mode = "confirm";
       palette.previous = { mode: "detail", hint: palette.hint };
       palette.confirm = {
-        text: `Set join policy to ${next}?`,
+        text: t("room.policyConfirm", { policy: next }),
         action: "room-join-policy",
         data: { joinPolicy: next },
       };
       palette.error = "";
-      palette.hint = "Enter or y applies · n or Esc cancels";
+      palette.hint = t("room.policyHint");
       this.touch();
     },
 
@@ -138,7 +140,7 @@ export function attachRoomSettings(Class) {
         || palette.kind !== "room-settings"
       ) {
         if (palette) {
-          palette.error = "only the room owner can delete the room";
+          palette.error = t("room.guardDelete");
           this.touch();
         }
         return;
@@ -146,12 +148,12 @@ export function attachRoomSettings(Class) {
       palette.mode = "confirm";
       palette.previous = { mode: "detail", hint: palette.hint };
       palette.confirm = {
-        text: `Delete #${settings.room.name} and its messages? This cannot be undone.`,
+        text: t("room.deleteConfirm", { name: settings.room.name }),
         action: "room-delete",
         data: { id: settings.room.id, name: settings.room.name },
       };
       palette.error = "";
-      palette.hint = "Enter or y deletes · n or Esc cancels";
+      palette.hint = t("palette.deleteHint");
       this.touch();
     },
 
@@ -162,21 +164,21 @@ export function attachRoomSettings(Class) {
       if (prompt.action === "room-name") {
         const name = String(value ?? "").trim();
         if (!name || Array.from(name).length > 64) {
-          palette.error = "room name must contain 1 to 64 characters";
+          palette.error = t("room.nameInvalid");
           this.touch();
           return;
         }
-        await this.applyRoomPatch({ name }, `renamed to ${name}`);
+        await this.applyRoomPatch({ name }, t("room.renamed", { name }));
         return;
       }
       if (prompt.action === "room-description") {
         const description = String(value ?? "").trim();
         if (Array.from(description).length > 2000) {
-          palette.error = "description is limited to 2000 characters";
+          palette.error = t("room.descriptionInvalid");
           this.touch();
           return;
         }
-        await this.applyRoomPatch({ description }, "description updated");
+        await this.applyRoomPatch({ description }, t("room.descriptionUpdated"));
       }
     },
 
@@ -229,7 +231,7 @@ export function attachRoomSettings(Class) {
           this.state.pending = null;
           this.state.selected = Math.min(this.state.selected, Math.max(0, this.state.rooms.length - 1));
           this.closePalette();
-          this.setStatus(`deleted #${confirm.data.name}`, "success");
+          this.setStatus(t("room.deleted", { name: confirm.data.name }), "success");
         } catch (error) {
           if (this.state.palette === palette) {
             palette.searching = false;
@@ -242,7 +244,7 @@ export function attachRoomSettings(Class) {
       if (confirm.action !== "room-join-policy") return;
       await this.applyRoomPatch(
         { joinPolicy: confirm.data.joinPolicy },
-        `join policy set to ${confirm.data.joinPolicy}`,
+        t("room.policySet", { policy: confirm.data.joinPolicy }),
       );
     },
   });

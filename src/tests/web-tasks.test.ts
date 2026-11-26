@@ -24,7 +24,7 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
   const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore" });
   let browser: any, agentContext: any;
   const pageErrors: string[] = [], nativeDialogs: string[] = [];
-  const api: TaskApi = { tasks: [], names: new Map(), admins: new Set(), clock: Date.now(), clearUrls: [] };
+  const api: TaskApi = { tasks: [], names: new Map(), admins: new Set(), clock: Date.now(), clearUrls: [], limit: 10, exposeLimit: true, createCalls: 0 };
   try {
     await waitForServer(origin);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
@@ -194,22 +194,101 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     expect(await page.locator("#taskGroups .task-row").count()).toBe(0);
     await page.locator("#taskFilter").selectOption("all");
 
-    // Inline edit covers people, due date, conclusion, and steps; the creator keeps status rights.
+    // Adding stays inline in the pane; it never opens the edit modal.
+    await page.locator("#taskCreateDetails summary").click();
+    await page.locator("#taskCreateForm").waitFor({ state: "visible" });
+    expect(await page.locator("#taskEditDialog").isVisible()).toBe(false);
+    await page.locator("#taskCreateDetails summary").click();
+
+    // Edit opens a labelled modal prefilled with every field; the title takes focus.
     await page.locator('#taskGroups [data-task-action="edit"]').click();
+    await page.locator("#taskEditDialog[open]").waitFor();
     await page.locator(".task-edit-form").waitFor();
+    expect(await page.locator("#tasksDialog").getAttribute("open")).not.toBeNull();
+    expect(await page.locator("#taskGroups .task-edit-form").count()).toBe(0);
+    expect(await page.locator("#taskEditDialog").getAttribute("aria-labelledby")).toBe("taskEditHeading");
+    expect(await page.locator("#taskEditHeading").textContent()).toBe("Edit task");
+    expect(await page.evaluate(() => document.activeElement?.classList.contains("task-edit-title"))).toBe(true);
+    expect(await page.locator(".task-edit-title").inputValue()).toBe("Review launch checklist");
+    expect(await page.locator(".task-edit-description").inputValue()).toBe("Check links, screenshots, and rollback steps.");
+    expect(await page.locator(".task-edit-due").inputValue()).toBe("2026-12-31");
+    expect(await page.locator(".task-edit-assignee").inputValue()).toBe(agentName);
+    expect(await page.locator(".task-edit-participants-field .task-person input:checked").count()).toBe(1);
+    expect(await page.locator(".task-edit-conclusion").inputValue()).toBe("Ready for release.");
+    expect(await page.locator(".task-edit-steps-field .task-step-text").nth(0).inputValue()).toBe("Draft the checklist");
+    expect(await page.locator(".task-edit-steps-field .task-step-text").nth(1).inputValue()).toBe("Publish the notes");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(120);
+    const lightFieldColors = await fieldGroupColors(page, ".task-edit-participants-field", ".task-edit-steps-field", ".task-edit-description");
+    expect(lightFieldColors.participantsBorder).toBe(lightFieldColors.inputBorder);
+    expect(lightFieldColors.stepsBorder).toBe(lightFieldColors.inputBorder);
+    expect(lightFieldColors.participantsBackground).toBe(lightFieldColors.inputBackground);
+    expect(lightFieldColors.stepsBackground).toBe(lightFieldColors.inputBackground);
+    expect(lightFieldColors.participantsWidth).toBe("1px");
+    expect(lightFieldColors.stepsWidth).toBe("1px");
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      app.setTheme("dark");
+    }, "/assets/chat/state.js");
+    await page.waitForTimeout(300);
+    const darkFieldColors = await fieldGroupColors(page, ".task-edit-participants-field", ".task-edit-steps-field", ".task-edit-description");
+    expect(darkFieldColors.participantsBorder).toBe(darkFieldColors.inputBorder);
+    expect(darkFieldColors.stepsBorder).toBe(darkFieldColors.inputBorder);
+    expect(darkFieldColors.participantsBackground).toBe(darkFieldColors.inputBackground);
+    expect(darkFieldColors.stepsBackground).toBe(darkFieldColors.inputBackground);
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      app.setTheme("light");
+    }, "/assets/chat/state.js");
+    await page.waitForTimeout(300);
+    // A refresh cannot discard the open draft while the modal owns it.
+    expect(await page.locator("#btnRefreshTasks").isDisabled()).toBe(true);
+    expect(await page.locator(".task-edit-title").inputValue()).toBe("Review launch checklist");
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(screenshotDir, "web-tasks-edit-modal-1280.png") });
+
+    // Cancel and Escape discard the draft and return focus to the row's edit button.
+    await page.locator(".task-edit-title").fill("Cancelled title");
+    await page.locator(".task-edit-actions .btn.ghost").click();
+    await page.locator("#taskEditDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.getAttribute("data-task-action") === "edit");
+    expect(await page.locator(".task-edit-form").count()).toBe(0);
+    expect(await page.locator("#taskGroups .task-title").textContent()).toBe("Review launch checklist");
+    expect(await page.locator("#btnRefreshTasks").isEnabled()).toBe(true);
+    await page.locator('#taskGroups [data-task-action="edit"]').click();
+    await page.locator("#taskEditDialog[open]").waitFor();
+    expect(await page.locator(".task-edit-title").inputValue()).toBe("Review launch checklist");
+    await page.locator(".task-edit-title").fill("Escape title");
+    await page.keyboard.press("Escape");
+    await page.locator("#taskEditDialog").waitFor({ state: "hidden" });
+    expect(await page.locator("#tasksDialog").getAttribute("open")).not.toBeNull();
+    expect(await page.locator("#taskGroups .task-title").textContent()).toBe("Review launch checklist");
+    await page.waitForFunction(() => document.activeElement?.getAttribute("data-task-action") === "edit");
+    // A backdrop click is another cancel path that keeps the old card.
+    await page.locator('#taskGroups [data-task-action="edit"]').click();
+    await page.locator("#taskEditDialog[open]").waitFor();
+    await page.locator(".task-edit-title").fill("Backdrop title");
+    await page.mouse.click(4, 4);
+    await page.locator("#taskEditDialog").waitFor({ state: "hidden" });
+    expect(await page.locator("#taskGroups .task-title").textContent()).toBe("Review launch checklist");
+
+    // Saving updates the one card and keeps the pane and room state.
+    await page.locator('#taskGroups [data-task-action="edit"]').click();
+    await page.locator("#taskEditDialog[open]").waitFor();
     await page.locator(".task-edit-title").fill("Review launch checklist v2");
     await page.locator(".task-edit-description").fill("Updated acceptance notes.");
     await page.locator(".task-edit-due").fill("2027-01-15");
     await page.locator(".task-edit-conclusion").fill("Signed off after review.");
-    // An unrelated refresh must not discard the open edit form: the control is
-    // inert while editing, and the draft keeps its value.
-    expect(await page.locator("#btnRefreshTasks").isDisabled()).toBe(true);
-    expect(await page.locator(".task-edit-title").inputValue()).toBe("Review launch checklist v2");
     await page.locator(".task-edit-participants-field .task-person").filter({ hasText: ownerName }).locator("input").check();
     await page.locator(".task-edit-steps-field .task-add-step").click();
     await page.locator(".task-edit-steps-field .task-step-text").nth(2).fill("Announce the release");
     await page.locator(".task-edit-steps-field .task-step-done").nth(2).check();
     await page.locator('.task-edit-actions button[type="submit"]').click();
+    await page.locator("#taskEditDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.getAttribute("data-task-action") === "edit");
+    expect(await page.locator("#taskGroups .task-row").count()).toBe(1);
+    expect(await page.locator("#tasksDialog").getAttribute("open")).not.toBeNull();
+    expect(await page.evaluate(() => sessionStorage.getItem("chat.roomId"))).toBe(roomId);
     row = page.locator("#taskGroups .task-row").filter({ hasText: "Review launch checklist v2" });
     await row.waitFor();
     expect(await row.locator(".task-description").textContent()).toBe("Updated acceptance notes.");
@@ -227,8 +306,24 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     expect(await page.locator("#taskGroups .task-row").count()).toBe(1);
     expect(await page.evaluate(() => document.querySelector("#chatView")!.classList.contains("has-tasks"))).toBe(false);
     expect(await handle.isVisible()).toBe(false);
+    // Editing from the modal board opens the same edit dialog above it.
+    await page.locator('#taskGroups [data-task-action="edit"]').click();
+    await page.locator("#taskEditDialog[open]").waitFor();
+    expect(await page.locator("#tasksDialog").getAttribute("open")).not.toBeNull();
+    expect(await page.locator(".task-edit-title").inputValue()).toBe("Review launch checklist v2");
+    expect(await page.evaluate(() => document.activeElement?.classList.contains("task-edit-title"))).toBe(true);
+    await page.locator(".task-edit-title").fill("Modal board draft");
+    // A breakpoint change while editing waits for the modal and keeps the draft.
     await page.setViewportSize({ width: 1280, height: 850 });
+    await page.waitForTimeout(120);
+    expect(await page.locator("#taskEditDialog").isVisible()).toBe(true);
+    expect(await page.locator(".task-edit-title").inputValue()).toBe("Modal board draft");
+    await page.keyboard.press("Escape");
+    await page.locator("#taskEditDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.querySelector("#chatView")!.classList.contains("has-tasks"));
+    expect(await page.locator("#tasksDialog").getAttribute("open")).not.toBeNull();
+    expect(await page.locator("#taskGroups .task-title").textContent()).toBe("Review launch checklist v2");
+    await page.waitForFunction(() => document.activeElement?.getAttribute("data-task-action") === "edit");
     expect(await page.evaluate(() => getComputedStyle(document.querySelector("#tasksDialog")!).position)).toBe("relative");
     expect(await page.locator("#taskGroups .task-row").count()).toBe(1);
     expect(await handle.isVisible()).toBe(true);
@@ -320,6 +415,28 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
       await page.locator("#taskCreateDetails summary").click();
       await page.locator("#btnAddCreateStep").click();
       await page.waitForTimeout(250);
+      const mobileFieldColors = await fieldGroupColors(page, ".task-create-participants", ".task-create-steps", "#taskDescription");
+      expect(mobileFieldColors.participantsBorder).toBe(mobileFieldColors.inputBorder);
+      expect(mobileFieldColors.stepsBorder).toBe(mobileFieldColors.inputBorder);
+      expect(mobileFieldColors.participantsBackground).toBe(mobileFieldColors.inputBackground);
+      expect(mobileFieldColors.stepsBackground).toBe(mobileFieldColors.inputBackground);
+      if (width === 390) {
+        await page.evaluate(async (url: string) => {
+          const { app } = await import(url);
+          app.setTheme("dark");
+        }, "/assets/chat/state.js");
+        await page.waitForTimeout(300);
+        const darkCreateColors = await fieldGroupColors(page, ".task-create-participants", ".task-create-steps", "#taskDescription");
+        expect(darkCreateColors.participantsBorder).toBe(darkCreateColors.inputBorder);
+        expect(darkCreateColors.stepsBorder).toBe(darkCreateColors.inputBorder);
+        expect(darkCreateColors.participantsBackground).toBe(darkCreateColors.inputBackground);
+        expect(darkCreateColors.stepsBackground).toBe(darkCreateColors.inputBackground);
+        await page.evaluate(async (url: string) => {
+          const { app } = await import(url);
+          app.setTheme("light");
+        }, "/assets/chat/state.js");
+        await page.waitForTimeout(300);
+      }
       const metrics = await overflowMetrics(page);
       expect(metrics.pageOverflow).toBe(0);
       expect(metrics.dialogOverflow).toBe(0);
@@ -405,6 +522,51 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     expect(await page.locator("#tasksSummary").textContent()).toBe("1 task");
     await page.waitForFunction(() => document.querySelector<HTMLButtonElement>("#btnClearCompleted")!.disabled);
     expect(api.clearUrls).toEqual([`/rooms/${roomId}/tasks`]);
+    expect(await page.locator("#btnCreateTask").isEnabled()).toBe(true);
+
+    // The room task limit is visible and blocks new tasks without hiding or locking existing rows.
+    const limitRow = page.locator("#taskGroups .task-row").filter({ hasText: "Review launch checklist v2" });
+    await limitRow.locator(".task-status-select").selectOption("done");
+    await page.locator('#taskGroups .task-row[data-status="done"]').waitFor();
+    api.limit = 1;
+    api.exposeLimit = false;
+    await page.locator("#btnRefreshTasks").click();
+    await page.waitForFunction(() => !document.querySelector<HTMLButtonElement>("#btnCreateTask")!.disabled);
+    expect(await page.locator("#tasksLimitNotice").isVisible()).toBe(false);
+    await page.locator("#taskCreateDetails summary").click();
+    await page.locator("#taskTitle").fill("Over the limit");
+    const beforeLimitPost = api.createCalls;
+    await page.locator("#btnCreateTask").click();
+    await page.locator("#tasksErrorText").filter({ hasText: "Task limit reached" }).waitFor();
+    expect(api.createCalls).toBe(beforeLimitPost + 1);
+    expect(await page.locator("#taskGroups .task-row").count()).toBe(1);
+
+    api.exposeLimit = true;
+    await page.locator("#btnRefreshTasks").click();
+    await page.locator("#tasksLimitNotice").waitFor({ state: "visible" });
+    expect(await page.locator("#tasksLimitNotice").textContent()).toContain("task limit (1)");
+    expect(await page.locator("#btnCreateTask").isDisabled()).toBe(true);
+    expect(await limitRow.locator('[data-task-action="edit"]').isEnabled()).toBe(true);
+    expect(await limitRow.locator('[data-task-action="delete"]').isEnabled()).toBe(true);
+    await page.locator("#btnTasksMenu").click();
+    expect(await page.locator("#btnClearCompleted").isEnabled()).toBe(true);
+    await page.keyboard.press("Escape");
+    await limitRow.locator('[data-task-action="edit"]').click();
+    await page.locator("#taskEditDialog[open]").waitFor();
+    expect(await page.locator(".task-edit-title").inputValue()).toBe("Review launch checklist v2");
+    await page.locator(".task-edit-actions .btn.ghost").click();
+    await page.locator("#taskEditDialog").waitFor({ state: "hidden" });
+    const beforeDisabledClick = api.createCalls;
+    await page.evaluate(() => (document.querySelector("#btnCreateTask") as HTMLButtonElement | null)?.click());
+    await page.waitForTimeout(100);
+    expect(api.createCalls).toBe(beforeDisabledClick);
+    await limitRow.locator('[data-task-action="delete"]').click();
+    await page.locator("#confirmDialog[open]").waitFor();
+    await page.locator("#btnAcceptConfirm").click();
+    await page.waitForFunction(() => document.querySelectorAll("#taskGroups .task-row").length === 0);
+    await page.locator("#tasksLimitNotice").waitFor({ state: "hidden" });
+    expect(await page.locator("#btnCreateTask").isEnabled()).toBe(true);
+
     await page.locator("#tasksHeading").focus();
     await page.keyboard.press("Escape");
     await page.locator("#tasksDialog").waitFor({ state: "hidden" });
@@ -472,6 +634,21 @@ async function overflowMetrics(page: any) {
       }),
     };
   });
+}
+
+async function fieldGroupColors(page: any, participants: string, steps: string, input: string) {
+  return page.evaluate((selectors: { participants: string; steps: string; input: string }) => {
+    const style = (selector: string) => getComputedStyle(document.querySelector<HTMLElement>(selector)!);
+    const inputStyle = style(selectors.input);
+    const participantsStyle = style(selectors.participants);
+    const stepsStyle = style(selectors.steps);
+    return {
+      inputBorder: inputStyle.borderTopColor, inputBackground: inputStyle.backgroundColor,
+      participantsBorder: participantsStyle.borderTopColor, participantsBackground: participantsStyle.backgroundColor,
+      stepsBorder: stepsStyle.borderTopColor, stepsBackground: stepsStyle.backgroundColor,
+      participantsWidth: participantsStyle.borderTopWidth, stepsWidth: stepsStyle.borderTopWidth,
+    };
+  }, { participants, steps, input });
 }
 
 function isolatedEnv(stateDir: string, port: number): NodeJS.ProcessEnv {

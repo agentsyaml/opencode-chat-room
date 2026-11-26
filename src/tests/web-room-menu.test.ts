@@ -34,27 +34,29 @@ test.skipIf(!browserModule)("announcements open from the Options menu and leavin
     await page.locator("#chatView").waitFor({ state: "visible" });
     await page.waitForTimeout(300);
 
-    // Members stay a header chip; only announcements moved into the Options menu.
+    // Members stay a header chip; announcements and reminders live in the Options menu.
     expect(await page.locator("#btnMembers").isVisible()).toBe(true);
     expect(await page.locator("#roomOptions #btnMembers").count()).toBe(0);
     expect(await page.locator("#roomOptions").isHidden()).toBe(true);
     expect(await page.locator("#roomOptions .menu-action").first().getAttribute("id")).toBe("btnAnnouncements");
-    expect(await page.locator("#roomOptions .menu-action svg").count()).toBe(6);
+    expect(await page.locator("#roomOptions .menu-action svg").count()).toBe(7);
+    expect(await page.locator("#roomOptions #btnReminders").count()).toBe(1);
+    expect(await page.locator("#btnReminders.chip").count()).toBe(0);
 
     await page.locator("#btnRoomOptions").click();
     expect(await page.locator("#btnRoomOptions").getAttribute("aria-expanded")).toBe("true");
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(screenshotDir, "room-options-menu-1280.png") });
     await page.locator("#btnAnnouncements").click();
-    await page.locator("#announcementPanel").waitFor({ state: "visible" });
+    await page.locator("#announcementsDialog[open]").waitFor();
     expect(await page.locator("#roomOptions").isHidden()).toBe(true);
     expect(await page.locator("#btnRoomOptions").getAttribute("aria-expanded")).toBe("false");
     await page.waitForFunction(() => document.activeElement?.id === "announcementHeading");
     await page.waitForTimeout(250);
-    await page.screenshot({ path: path.join(screenshotDir, "announcement-panel-1280.png") });
+    await page.screenshot({ path: path.join(screenshotDir, "announcements-dialog-1280.png") });
     await page.keyboard.press("Escape");
-    await page.locator("#announcementPanel").waitFor({ state: "hidden" });
-    expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnRoomOptions");
+    await page.locator("#announcementsDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
 
     // Phone layout: the menu and the panel stay inside the viewport.
     await page.setViewportSize({ width: 390, height: 844 });
@@ -71,16 +73,16 @@ test.skipIf(!browserModule)("announcements open from the Options menu and leavin
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnRoomOptions");
     await page.locator("#btnRoomOptions").click();
     await page.locator("#btnAnnouncements").click();
-    const panelBox = await page.locator("#announcementPanel").boundingBox();
+    const panelBox = await page.locator("#announcementsDialog").boundingBox();
     expect(panelBox).not.toBeNull();
     expect(panelBox!.x).toBeGreaterThanOrEqual(0);
     expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(390);
     expect(panelBox!.y).toBeGreaterThanOrEqual(0);
     await page.waitForTimeout(250);
-    await page.screenshot({ path: path.join(screenshotDir, "announcement-panel-390.png") });
+    await page.screenshot({ path: path.join(screenshotDir, "announcements-dialog-390.png") });
     await page.keyboard.press("Escape");
-    await page.locator("#announcementPanel").waitFor({ state: "hidden" });
-    expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnRoomOptions");
+    await page.locator("#announcementsDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
 
     // Narrow, tablet, and short desktop widths keep the menu inside the viewport.
     for (const [width, height] of [[320, 700], [768, 600], [1280, 500]] as const) {

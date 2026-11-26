@@ -1,6 +1,5 @@
 // Task rows: a compact summary of people, due date, steps, and conclusion.
 import { icon } from "./icons.js";
-import { buildTaskForm } from "./task-form.js";
 
 const STATUSES = ["todo", "doing", "done"];
 const STATUS_LABELS = { todo: "tasksStatusTodo", doing: "tasksStatusDoing", done: "tasksStatusDone" };
@@ -44,11 +43,6 @@ export const buildTaskRow = (view, task, index) => {
   row.dataset.taskId = task.id;
   row.dataset.status = status;
   row.style.setProperty("--task-i", String(Math.min(index, 9)));
-  if (view.isEditing(task)) {
-    row.classList.add("task-row-editing");
-    row.append(buildTaskForm(view, task));
-    return row;
-  }
   const main = document.createElement("div");
   main.className = "task-main";
   const titleLine = document.createElement("div");

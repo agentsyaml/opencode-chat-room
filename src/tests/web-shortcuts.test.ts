@@ -47,6 +47,14 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     expect(rows).toContainEqual([modifier, "Home", "End"]);
     expect(rows).toContainEqual(["PageUp", "PageDown"]);
     expect(rows).toContainEqual(["Esc"]);
+    // The palette row keeps its two key combos together and leaves a normal gap
+    // before the description instead of pushing it to the far edge.
+    const paletteRow = page.locator("#shortcutsDialog .keys-list li").filter({ hasText: "Open search and commands" });
+    const keysBox = await paletteRow.locator(".keys-group").boundingBox();
+    const labelBox = await paletteRow.locator(":scope > span:last-child").boundingBox();
+    if (!keysBox || !labelBox) throw new Error("palette shortcut row is not visible");
+    expect(labelBox.x - (keysBox.x + keysBox.width)).toBeGreaterThanOrEqual(0);
+    expect(labelBox.x - (keysBox.x + keysBox.width)).toBeLessThanOrEqual(24);
     const sheet = await page.locator("#shortcutsDialog").textContent();
     expect(sheet).toContain("Switch to the previous or next room");
     expect(sheet).toContain("Scroll messages while typing");

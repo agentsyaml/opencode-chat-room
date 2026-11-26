@@ -44,6 +44,8 @@ function parseClient(value) {
     url: optionalString(raw.url, "client.url"),
     token: optionalString(raw.token, "client.token"),
     participant: optionalString(raw.participant, "client.participant"),
+    language: optionalString(raw.language, "client.language"),
+    theme: optionalString(raw.theme, "client.theme"),
     requestTimeoutMs,
   };
 }
@@ -54,6 +56,8 @@ function parseConfig(value) {
   return {
     url: optionalString(raw.url, "url"),
     token: optionalString(raw.token, "token"),
+    language: optionalString(raw.language, "language"),
+    theme: optionalString(raw.theme, "theme"),
     client: parseClient(raw.client),
   };
 }
@@ -174,16 +178,20 @@ function stateFile(env, cwd, home) {
   return path.join(stateHome, "chatroom-tui", "session.json");
 }
 
-export function resolveTuiConfig(env = process.env, cwd = process.cwd()) {
-  const file = loadTuiConfig(env, cwd);
+/** Resolve startup config. extra = { flags, prefs, project } keeps the paths
+ * used by main.mjs testable; callers without extra behave as before. */
+export function resolveTuiConfig(env = process.env, cwd = process.cwd(), extra = {}) {
+  const file = extra.project === undefined ? loadTuiConfig(env, cwd) : extra.project;
+  const flags = extra.flags ?? {};
+  const prefs = extra.prefs ?? {};
   const home = env.HOME || os.homedir();
-  const url = (envValue(env, "CHAT_ROOM_SERVER_URL") ?? file?.client?.url ?? file?.url ?? "")
+  const url = (flags.server ?? envValue(env, "CHAT_ROOM_SERVER_URL") ?? prefs.url ?? file?.client?.url ?? file?.url ?? "")
     .trim().replace(/\/+$/, "");
   if (!url) throw new Error(`chatroom TUI: server URL is not set; ${URL_HINT}`);
   if (!/^https?:\/\/[^/]+/i.test(url)) {
     throw new Error(`chatroom TUI: server URL must be an http(s) URL; ${URL_HINT}`);
   }
-  const name = envValue(env, "CHAT_ROOM_TUI_NAME") ?? file?.client?.participant ?? DEFAULT_PARTICIPANT;
+  const name = flags.name ?? envValue(env, "CHAT_ROOM_TUI_NAME") ?? prefs.participant ?? file?.client?.participant ?? DEFAULT_PARTICIPANT;
   return {
     url,
     token: envValue(env, "CHAT_ROOM_SERVER_TOKEN") ?? file?.client?.token ?? file?.token ?? "",

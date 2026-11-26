@@ -66,6 +66,10 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     await page.evaluate(async (modulePath: string) => (await import(modulePath)).whenShikiIdle(), "/assets/chat/shiki.js");
 
     const first = blocks.nth(0), second = blocks.nth(1);
+    const language = first.locator(".code-language"), secondLanguage = second.locator(".code-language");
+    expect((await language.textContent())?.trim()).toBe("js");
+    expect(await language.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
+    expect((await secondLanguage.textContent())?.trim()).toBe("notalang");
     const firstCode = first.locator("pre > code"), secondCode = second.locator("pre > code");
     const firstText = await firstCode.evaluate((node: HTMLElement) => node.textContent!);
     const secondText = await secondCode.evaluate((node: HTMLElement) => node.textContent!);
@@ -85,12 +89,12 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
         const value = channel / 255;
         return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
       }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index]!, 0);
-      const root = document.documentElement, pre = block.querySelector("pre")!, original = root.dataset.theme;
+      const root = document.documentElement, original = root.dataset.theme;
       const tokens = Array.from(block.querySelectorAll('span[style*="--shiki-token"]'));
       const ratios: Record<string, number> = {};
       for (const theme of ["light", "dark", "forest", "sand"]) {
         root.dataset.theme = theme;
-        const background = luminance(parse(getComputedStyle(pre).backgroundColor));
+        const background = luminance(parse(getComputedStyle(block).backgroundColor));
         tokens.forEach((node, index) => {
           const foreground = luminance(parse(getComputedStyle(node).color));
           ratios[`${theme} ${index}`] = (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05);
@@ -103,7 +107,6 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     expect(Object.entries(contrast).filter(([, ratio]) => Number(ratio) < 4.5)).toEqual([]);
 
     const toolbar = first.locator(".code-toolbar");
-    expect(await toolbar.evaluate((node: Element) => getComputedStyle(node).transitionDuration)).toBe("0.14s");
     expect(await toolbar.locator("button").count()).toBe(2);
     const iconOnly = await toolbar.locator("button").evaluateAll((buttons: Element[]) => buttons.map((button) => ({
       text: button.textContent?.trim(), icon: Boolean(button.querySelector("svg")),
@@ -119,13 +122,8 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     expect(iconOnly[0].label).toBe("Wrap code");
     expect(iconOnly[0].title).toBe("Wrap code");
     expect(iconOnly[1].label).toBe("Copy");
-    expect(await toolbar.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("0");
-    await first.locator(".code-wrap-toggle").focus();
-    await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-toolbar")!).opacity === "1");
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-toolbar")!).opacity === "0");
-    await first.hover();
-    await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-toolbar")!).opacity === "1");
+    // The header is part of the block, not a hover-only overlay.
+    expect(await toolbar.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
     await page.screenshot({ path: path.join(artifactDir, "code-block-desktop.png") });
 
     const wrap = first.locator(".code-wrap-toggle");
@@ -142,12 +140,7 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     expect(await wrap.getAttribute("aria-pressed")).toBe("false");
     expect(await whiteSpace()).toBe("pre");
     expect(await pre.evaluate((node: HTMLElement) => node.scrollLeft)).toBe(40);
-    // Clicking a control must not pin the toolbar open after the pointer leaves.
-    await page.mouse.move(4, 4);
-    await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-toolbar")!).opacity === "0");
 
-    await first.hover();
-    await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-toolbar")!).opacity === "1");
     await page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (value: string) => { (window as any).__copiedCode = value; } } });
     });
@@ -172,23 +165,17 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     await mobile.locator("#chatView").waitFor({ state: "visible" });
     const mobileBlock = mobile.locator(".msg-text .code-block").first();
     const mobileToolbar = mobileBlock.locator(".code-toolbar");
-    const toolbarOpacity = () => mobileToolbar.evaluate((node: Element) => getComputedStyle(node).opacity);
-    const waitToolbarOpacity = (value: "0" | "1") => mobile.waitForFunction((expected: string) => {
-      const toolbar = document.querySelector(".msg-text .code-block .code-toolbar");
-      return toolbar !== null && getComputedStyle(toolbar).opacity === expected;
-    }, value);
     await mobileBlock.waitFor();
     await mobileBlock.scrollIntoViewIfNeeded();
-    await waitToolbarOpacity("0");
-    expect(await toolbarOpacity()).toBe("0");
+    // Touch screens get the same persistent header instead of a hidden hover toolbar.
+    expect(await mobileToolbar.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
+    expect(await mobileBlock.locator(".code-language").textContent()).toBe("js");
     await mobile.screenshot({ path: path.join(artifactDir, "code-block-mobile-at-rest.png") });
     await mobileBlock.tap({ position: { x: 12, y: 20 } });
-    await waitToolbarOpacity("1");
-    expect(await toolbarOpacity()).toBe("1");
+    expect(await mobileToolbar.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
     await mobile.screenshot({ path: path.join(artifactDir, "code-block-mobile-tapped.png") });
     await mobile.locator(".msg-text p").first().tap();
-    await waitToolbarOpacity("0");
-    expect(await toolbarOpacity()).toBe("0");
+    expect(await mobileToolbar.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
     await mobile.screenshot({ path: path.join(artifactDir, "code-block-mobile-dismissed.png") });
     await mobileContext.close();
     expect(mobileErrors).toEqual([]);

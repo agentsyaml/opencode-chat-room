@@ -2,9 +2,11 @@ import { LS } from "./state.js";
 
 export function initAnnouncements(app) {
   const $ = app.$, drafts = new Map();
-  const panel = $("#announcementPanel"), trigger = $("#btnAnnouncements"), list = $("#announcementList");
+  const surface = $("#announcementsDialog"), trigger = $("#btnAnnouncements"), list = $("#announcementList");
   const dialog = $("#announcementDialog"), heading = $("#announcementDialogHeading");
+  const panelHeading = $("#announcementHeading"), chatView = $("#chatView");
   let items = [], selected = "", generation = 0, roomGeneration = 0, editorRevision = 0, saveToken = 0;
+  let opener = null, pendingReopen = false, restoreSurfaceFocus = true;
   const key = (id, name = selected) => `${id}\0${name ? `item\0${name}` : "new"}`;
   const roomId = () => app.state.room?.id;
   const currentRoom = (id, request) => roomId() === id && roomGeneration === request;
@@ -23,6 +25,48 @@ export function initAnnouncements(app) {
   function status(text) { $("#announcementStatus").textContent = text; }
   function formStatus(text) { $("#announcementDialogStatus").textContent = text; }
   function count() { $("#announcementCount").textContent = app.t("announcementCount", { count: Array.from($("#announcementContent").value).length }); }
+  const clearPane = () => {
+    surface.classList.remove("is-pane");
+    if (chatView.dataset.sidePane !== "announcements") return;
+    delete chatView.dataset.sidePane;
+    chatView.classList.remove("has-pane");
+  };
+  const showSurface = () => {
+    if (app.panelPlacement("announcements") === "pane") {
+      app.closeOtherPanelSurfaces?.("announcements");
+      surface.classList.add("is-pane");
+      chatView.classList.add("has-pane");
+      chatView.dataset.sidePane = "announcements";
+      if (!surface.open) surface.show();
+    } else {
+      clearPane();
+      if (!surface.open) surface.showModal();
+    }
+  };
+  const syncMode = () => {
+    if (!surface.open || (app.panelPlacement("announcements") === "pane") === surface.classList.contains("is-pane")) return;
+    pendingReopen = true;
+    surface.close();
+    showSurface();
+    panelHeading.focus({ preventScroll: true });
+  };
+  const closeSurface = (focus = true) => {
+    restoreSurfaceFocus = focus;
+    if (surface.open) surface.close();
+  };
+  function openSurface() {
+    const id = roomId();
+    if (!id) return;
+    if (app.panelPlacement("announcements") === "pane") app.closeDocPreview?.(false);
+    if (surface.open) { panelHeading.focus(); return; }
+    app.closePanels?.();
+    const active = document.activeElement;
+    opener = active instanceof HTMLElement && active !== document.body && !active.closest("dialog") && !$("#roomOptions")?.contains(active)
+      ? active : $("#btnRoomOptions");
+    showSurface();
+    panelHeading.focus();
+    void load(id);
+  }
   function render() {
     list.textContent = "";
     for (const entry of items) {
@@ -139,16 +183,35 @@ export function initAnnouncements(app) {
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   trigger.addEventListener("click", () => {
     // The entry lives in the Options menu, so choosing it closes that menu first.
-    const open = panel.hidden; app.closePanels(); panel.hidden = !open;
-    if (open) { void load(); $("#announcementHeading").focus(); }
-    else $("#btnRoomOptions").focus();
+    app.closePanels();
+    openSurface();
   });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !dialog.open && !panel.hidden) { app.closePanels(); $("#btnRoomOptions").focus(); } });
-  const close = app.closePanels;
-  app.closePanels = () => { close(); panel.hidden = true; if (dialog.open) dialog.close(); };
+  $("#btnCloseAnnouncements").addEventListener("click", () => closeSurface());
+  surface.addEventListener("click", (event) => { if (event.target === surface) closeSurface(); });
+  surface.addEventListener("cancel", (event) => { event.preventDefault(); closeSurface(); });
+  surface.addEventListener("close", () => {
+    if (pendingReopen) { pendingReopen = false; return; }
+    clearPane();
+    const focus = restoreSurfaceFocus;
+    restoreSurfaceFocus = true;
+    const target = opener;
+    opener = null;
+    if (focus && target?.isConnected) target.focus({ preventScroll: true });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !surface.open || !surface.classList.contains("is-pane")) return;
+    if (!surface.contains(document.activeElement)) return;
+    event.preventDefault();
+    closeSurface();
+  });
+  app.registerPanelSurface?.("announcements", { close: () => closeSurface(false) });
+  app.watchPanel?.("announcements", syncMode);
+  const closePanels = app.closePanels;
+  app.closePanels = () => { closePanels(); if (dialog.open) dialog.close(); };
   document.addEventListener("chat-room-activated", (event) => {
     const id = event.detail;
     if (dialog.open) dialog.close();
+    if (surface.open && !surface.classList.contains("is-pane")) closeSurface(false);
     formStatus("");
     roomGeneration++; generation++; saveToken++; $("#btnSaveAnnouncement").disabled = false;
     selected = ""; items = []; select(null); void load(id);

@@ -3,12 +3,15 @@
 // from palette-app.mjs.
 import { attachPalette } from "./palette-app.mjs";
 import { attachInfo } from "./info-app.mjs";
+import { attachSettings } from "./settings-app.mjs";
 import { attachReminders } from "./reminder-app.mjs";
 import { attachRoomSettings } from "./room-settings-app.mjs";
 import { attachMessageActions } from "./message-app.mjs";
 import { attachJoinRequests } from "./join-app.mjs";
 import { canonicalizeMentions } from "./mentions.mjs";
 import { mergeMessages, messageStamp, oldestSeq } from "./messages.mjs";
+import { normalizeLanguage, setLanguage, t } from "./i18n.mjs";
+import { normalizeTheme } from "./prefs.mjs";
 
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
 
@@ -22,15 +25,23 @@ const normalizeRoom = (room) => ({
 });
 
 export class ChatApp {
-  constructor({ api, sessionID, participant, host = "", autoPoll = true, settings = {}, downloadDir = process.cwd(), schedule = (fn, ms) => setTimeout(fn, ms) }) {
+  constructor({ api, sessionID, participant, host = "", autoPoll = true, settings = {}, savePrefs = null, downloadDir = process.cwd(), schedule = (fn, ms) => setTimeout(fn, ms) }) {
     this.api = api;
     this.sessionID = sessionID;
     this.participant = participant;
     this.autoPoll = autoPoll;
     this.schedule = schedule;
+    this.savePrefs = typeof savePrefs === "function" ? savePrefs : null;
     this.settings = { ...settings };
     this.token = this.settings.token ?? "";
     delete this.settings.token;
+    this.prefs = {
+      language: normalizeLanguage(this.settings.language),
+      theme: normalizeTheme(this.settings.theme),
+      participant: this.settings.participant ?? participant,
+      url: this.settings.server ?? "",
+    };
+    setLanguage(this.prefs.language);
     this.downloadDir = downloadDir;
     this.closed = false;
     this.pollToken = 0;
@@ -45,7 +56,8 @@ export class ChatApp {
     this.state = {
       host,
       participant,
-      theme: "dark",
+      theme: this.prefs.theme,
+      language: this.prefs.language,
       connection: "connecting",
       rooms: [],
       selected: 0,
@@ -105,14 +117,14 @@ export class ChatApp {
       this.state.selected = found >= 0 ? found : Math.min(this.state.selected, Math.max(0, rooms.length - 1));
       this.state.connection = "online";
       if (!quiet) {
-        this.state.status = "room list refreshed";
+        this.state.status = t("status.refreshed");
         this.state.statusKind = "info";
       }
       this.touch();
       return true;
     } catch (error) {
       this.state.connection = "offline";
-      this.state.status = `could not refresh rooms: ${errorText(error)}`;
+      this.state.status = t("status.refreshFailed", { error: errorText(error) });
       this.state.statusKind = "error";
       this.touch();
       return false;
@@ -138,7 +150,7 @@ export class ChatApp {
     this.state.messages = [];
     this.state.pending = null;
     this.state.highlight = null;
-    this.state.status = `opening #${summary.name}`;
+    this.state.status = t("status.opening", { name: summary.name });
     this.state.statusKind = "info";
     this.touch();
     if (summary.joined) await this.loadRoom(summary.id);
@@ -150,7 +162,7 @@ export class ChatApp {
       const result = await this.api.join(roomID, this.sessionID, this.participant);
       if (!this.isCurrent(roomID)) return;
       if (result?.pending) {
-        const message = String(result.message ?? "join request pending; waiting for approval");
+        const message = String(result.message ?? t("status.joinPending"));
         this.state.pending = { roomId: roomID, message };
         this.state.joined = false;
         this.state.status = message;
@@ -161,7 +173,7 @@ export class ChatApp {
       }
       this.enterRoom(result?.room ?? result, roomID, true);
     } catch (error) {
-      if (this.isCurrent(roomID)) this.setStatus(`could not join: ${errorText(error)}`, "error");
+      if (this.isCurrent(roomID)) this.setStatus(t("status.joinFailed", { error: errorText(error) }), "error");
     }
   }
 
@@ -173,7 +185,7 @@ export class ChatApp {
       const status = typeof result === "string" ? result : result?.status;
       if (status === "joined") {
         this.state.pending = null;
-        this.setStatus("join request approved", "success");
+        this.setStatus(t("status.joinApproved"), "success");
         await this.loadRoom(roomID);
         return;
       }
@@ -182,7 +194,7 @@ export class ChatApp {
         return;
       }
       this.state.pending = null;
-      this.setStatus("join request is no longer pending - press Enter to try again", "error");
+      this.setStatus(t("status.joinStale"), "error");
     } catch {
       this.later(() => this.checkJoin(roomID), 1500);
     }
@@ -193,18 +205,18 @@ export class ChatApp {
       const room = await this.api.getRoom(roomID);
       if (!this.isCurrent(roomID) || !room) return;
       if (room.joined === false) {
-        this.notJoined(roomID, "not a member of this room");
+        this.notJoined(roomID, t("status.notMember"));
         return;
       }
       this.enterRoom(room, roomID, false);
     } catch (error) {
-      if (this.isCurrent(roomID)) this.setStatus(`could not open room: ${errorText(error)}`, "error");
+      if (this.isCurrent(roomID)) this.setStatus(t("status.openFailed", { error: errorText(error) }), "error");
     }
   }
 
   enterRoom(room, roomID, joinedNow) {
     if (!room || typeof room !== "object") {
-      this.setStatus("room data is missing", "error");
+      this.setStatus(t("status.roomMissing"), "error");
       return;
     }
     const summary = this.state.rooms.find((item) => item.id === roomID);
@@ -224,7 +236,7 @@ export class ChatApp {
     this.state.pending = null;
     this.state.messages = cache;
     this.state.connection = "online";
-    this.state.status = joinedNow ? `joined #${this.state.current.name}` : "";
+    this.state.status = joinedNow ? t("status.joined", { name: this.state.current.name }) : "";
     this.state.statusKind = "success";
     if (typeof room.hasMore === "boolean") this.historyMore.set(roomID, room.hasMore);
     const oldest = oldestSeq(cache);
@@ -266,14 +278,14 @@ export class ChatApp {
       );
       if (!this.isCurrent(roomID)) return false;
       if (!result || result.member === false) {
-        this.notJoined(roomID, "you are no longer a member of this room");
+        this.notJoined(roomID, t("status.memberLost"));
         return false;
       }
       const wasOffline = this.state.connection !== "online";
       this.merge(result.items);
       this.state.connection = "online";
       if (wasOffline) {
-        this.state.status = "reconnected";
+        this.state.status = t("status.reconnected");
         this.state.statusKind = "success";
       }
       this.touch();
@@ -282,7 +294,7 @@ export class ChatApp {
     } catch (error) {
       if (controller?.signal.aborted) return false;
       this.state.connection = "reconnecting";
-      this.state.status = `connection lost: ${errorText(error)} - retrying`;
+      this.state.status = t("status.connectionLost", { error: errorText(error) });
       this.state.statusKind = "error";
       this.touch();
       return false;
@@ -334,7 +346,7 @@ export class ChatApp {
     if (!raw) return;
     const room = this.state.current;
     if (!room || !this.state.joined) {
-      this.setStatus("join a room before sending", "error");
+      this.setStatus(t("status.joinBeforeSend"), "error");
       return;
     }
     const text = canonicalizeMentions(raw, room.participants);
@@ -354,12 +366,12 @@ export class ChatApp {
       else if (result?.id) this.merge([result]);
       this.state.highlight = null;
       this.state.connection = "online";
-      this.setStatus("sent", "success");
+      this.setStatus(t("status.sent"), "success");
       this.markRead();
     } catch (error) {
       // Keep text typed while the request was in flight; dropping it loses work.
       this.state.draft = this.state.draft ? `${raw}\n${this.state.draft}` : raw;
-      this.setStatus(`send failed: ${errorText(error)}`, "error");
+      this.setStatus(t("status.sendFailed", { error: errorText(error) }), "error");
     }
   }
 
@@ -432,6 +444,7 @@ export class ChatApp {
 
 attachPalette(ChatApp);
 attachInfo(ChatApp);
+attachSettings(ChatApp);
 attachReminders(ChatApp);
 attachRoomSettings(ChatApp);
 attachMessageActions(ChatApp);

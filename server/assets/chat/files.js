@@ -2,7 +2,7 @@
 import { LS } from "./state.js";
 import { isRoomAdmin } from "./admin-badge.js";
 import { icon } from "./icons.js";
-import { docPreviewFormat, isDocPreviewResource, TEXT_PREVIEW_LIMIT } from "./resource-format.js";
+import { docPreviewFormat, isDocPreviewResource, OFFICE_KINDS, TEXT_PREVIEW_LIMIT } from "./resource-format.js";
 import { createCopyButton, copyResourceText } from "./copy-action.js";
 
 const PAGE_SIZE = 500;
@@ -23,8 +23,9 @@ export function initFiles(app) {
   const $ = app.$;
   const list = $("#fileList"), select = $("#filesUploader"), summary = $("#filesSummary");
   const empty = $("#filesEmpty"), error = $("#filesError"), more = $("#btnFilesMore");
-  const roomName = $("#filesRoomName"), heading = $("#filesHeading"), trigger = $("#btnFiles");
+  const roomName = $("#filesRoomName"), heading = $("#filesHeading"), trigger = $("#btnFiles"), chatView = $("#chatView");
   let items = [], total = 0, loading = false, generation = 0, opener = null, preview = null, previewToken = 0;
+  let pendingReopen = false;
 
   const mediaKind = (mime) => /^image\//.test(mime || "") ? "image"
     : /^audio\//.test(mime || "") ? "audio"
@@ -185,7 +186,8 @@ export function initFiles(app) {
     actions.className = "file-actions";
     const previewID = `file-preview-${resource.id}`;
     const docPreview = isDocPreviewResource(resource);
-    const textPreview = docPreview && docPreviewFormat(resource)?.kind !== "pdf";
+    const previewFormat = docPreview ? docPreviewFormat(resource) : null;
+    const textPreview = Boolean(previewFormat && previewFormat.kind !== "pdf" && !OFFICE_KINDS.has(previewFormat.kind));
     if (mediaKind(resource.mimeType) || docPreview) {
       const inline = mediaKind(resource.mimeType);
       actions.append(actionButton("preview", app.t("filesPreviewLabel", { name: resource.name }), ICONS.preview, inline
@@ -306,8 +308,35 @@ export function initFiles(app) {
     hideError();
   };
 
+  const clearPane = () => {
+    dialog.classList.remove("is-pane");
+    if (chatView.dataset.sidePane !== "files") return;
+    delete chatView.dataset.sidePane;
+    chatView.classList.remove("has-pane");
+  };
+  const show = () => {
+    if (app.panelPlacement("files") === "pane") {
+      app.closeOtherPanelSurfaces?.("files");
+      dialog.classList.add("is-pane");
+      chatView.classList.add("has-pane");
+      chatView.dataset.sidePane = "files";
+      if (!dialog.open) dialog.show();
+    } else {
+      clearPane();
+      if (!dialog.open) dialog.showModal();
+    }
+  };
+  const syncMode = () => {
+    if (!dialog.open || (app.panelPlacement("files") === "pane") === dialog.classList.contains("is-pane")) return;
+    pendingReopen = true;
+    dialog.close();
+    show();
+    heading.focus({ preventScroll: true });
+  };
+
   const open = () => {
     if (!app.state.room) return;
+    if (app.panelPlacement("files") === "pane") app.closeDocPreview?.(false);
     if (dialog.open) { heading.focus(); return; }
     app.closePanels?.();
     const active = document.activeElement;
@@ -323,7 +352,7 @@ export function initFiles(app) {
     closePreview();
     summary.textContent = app.t("filesLoading");
     roomName.textContent = app.state.room.name ? ` · ${app.state.room.name}` : "";
-    dialog.showModal();
+    show();
     heading.focus();
     Promise.resolve(app.loadManageableMembers?.()).then(() => { if (dialog.open && items.length) render(); });
     void load(true);
@@ -334,17 +363,30 @@ export function initFiles(app) {
 
   trigger?.addEventListener("click", () => { app.closePanels(); open(); });
   $("#btnCloseFiles")?.addEventListener("click", close);
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !dialog.open || !dialog.classList.contains("is-pane")) return;
+    if (!dialog.contains(document.activeElement)) return;
+    event.preventDefault();
+    close();
+  });
+  app.registerPanelSurface?.("files", { close });
+  app.watchPanel?.("files", syncMode);
   $("#btnRefreshFiles")?.addEventListener("click", () => void load(true));
   more.addEventListener("click", () => void load(false));
   select.addEventListener("change", render);
   dialog.addEventListener("click", (event) => { if (event.target === dialog) close(); });
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
   dialog.addEventListener("close", () => {
+    // close() queues this event; a rapid reopen can land before it runs, and
+    // clearing here would wipe the freshly opened dialog and its in-flight load.
+    if (pendingReopen) { pendingReopen = false; return; }
+    if (dialog.open) return;
     generation++;
     loading = false;
     setBusy(false);
     previewToken++;
     closePreview();
+    clearPane();
     items = [];
     total = 0;
     list.textContent = "";

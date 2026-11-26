@@ -207,8 +207,10 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     // Download stays available from the pane.
     const headerDownload = page.locator("#btnDocPreviewDownload");
     expect(await headerDownload.locator("svg.fluent-icon").count()).toBe(1);
-    expect(await headerDownload.textContent()).toContain("Download");
+    expect((await headerDownload.textContent())?.trim()).toBe("");
+    expect(await headerDownload.getAttribute("aria-label")).toBe("Download");
     expect(Math.abs((await headerDownload.boundingBox())!.height - 36)).toBeLessThanOrEqual(2);
+    expect(Math.abs((await headerDownload.boundingBox())!.width - 36)).toBeLessThanOrEqual(2);
     expect(await page.locator("#btnDocPreviewCopy svg.copy-icon").count()).toBe(1);
     const downloadPromise = page.waitForEvent("download");
     await page.locator("#btnDocPreviewDownload").click();
@@ -370,6 +372,23 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await page.waitForFunction(() => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - 432) <= 2);
     expect(await page.evaluate(() => localStorage.getItem("chat.sidePaneWidth"))).toBeNull();
     expect(await page.evaluate(() => document.querySelector<HTMLElement>("#chatView")!.style.getPropertyValue("--side-pane-width"))).toBe("");
+
+    // At 1500x900 the file preview uses the same wider workspace as the task board:
+    // the app grows to 1600 max, the pane takes the extra width, and chat keeps 700px.
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await page.waitForFunction(() => document.querySelector("#docPreview")!.getBoundingClientRect().width > 500);
+    const largePreview = await page.evaluate(() => {
+      const width = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().width;
+      return { app: width("#app"), pane: width("#docPreview"), chat: width("#msgScroll"), rail: width("#roomRail") };
+    });
+    expect(largePreview.app).toBeGreaterThan(1440);
+    expect(largePreview.app).toBeLessThanOrEqual(1600);
+    expect(largePreview.pane).toBeGreaterThanOrEqual(502);
+    expect(largePreview.pane).toBeLessThanOrEqual(506);
+    expect(largePreview.chat).toBeGreaterThanOrEqual(699);
+    expect(largePreview.rail).toBe(252);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForFunction(() => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - 432) <= 2);
 
     // A stored width comes back after a reload and re-clamps to the current window.
     await handle.focus();

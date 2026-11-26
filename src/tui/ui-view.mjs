@@ -8,6 +8,7 @@ import {
 } from "@opentui/core";
 import { createOverlays } from "./ui-overlay-view.mjs";
 import { createSuggestView } from "./ui-suggest-view.mjs";
+import { t } from "./i18n.mjs";
 
 export function createView(renderer, theme) {
   const view = {};
@@ -17,6 +18,7 @@ export function createView(renderer, theme) {
     width: "100%",
     height: "100%",
     flexDirection: "column",
+    backgroundColor: theme.surface,
   });
   renderer.root.add(view.root);
 
@@ -71,6 +73,7 @@ export function createView(renderer, theme) {
     flexDirection: "column",
     border: ["right"],
     borderColor: theme.border,
+    backgroundColor: theme.surface,
     minHeight: 0,
   });
   view.body.add(view.roomsPane);
@@ -89,7 +92,7 @@ export function createView(renderer, theme) {
     height: 1,
     wrapMode: "none",
     fg: theme.muted,
-    content: "ROOMS",
+    content: t("rooms.title"),
   });
   view.roomsHeader.add(view.roomsTitle);
 
@@ -112,6 +115,18 @@ export function createView(renderer, theme) {
   });
   view.roomsPane.add(view.roomScroll);
   view.roomScroll.verticalScrollBar.visible = false;
+
+  view.roomsFooter = new TextRenderable(renderer, {
+    id: "rooms-footer",
+    height: 1,
+    flexShrink: 0,
+    wrapMode: "none",
+    truncate: true,
+    paddingX: 1,
+    fg: theme.faint,
+    content: ` ${t("rooms.refreshHint")}`,
+  });
+  view.roomsPane.add(view.roomsFooter);
 
   view.roomContent = new BoxRenderable(renderer, {
     id: "room-content",
@@ -179,11 +194,10 @@ export function createView(renderer, theme) {
     id: "composer-box",
     height: 5,
     flexShrink: 0,
-    border: true,
-    borderStyle: "rounded",
+    border: ["left"],
+    borderStyle: "heavy",
     borderColor: theme.border,
-    title: " message ",
-    titleAlignment: "left",
+    backgroundColor: theme.raised,
     paddingX: 2,
     marginX: 1,
   });
@@ -211,7 +225,7 @@ export function createView(renderer, theme) {
     flexGrow: 1,
     height: 3,
     wrapMode: "char",
-    placeholder: "Write a message...",
+    placeholder: t("chat.composerPlaceholder"),
     placeholderColor: theme.faint,
     backgroundColor: "transparent",
     focusedBackgroundColor: "transparent",
@@ -226,6 +240,7 @@ export function createView(renderer, theme) {
     flexShrink: 0,
     border: ["top"],
     borderColor: theme.border,
+    backgroundColor: theme.surface,
     paddingX: 2,
   });
   view.root.add(view.statusBox);
@@ -255,7 +270,7 @@ export function createView(renderer, theme) {
     height: 1,
     wrapMode: "none",
     fg: theme.faint,
-    content: "Tab focus · Alt+Space palette · ? help",
+    content: t("status.hints", { dot: "●", label: t("connection.online") }),
   });
   view.statusRow.add(view.statusHints);
 

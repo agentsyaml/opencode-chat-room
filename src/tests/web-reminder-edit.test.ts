@@ -42,7 +42,7 @@ test.skipIf(!browserModule)("reminder edits reject bad zones, keep drafts, and n
     await page.locator("#inName").fill("Edit tester"); await page.locator("#inRoomName").fill("Edit room"); await page.locator("#btnCreate").click();
     await page.locator("#chatView").waitFor({ state: "visible" });
     const roomA = await page.evaluate(async (url: string) => (await import(url)).app.state.room.id, "/assets/chat/state.js");
-    await page.locator("#btnReminders").click();
+    await openReminders(page);
     await page.locator(".reminder-list li").getByText("Seeded reminder").waitFor();
 
     // A bad zone must be reported in the form, not thrown out of the submit handler.
@@ -102,7 +102,7 @@ test.skipIf(!browserModule)("reminder edits reject bad zones, keep drafts, and n
     await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "Draft room");
     await page.evaluate(async ({ url, id }: { url: string; id: string }) => (await import(url)).app.activateRoom(id), { url: "/assets/chat/state.js", id: roomA });
     await page.waitForFunction(() => document.querySelector("#roomName")?.textContent === "Edit room");
-    if (!await page.locator("#reminderPanel").isVisible()) await page.locator("#btnReminders").click();
+    await openReminders(page);
     await page.locator("#btnNewReminder").click();
     expect(await page.locator("#reminderText").inputValue()).toBe("Draft keeps its room");
     expect(pageErrors).toEqual([]);
@@ -111,6 +111,13 @@ test.skipIf(!browserModule)("reminder edits reject bad zones, keep drafts, and n
     await rm(directory, { recursive: true, force: true });
   }
 }, 90000);
+
+async function openReminders(page: any) {
+  if (await page.locator("#remindersDialog").evaluate((node: HTMLDialogElement) => node.open)) return;
+  await page.locator("#btnRoomOptions").click();
+  await page.locator("#btnReminders").click();
+  await page.locator("#remindersDialog[open]").waitFor();
+}
 
 function isolatedEnv(directory: string, port: number): NodeJS.ProcessEnv {
   const env = { ...process.env };

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startServer } from "../server/http-server.ts";
+import { startServer } from "../src/platform/http-server.ts";
 
 const sandbox = mkdtempSync(path.join(os.tmpdir(), "chat-room-smoke-"));
 process.env.CHAT_ROOM_STATE_DIR = sandbox;

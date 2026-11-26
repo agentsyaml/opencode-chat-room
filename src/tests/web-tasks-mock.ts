@@ -7,7 +7,7 @@ export type TaskRecord = {
   dueDate: string; participants: string[]; conclusion: string; steps: TaskStep[];
   createdAt: number; updatedAt: number;
 };
-export type TaskApi = { tasks: TaskRecord[]; names: Map<string, string>; admins: Set<string>; clock: number; clearUrls: string[] };
+export type TaskApi = { tasks: TaskRecord[]; names: Map<string, string>; admins: Set<string>; clock: number; clearUrls: string[]; limit?: number; exposeLimit?: boolean; createCalls: number };
 
 export async function installTaskRoutes(page: any, api: TaskApi) {
   const readSteps = (value: unknown): TaskStep[] | null => {
@@ -42,10 +42,16 @@ export async function installTaskRoutes(page: any, api: TaskApi) {
     const sessionID = method === "GET" ? url.searchParams.get("sessionID") || "" : String(body.sessionID || "");
     const callerName = api.names.get(sessionID) || "";
     if (method === "GET" && !taskId) {
-      return reply(200, { tasks: api.tasks.filter((task) => task.roomId === roomId) });
+      const tasks = api.tasks.filter((task) => task.roomId === roomId);
+      const response = api.limit !== undefined && api.exposeLimit !== false ? { tasks, limit: api.limit } : { tasks };
+      return reply(200, response);
     }
     if (method === "POST" && !taskId) {
+      api.createCalls++;
       if (!callerName) return reply(403, { error: "Not a room member" });
+      if (api.limit !== undefined && api.tasks.filter((task) => task.roomId === roomId).length >= api.limit) {
+        return reply(409, { error: "Task limit reached", limit: api.limit });
+      }
       const title = String(body.title ?? "").trim();
       if (!title) return reply(400, { error: "Title required" });
       const dueDate = typeof body.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.dueDate) ? body.dueDate : "";

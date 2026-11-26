@@ -13,7 +13,21 @@ test("every server module is listed in the published files", async () => {
   expect(missing).toEqual([]);
 });
 
-test("the center publishes its channeld sources without a runtime dependency", async () => {
+test("the Monaco editor assets ship with their license", async () => {
+  const root = path.resolve(import.meta.dir, "../..");
+  const manifest = JSON.parse(await Bun.file(path.join(root, "package.json")).text()) as {
+    files: string[];
+    scripts?: Record<string, string>;
+  };
+  expect(manifest.files).toContain("server/assets");
+  expect(manifest.scripts?.prepack).toContain("scripts/build-monaco.ts --quiet");
+  for (const file of ["integration-rules.js", "integration-rules.css", "editor.worker.js", "json.worker.js", "LICENSE", "ThirdPartyNotices.txt"]) {
+    expect(await Bun.file(path.join(root, "server/assets/monaco", file)).exists()).toBe(true);
+  }
+  expect(await Bun.file(path.join(root, "server/assets/monaco/LICENSE")).text()).toContain("MIT License");
+});
+
+test("the server package lists channel runtime modules", async () => {
   const root = path.resolve(import.meta.dir, "../..");
   const manifest = JSON.parse(await Bun.file(path.join(root, "package.json")).text()) as {
     files: string[];
@@ -21,6 +35,8 @@ test("the center publishes its channeld sources without a runtime dependency", a
     dependencies?: Record<string, string>;
   };
   expect(manifest.files).toContain("server/channels.ts");
+  expect(manifest.files).toContain("server/assets");
+  expect(manifest.scripts?.prepack).toContain("scripts/build-monaco.ts --quiet");
   expect(manifest.files).toContain("packages/chat-room-channeld/src");
   expect(manifest.files).toContain("packages/chat-room-channeld/dist/mock-adapter.js");
   expect(manifest.files).toContain("packages/chat-room-channeld/dist/feishu-adapter.js");

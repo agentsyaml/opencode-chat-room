@@ -1,51 +1,65 @@
 // CLI entry for `opencode-chat-room cli`. Config, HTTP and session helpers are
 // imported lazily so --help/--version work without a terminal or OpenTUI.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createApp } from "./app.mjs";
+import { DEFAULT_LANGUAGE, getLanguage, normalizeLanguage, setLanguage, t } from "./i18n.mjs";
 
 const NAME = "opencode-chat-room cli";
-const FALLBACK_VERSION = "0.8.0";
+const FALLBACK_VERSION = "0.8.1";
+const LANGUAGE_VALUES = ["en", "zh", "zh-cn", "zh_cn"];
 
-export const HELP = `opencode-chat-room cli - terminal client for a chat-room server
+export const HELP = t("cli.help");
 
-Usage: opencode-chat-room cli [--name <display name>]
-       opencode-chat-room cli --help
-       opencode-chat-room cli --version
-
-Options:
-  --name <name>   display name for this session
-  --help          show this help
-  --version       print the version
-
-Config is read from chatroom.json / chatroom.jsonc / chatroom.yaml in the
-current directory or ~/.config/chatroom, and from environment variables.
-A token is never accepted on the command line. See the README for fields.
-
-Keys: arrows select rooms · Enter opens · Tab focuses the composer ·
-PageUp/PageDown scroll · Alt+Home/End jumps · Alt+Space or Ctrl+P opens the
-palette · Ctrl+C quits.
-Type / at the start of the composer for inline commands; @ mentions members.
-Commands include: members, join requests, announcements, questions, files,
-reminders, room settings, recall/reveal/reply/ask, delete room and quit.
-This command needs an interactive terminal.
-`;
+export function helpText(language) {
+  const previous = getLanguage();
+  setLanguage(language);
+  const text = t("cli.help");
+  setLanguage(previous);
+  return text;
+}
 
 export function parseArgs(argv = []) {
-  const options = { help: false, version: false, name: undefined };
+  const options = {
+    help: false,
+    version: false,
+    setup: false,
+    name: undefined,
+    language: undefined,
+    theme: undefined,
+    server: undefined,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--version" || arg === "-v") options.version = true;
-    else if (arg === "--name") {
-      const value = argv[index + 1];
-      if (!value || value.startsWith("-")) return { error: "--name requires a display name" };
-      options.name = value;
-      index += 1;
-    } else if (arg.startsWith("--name=")) {
-      const value = arg.slice("--name=".length);
-      if (!value) return { error: "--name requires a display name" };
-      options.name = value;
+    else if (arg === "--setup") options.setup = true;
+    else if (arg.startsWith("--")) {
+      const split = arg.indexOf("=");
+      const key = split === -1 ? arg : arg.slice(0, split);
+      if (!["--name", "--language", "--theme", "--server"].includes(key)) {
+        return { error: `unknown option: ${arg}` };
+      }
+      let value = split === -1 ? argv[index + 1] : arg.slice(split + 1);
+      if (split === -1) {
+        if (!value || value.startsWith("-")) return { error: `${key} requires a value` };
+        index += 1;
+      }
+      if (!value) return { error: `${key} requires a value` };
+      if (key === "--language") {
+        if (!LANGUAGE_VALUES.includes(value.trim().toLowerCase())) {
+          return { error: "--language must be en or zh-CN" };
+        }
+        options.language = normalizeLanguage(value);
+        continue;
+      }
+      if (key === "--theme") {
+        value = value.trim().toLowerCase();
+        if (value !== "dark" && value !== "light") return { error: "--theme must be dark or light" };
+        options.theme = value;
+        continue;
+      }
+      options[key.slice(2)] = value;
     } else {
       return { error: `unknown option: ${arg}` };
     }
@@ -90,6 +104,22 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error ?? "unknown error");
 }
 
+async function helpLanguage(options) {
+  const explicit = options.language ?? process.env.CHAT_ROOM_TUI_LANGUAGE;
+  if (explicit) return normalizeLanguage(explicit);
+  try {
+    const { loadTuiPrefs } = await import("./prefs.mjs");
+    return normalizeLanguage(loadTuiPrefs(process.env).language ?? DEFAULT_LANGUAGE);
+  } catch {
+    return DEFAULT_LANGUAGE;
+  }
+}
+
+/** --setup always opens settings; a missing tui.json means first run. */
+export function shouldOpenSetup(options = {}, prefsExists = true) {
+  return Boolean(options.setup) || !prefsExists;
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   if (options.error) {
@@ -97,7 +127,7 @@ export async function main(argv = process.argv.slice(2)) {
     return 1;
   }
   if (options.help) {
-    process.stdout.write(HELP);
+    process.stdout.write(helpText(await helpLanguage(options)));
     return 0;
   }
   if (options.version) {
@@ -118,12 +148,22 @@ export async function main(argv = process.argv.slice(2)) {
   let renderer;
   let ui;
   try {
-    const [{ resolveTuiConfig, findTuiConfigFile }, { loadSession, saveSession }, { createApi }] = await Promise.all([
+    const [
+      { resolveTuiConfig, findTuiConfigFile, loadTuiConfig },
+      { loadSession, saveSession },
+      { createApi },
+      { loadTuiPrefs, saveTuiPrefs, resolveTuiPreferences, tuiPrefsFile },
+    ] = await Promise.all([
       import("./config.mjs"),
       import("./session.mjs"),
       import("./http.mjs"),
+      import("./prefs.mjs"),
     ]);
-    config = resolveTuiConfig(process.env, process.cwd());
+    const prefs = loadTuiPrefs(process.env);
+    const project = loadTuiConfig(process.env, process.cwd());
+    config = resolveTuiConfig(process.env, process.cwd(), { flags: options, prefs, project });
+    const preferences = resolveTuiPreferences(process.env, process.cwd(), options, { prefs, project });
+    setLanguage(preferences.language);
     const requested = options.name?.trim();
     const session = loadSession(config.stateFile, requested || config.participant);
     const participant = requested || session.name || config.participant;
@@ -163,15 +203,23 @@ export async function main(argv = process.argv.slice(2)) {
         participant,
         sessionFile: config.stateFile,
         configFile: findTuiConfigFile(process.env, process.cwd()) ?? "",
+        prefsFile: tuiPrefsFile(process.env),
+        language: preferences.language,
+        theme: preferences.theme,
         requestTimeoutMs: config.requestTimeoutMs,
         pollTimeoutMs: 20000,
         token: config.token,
       },
+      savePrefs: (next) => saveTuiPrefs(process.env, next),
       downloadDir: path.join(process.cwd(), "downloads"),
     });
     ui = createTui(renderer, app);
     await app.init();
     ui.sync();
+    // Settings need a working server to boot, so first run and --setup open
+    // here, right after the room list loads. Without a configured server the
+    // config error above still exits before the terminal is touched.
+    if (shouldOpenSetup(options, existsSync(preferences.prefsFile))) app.openSettingsEditor();
 
     return await new Promise((resolve) => {
       const finish = () => resolve(0);

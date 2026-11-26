@@ -89,11 +89,11 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
     expect(await page.locator(".code-toolbar svg:not(.fluent-icon)").count()).toBe(0);
     await assertIcons();
 
-    // The Options menu has exactly six icons, each painted beside its label.
+    // The Options menu has exactly seven icons, each painted beside its label.
     await page.locator("#btnRoomOptions").click();
     await page.locator("#roomOptions").waitFor({ state: "visible" });
     await page.waitForTimeout(250);
-    expect(await page.locator("#roomOptions .menu-action svg.fluent-icon").count()).toBe(6);
+    expect(await page.locator("#roomOptions .menu-action svg.fluent-icon").count()).toBe(7);
     const desktopMenu = await page.evaluate(() => {
       const items = Array.from(document.querySelectorAll<HTMLElement>("#roomOptions .menu-action"));
       return items.map((item) => {
@@ -107,7 +107,7 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
         };
       });
     });
-    expect(desktopMenu).toHaveLength(6);
+    expect(desktopMenu).toHaveLength(7);
     for (const item of desktopMenu) {
       expect(item.iconWidth).toBeGreaterThanOrEqual(12);
       expect(item.iconHeight).toBeGreaterThanOrEqual(12);
@@ -183,13 +183,13 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
     });
     expect(mobile.menu.x).toBeGreaterThanOrEqual(0);
     expect(mobile.menu.right).toBeLessThanOrEqual(390);
-    expect(mobile.items).toHaveLength(6);
+    expect(mobile.items).toHaveLength(7);
     for (const item of mobile.items) {
       expect(item.iconWidth).toBeGreaterThanOrEqual(12);
       expect(item.iconHeight).toBeGreaterThanOrEqual(12);
       expect(item.iconRight).toBeLessThanOrEqual(item.labelLeft + 1);
     }
-    expect(mobile.chips).toHaveLength(4);
+    expect(mobile.chips).toHaveLength(3);
     expect(mobile.chips.every((chip: { missing: boolean; width: number; height: number }) => !chip.missing && chip.width > 0 && chip.height > 0)).toBe(true);
     await assertIcons();
     await page.screenshot({ path: path.join(screenshotDir, "web-icons-mobile-390.png") });

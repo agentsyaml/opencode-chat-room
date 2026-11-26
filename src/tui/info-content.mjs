@@ -1,6 +1,7 @@
 // Pure formatting for the CLI parity commands. No terminal or network code, so
 // the row text and the settings redaction can be checked directly in tests.
 import { sanitizeText } from "./messages.mjs";
+import { t } from "./i18n.mjs";
 
 const oneLine = (value, max = 100) => {
   const text = sanitizeText(value).replace(/\s+/g, " ").trim();
@@ -9,7 +10,7 @@ const oneLine = (value, max = 100) => {
 
 function timeLabel(value) {
   const ms = typeof value === "number" ? value : Date.parse(String(value ?? ""));
-  if (!Number.isFinite(ms)) return "unknown time";
+  if (!Number.isFinite(ms)) return t("time.unknown");
   const date = new Date(ms);
   const pad = (part) => String(part).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
@@ -33,10 +34,15 @@ export function memberRows(members, selfID) {
   return (Array.isArray(members) ? members : []).map((member) => {
     const self = Boolean(selfID) && member.sessionID === selfID;
     const name = sanitizeText(member.name || member.sessionID || "?");
-    const type = member.type === "agent" ? "agent" : "human";
-    const activity = sanitizeText(member.activity?.state || "unknown");
+    const type = member.type === "agent" ? t("member.typeAgent") : t("member.typeHuman");
+    const activity = sanitizeText(member.activity?.state || t("member.activityUnknown"));
     return {
-      name: `${self ? "●" : "○"} ${name}${self ? " (you)" : ""} · member · ${type} · ${activity}`,
+      name: t("member.row", {
+        marker: self ? "●" : "○",
+        name: self ? t("member.self", { name }) : name,
+        type,
+        activity,
+      }),
       value: String(member.sessionID ?? name),
     };
   });
@@ -44,7 +50,7 @@ export function memberRows(members, selfID) {
 
 export function announcementRows(announcements) {
   return (Array.isArray(announcements) ? announcements : []).map((item) => ({
-    name: `${sanitizeText(item.name)} · updated ${timeLabel(item.updatedAt)}`,
+    name: t("announcement.row", { name: sanitizeText(item.name), time: timeLabel(item.updatedAt) }),
     value: String(item.name),
     content: String(item.content ?? ""),
     updatedAt: item.updatedAt,
@@ -54,11 +60,17 @@ export function announcementRows(announcements) {
 export function questionRows(open, messages = []) {
   const rows = [];
   const seen = new Set();
+  const rowOf = (marker, sender, text, answered) => t("question.row", {
+    marker,
+    sender: sanitizeText(sender || "?"),
+    text: oneLine(text),
+    answered: answered ? t("question.answered") : "",
+  });
   for (const question of Array.isArray(open) ? open : []) {
     seen.add(question.id);
     const answered = Boolean(question.answeredByMessageID);
     rows.push({
-      name: `${answered ? "✓" : "?"} ${sanitizeText(question.senderId || "?")}: ${oneLine(question.text)}${answered ? " (answered)" : ""}`,
+      name: rowOf(answered ? "✓" : "?", question.senderId, question.text, answered),
       value: String(question.id),
       text: String(question.text ?? ""),
       open: !answered,
@@ -68,7 +80,7 @@ export function questionRows(open, messages = []) {
     if (!message?.isQuestion || !message.answeredByMessageID || seen.has(message.id)) continue;
     seen.add(message.id);
     rows.push({
-      name: `✓ ${sanitizeText(message.senderId || "?")}: ${oneLine(message.text)} (answered)`,
+      name: rowOf("✓", message.senderId, message.text, true),
       value: String(message.id),
       open: false,
     });
@@ -78,7 +90,12 @@ export function questionRows(open, messages = []) {
 
 export function fileRows(resources) {
   return (Array.isArray(resources) ? resources : []).map((item) => ({
-    name: `${sanitizeText(item.name)} · ${formatBytes(item.size)} · ${sanitizeText(item.uploaderName || item.uploaderSessionID || "unknown")} · ${timeLabel(item.createdAt)}`,
+    name: t("file.row", {
+      name: sanitizeText(item.name),
+      size: formatBytes(item.size),
+      uploader: sanitizeText(item.uploaderName || item.uploaderSessionID || t("file.uploaderUnknown")),
+      time: timeLabel(item.createdAt),
+    }),
     value: String(item.id),
     resource: item,
   }));
@@ -86,7 +103,11 @@ export function fileRows(resources) {
 
 export function joinRequestRows(requests) {
   return (Array.isArray(requests) ? requests : []).map((item) => ({
-    name: `${sanitizeText(item.name || item.participantId || "?")} · ${item.isAgent ? "Agent" : "Human"} · ${timeLabel(item.createdAt)}`,
+    name: t("join.row", {
+      name: sanitizeText(item.name || item.participantId || "?"),
+      type: item.isAgent ? t("common.agent") : t("common.human"),
+      time: timeLabel(item.createdAt),
+    }),
     value: String(item.sessionID),
     request: item,
   }));
@@ -95,11 +116,19 @@ export function joinRequestRows(requests) {
 export function reminderRows(reminders) {
   return (Array.isArray(reminders) ? reminders : []).map((item) => {
     const schedule = item.schedule?.type === "cron"
-      ? `cron ${sanitizeText(item.schedule.expression)} (${sanitizeText(item.schedule.timezone || "server")})`
-      : `once ${timeLabel(Date.parse(item.schedule?.at ?? ""))}`;
+      ? t("reminder.cron", {
+        expression: sanitizeText(item.schedule.expression),
+        timezone: sanitizeText(item.schedule.timezone || t("common.server")),
+      })
+      : t("reminder.once", { time: timeLabel(Date.parse(item.schedule?.at ?? "")) });
     const next = typeof item.nextRunAt === "string" ? timeLabel(Date.parse(item.nextRunAt)) : timeLabel(item.nextRunAt);
     return {
-      name: `${item.paused ? "⏸" : "●"} ${oneLine(item.text)} · ${schedule} · next ${next}`,
+      name: t("reminder.row", {
+        marker: item.paused ? "⏸" : "●",
+        text: oneLine(item.text),
+        schedule,
+        time: next,
+      }),
       value: String(item.id),
       paused: Boolean(item.paused),
       text: String(item.text ?? ""),
@@ -114,7 +143,7 @@ function timezoneOrThrow(value) {
     new Intl.DateTimeFormat("en-US", { timeZone: value });
     return value;
   } catch {
-    throw new Error(`invalid timezone: ${value}`);
+    throw new Error(t("schedule.timezone", { value }));
   }
 }
 
@@ -123,24 +152,24 @@ export function parseReminderSchedule(input) {
   const parts = String(input ?? "").trim().split(/\s+/);
   const kind = parts.shift()?.toLowerCase();
   if (kind === "cron") {
-    if (parts.length < 5) throw new Error("cron needs 5 fields, for example: cron 0 9 * * *");
-    if (parts.length > 6) throw new Error("cron accepts 5 fields plus an optional timezone");
+    if (parts.length < 5) throw new Error(t("schedule.cronFields"));
+    if (parts.length > 6) throw new Error(t("schedule.cronAccept"));
     const expression = parts.slice(0, 5).join(" ");
     const timezone = parts[5] ? timezoneOrThrow(parts[5]) : undefined;
     return { type: "cron", expression, ...(timezone ? { timezone } : {}) };
   }
   if (kind === "once") {
-    if (!parts.length) throw new Error("once needs an ISO datetime, for example: once 2026-11-23T09:00");
-    if (parts.length > 2) throw new Error("once accepts an ISO datetime plus an optional timezone");
+    if (!parts.length) throw new Error(t("schedule.onceNeeds"));
+    if (parts.length > 2) throw new Error(t("schedule.onceAccept"));
     const at = parts[0];
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(at) || !Number.isFinite(Date.parse(at))) {
-      throw new Error("once needs an ISO datetime, for example: 2026-11-23T09:00");
+      throw new Error(t("schedule.onceInvalid"));
     }
     const timezone = parts[1] ? timezoneOrThrow(parts[1]) : undefined;
-    if (Date.parse(at) <= Date.now()) throw new Error("once datetime must be in the future");
+    if (Date.parse(at) <= Date.now()) throw new Error(t("schedule.onceFuture"));
     return { type: "once", at, ...(timezone ? { timezone } : {}) };
   }
-  throw new Error('schedule must start with "once" or "cron"');
+  throw new Error(t("schedule.start"));
 }
 
 function safeValue(value, token) {
@@ -161,14 +190,16 @@ function safeValue(value, token) {
 export function settingsMarkdown(settings = {}) {
   const token = settings.token ? String(settings.token) : "";
   const lines = [
-    `- **Server**: ${safeValue(settings.server || "not set", token)}`,
-    `- **Participant**: ${safeValue(settings.participant || "?", token)}`,
-    `- **Session file**: ${safeValue(settings.sessionFile || "unknown", token)}`,
-    `- **Config file**: ${safeValue(settings.configFile || "none (environment only)", token)}`,
-    `- **Theme**: ${safeValue(settings.theme || "dark", token)}`,
-    `- **Delivery**: server long-poll, ${Math.round((settings.pollTimeoutMs ?? 20000) / 1000)}s hold`,
-    `- **Request timeout**: ${Math.round((settings.requestTimeoutMs ?? 10000) / 1000)}s`,
-    `- **Token**: ${token ? "set (redacted)" : "not set"}`,
+    `- **${t("settings.labelServer")}**: ${safeValue(settings.server || t("common.notSet"), token)}`,
+    `- **${t("settings.labelParticipant")}**: ${safeValue(settings.participant || "?", token)}`,
+    `- **${t("settings.labelLanguage")}**: ${safeValue(settings.language || "en", token)}`,
+    `- **${t("settings.labelSessionFile")}**: ${safeValue(settings.sessionFile || t("common.unknown"), token)}`,
+    `- **${t("settings.labelConfigFile")}**: ${safeValue(settings.configFile || t("settings.environmentOnly"), token)}`,
+    `- **${t("settings.labelTheme")}**: ${safeValue(settings.theme || "dark", token)}`,
+    `- **${t("settings.labelDelivery")}**: ${t("settings.deliveryValue", { seconds: Math.round((settings.pollTimeoutMs ?? 20000) / 1000) })}`,
+    `- **${t("settings.labelRequestTimeout")}**: ${t("settings.requestTimeoutValue", { seconds: Math.round((settings.requestTimeoutMs ?? 10000) / 1000) })}`,
+    `- **${t("settings.labelToken")}**: ${token ? t("settings.tokenSet") : t("common.notSet")}`,
+    `- **${t("room.labelEditing")}**: ${t("settings.editAvailable")}`,
   ];
   return lines.join("\n");
 }
@@ -177,22 +208,26 @@ export function roomSettingsMarkdown(room = {}, { participant, sessionID, canEdi
   const owner = Boolean(participant) && room.ownerId === participant;
   const admin = owner || (room.adminIds ?? []).includes(participant);
   const agentAdmin = Boolean(room.adminSessionID) && room.adminSessionID === sessionID;
-  const role = owner ? "owner" : admin ? "admin" : agentAdmin ? "management agent" : "member";
-  const policy = room.joinPolicy === "approval" ? "approval" : "open";
-  const description = room.description ? oneLine(room.description, 300) : "not set";
-  const admins = (room.adminIds ?? []).filter(Boolean).join(", ") || "none";
-  const successor = room.successorId || "none";
-  const management = room.adminSessionID ? (agentName || room.adminSessionID) : "none";
+  const role = owner ? t("room.roleOwner")
+    : admin ? t("room.roleAdmin")
+      : agentAdmin ? t("room.roleManagement")
+        : t("room.roleMember");
+  const policy = room.joinPolicy === "approval" ? t("room.policyApproval") : t("room.policyOpen");
+  const description = room.description ? oneLine(room.description, 300) : t("common.notSet");
+  const admins = (room.adminIds ?? []).filter(Boolean).join(", ") || t("common.none");
+  const successor = room.successorId || t("common.none");
+  const management = room.adminSessionID ? (agentName || room.adminSessionID) : t("common.none");
+  const label = (key) => `- **${t(key)}**`;
   return [
-    `- **Name**: ${oneLine(room.name || "?", 80)}`,
-    `- **Description**: ${description}`,
-    `- **Join policy**: ${policy}`,
-    `- **Kind**: ${room.kind === "direct" ? "direct" : "group"}`,
-    `- **Owner**: ${oneLine(room.ownerId || "?", 80)}`,
-    `- **Admins**: ${admins}`,
-    `- **Successor**: ${successor}`,
-    `- **Management agent**: ${management}`,
-    `- **Your role**: ${role}`,
-    `- **Editing**: ${canEdit ? "available" : "read-only"}`,
+    `${label("room.labelName")}: ${oneLine(room.name || "?", 80)}`,
+    `${label("room.labelDescription")}: ${description}`,
+    `${label("room.labelJoinPolicy")}: ${policy}`,
+    `${label("room.labelKind")}: ${room.kind === "direct" ? t("room.kindDirect") : t("room.kindGroup")}`,
+    `${label("room.labelOwner")}: ${oneLine(room.ownerId || "?", 80)}`,
+    `${label("room.labelAdmins")}: ${admins}`,
+    `${label("room.labelSuccessor")}: ${successor}`,
+    `${label("room.labelManagement")}: ${management}`,
+    `${label("room.labelRole")}: ${role}`,
+    `${label("room.labelEditing")}: ${canEdit ? t("room.editingAvailable") : t("room.editingReadOnly")}`,
   ].join("\n");
 }

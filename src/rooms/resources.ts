@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { databasePath, readState } from "../state/store.ts";
 import { getResource, listResources, putResource, removeResource, type StoredResource } from "../state/sqlite-state.ts";
+import { resourceStorage, resourceStorageKey, StorageConflictError, type ResourceStorage } from "./storage.ts";
 
 export type Resource = StoredResource;
 export class ResourceError extends Error {
@@ -59,7 +60,7 @@ async function waitForResource(roomID: string, id: string): Promise<Resource | u
   return undefined;
 }
 
-export async function uploadResource(roomID: string, filename: string, body: ReadableStream<Uint8Array>, limitBytes: number, uploader?: { sessionID: string; name: string }, requestedID?: string): Promise<Resource> {
+export async function uploadResource(roomID: string, filename: string, body: ReadableStream<Uint8Array>, limitBytes: number, uploader?: { sessionID: string; name: string }, requestedID?: string, storage?: ResourceStorage): Promise<Resource> {
   if (!uuid.test(roomID)) throw new ResourceError(404, "room not found");
   if (requestedID !== undefined && !uuid.test(requestedID)) throw new ResourceError(400, "invalid resource id");
   if (!Number.isSafeInteger(limitBytes) || limitBytes <= 0) throw new Error("limitBytes must be a positive safe integer");
@@ -71,13 +72,14 @@ export async function uploadResource(roomID: string, filename: string, body: Rea
     const existing = await getResource(databasePath(), roomID, requestedID);
     if (existing) return replay(existing, name, uploader);
   }
+  const store = storage ?? resourceStorage();
   const dir = roomDirectory(roomID);
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   const id = requestedID ?? randomUUID();
+  const key = resourceStorageKey(roomID, id);
   const temp = path.join(dir, `${id}.${randomUUID()}.tmp`);
-  const dest = resourcePath({ id, roomID } as Resource);
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-  let linked = false;
+  let stored = false;
   try {
     handle = await fs.open(temp, "wx", 0o600);
     const reader = body.getReader();
@@ -105,16 +107,21 @@ export async function uploadResource(roomID: string, filename: string, body: Rea
     } finally { reader.releaseLock(); }
     const resource: Resource = { id, roomID, name, mimeType: mime(prefix.subarray(0, prefixSize)), size, createdAt: Date.now(), ...(uploader ? { uploaderSessionID: uploader.sessionID, uploaderName: uploader.name } : {}) };
     await handle.close(); handle = undefined;
-    // link() creates the final name only if absent; rename() would replace another attempt's file.
-    try { await fs.link(temp, dest); linked = true; }
-    catch (error) {
+    try {
+      // Local mode links the temp file into place; S3 uploads it and keeps a cache
+      // copy when configured. Both reject an existing key instead of overwriting.
+      await store.put(key, temp, resource.mimeType);
+      stored = true;
+    } catch (error) {
+      if (error instanceof StorageConflictError) {
+        const existing = requestedID ? await waitForResource(roomID, id) : undefined;
+        if (existing) return replay(existing, name, uploader);
+        throw new ResourceError(409, "resource id conflict");
+      }
+      throw error;
+    } finally {
       await fs.rm(temp, { force: true }).catch(() => {});
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const existing = requestedID ? await waitForResource(roomID, id) : undefined;
-      if (existing) return replay(existing, name, uploader);
-      throw new ResourceError(409, "resource id conflict");
     }
-    await fs.rm(temp, { force: true }).catch(() => {});
     try { if (!await putResource(databasePath(), resource)) throw new ResourceError(404, "room not found"); }
     catch (error) {
       const existing = requestedID ? await getResource(databasePath(), roomID, id).catch(() => undefined) : undefined;
@@ -125,7 +132,7 @@ export async function uploadResource(roomID: string, filename: string, body: Rea
   } catch (error) {
     await handle?.close().catch(() => {});
     await fs.rm(temp, { force: true }).catch(() => {});
-    if (linked) await fs.rm(dest, { force: true }).catch(() => {});
+    if (stored) await store.delete(key).catch(() => {});
     throw error;
   }
 }
@@ -142,17 +149,20 @@ export async function findResource(roomID: string, id: string): Promise<Resource
   if (!uuid.test(id)) return undefined;
   return getResource(databasePath(), roomID, id);
 }
-export async function deleteResource(roomID: string, id: string): Promise<boolean> {
+export async function openResource(resource: Pick<Resource, "id" | "roomID">, start?: number, end?: number, storage?: ResourceStorage) {
+  return (storage ?? resourceStorage()).open(resourceStorageKey(resource.roomID, resource.id), start, end);
+}
+export async function deleteResource(roomID: string, id: string, storage?: ResourceStorage): Promise<boolean> {
   const resource = await findResource(roomID, id);
   if (!resource) return false;
   await removeResource(databasePath(), roomID, id);
-  await fs.rm(resourcePath(resource), { force: true });
+  await (storage ?? resourceStorage()).delete(resourceStorageKey(resource.roomID, resource.id));
   return true;
 }
-export async function removeRoomResources(roomID: string): Promise<void> {
+export async function removeRoomResources(roomID: string, storage?: ResourceStorage): Promise<void> {
   if (!uuid.test(roomID)) throw new ResourceError(404, "room not found");
   if (await readState((service) => service.listRooms().some((room) => room.id === roomID))) {
     throw new ResourceError(409, "room still exists; resource cleanup was not performed");
   }
-  await fs.rm(roomDirectory(roomID), { recursive: true, force: true });
+  await (storage ?? resourceStorage()).deletePrefix(roomID);
 }

@@ -1,6 +1,18 @@
-import { createHash } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { cardVersionFromEnv, type CardVersion } from "./feishu-card.ts";
+import { parseInboundEvent } from "./feishu-inbound.ts";
+import { FeishuLiveConnection } from "./feishu-live.ts";
+import {
+  ensureToken,
+  FeishuApiError,
+  sendMessage,
+  startupFailureDetail,
+  type FeishuConfig,
+  type SendParams,
+  type SendReceipt,
+  type TokenState,
+} from "./feishu-send.ts";
 import { createFrameReader, writeFrame } from "./framing.ts";
 import {
   EVENT_SCHEMA_VERSION,
@@ -8,89 +20,28 @@ import {
   PROTOCOL_VERSION,
   RPC_INTERNAL_ERROR,
   RPC_METHOD_NOT_FOUND,
+  adapterRequestId,
   rpcError,
+  rpcRequest,
   rpcResult,
-  type Endpoint,
+  type IngestEvent,
 } from "./protocol.ts";
+
+export { deterministicUuid } from "./feishu-send.ts";
 
 const DEFAULT_BASE_URL = "https://open.feishu.cn";
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_RATE_LIMIT_MS = 1000;
-const TOKEN_REFRESH_MARGIN_MS = 30 * 60_000;
-const FALLBACK_TOKEN_TTL_SECONDS = 7200;
-const TOKEN_INVALID_CODE = 99991663;
-const RATE_LIMIT_CODES = new Set([230020, 99991400]);
 
-type SendState = "sent" | "retryable" | "rate_limited" | "permanent" | "unsupported" | "unknown";
-
-interface SendReceipt {
-  state: SendState;
-  providerMessage?: { endpoint: Endpoint; nativeMessageId: string };
-  retryAfterMs?: number;
-  detail?: string;
-}
-
-interface FeishuConfig {
-  appId: string;
-  appSecret: string;
-  baseUrl: string;
-  timeoutMs: number;
-}
-
-interface AdapterState {
-  accountId: string;
+interface AdapterState extends TokenState {
   config?: FeishuConfig;
-  token?: string;
-  tokenExpiresAt: number;
   started: boolean;
-}
-
-interface SendTarget {
-  roomId?: unknown;
-  room?: unknown;
-}
-
-interface SendParams {
-  idempotencyKey?: unknown;
-  target?: SendTarget;
-  payload?: unknown;
-}
-
-interface RawResponse {
-  status: number;
-  headers: Headers;
-  body?: unknown;
-}
-
-class FeishuTimeoutError extends Error {
-  constructor() {
-    super("feishu request timed out");
-    this.name = "FeishuTimeoutError";
-  }
-}
-
-class FeishuApiError extends Error {
-  constructor(
-    readonly code: number,
-    readonly msg: string,
-    readonly scope: "token" | "send",
-  ) {
-    super(`feishu ${scope} code ${code}: ${msg}`);
-    this.name = "FeishuApiError";
-  }
+  inbound?: FeishuLiveConnection;
+  pending: Map<string, (result: { duplicate?: boolean; error?: string }) => void>;
+  sequence: number;
 }
 
 function logLine(accountId: string, message: string): void {
   console.error(`feishu adapter ${accountId}: ${message}`);
-}
-
-/** Stable 32-hex SHA-256 prefix used as the Feishu idempotent message uuid. */
-export function deterministicUuid(idempotencyKey: string): string {
-  return createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 32);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function configFromEnv(env: NodeJS.ProcessEnv): FeishuConfig | { error: string } {
@@ -105,241 +56,83 @@ function configFromEnv(env: NodeJS.ProcessEnv): FeishuConfig | { error: string }
   const timeout = Number(env.FEISHU_HTTP_TIMEOUT_MS);
   const timeoutMs = Number.isInteger(timeout) && timeout > 0 ? timeout : DEFAULT_TIMEOUT_MS;
   const baseUrl = (env.FEISHU_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
-  return { appId, appSecret, baseUrl, timeoutMs };
-}
-
-async function fetchJson(url: string, init: RequestInit, timeoutMs: number): Promise<RawResponse> {
-  const controller = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
+  let cardVersion: CardVersion;
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    const text = await response.text();
-    let body: unknown;
-    if (text.trim()) {
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = undefined;
-      }
-    }
-    return { status: response.status, headers: response.headers, body };
+    cardVersion = cardVersionFromEnv(env.FEISHU_CARD_VERSION);
   } catch (error) {
-    // A timeout means the request may already be in Feishu's hands.
-    if (timedOut) throw new FeishuTimeoutError();
-    throw error;
-  } finally {
-    clearTimeout(timer);
+    return { error: error instanceof Error ? error.message : String(error) };
   }
-}
-
-async function requestToken(config: FeishuConfig): Promise<{ token: string; expiresAt: number }> {
-  const raw = await fetchJson(
-    `${config.baseUrl}/open-apis/auth/v3/tenant_access_token/internal`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ app_id: config.appId, app_secret: config.appSecret }),
-    },
-    config.timeoutMs,
+  const inbound = env.FEISHU_INBOUND === "1";
+  const inboundChats = new Set(
+    (env.FEISHU_INBOUND_CHATS ?? "").split(/[,\s]+/).map((item) => item.trim()).filter(Boolean),
   );
-  const body = raw.body;
-  if (!isRecord(body) || typeof body.code !== "number") {
-    throw new Error("feishu token response was malformed");
-  }
-  if (body.code !== 0) {
-    throw new FeishuApiError(body.code, typeof body.msg === "string" ? body.msg : "", "token");
-  }
-  if (typeof body.tenant_access_token !== "string" || body.tenant_access_token.length === 0) {
-    throw new Error("feishu token response was malformed");
-  }
-  const expire =
-    typeof body.expire === "number" && body.expire > 0 ? body.expire : FALLBACK_TOKEN_TTL_SECONDS;
-  return { token: body.tenant_access_token, expiresAt: Date.now() + expire * 1000 };
-}
-
-async function ensureToken(config: FeishuConfig, state: AdapterState, force = false): Promise<string> {
-  if (!force && state.token && state.tokenExpiresAt - Date.now() > TOKEN_REFRESH_MARGIN_MS) {
-    return state.token;
-  }
-  const fresh = await requestToken(config);
-  state.token = fresh.token;
-  state.tokenExpiresAt = fresh.expiresAt;
-  logLine(state.accountId, "tenant token acquired");
-  return fresh.token;
-}
-
-function errorCode(error: unknown): string | undefined {
-  const direct = (error as { code?: unknown } | null)?.code;
-  if (typeof direct === "string") return direct;
-  const cause = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
-  return typeof cause === "string" ? cause : undefined;
-}
-
-function networkFailure(error: unknown): SendReceipt {
-  const code = errorCode(error);
-  return { state: "retryable", detail: code ? `feishu network error (${code})` : "feishu network error" };
-}
-
-function failureReceipt(error: unknown): SendReceipt {
-  if (error instanceof FeishuTimeoutError) {
-    return { state: "unknown", detail: error.message };
-  }
-  if (error instanceof FeishuApiError) {
-    if (RATE_LIMIT_CODES.has(error.code)) {
-      return { state: "rate_limited", retryAfterMs: DEFAULT_RATE_LIMIT_MS, detail: `feishu code ${error.code}` };
-    }
-    return { state: "permanent", detail: error.message };
-  }
-  if (error instanceof Error && error.message === "feishu token response was malformed") {
-    return { state: "permanent", detail: error.message };
-  }
-  return networkFailure(error);
-}
-
-function parseRetryAfter(value: string | null): number {
-  if (!value) return DEFAULT_RATE_LIMIT_MS;
-  const seconds = Number(value.trim());
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-  const date = Date.parse(value);
-  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
-  return DEFAULT_RATE_LIMIT_MS;
-}
-
-function apiCode(raw: RawResponse): number | undefined {
-  return isRecord(raw.body) && typeof raw.body.code === "number" ? raw.body.code : undefined;
-}
-
-/** A Feishu business error, as opposed to an HTTP transport failure. */
-function isApiFailure(raw: RawResponse): boolean {
-  const code = apiCode(raw);
-  return raw.status !== 429 && raw.status < 500 && code !== undefined && code !== 0;
-}
-
-const CLIENT_ERROR_STATUSES = new Set([400, 401, 403, 404]);
-
-function apiResponseDetail(body: unknown, status: number): string {
-  const code = isRecord(body) && typeof body.code === "number" ? body.code : undefined;
-  const msg = isRecord(body) && typeof body.msg === "string" ? body.msg : "";
-  if (code !== undefined && code !== 0) return msg ? `feishu code ${code}: ${msg}` : `feishu code ${code}`;
-  return `feishu http ${status}`;
-}
-
-function mapSendResponse(raw: RawResponse, endpoint: Endpoint): SendReceipt {
-  if (raw.status === 429) {
-    return { state: "rate_limited", retryAfterMs: parseRetryAfter(raw.headers.get("retry-after")) };
-  }
-  if (raw.status >= 500) {
-    return { state: "retryable", detail: `feishu http ${raw.status}` };
-  }
-  const body = raw.body;
-  const code = apiCode(raw);
-  if (code !== undefined && RATE_LIMIT_CODES.has(code)) {
+  if (inbound && inboundChats.size === 0) {
     return {
-      state: "rate_limited",
-      retryAfterMs: parseRetryAfter(raw.headers.get("retry-after")),
-      detail: `feishu code ${code}`,
+      error: "FEISHU_INBOUND=1 requires FEISHU_INBOUND_CHATS (comma-separated group chat ids)",
     };
   }
-  if (CLIENT_ERROR_STATUSES.has(raw.status)) {
-    return { state: "permanent", detail: apiResponseDetail(body, raw.status) };
-  }
-  if (!isRecord(body) || typeof body.code !== "number") {
-    return { state: "unknown", detail: "feishu response was malformed" };
-  }
-  if (body.code === 0) {
-    const data = isRecord(body.data) ? body.data : undefined;
-    const messageId = data && typeof data.message_id === "string" ? data.message_id : undefined;
-    if (raw.status >= 200 && raw.status < 300 && messageId) {
-      return { state: "sent", providerMessage: { endpoint, nativeMessageId: messageId } };
-    }
-    return { state: "unknown", detail: "feishu response was malformed" };
-  }
-  const msg = typeof body.msg === "string" ? body.msg : "";
-  return { state: "permanent", detail: msg ? `feishu code ${body.code}: ${msg}` : `feishu code ${body.code}` };
+  return { appId, appSecret, baseUrl, timeoutMs, cardVersion, inbound, inboundChats };
 }
 
-function postMessage(config: FeishuConfig, token: string, body: string): Promise<RawResponse> {
-  return fetchJson(
-    `${config.baseUrl}/open-apis/im/v1/messages?receive_id_type=chat_id`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body,
-    },
-    config.timeoutMs,
-  );
-}
 
-async function sendMessage(
-  config: FeishuConfig,
-  state: AdapterState,
-  params: SendParams,
-): Promise<SendReceipt> {
-  const target = params.target;
-  const chatId = target && typeof target.roomId === "string" && target.roomId
-    ? target.roomId
-    : target && typeof target.room === "string"
-      ? target.room
-      : undefined;
-  if (!chatId) return { state: "permanent", detail: "send target requires a room" };
-  const text = isRecord(params.payload) && typeof params.payload.text === "string"
-    ? params.payload.text
-    : undefined;
-  if (text === undefined) return { state: "permanent", detail: "send payload.text must be a string" };
-  if (typeof params.idempotencyKey !== "string" || params.idempotencyKey.length === 0) {
-    return { state: "permanent", detail: "send requires an idempotency key" };
-  }
+const INGEST_TIMEOUT_MS = 5000;
 
-  const endpoint = target as unknown as Endpoint;
-  // A Feishu interactive card renders Markdown; msg_type "text" would show it literally.
-  const card = {
-    config: { wide_screen_mode: true },
-    elements: [{ tag: "div", text: { tag: "lark_md", content: text } }],
-  };
-  const body = JSON.stringify({
-    receive_id: chatId,
-    msg_type: "interactive",
-    content: JSON.stringify(card),
-    uuid: deterministicUuid(params.idempotencyKey),
+/** Emit one ingest request and wait for the host commit; false means no ack. */
+function emitIngest(state: AdapterState, event: IngestEvent): Promise<boolean> {
+  const id = adapterRequestId(++state.sequence);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      state.pending.delete(id);
+      logLine(state.accountId, "inbound ingest timed out");
+      resolve(false);
+    }, INGEST_TIMEOUT_MS);
+    state.pending.set(id, (result) => {
+      clearTimeout(timer);
+      if (result.error) logLine(state.accountId, `inbound ingest failed: ${result.error}`);
+      resolve(!result.error);
+    });
+    void writeFrame(process.stdout, rpcRequest(id, "ingest", event)).catch(() => {
+      clearTimeout(timer);
+      state.pending.delete(id);
+      resolve(false);
+    });
   });
-
-  let token: string;
-  let raw: RawResponse;
-  try {
-    token = await ensureToken(config, state);
-    raw = await postMessage(config, token, body);
-  } catch (error) {
-    return failureReceipt(error);
-  }
-
-  if (raw.status !== 429 && raw.status < 500 && apiCode(raw) === TOKEN_INVALID_CODE) {
-    try {
-      token = await ensureToken(config, state, true);
-      raw = await postMessage(config, token, body);
-    } catch (error) {
-      return failureReceipt(error);
-    }
-    // A token that is still rejected after a forced refresh will not fix itself.
-    if (isApiFailure(raw) && apiCode(raw) === TOKEN_INVALID_CODE) {
-      return { state: "permanent", detail: `feishu code ${TOKEN_INVALID_CODE}` };
-    }
-  }
-  return mapSendResponse(raw, endpoint);
 }
 
-function startupFailureDetail(error: unknown): string {
-  if (error instanceof FeishuTimeoutError) return error.message;
-  if (error instanceof FeishuApiError) return error.message;
-  if (error instanceof Error && error.message === "feishu token response was malformed") return error.message;
-  const code = errorCode(error);
-  return code ? `feishu token request failed (${code})` : "feishu token request failed";
+async function startInbound(config: FeishuConfig, state: AdapterState): Promise<void> {
+  const live = new FeishuLiveConnection({
+    appId: config.appId,
+    appSecret: config.appSecret,
+    baseUrl: config.baseUrl,
+    timeoutMs: config.timeoutMs,
+    log: (message) => logLine(state.accountId, message),
+    onEvent: async (payload) => {
+      const parsed = parseInboundEvent(payload, {
+        accountId: state.accountId,
+        appId: config.appId,
+        chats: config.inboundChats,
+      });
+      if (!parsed.event) {
+        if (parsed.ignored) logLine(state.accountId, `inbound ignored: ${parsed.ignored}`);
+        return true;
+      }
+      return emitIngest(state, parsed.event);
+    },
+  });
+  await live.start();
+  state.inbound = live;
+  await notifyInbound(state, "ready");
+}
+
+/** Report inbound health without blocking the adapter's outbound path. */
+async function notifyInbound(state: AdapterState, inbound: "ready" | "failed", detail?: string): Promise<void> {
+  const id = adapterRequestId(++state.sequence);
+  const params = detail === undefined ? { inbound } : { inbound, detail };
+  try {
+    await writeFrame(process.stdout, rpcRequest(id, "status", params));
+  } catch {
+    // A status frame must never fail the adapter.
+  }
 }
 
 async function handleRequest(message: Record<string, unknown>, state: AdapterState): Promise<void> {
@@ -355,7 +148,16 @@ async function handleRequest(message: Record<string, unknown>, state: AdapterSta
   }
   const id = rawId;
   const method = message.method;
-  if (typeof method !== "string") return;
+  if (typeof method !== "string") {
+    // Response to an adapter-initiated ingest request.
+    const resolver = state.pending.get(String(id));
+    if (resolver) {
+      state.pending.delete(String(id));
+      const failure = message.error as { message?: string } | undefined;
+      resolver(failure ? { error: failure.message ?? "host ingest failed" } : {});
+    }
+    return;
+  }
 
   if (method === "initialize") {
     const config = configFromEnv(process.env);
@@ -372,7 +174,14 @@ async function handleRequest(message: Record<string, unknown>, state: AdapterSta
         maxFrameBytes: MAX_FRAME_BYTES,
         accounts: {
           [state.accountId]: {
-            send: { text: true, format: ["text", "markdown"], reply: "none", idempotency: "persistent_delivery_key" },
+            send: {
+              text: true,
+              format: ["text", "markdown"],
+              reply: "native",
+              idempotency: "persistent_delivery_key",
+              card: ["1.0", "2.0"],
+            },
+            ...(config.inbound ? { ingress: "durable_outbox" } : {}),
           },
         },
       }),
@@ -395,6 +204,19 @@ async function handleRequest(message: Record<string, unknown>, state: AdapterSta
       logLine(state.accountId, `token validation failed: ${detail}`);
       await writeFrame(process.stdout, rpcError(id, RPC_INTERNAL_ERROR, detail));
       return;
+    }
+    if (state.config.inbound) {
+      try {
+        await startInbound(state.config, state);
+      } catch (error) {
+        // Inbound is opt-in but must never take the working outbound path down.
+        const detail = error instanceof FeishuApiError
+          ? startupFailureDetail(error)
+          : error instanceof Error ? error.message : String(error);
+        const hint = `${detail} (requires long-connection event subscription for im.message.receive_v1 and the bot in an allowlisted group)`;
+        logLine(state.accountId, `inbound disabled; outbound stays active: ${hint}`);
+        await notifyInbound(state, "failed", detail);
+      }
     }
     state.started = true;
     await writeFrame(process.stdout, rpcResult(id, { ready: true }));
@@ -426,6 +248,7 @@ async function handleRequest(message: Record<string, unknown>, state: AdapterSta
   }
 
   if (method === "shutdown") {
+    await state.inbound?.stop();
     await writeFrame(process.stdout, rpcResult(id, {}));
     process.exit(0);
   }
@@ -438,6 +261,8 @@ export function runFeishuAdapter(): Promise<void> {
     accountId: process.env.CHANNELD_ACCOUNT_ID ?? "feishu",
     tokenExpiresAt: 0,
     started: false,
+    pending: new Map(),
+    sequence: 0,
   };
   const read = createFrameReader(
     (message) => {
@@ -449,6 +274,11 @@ export function runFeishuAdapter(): Promise<void> {
   );
   process.stdin.on("data", (chunk: Buffer) => read(chunk));
   logLine(state.accountId, "ready on stdio");
+  const finish = (): void => {
+    void state.inbound?.stop();
+  };
+  process.stdin.once("end", finish);
+  process.stdin.once("close", finish);
   return new Promise((resolve) => {
     process.stdin.once("end", resolve);
     process.stdin.once("close", resolve);

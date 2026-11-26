@@ -1,4 +1,7 @@
 import { pointerOrSelectionActive } from "./message-window.js";
+import { icon } from "./icons.js";
+
+const READ_ALL_ICON = icon("checkmark", "message-read-check");
 
 export function initReceipts(app) {
   const $ = app.$, panel = $("#readerPanel");
@@ -96,13 +99,22 @@ export function initReceipts(app) {
   }
   function updateButton(button, message, own = button.dataset.ownMessage === "true") {
     const readers = readersFor(message), count = readers.length, known = hasReceiptData(message);
-    const label = readerStatus(message, readers);
+    const allRead = own && known && readByEveryone(message, readers);
+    const label = allRead ? app.t("receiptAllRead") : readerStatus(message, readers);
     button.hidden = !own && count === 0;
-    button.textContent = String(count || (known ? 0 : "…"));
-    button.dataset.readerState = count ? "read" : known ? "empty" : "unknown";
+    if (allRead) button.innerHTML = READ_ALL_ICON;
+    else button.textContent = String(count || (known ? 0 : "…"));
+    button.dataset.readerState = allRead ? "all" : count ? "read" : known ? "empty" : "unknown";
     button.setAttribute("aria-label", label);
     button.setAttribute("aria-expanded", String(selectedID === message.id));
     button.title = label;
+  }
+  function readByEveryone(message, readers) {
+    const senderID = message.senderSessionID || (app.state.room?.kind === "direct" ? message.senderId : "");
+    const eligible = (app.state.memberSessions.get(app.state.room?.id) || []).filter((member) => member.sessionID && member.sessionID !== senderID);
+    if (!eligible.length) return false;
+    const seen = new Set(readers.map((reader) => reader.sessionID));
+    return eligible.every((member) => seen.has(member.sessionID));
   }
   function readersFor(message) {
     const key = receiptKey(message);

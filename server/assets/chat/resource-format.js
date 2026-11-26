@@ -2,6 +2,14 @@
 // sniffs text and PDF uploads as application/octet-stream, so the filename
 // extension is a first-class signal alongside the MIME type.
 export const TEXT_PREVIEW_LIMIT = 2 * 1024 * 1024;
+// Office files are zipped XML packages; the viewer needs far more room than text.
+export const OFFICE_PREVIEW_LIMIT = 20 * 1024 * 1024;
+export const OFFICE_KINDS = new Set(["docx", "xlsx", "pptx"]);
+const OFFICE_MIMES = {
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+};
 
 const MIME_LANGUAGES = {
   "application/json": "json", "application/ld+json": "json",
@@ -65,6 +73,9 @@ export function docPreviewFormat(resource) {
   if (mime === "text/markdown" || mime === "text/x-markdown" || ext === "md" || ext === "markdown") {
     return { kind: "markdown", language: "", label: "" };
   }
+  // Server sniffing reports Office packages as octet-stream, so the extension counts.
+  const office = OFFICE_MIMES[mime] || (OFFICE_KINDS.has(ext) ? ext : "");
+  if (office) return { kind: office, language: "", label: office.toUpperCase() };
   const knownExtension = Object.hasOwn(EXTENSION_LANGUAGES, ext);
   if (!knownExtension && !isTextMime(mime)) return null;
   const language = knownExtension ? EXTENSION_LANGUAGES[ext] : MIME_LANGUAGES[mime] || "";

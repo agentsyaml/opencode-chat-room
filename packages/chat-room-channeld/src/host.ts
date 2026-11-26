@@ -4,8 +4,10 @@ import { applyReceipt, notifyDeliveryResult, type DeliveryResultHandler } from "
 import { parseTarget, startFailureReason, toEndpoint, validateTargets } from "./host-helpers.ts";
 import { IngestGate, type IngestResult } from "./ingest-gate.ts";
 import { log } from "./log.ts";
-import type { Endpoint, IngestEvent } from "./protocol.ts";
+import type { Endpoint, IngestEvent, MessageRef } from "./protocol.ts";
 import { matchRules, planPayload, sameEndpoint, targetKey } from "./rules.ts";
+import type { ChannelAccountRuntime } from "./stats.ts";
+import { sanitizeAccountError } from "./stats.ts";
 import { openState, type ChannelState, type DeliveryRow } from "./state.ts";
 
 export type { IngestResult } from "./ingest-gate.ts";
@@ -26,6 +28,7 @@ export interface SpawnAdapterContext {
   onIngest(event: IngestEvent): Promise<{ duplicate: boolean; eventId?: string }>;
   onExit(code: number | null, signal: NodeJS.Signals | null): void;
   onUnavailable(reason: string): void;
+  onStatus(status: { inbound?: string; detail?: string }): void;
 }
 
 export type SpawnAdapter = (account: AccountConfig, context: SpawnAdapterContext) => AdapterHandle;
@@ -36,6 +39,16 @@ export interface HostDeps {
   now?: () => number;
   deliveryIntervalMs?: number;
   onDeliveryResult?: DeliveryResultHandler;
+  /**
+   * Called once for a newly committed ingest event, never for duplicates or
+   * echoes. The host awaits it before reporting success: for an inbound
+   * notification, a rejection rolls the event back and becomes an ingest error
+   * so the provider retries instead of ACKing a lost message. Duplicate/replay
+   * suppression is durable via the event dedup key.
+   */
+  onIngestCommitted?: (event: IngestEvent) => Promise<void> | void;
+  /** Events used as inbound room notifications must not match outbound rules. */
+  notificationOnly?: (event: IngestEvent) => boolean;
 }
 
 function defaultSpawnAdapter(account: AccountConfig, context: SpawnAdapterContext): AdapterHandle {
@@ -49,18 +62,22 @@ export class ChannelHost {
   readonly #now: () => number;
   readonly #deliveryIntervalMs: number;
   readonly #onDeliveryResult?: DeliveryResultHandler;
+  readonly #onIngestCommitted?: (event: IngestEvent) => Promise<void> | void;
+  readonly #notificationOnly?: (event: IngestEvent) => boolean;
   readonly #adapters = new Map<string, AdapterHandle>();
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #inFlight = new Map<string, Set<string>>();
   readonly #notified = new Set<string>();
   readonly #active = new Set<Promise<void>>();
   readonly #disabled = new Set<string>();
+  readonly #accountStates = new Map<string, ChannelAccountRuntime>();
   readonly #gate = new IngestGate((accountId, _event, _error) => {
     this.#disableAccount(accountId, "ingest barrier limit reached");
   });
   #state?: ChannelState;
   #running = false;
   #starting = false;
+  #stopReason?: string;
   #idleTimer?: ReturnType<typeof setInterval>;
   #rejectionHandler?: (reason: unknown) => void;
 
@@ -71,6 +88,8 @@ export class ChannelHost {
     this.#now = deps.now ?? Date.now;
     this.#deliveryIntervalMs = deps.deliveryIntervalMs ?? 200;
     this.#onDeliveryResult = deps.onDeliveryResult;
+    this.#onIngestCommitted = deps.onIngestCommitted;
+    this.#notificationOnly = deps.notificationOnly;
   }
 
   /** Account ids whose adapter failed to start or exited; their queues stay paused. */
@@ -78,11 +97,24 @@ export class ChannelHost {
     return [...this.#disabled];
   }
 
+  /** Live per-account state keyed by `platform/account`, including startup failures. */
+  get accountRuntimeStates(): ReadonlyMap<string, ChannelAccountRuntime> {
+    return new Map(this.#accountStates);
+  }
+
   /** Read-only view for routes: unknown ids or platform mismatches are missing. */
   targetStatus(platform: string, accountId: string): "ready" | "disabled" | "missing" {
     const account = this.#config.accounts.find((item) => item.id === accountId);
     if (!account || account.platform !== platform) return "missing";
     return this.#disabled.has(accountId) ? "disabled" : "ready";
+  }
+
+  /** Latest provider message sent for a logical room message, for native replies. */
+  findProviderMessage(endpoint: Endpoint, logicalMessageId: string): MessageRef | undefined {
+    const state = this.#state;
+    if (!state || !logicalMessageId) return undefined;
+    const nativeMessageId = state.findProviderMessage(targetKey(endpoint), logicalMessageId);
+    return nativeMessageId ? { endpoint, nativeMessageId } : undefined;
   }
 
   async start(): Promise<void> {
@@ -115,13 +147,17 @@ export class ChannelHost {
           onIngest: (event) => this.ingest(event),
           onExit: (code, signal) => this.#handleExit(account.id, code, signal),
           onUnavailable: (reason) => this.#disableAccount(account.id, reason),
+          onStatus: (status) => this.#handleAdapterStatus(account.id, status),
         });
         this.#adapters.set(account.id, adapter);
         await adapter.start();
+        const current = this.#accountStates.get(`${account.platform}/${account.id}`);
+        this.#setAccountState(account, "started", current?.lastError);
         this.#schedule(account.id);
         return { id: account.id };
       } catch (error) {
         const reason = startFailureReason(account.id, error);
+        this.#setAccountState(account, "failed", reason);
         this.#disabled.add(account.id);
         log.error(`adapter ${account.id} failed to start: ${reason}`, { account: account.id });
         if (adapter) {
@@ -146,6 +182,7 @@ export class ChannelHost {
       } else {
         const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
         failures.push({ id: account.id, reason });
+        this.#setAccountState(account, "failed", reason);
         this.#disabled.add(account.id);
         log.error(`adapter ${account.id} failed to start: ${reason}`, { account: account.id });
       }
@@ -169,6 +206,7 @@ export class ChannelHost {
       state.close();
       this.#state = undefined;
       this.#disabled.clear();
+      this.#accountStates.clear();
       const detail = failures.map((failure) => `${failure.id}: ${failure.reason}`).join("; ");
       throw new Error(`no adapters started${detail ? `: ${detail}` : ""}`);
     }
@@ -206,6 +244,27 @@ export class ChannelHost {
     }
     const stored: IngestEvent = { ...event, ingressSeq: result.ingressSeq };
     log.info(`ingested ${stored.kind}`, { event: stored.eventId });
+
+    if (this.#onIngestCommitted) {
+      try {
+        await this.#onIngestCommitted(stored);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        // An inbound notification owns the ACK: roll back and fail the ingest so
+        // Feishu retries. Other consumer failures stay contained as before.
+        if (this.#notificationOnly?.(stored)) {
+          state.deleteIngestEvent(stored.eventId);
+          log.error(`inbound commit rolled back: ${message}`, { event: stored.eventId });
+          throw error;
+        }
+        log.warn(`onIngestCommitted failed: ${message}`, { event: stored.eventId });
+      }
+    }
+
+    if (this.#notificationOnly?.(stored)) {
+      log.info("inbound notification only; outbound rules skipped", { event: stored.eventId });
+      return { duplicate: false, eventId: stored.eventId };
+    }
 
     if (stored.kind === "message.forward_requested") {
       const selected = stored.selectedMessage;
@@ -256,7 +315,7 @@ export class ChannelHost {
     return { duplicate: false, eventId: stored.eventId };
   }
 
-  async stop(): Promise<void> {
+  async stop(options: { abortInFlight?: boolean } = {}): Promise<void> {
     if (!this.#running && !this.#state) {
       this.#clearIdle();
       this.#removeRejectionGuard();
@@ -264,10 +323,17 @@ export class ChannelHost {
     }
     this.#running = false;
     this.#starting = false;
+    const stopReason = "relay runtime stopped";
+    this.#stopReason = stopReason;
     this.#clearIdle();
     for (const timer of this.#timers.values()) clearTimeout(timer);
     this.#timers.clear();
+    if (options.abortInFlight) {
+      this.#settleInFlightUnknown(stopReason);
+      await this.#stopAdapters();
+    }
     await Promise.allSettled([...this.#active]);
+    this.#settleInFlightUnknown(stopReason);
     await this.#stopAdapters();
     this.#state?.close();
     this.#state = undefined;
@@ -275,6 +341,7 @@ export class ChannelHost {
     this.#inFlight.clear();
     this.#notified.clear();
     this.#disabled.clear();
+    this.#accountStates.clear();
     this.#removeRejectionGuard();
     log.info("host stopped");
   }
@@ -356,6 +423,8 @@ export class ChannelHost {
       } finally {
         inFlight.delete(row.deliveryId);
       }
+      // A host stop wins over a late send result: reload must not auto-resend.
+      if (this.#stopReason) receipt = { state: "unknown", detail: this.#stopReason };
       applyReceipt(state, row, attemptId, accountId, receipt, this.#now());
       notifyDeliveryResult(state, row.deliveryId, this.#onDeliveryResult, { attemptId, notified: this.#notified });
     } finally {
@@ -364,6 +433,27 @@ export class ChannelHost {
         this.#pauseAccountDeliveries(accountId, "account disabled until restart");
       }
     }
+  }
+
+  /** Stop must never leave rows that the next host would auto-resend. */
+  #settleInFlightUnknown(reason: string): void {
+    const state = this.#state;
+    if (!state) return;
+    for (const [accountId, deliveryIds] of this.#inFlight) {
+      for (const deliveryId of deliveryIds) {
+        try {
+          state.markDelivery(deliveryId, "unknown", { lastError: reason });
+          notifyDeliveryResult(state, deliveryId, this.#onDeliveryResult, { notified: this.#notified });
+        } catch (error) {
+          this.#safeWarn(
+            `could not mark delivery unknown: ${error instanceof Error ? error.message : String(error)}`,
+            accountId,
+            deliveryId,
+          );
+        }
+      }
+    }
+    this.#inFlight.clear();
   }
 
   #pauseAccountDeliveries(accountId: string, reason: string): void {
@@ -383,9 +473,37 @@ export class ChannelHost {
     }
   }
 
+  /** Inbound health is advisory: failures must not disable a working outbound account. */
+  #handleAdapterStatus(accountId: string, status: { inbound?: string; detail?: string }): void {
+    if (this.#disabled.has(accountId)) return;
+    const account = this.#config.accounts.find((item) => item.id === accountId);
+    if (!account) return;
+    const key = `${account.platform}/${account.id}`;
+    if (status.inbound === "failed") {
+      const detail = sanitizeAccountError(`inbound failed: ${status.detail ?? "unknown"}`);
+      this.#accountStates.set(key, { state: "started", lastError: detail });
+      log.warn(detail, { account: accountId });
+    } else if (status.inbound === "ready") {
+      this.#accountStates.set(key, { state: "started" });
+    }
+  }
+
+  #setAccountState(
+    account: AccountConfig,
+    state: ChannelAccountRuntime["state"],
+    lastError?: string,
+  ): void {
+    this.#accountStates.set(
+      `${account.platform}/${account.id}`,
+      lastError ? { state, lastError } : { state },
+    );
+  }
+
   #disableAccount(accountId: string, reason: string): void {
     if (this.#disabled.has(accountId)) return;
     this.#disabled.add(accountId);
+    const account = this.#config.accounts.find((item) => item.id === accountId);
+    if (account) this.#setAccountState(account, "disabled", reason);
 
     const timer = this.#timers.get(accountId);
     if (timer) {

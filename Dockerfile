@@ -25,6 +25,8 @@ ENV NODE_ENV=production \
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/src/state/pg-worker.mjs /app/src/state/pg-worker.mjs
+COPY --from=build /app/src/state/pg-sql.mjs /app/src/state/pg-sql.mjs
 COPY --from=build /app/src/tui ./src/tui
 COPY --from=build /app/packages/chat-room-channeld/dist ./packages/chat-room-channeld/dist
 COPY package.json ./

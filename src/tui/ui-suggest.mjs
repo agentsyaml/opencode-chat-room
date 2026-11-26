@@ -5,6 +5,7 @@ import { buildCommands, filterCommands } from "./palette.mjs";
 import { insertMention, mentionItems, mentionTrigger } from "./mentions.mjs";
 import { SUGGEST_LIMIT } from "./ui-suggest-view.mjs";
 import { syncMentionHighlights } from "./ui-mentions.mjs";
+import { t } from "./i18n.mjs";
 
 function hide(ui) {
   ui.suggestBox.visible = false;
@@ -62,7 +63,7 @@ function renderSuggest(ui, state, kind, items) {
   ui.suggestBox.height = count + 3;
   ui.suggestBox.borderColor = theme.border;
   ui.suggestBox.backgroundColor = theme.surface;
-  ui.suggestBox.title = kind === "slash" ? " commands " : " mentions ";
+  ui.suggestBox.title = ` ${kind === "slash" ? t("suggest.commands") : t("suggest.mentions")} `;
   ui.suggestHint.fg = theme.muted;
 
   ui.suggestRows.forEach(({ row, label }, index) => {
@@ -71,7 +72,7 @@ function renderSuggest(ui, state, kind, items) {
       row.visible = index === 0 && !items.length;
       if (index === 0 && !items.length) {
         row.backgroundColor = "transparent";
-        label.content = "No commands";
+        label.content = t("suggest.noCommands");
         label.fg = theme.muted;
       }
       return;
@@ -86,9 +87,9 @@ function renderSuggest(ui, state, kind, items) {
   const counter = items.length ? ` · ${Math.min(selected + 1, items.length)}/${items.length}` : "";
   ui.suggestHint.content = kind === "slash"
     ? items.length
-      ? ` ↑↓ select · Enter run · Esc dismiss${counter}`
-      : " No commands · Enter sends as message · Esc dismiss"
-    : ` ↑↓ select · Enter insert · Esc dismiss${counter}`;
+      ? ` ${t("suggest.runHint", { count: counter })}`
+      : ` ${t("suggest.emptyHint")}`
+    : ` ${t("suggest.mentionHint", { count: counter })}`;
   ui.renderer.requestRender();
 }
 

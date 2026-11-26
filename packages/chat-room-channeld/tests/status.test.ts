@@ -157,6 +157,7 @@ describe("channel stats", () => {
       accounts: [
         {
           account: "mock/a",
+          state: "unknown",
           queueDepth: 1,
           oldestBacklogAt: accountAOldest,
           unknown: 1,
@@ -165,6 +166,7 @@ describe("channel stats", () => {
         },
         {
           account: "mock/b",
+          state: "unknown",
           queueDepth: 2,
           oldestBacklogAt: accountBOldest,
           unknown: 0,
@@ -173,6 +175,7 @@ describe("channel stats", () => {
         },
         {
           account: "mock/c",
+          state: "unknown",
           queueDepth: 0,
           oldestBacklogAt: null,
           unknown: 0,

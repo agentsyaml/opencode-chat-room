@@ -77,6 +77,7 @@ export function renderMarkdown(root, text, app) {
     }
   }
   decorateLinks(fragment);
+  wrapTables(fragment);
   fragment.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.disabled = true; });
   const codeBlocks = [...fragment.querySelectorAll("pre > code")];
   for (const code of codeBlocks) decorateCodeBlock(code, app);
@@ -90,20 +91,32 @@ export function renderMarkdown(root, text, app) {
   for (const resource of resources) void loadResourceCard(resource.card, resource.roomId, app);
 }
 
+// A narrow screen scrolls the table inside a frame instead of widening the message.
+function wrapTables(fragment) {
+  for (const table of fragment.querySelectorAll("table")) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "markdown-table";
+    table.replaceWith(wrapper);
+    wrapper.append(table);
+  }
+}
+
 function decorateCodeBlock(code, app) {
   const pre = code.parentElement;
   if (!pre || pre.closest(".mermaid-diagram") || pre.parentElement?.classList.contains("code-block")) return;
-  const block = document.createElement("div");
+  const block = document.createElement("div"), head = document.createElement("div");
   block.className = "code-block";
+  head.className = "code-block-head";
   pre.replaceWith(block);
-  block.append(pre, codeToolbar(code, pre, block, app));
-  // Touch screens have no hover: a tapped code block keeps focus so its toolbar stays reachable.
-  if (window.matchMedia("(pointer: coarse)").matches) {
-    block.tabIndex = 0;
-    block.addEventListener("pointerdown", (event) => {
-      if (!event.target.closest?.(".code-tool-button")) block.focus({ preventScroll: true });
-    });
+  const language = (/language-(\S+)/.exec(code.className) || [])[1];
+  if (language) {
+    const label = document.createElement("span");
+    label.className = "code-language";
+    label.textContent = language.toLowerCase();
+    head.append(label);
   }
+  head.append(codeToolbar(code, pre, block, app));
+  block.append(head, pre);
 }
 
 function codeToolbar(code, pre, block, app) {

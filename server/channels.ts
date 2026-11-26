@@ -6,16 +6,26 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { ServerSettings } from "../src/config/file-config.ts";
+import {
+  adminMessage,
+  persistRoomSettings,
+  readAdminBody,
+  type ChannelSettingsPatch,
+} from "./channel-settings.ts";
+import { handleIntegrationAdmin } from "./channel-integration.ts";
 import { databasePath, writeState } from "../src/state/store.ts";
 import { openStateDatabase } from "../src/state/sqlite-state.ts";
+import { writeSqliteStateWithDatabase } from "../src/state/sqlite-state.ts";
 import {
   parseConfig,
   type ChannelConfig,
   type RuleTarget,
 } from "../packages/chat-room-channeld/src/config.ts";
 import { createHost, type ChannelHost, type SpawnAdapter } from "../packages/chat-room-channeld/src/host.ts";
+import { validateTargets } from "../packages/chat-room-channeld/src/host-helpers.ts";
 import { EVENT_SCHEMA_VERSION, type Endpoint, type IngestEvent } from "../packages/chat-room-channeld/src/protocol.ts";
 import { matchRules, targetKey } from "../packages/chat-room-channeld/src/rules.ts";
+import { inboundRoomText, matchInboundRoutes } from "../packages/chat-room-channeld/src/inbound.ts";
 import {
   isTerminalDeliveryState,
   readChannelStats,
@@ -34,8 +44,20 @@ export type ChannelDeps = {
   deliveryIntervalMs?: number;
 };
 
-// The center accepts an optional receipt because an account disabled mid-send
-// records a terminal `unknown` without one; the message must not invent one.
+export type { ChannelSettingsPatch } from "./channel-settings.ts";
+export type ChannelControllerDeps = ChannelDeps & {
+  env?: NodeJS.ProcessEnv;
+  persistSettings?: (next: ChannelSettingsPatch) => Promise<boolean> | boolean;
+};
+export interface ChannelController {
+  readonly runtime: ChannelsRuntime | undefined;
+  readonly enabled: boolean;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  handle(req: Request, url: URL): Promise<Response | undefined>;
+}
+
+// A disabled mid-send account records terminal `unknown` without a receipt.
 export type DeliveryResultCallback = (
   event: IngestEvent | undefined,
   delivery: DeliveryRow,
@@ -112,14 +134,45 @@ export function createDeliveryResultHandler(): DeliveryResultCallback {
 }
 
 /**
- * Start the relay host when `server.channeld.enabled` is on. A missing or
- * invalid config fails startup; an adapter start failure only disables channels.
+ * Build the inbound-room notifier. One room message is appended per committed
+ * event and route. The marker table and message append share one SQLite
+ * transaction, so a retry after a transport failure cannot duplicate a room
+ * message; a failed append rolls the channel event back in the host so Feishu
+ * retries instead of ACKing a lost notification. Inbound events never match
+ * outbound rules.
  */
-export async function startChannels(
-  settings: ServerSettings,
-  deps: ChannelDeps = {},
-): Promise<ChannelsRuntime | undefined> {
-  if (!settings.channeld?.enabled) return undefined;
+export function createInboundRelay(config: ChannelConfig): {
+  onIngestCommitted: (event: IngestEvent) => Promise<void>;
+  notificationOnly: (event: IngestEvent) => boolean;
+} {
+  return {
+    notificationOnly: (event) => matchInboundRoutes(config, event).length > 0,
+    onIngestCommitted: async (event) => {
+      for (const route of matchInboundRoutes(config, event)) {
+        const text = inboundRoomText(event, route);
+        if (!text) continue;
+        await writeSqliteStateWithDatabase(databasePath(), (svc, _registry, db) => {
+          db.exec(
+            `CREATE TABLE IF NOT EXISTS channel_inbound_relays (
+               event_id TEXT NOT NULL,
+               room_id TEXT NOT NULL,
+               relayed_at INTEGER NOT NULL,
+               PRIMARY KEY (event_id, room_id)
+             )`,
+          );
+          const inserted = db.query(
+            "INSERT OR IGNORE INTO channel_inbound_relays (event_id, room_id, relayed_at) VALUES (?, ?, ?)",
+          ).run(event.eventId, route.to.room, Date.now());
+          if (Number(inserted.changes) === 0) return;
+          svc.addEvent(route.to.room, text);
+        });
+      }
+    },
+  };
+}
+
+/** Parse and fully validate a config before an old runtime is touched. */
+function loadValidChannelConfig(settings: ServerSettings): ChannelConfig {
   const configPath = settings.channeld.config;
   if (!configPath) {
     throw new Error(
@@ -129,11 +182,21 @@ export async function startChannels(
   const stateDir = path.dirname(databasePath());
   const stateFile = resolveChannelStateFile(stateDir, settings.channeld.stateFile);
   const config = loadChannelConfig(configPath, stateFile);
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  validateTargets(config);
+  return config;
+}
+
+async function activateRuntime(
+  config: ChannelConfig,
+  deps: ChannelDeps,
+): Promise<ChannelsRuntime | undefined> {
+  mkdirSync(path.dirname(config.stateFile), { recursive: true, mode: 0o700 });
+  const inbound = createInboundRelay(config);
   const host = createHost(config, {
     spawnAdapter: deps.spawnAdapter,
     deliveryIntervalMs: deps.deliveryIntervalMs,
     onDeliveryResult: createDeliveryResultHandler(),
+    ...inbound,
   });
   try {
     await host.start();
@@ -146,13 +209,172 @@ export async function startChannels(
   return { host, config };
 }
 
-export async function stopChannels(runtime: ChannelsRuntime | undefined): Promise<void> {
+/**
+ * Start the relay host when `server.channeld.enabled` is on. A missing or
+ * invalid config fails startup; an adapter start failure only disables channels.
+ */
+export async function startChannels(
+  settings: ServerSettings,
+  deps: ChannelDeps = {},
+): Promise<ChannelsRuntime | undefined> {
+  if (!settings.channeld?.enabled) return undefined;
+  return activateRuntime(loadValidChannelConfig(settings), deps);
+}
+
+export async function stopChannels(
+  runtime: ChannelsRuntime | undefined,
+  options: { abortInFlight?: boolean } = {},
+): Promise<void> {
   if (!runtime) return;
   try {
-    await runtime.host.stop();
+    await runtime.host.stop(options);
   } catch (error) {
     console.warn(`[chat-room] channeld stop failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+export function createChannelController(
+  initial: ServerSettings,
+  deps: ChannelControllerDeps = {},
+): ChannelController {
+  const env = deps.env ?? process.env;
+  let settings: ServerSettings = { ...initial, channeld: { ...initial.channeld } };
+  let runtime: ChannelsRuntime | undefined;
+  let queue: Promise<unknown> = Promise.resolve();
+
+  // Admin mutations run one at a time so a reload cannot race enable/disable.
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = queue.then(fn, fn);
+    queue = run.then(() => undefined, () => undefined);
+    return run;
+  };
+  const persist = async (next: ChannelSettingsPatch): Promise<boolean> => {
+    try {
+      if (deps.persistSettings) return await deps.persistSettings(next);
+      return await persistRoomSettings(env, next);
+    } catch {
+      return false;
+    }
+  };
+  const withConfig = (config: string | undefined): ServerSettings =>
+    config ? { ...settings, channeld: { ...settings.channeld, enabled: true, config } } : settings;
+
+  const disableCore = async (): Promise<Response> => {
+    const old = runtime;
+    runtime = undefined;
+    await stopChannels(old, { abortInFlight: true });
+    settings = { ...settings, channeld: { ...settings.channeld, enabled: false } };
+    const persisted = await persist({ enabled: false, config: settings.channeld.config });
+    return json({ enabled: false, persisted, restartRequired: !persisted });
+  };
+
+  const activateCore = async (configPath: string): Promise<Response> => {
+    let config: ChannelConfig;
+    try {
+      config = loadValidChannelConfig(withConfig(configPath));
+    } catch (error) {
+      return json({ error: adminMessage(error) }, 400);
+    }
+    const previousRuntime = runtime;
+    const previous = previousRuntime ? { settings, config: previousRuntime.config } : undefined;
+    runtime = undefined;
+    if (previousRuntime) await stopChannels(previousRuntime, { abortInFlight: true });
+
+    let next: ChannelsRuntime | undefined;
+    try {
+      next = await activateRuntime(config, deps);
+    } catch (error) {
+      console.warn(`[chat-room] relay restart failed: ${adminMessage(error)}`);
+    }
+    if (next) {
+      runtime = next;
+      settings = withConfig(configPath);
+      const persisted = await persist({ enabled: true, config: configPath });
+      return json({ enabled: true, persisted, restartRequired: !persisted });
+    }
+
+    if (previous) {
+      let restored: ChannelsRuntime | undefined;
+      try {
+        restored = await activateRuntime(previous.config, deps);
+      } catch (error) {
+        console.warn(`[chat-room] relay restore failed: ${adminMessage(error)}`);
+      }
+      if (restored) {
+        runtime = restored;
+        settings = previous.settings;
+        return json({
+          error: "relay failed to start; previous configuration restored",
+          enabled: true,
+          restored: true,
+        }, 502);
+      }
+    }
+    settings = { ...settings, channeld: { ...settings.channeld, enabled: false } };
+    const persisted = await persist({ enabled: false, config: settings.channeld.config });
+    return json({
+      error: previous
+        ? "relay failed to start and the previous runtime could not be restored"
+        : "relay failed to start",
+      enabled: false,
+      persisted,
+      restartRequired: !persisted,
+    }, 500);
+  };
+
+  const handle = async (req: Request, url: URL): Promise<Response | undefined> => {
+    const adminPath = url.pathname === "/channeld/reload"
+      || url.pathname === "/channeld/enable"
+      || url.pathname === "/channeld/disable";
+    const integrationPath = url.pathname === "/channeld/plugins"
+      || url.pathname === "/channeld/integration";
+    if (!adminPath && !integrationPath) return channelRoutes(req, url, runtime);
+    if (env.CHATROOM_ALLOW_ADMIN !== "true") return undefined;
+    if (integrationPath) {
+      return serial(() => handleIntegrationAdmin(req, url, {
+        enabled: () => Boolean(runtime),
+        runtime: () => runtime,
+        activate: activateCore,
+        disable: disableCore,
+      }));
+    }
+    if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+
+    if (url.pathname === "/channeld/disable") return serial(disableCore);
+
+    const body = await readAdminBody(req);
+    if (!body.ok) return json({ error: "invalid request body" }, 400);
+    const configPath = body.config ?? settings.channeld.config;
+    if (!configPath) {
+      return json({ error: "relay has no configuration path; provide one with {config}" }, 400);
+    }
+    if (url.pathname === "/channeld/reload" && !runtime) {
+      return json({ error: "relay is disabled; enable it first" }, 409);
+    }
+    if (url.pathname === "/channeld/enable" && runtime && (!body.config || body.config === settings.channeld.config)) {
+      const persisted = await persist({ enabled: true, config: settings.channeld.config });
+      return json({ enabled: true, persisted, restartRequired: !persisted });
+    }
+    return serial(() => activateCore(configPath));
+  };
+
+  return {
+    get runtime() {
+      return runtime;
+    },
+    get enabled() {
+      return Boolean(runtime);
+    },
+    start: () => serial(async () => {
+      runtime = await startChannels(settings, deps);
+    }),
+    stop: () => serial(async () => {
+      const old = runtime;
+      runtime = undefined;
+      await stopChannels(old);
+    }),
+    handle,
+  };
 }
 
 function parseTarget(value: unknown): RuleTarget | undefined {
@@ -166,7 +388,7 @@ function parseTarget(value: unknown): RuleTarget | undefined {
   return { platform: raw.platform, account: raw.account, room: raw.room };
 }
 
-type ForwardableMessage = { text: string; createdAt: number };
+type ForwardableMessage = { text: string; createdAt: number; parentMessageId?: string };
 
 /** A malformed percent escape must not become a 500. */
 function decodeSegment(segment: string): string | undefined {
@@ -198,10 +420,19 @@ async function readForwardableMessage(
 ): Promise<ForwardableMessage | undefined> {
   if (!await memberName(roomId, sessionID)) return undefined;
   const db = await openStateDatabase(databasePath());
-  const row = db.query("SELECT text, created_at, recalled_at FROM messages WHERE room_id = ? AND id = ?")
-    .get(roomId, messageId) as { text: string; created_at: number; recalled_at: number | null } | null;
+  const row = db.query("SELECT text, created_at, answer_to, recalled_at FROM messages WHERE room_id = ? AND id = ?")
+    .get(roomId, messageId) as {
+      text: string;
+      created_at: number;
+      answer_to: string | null;
+      recalled_at: number | null;
+    } | null;
   if (!row || row.recalled_at !== null) return undefined;
-  return { text: row.text, createdAt: Number(row.created_at) };
+  return {
+    text: row.text,
+    createdAt: Number(row.created_at),
+    ...(row.answer_to ? { parentMessageId: row.answer_to } : {}),
+  };
 }
 
 async function isRoomMember(roomId: string, sessionID: string): Promise<boolean> {
@@ -238,17 +469,23 @@ function forwardTargets(runtime: ChannelsRuntime, roomId: string): RuleTarget[] 
  * POST /rooms/:roomId/forward and GET /rooms/:roomId/forward-targets.
  * No runtime means the feature is off: the route stays absent.
  */
+export type ChannelRuntimeSource = ChannelsRuntime | ChannelController | undefined;
+
 export async function channelRoutes(
   req: Request,
   url: URL,
-  runtime: ChannelsRuntime | undefined,
+  source: ChannelRuntimeSource,
 ): Promise<Response | undefined> {
+  // A controller keeps its own swappable runtime; plain runtimes stay supported
+  // for callers and tests that manage one host directly.
+  if (source && "handle" in source) return source.handle(req, url);
+  const runtime = source;
   if (!runtime) return undefined;
 
   if (url.pathname === "/channeld/status") {
     if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
     try {
-      return json(readChannelStats(runtime.config.stateFile));
+      return json(readChannelStats(runtime.config.stateFile, Date.now(), runtime.host.accountRuntimeStates));
     } catch {
       return json({ error: "channel state unavailable" }, 503);
     }
@@ -283,6 +520,11 @@ export async function channelRoutes(
 
     const source: Endpoint = { platform: "chatroom", accountId: "center", roomId };
     const requestedTarget: Endpoint = { platform: target.platform, accountId: target.account, roomId: target.room };
+    // A room reply quotes its parent only when that parent already went to the
+    // same external endpoint; the native id comes from channel_echoes.
+    const parent = message.parentMessageId
+      ? runtime.host.findProviderMessage(requestedTarget, message.parentMessageId)
+      : undefined;
     const event: IngestEvent = {
       schemaVersion: EVENT_SCHEMA_VERSION,
       eventId: `fwd-${randomUUID()}`,
@@ -294,6 +536,7 @@ export async function channelRoutes(
       sourceDedupKey: `forward:${messageId}:${targetKey(requestedTarget)}`,
       selectedMessage: { endpoint: source, nativeMessageId: messageId, text: message.text },
       requestedTarget,
+      ...(parent ? { parent } : {}),
       occurredAt: new Date(message.createdAt).toISOString(),
       receivedAt: new Date().toISOString(),
       content: { text: message.text },

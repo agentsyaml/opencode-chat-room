@@ -1,0 +1,8 @@
+pptx-preview
+https://github.com/501351981/pptx-preview
+
+本项目发布的npm包可免费使用，自用商用均可
+本项目的源码仅供个人学习使用，不得发布到互联网平台中，不得直接修改源码并转为自有项目进行开源
+
+The published npm package is free to use, including commercially. Its source is not
+included and may not be republished or modified into another open-source project.

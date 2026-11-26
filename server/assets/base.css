@@ -223,11 +223,16 @@
 
   .hint { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-3); }
 
-  .panel.announcement-panel { width: min(390px, calc(100vw - 32px)); max-height: min(65dvh, 560px); overflow: auto; }
-  .announcement-head, .announcement-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-  .announcement-head h3 { margin: 0; font-size: 15px; }
-  .announcement-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-  .panel .announcement-tools .btn, .panel .reminder-tools .btn { margin: 0; padding: 6px 9px; font-size: 12px; }
+  .announcement-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  #announcementsDialog, #remindersDialog { width: min(600px, calc(100vw - 32px)); max-height: min(760px, 86dvh); padding: 0; overflow: hidden; }
+  #announcementsDialog[open], #remindersDialog[open] { display: flex; flex-direction: column; }
+  .announcements-dialog .admin-dialog-head, .reminders-dialog .admin-dialog-head { flex: none; flex-wrap: wrap; padding: 18px 20px 12px; }
+  .announcements-dialog .admin-dialog-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .announcements-body, .reminders-body { flex: 1 1 auto; min-height: 0; padding: 0 20px 20px; overflow-y: auto; }
+  #announcementsDialog.is-pane .admin-dialog-head, #remindersDialog.is-pane .admin-dialog-head { padding: 16px 12px 10px 18px; }
+  #announcementsDialog.is-pane .announcements-body, #remindersDialog.is-pane .reminders-body { padding: 0 14px 18px 18px; }
+  .announcements-dialog .announcement-list { margin: 0; max-height: none; }
+  .reminders-dialog .reminder-list { margin: 0; }
   .announcement-list { list-style: none; padding: 0; margin: 10px 0; max-height: 150px; overflow: auto; }
   .announcement-list button { width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; font: inherit; overflow-wrap: anywhere; cursor: pointer; }
   .announcement-list button:hover, .announcement-list button[aria-current="true"] { background: var(--accent-soft); border-color: var(--line); }
@@ -258,8 +263,6 @@
   .btn.danger:hover { filter: brightness(.94); }
   .announcement-content { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-  .panel.reminder-panel { width: min(410px, calc(100vw - 32px)); max-height: min(72dvh, 640px); overflow: auto; }
-  .reminder-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
   .reminder-form { border-top: 1px solid var(--line); padding-top: 10px; }
   #reminderDialog .reminder-form { border: 0; padding: 18px 20px; }
   #reminderDialog .reminder-form .field { margin-bottom: 12px; }
@@ -320,12 +323,15 @@
   .keys-section + .keys-section { margin-top: 16px; }
   .keys-section h3 { margin: 0 0 7px; color: var(--ink-3); font-size: 10.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
   .keys-list { display: grid; gap: 2px; list-style: none; margin: 0; padding: 0; }
-  .keys-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent); font-size: 13px; }
+  .keys-list li { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 4px 16px; padding: 7px 0; border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent); font-size: 13px; }
   .keys-list li:first-child { border-top: 0; }
-  .keys-list li > span:last-child { color: var(--ink-2); text-align: right; }
+  .keys-list li > span:last-child { color: var(--ink-2); }
+  .keys-group { display: inline-flex; align-items: center; gap: 6px; }
   @media (max-width: 560px) {
     .keys-dialog { padding: 18px; }
     .keys-dialog-head h2 { font-size: 21px; }
+    .keys-list li { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 4px 10px; }
+    .keys-group { flex-wrap: wrap; }
   }
   .room-list { margin-top: 0; }
   .room-list h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: .06em; color: var(--ink-2); }

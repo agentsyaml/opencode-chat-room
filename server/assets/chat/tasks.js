@@ -2,7 +2,7 @@
 // leaves the conversation usable while tasks stay visible.
 import { LS } from "./state.js";
 import { isRoomAdmin } from "./admin-badge.js";
-import { TITLE_MAX, createStepsEditor, fillAssignees, fillPeople, readPeople } from "./task-form.js";
+import { TITLE_MAX, buildTaskForm, createStepsEditor, fillAssignees, fillPeople, readPeople } from "./task-form.js";
 import { buildTaskRow } from "./task-row.js";
 
 const STATUSES = ["todo", "doing", "done"];
@@ -23,13 +23,18 @@ export function initTasks(app) {
   const trigger = $("#btnTasks"), heading = $("#tasksHeading"), roomName = $("#tasksRoomName");
   const groups = $("#taskGroups"), empty = $("#tasksEmpty"), summary = $("#tasksSummary");
   const error = $("#tasksError"), errorText = $("#tasksErrorText"), refresh = $("#btnRefreshTasks");
+  const limitNotice = $("#tasksLimitNotice");
   const filter = $("#taskFilter"), createDetails = $("#taskCreateDetails"), createForm = $("#taskCreateForm");
   const titleInput = $("#taskTitle"), descriptionInput = $("#taskDescription"), assigneeSelect = $("#taskAssignee");
   const dueInput = $("#taskDueDate"), conclusionInput = $("#taskConclusion"), createPeople = $("#taskCreateParticipants");
   const menuButton = $("#btnTasksMenu"), menu = $("#tasksMenu"), clearButton = $("#btnClearCompleted");
   const createButton = $("#btnCreateTask");
+  const editDialog = $("#taskEditDialog"), editHeading = $("#taskEditHeading"), editBody = $("#taskEditFormHost");
+  const editError = $("#taskEditError"), editErrorText = $("#taskEditErrorText");
+  if (!editDialog) return;
   const createSteps = createStepsEditor(app, $("#taskCreateSteps"), $("#btnAddCreateStep"));
-  let items = [], loading = false, failed = false, generation = 0, editingId = "", focusEdit = false;
+  let items = [], loading = false, failed = false, generation = 0, editingId = "";
+  let taskLimit = null;
   let opener = null, restoreFocus = true, pendingReopen = false;
 
   const statusOf = (task) => STATUSES.includes(task.status) ? task.status : "todo";
@@ -59,13 +64,40 @@ export function initTasks(app) {
     trigger.hidden = app.state.room?.kind === "direct";
     roomName.textContent = app.state.room?.name ? ` · ${app.state.room.name}` : "";
   };
-  const showError = (key) => { app.setText(errorText, key); error.hidden = false; };
-  const hideError = () => { error.hidden = true; };
+  // Errors belong to the edit modal while it is open; the pane error sits behind it.
+  const showError = (key) => {
+    const inEdit = editDialog.open;
+    app.setText(inEdit ? editErrorText : errorText, key);
+    (inEdit ? editError : error).hidden = false;
+  };
+  const hideError = () => { error.hidden = true; editError.hidden = true; };
+  const showText = (message) => {
+    errorText.textContent = message;
+    delete errorText.dataset.i18n;
+    delete errorText._i18nValues;
+    error.hidden = false;
+  };
   const clearableCount = () => items.filter((task) => statusOf(task) === "done" && (isAdmin() || isCreator(task))).length;
   const syncClear = () => {
     const count = clearableCount();
     clearButton.disabled = loading || count === 0;
     clearButton.dataset.count = String(count);
+  };
+  const atLimit = () => Number.isInteger(taskLimit) && taskLimit > 0 && items.length >= taskLimit;
+  const syncLimit = () => {
+    const reached = atLimit();
+    if (limitNotice) {
+      limitNotice.hidden = !reached;
+      if (reached) app.setText(limitNotice, "tasksLimitReached", { limit: taskLimit });
+    }
+    createButton.disabled = loading || reached;
+    if (reached) {
+      createButton.setAttribute("aria-describedby", "tasksLimitNotice");
+      createButton.title = app.t("tasksLimitReached", { limit: taskLimit });
+    } else {
+      createButton.removeAttribute("aria-describedby");
+      createButton.removeAttribute("title");
+    }
   };
   const setBusy = (busy) => {
     loading = busy;
@@ -73,13 +105,15 @@ export function initTasks(app) {
     // A reload that finishes while an editor is open must not re-enable the
     // refresh control the editor has locked.
     refresh.disabled = busy || Boolean(editingId);
-    createButton.disabled = busy;
     syncClear();
+    syncLimit();
   };
 
   const focusRowControl = (taskId, selector) => {
     const row = groups.querySelector(`[data-task-id="${CSS.escape(taskId)}"]`);
-    row?.querySelector(selector)?.focus();
+    const control = row?.querySelector(selector);
+    control?.focus();
+    return Boolean(control);
   };
 
   const replaceTask = (task) => {
@@ -154,19 +188,35 @@ export function initTasks(app) {
     }
   };
 
-  const startEdit = (task) => {
-    editingId = task.id;
-    focusEdit = true;
-    hideError();
-    render();
+  // The dialog close event is async, so clear the form before another edit can open.
+  const closeEdit = (restore = true) => {
+    if (!editDialog.open) return;
+    const taskId = editingId;
+    editDialog.close();
+    editingId = "";
+    editBody.textContent = "";
+    editError.hidden = true;
+    refresh.disabled = loading;
+    // A breakpoint change waits for the editor so its modal never lands under the board.
+    if (pane.matches !== dialog.classList.contains("is-pane")) syncMode();
+    if (!restore || !dialog.open || !taskId) return;
+    if (!focusRowControl(taskId, ".task-action-edit")) heading.focus();
   };
 
-  const cancelEdit = (task) => {
-    editingId = "";
-    focusEdit = false;
-    render();
-    focusRowControl(task.id, ".task-action-edit");
+  // The modal form owns the draft fields, so pane renders and reloads cannot drop them.
+  const startEdit = (task) => {
+    if (editDialog.open || !dialog.open) return;
+    editingId = task.id;
+    hideError();
+    editBody.textContent = "";
+    editHeading.textContent = app.t("tasksEditHeading");
+    editBody.append(buildTaskForm(view, task));
+    refresh.disabled = true;
+    editDialog.showModal();
+    editBody.querySelector(".task-edit-title")?.focus();
   };
+
+  const cancelEdit = () => closeEdit(true);
 
   const saveEdit = async (task, body) => {
     const roomId = app.state.room?.id;
@@ -177,19 +227,15 @@ export function initTasks(app) {
       });
       if (!currentRoom(roomId)) return true;
       replaceTask(result?.task || { ...task, ...body });
-      editingId = "";
-      focusEdit = false;
       hideError();
       render();
-      focusRowControl(task.id, ".task-action-edit");
+      closeEdit(true);
       return true;
     } catch (failure) {
       if (!currentRoom(roomId)) return true;
       showError("tasksUpdateFailed");
       if (failure?.status === 403) {
-        editingId = "";
-        focusEdit = false;
-        render();
+        closeEdit(false);
         void load();
       }
       return false;
@@ -198,7 +244,6 @@ export function initTasks(app) {
 
   const view = {
     app, statusOf, updatedOf, canEdit, canStatus, stepsOf, participantsOf, dateValue, formatDue, isOverdue,
-    isEditing: (task) => task.id === editingId,
     // One open editor owns the board; other rows stay visible but inert.
     isLocked: () => Boolean(editingId),
     onStatus: changeStatus, onEdit: startEdit, onDelete: removeTask, onToggleStep: toggleStep,
@@ -239,17 +284,15 @@ export function initTasks(app) {
     if (!empty.hidden) app.setText(empty, items.length ? "tasksEmptyFiltered" : "tasksEmpty");
     summary.textContent = items.length ? app.t("tasksSummary", { count: visible.length }) : "";
     syncClear();
+    syncLimit();
     refresh.disabled = loading || Boolean(editingId);
-    if (editingId && focusEdit) {
-      focusEdit = false;
-      groups.querySelector(".task-edit-title")?.focus();
-    }
   };
 
   const load = async () => {
     const room = app.state.room;
     if (!room || loading) return;
     const roomId = room.id, request = ++generation;
+    taskLimit = null;
     setBusy(true);
     hideError();
     if (!items.length) summary.textContent = app.t("tasksLoading");
@@ -259,6 +302,8 @@ export function initTasks(app) {
       failed = false;
       items = (Array.isArray(result?.tasks) ? result.tasks : [])
         .filter((task) => task && typeof task.id === "string" && typeof task.title === "string");
+      const limit = Number(result?.limit);
+      taskLimit = Number.isInteger(limit) && limit > 0 ? limit : null;
       render();
     } catch {
       if (request !== generation || !currentRoom(roomId)) return;
@@ -310,19 +355,26 @@ export function initTasks(app) {
   };
 
   const show = () => {
-    if (pane.matches) {
+    if (app.panelPlacement("tasks") === "pane") {
+      app.closeOtherPanelSurfaces?.("tasks");
       dialog.classList.add("is-pane");
-      chatView.classList.add("has-tasks");
+      chatView.classList.add("has-pane", "has-tasks");
+      chatView.dataset.sidePane = "tasks";
       if (!dialog.open) dialog.show();
     } else {
       dialog.classList.remove("is-pane");
       chatView.classList.remove("has-tasks");
+      if (chatView.dataset.sidePane === "tasks") {
+        delete chatView.dataset.sidePane;
+        chatView.classList.remove("has-pane");
+      }
       if (!dialog.open) dialog.showModal();
     }
   };
 
   const syncMode = () => {
-    if (!dialog.open || pane.matches === dialog.classList.contains("is-pane")) return;
+    if (editDialog.open || !dialog.open
+      || (app.panelPlacement("tasks") === "pane") === dialog.classList.contains("is-pane")) return;
     pendingReopen = true;
     setMenu(false);
     dialog.close();
@@ -337,6 +389,7 @@ export function initTasks(app) {
     // must take the column back even when the task pane is already open.
     app.closeDocPreview?.(false);
     if (dialog.open) { heading.focus(); return; }
+    if (editDialog.open) closeEdit(false);
     app.closePanels();
     const active = document.activeElement;
     opener = active instanceof HTMLElement && active !== document.body && !active.closest("dialog") && !$("#roomOptions")?.contains(active)
@@ -346,8 +399,8 @@ export function initTasks(app) {
     failed = false;
     loading = false;
     items = [];
+    taskLimit = null;
     editingId = "";
-    focusEdit = false;
     filter.value = "all";
     createDetails.open = false;
     resetCreate();
@@ -358,6 +411,7 @@ export function initTasks(app) {
     summary.textContent = app.t("tasksLoading");
     syncHead();
     syncClear();
+    syncLimit();
     show();
     heading.focus();
     void load();
@@ -372,25 +426,31 @@ export function initTasks(app) {
 
   const close = (focus = true) => {
     restoreFocus = focus;
+    if (editDialog.open) closeEdit(false);
     if (dialog.open) dialog.close();
   };
 
   dialog.addEventListener("close", () => {
     // A breakpoint switch closes and reopens the same dialog; keep the loaded list.
     if (pendingReopen) { pendingReopen = false; return; }
+    closeEdit(false);
     generation++;
     setBusy(false);
     failed = false;
     loading = false;
     items = [];
+    taskLimit = null;
     editingId = "";
-    focusEdit = false;
     groups.textContent = "";
     empty.hidden = true;
     hideError();
     setMenu(false);
     summary.textContent = "";
     chatView.classList.remove("has-tasks");
+    if (chatView.dataset.sidePane === "tasks") {
+      delete chatView.dataset.sidePane;
+      chatView.classList.remove("has-pane");
+    }
     dialog.classList.remove("is-pane");
     const focus = restoreFocus;
     restoreFocus = true;
@@ -402,6 +462,8 @@ export function initTasks(app) {
   });
 
   trigger.addEventListener("click", () => { app.closePanels(); open(); });
+  app.registerPanelSurface?.("tasks", { close: () => close(false) });
+  app.watchPanel?.("tasks", syncMode);
   $("#btnCloseTasks")?.addEventListener("click", () => close());
   refresh.addEventListener("click", () => { if (!editingId) void load(); });
   $("#btnRetryTasks")?.addEventListener("click", () => void load());
@@ -435,6 +497,7 @@ export function initTasks(app) {
       titleInput.focus();
       return;
     }
+    if (atLimit()) { syncLimit(); return; }
     const description = descriptionInput.value.trim(), assignee = assigneeSelect.value;
     const body = {
       sessionID: LS.sessionID, title, dueDate: dueInput.value,
@@ -454,14 +517,35 @@ export function initTasks(app) {
       hideError();
       render();
       heading.focus();
-    } catch {
+    } catch (failure) {
       if (!currentRoom(roomId)) return;
-      showError("tasksCreateFailed");
+      const message = String(failure?.message || "");
+      if (failure?.status !== 409 && !/limit|maximum|too many/i.test(message)) {
+        showError("tasksCreateFailed");
+        return;
+      }
+      const parsed = Number(/(\d+)/.exec(message)?.[1]);
+      await load();
+      if (!currentRoom(roomId)) return;
+      if (!taskLimit && Number.isInteger(parsed) && parsed > 0) taskLimit = parsed;
+      const limit = taskLimit || parsed;
+      syncLimit();
+      if (limit) {
+        app.setText(errorText, "tasksLimitReached", { limit });
+        error.hidden = false;
+      } else {
+        showText(message || app.t("tasksCreateFailed"));
+      }
     } finally {
-      if (currentRoom(roomId)) createButton.disabled = false;
+      if (currentRoom(roomId)) syncLimit();
     }
   });
 
+  $("#btnCloseTaskEdit")?.addEventListener("click", () => closeEdit(true));
+  editDialog.addEventListener("click", (event) => {
+    if (event.target === editDialog) closeEdit(true);
+  });
+  editDialog.addEventListener("cancel", (event) => { event.preventDefault(); closeEdit(true); });
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog && !dialog.classList.contains("is-pane")) close();
   });
@@ -479,9 +563,11 @@ export function initTasks(app) {
     close();
   });
   document.addEventListener("chat-room-activated", () => {
+    closeEdit(false);
     // A modal blocks the room switch, so only the side pane survives it.
     if (dialog.open && dialog.classList.contains("is-pane") && app.state.room?.kind !== "direct") {
       items = [];
+      taskLimit = null;
       editingId = "";
       filter.value = "all";
       // A draft typed for the previous room must not be created in the new one.
@@ -499,6 +585,7 @@ export function initTasks(app) {
     }
     close(false);
     items = [];
+    taskLimit = null;
     editingId = "";
     generation++;
     syncHead();
@@ -513,6 +600,7 @@ export function initTasks(app) {
     applyLocale();
     syncHead();
     syncClear();
+    syncLimit();
     if (!dialog.open) return;
     const unassigned = assigneeSelect.querySelector('option[value=""]');
     if (unassigned) unassigned.textContent = app.t("tasksUnassigned");

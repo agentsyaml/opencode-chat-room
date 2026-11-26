@@ -28,7 +28,7 @@ export async function announcementBoardWorks(page: any, artifacts: string) {
   await page.waitForFunction(() => document.querySelector("#announcementDialogStatus")?.textContent?.includes("already exists"));
   await closeAnnouncement(page);
   await openAnnouncement(page, name);
-  if (!await page.locator("#announcementPanel").isVisible()) throw new Error(`Announcement panel closed: ${await page.locator("#announcementStatus").textContent()}`);
+  if (!await page.locator("#announcementsDialog").isVisible()) throw new Error(`Announcement panel closed: ${await page.locator("#announcementStatus").textContent()}`);
   expect(await page.locator("#announcementContent").inputValue()).toBe(content);
   await page.screenshot({ path: path.join(artifacts, "chat-announcement-dialog.png"), fullPage: true });
   await page.locator("#announcementContent").fill("Edited safely");
@@ -45,13 +45,13 @@ export async function announcementBoardWorks(page: any, artifacts: string) {
 async function openAnnouncementPanel(page: any) {
   await page.locator("#btnRoomOptions").click();
   await page.locator("#btnAnnouncements").click();
-  await page.locator("#announcementPanel").waitFor({ state: "visible" });
+  await page.locator("#announcementsDialog").waitFor({ state: "visible" });
 }
 
 async function closeAnnouncementPanel(page: any) {
-  if (await page.locator("#announcementPanel").isVisible()) {
+  if (await page.locator("#announcementsDialog").isVisible()) {
     await page.keyboard.press("Escape");
-    await page.locator("#announcementPanel").waitFor({ state: "hidden" });
+    await page.locator("#announcementsDialog").waitFor({ state: "hidden" });
   }
 }
 
@@ -183,17 +183,19 @@ async function announcementRoomActivation(page: any) {
   await openAnnouncement(page, "__Test_FailedDraft");
   expect(await page.locator("#announcementContent").inputValue()).toBe("Keep failed draft");
   await closeAnnouncement(page);
+  await closeAnnouncementPanel(page);
   await page.locator(`#roomListChat [data-room-id="${targetID}"]`).click();
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), targetID);
   await page.waitForFunction(() => document.querySelector("#msgList")?.textContent?.includes("Announcement history anchor"));
-  if (!await page.locator("#announcementPanel").isVisible()) await openAnnouncementPanel(page);
+  if (!await page.locator("#announcementsDialog").isVisible()) await openAnnouncementPanel(page);
   await openAnnouncement(page, "__Test_TargetAnnouncement");
   expect(await page.locator("#announcementContent").inputValue()).toBe("Target room content");
   expect(await page.locator("#msgList").getByText("Announcement history anchor").count()).toBe(1);
   await closeAnnouncement(page);
+  await closeAnnouncementPanel(page);
   await page.locator(`#roomListChat [data-room-id="${sourceID}"]`).click();
   await page.waitForFunction((id: string) => document.querySelector("#btnCopyId")?.getAttribute("title")?.endsWith(id), sourceID);
-  if (!await page.locator("#announcementPanel").isVisible()) await openAnnouncementPanel(page);
+  if (!await page.locator("#announcementsDialog").isVisible()) await openAnnouncementPanel(page);
   await openAnnouncement(page, "__Test_FailedDraft");
   expect(await page.locator("#announcementContent").inputValue()).toBe("Keep failed draft");
 }

@@ -1,7 +1,4 @@
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import { Readable } from "node:stream";
-import { deleteResource, findResource, listRoomResources, maxResourceBytes, resourcePath, uploadResource, type Resource } from "../src/rooms/resources.ts";
+import { deleteResource, findResource, listRoomResources, maxResourceBytes, openResource, uploadResource, type Resource } from "../src/rooms/resources.ts";
 import { readState } from "../src/state/store.ts";
 import { isRoomAdmin, isUser } from "./room-owner.ts";
 
@@ -77,23 +74,26 @@ export async function resourceRoutes(req: Request, url: URL): Promise<Response |
 }
 
 async function content(req: Request, resource: Resource): Promise<Response> {
-  const path = resourcePath(resource);
-  const info = await stat(path);
+  // The database row is authoritative for size and Range validation; storage
+  // streams exactly the validated window.
+  const size = resource.size;
   const range = req.headers.get("range");
-  if (range && info.size === 0) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": "bytes */0" } });
-  if (info.size === 0) return new Response(null, { headers: { ...safeHeaders, "Content-Type": resource.mimeType, "Content-Disposition": contentDisposition(resource.name, false), "Content-Length": "0" } });
-  let start = 0, end = info.size - 1, status = 200;
+  if (range && size === 0) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": "bytes */0" } });
+  if (size === 0) return new Response(null, { headers: { ...safeHeaders, "Content-Type": resource.mimeType, "Content-Disposition": contentDisposition(resource.name, false), "Content-Length": "0" } });
+  let start = 0, end = size - 1, status = 200;
   if (range) {
     const match = range.match(/^bytes=(\d*)-(\d*)$/);
-    if (!match || (!match[1] && !match[2])) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${info.size}` } });
-    if (!match[1]) { const suffix = Number(match[2]); if (!Number.isSafeInteger(suffix) || suffix <= 0) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${info.size}` } }); start = Math.max(0, info.size - suffix); }
-    else { start = Number(match[1]); if (!Number.isSafeInteger(start)) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${info.size}` } }); }
-    if (match[1] && match[2]) { const requestedEnd = Number(match[2]); if (!Number.isSafeInteger(requestedEnd)) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${info.size}` } }); end = Math.min(requestedEnd, end); }
-    if (start >= info.size || end < start) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${info.size}` } });
+    if (!match || (!match[1] && !match[2])) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${size}` } });
+    if (!match[1]) { const suffix = Number(match[2]); if (!Number.isSafeInteger(suffix) || suffix <= 0) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${size}` } }); start = Math.max(0, size - suffix); }
+    else { start = Number(match[1]); if (!Number.isSafeInteger(start)) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${size}` } }); }
+    if (match[1] && match[2]) { const requestedEnd = Number(match[2]); if (!Number.isSafeInteger(requestedEnd)) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${size}` } }); end = Math.min(requestedEnd, end); }
+    if (start >= size || end < start) return new Response(null, { status: 416, headers: { ...safeHeaders, "Content-Range": `bytes */${size}` } });
     status = 206;
   }
+  const opened = await openResource(resource, status === 206 ? start : undefined, status === 206 ? end : undefined);
+  if (!opened) return json({ error: "resource not found" }, 404);
   const inline = /^(image\/(png|jpeg|gif|webp)|audio\/(mpeg|ogg|wav)|video\/(mp4|webm))$/.test(resource.mimeType);
   const headers = new Headers({ ...safeHeaders, "Content-Type": resource.mimeType, "Content-Disposition": contentDisposition(resource.name, inline), "Content-Length": String(end - start + 1) });
-  if (status === 206) headers.set("Content-Range", `bytes ${start}-${end}/${info.size}`);
-  return new Response(Readable.toWeb(createReadStream(path, { start, end })) as unknown as ReadableStream, { status, headers });
+  if (status === 206) headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
+  return new Response(opened.stream, { status, headers });
 }

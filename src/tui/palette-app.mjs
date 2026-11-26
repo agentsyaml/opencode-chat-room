@@ -2,6 +2,7 @@
 // terminal core stays under the project line budget.
 import { buildCommands, filterCommands, nextScope, scopeSources, searchMessages } from "./palette.mjs";
 import { mergeMessages, oldestSeq } from "./messages.mjs";
+import { t } from "./i18n.mjs";
 
 const SEARCH_PAGES = 2;
 
@@ -93,7 +94,7 @@ export function attachPalette(Class) {
           // A failed page must not consume the room's search budget.
           this.historyPages.set(room.id, (this.historyPages.get(room.id) ?? 0) + 1);
         } catch (error) {
-          if (this.state.palette === palette) palette.error = `history: ${error.message ?? error}`;
+          if (this.state.palette === palette) palette.error = t("palette.historyError", { error: error.message ?? error });
         } finally {
           this.historyInflight.delete(room.id);
         }
@@ -168,7 +169,7 @@ export function attachPalette(Class) {
           return;
         case "new-room":
           palette.mode = "prompt";
-          palette.prompt = { label: "New room name", value: "", action: "new-room", data: {} };
+          palette.prompt = { label: t("palette.newRoomPrompt"), value: "", action: "new-room", data: {} };
           palette.selected = 0;
           palette.error = "";
           this.touch();
@@ -213,7 +214,7 @@ export function attachPalette(Class) {
           await this.openReminders();
           return;
         case "settings":
-          this.openSettings();
+          this.openSettingsEditor();
           return;
         case "room-settings":
           await this.openRoomSettings();
@@ -260,7 +261,7 @@ export function attachPalette(Class) {
       const palette = this.state.palette;
       const name = String(palette?.prompt?.value ?? "").trim();
       if (!name) {
-        palette.error = "enter a room name";
+        palette.error = t("palette.enterRoomName");
         this.touch();
         return;
       }
@@ -274,7 +275,7 @@ export function attachPalette(Class) {
         const index = this.state.rooms.findIndex((room) => room.id === roomID);
         this.closePalette();
         if (index >= 0) await this.openRoom(index);
-        else this.setStatus(`created #${name}`, "success");
+        else this.setStatus(t("palette.created", { name }), "success");
       } catch (error) {
         if (this.state.palette) {
           this.state.palette.searching = false;
@@ -287,7 +288,7 @@ export function attachPalette(Class) {
     async leaveCurrent() {
       const room = this.state.current;
       if (!room || !this.state.joined) {
-        this.setStatus("not joined to a room", "error");
+        this.setStatus(t("palette.notJoined"), "error");
         return;
       }
       try {
@@ -297,9 +298,9 @@ export function attachPalette(Class) {
         const summary = this.state.rooms.find((item) => item.id === room.id);
         if (summary) summary.joined = false;
         await this.refreshRooms(true);
-        this.setStatus(`left #${room.name}`, "success");
+        this.setStatus(t("palette.left", { name: room.name }), "success");
       } catch (error) {
-        this.setStatus(`could not leave: ${error.message ?? error}`, "error");
+        this.setStatus(t("palette.leaveFailed", { error: error.message ?? error }), "error");
       }
     },
 

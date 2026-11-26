@@ -446,4 +446,64 @@ setInterval(() => {}, 1000);
       else process.env.CHANNELD_MOCK_EMIT = previousEmit;
     }
   });
+
+  test("onIngestCommitted failures roll back inbound notifications but stay contained elsewhere", async () => {
+    const root = tempDir();
+    const adapterPath = path.resolve(import.meta.dir, "../src/mock-adapter.ts");
+    const config = parseConfig({
+      stateFile: path.join(root, "state.sqlite"),
+      accounts: [{ id: "a", platform: "mock", adapter: { command: ["bun", adapterPath], runtime: "bun" } }],
+      rules: [{
+        id: "must-not-run",
+        version: 1,
+        from: { platform: "feishu", account: "feishu-main", room: "oc_allowed" },
+        to: [{ platform: "mock", account: "a", room: "out" }],
+      }],
+    });
+    const committed: string[] = [];
+    let state: ChannelState | undefined;
+    const host = new ChannelHost(config, {
+      stateFactory: (file) => {
+        state = openState(file);
+        return state;
+      },
+      deliveryIntervalMs: 20,
+      notificationOnly: (event) => event.source.platform === "feishu",
+      onIngestCommitted: (event) => {
+        committed.push(event.eventId);
+        throw new Error("center consumer failed");
+      },
+    });
+    await host.start();
+    try {
+      const event = (overrides: Record<string, unknown>) => ({
+        schemaVersion: 1,
+        eventId: "feishu-evt-1",
+        kind: "message.created",
+        source: { platform: "feishu", accountId: "feishu-main", roomId: "oc_allowed" },
+        actor: { platform: "feishu", identityNamespace: "open_id", nativeUserId: "ou_alice" },
+        providerEventId: "evt-1",
+        sourceDedupKey: "feishu:feishu-main:evt-1",
+        receivedAt: new Date(0).toISOString(),
+        content: { text: "hello from feishu" },
+        ...overrides,
+      });
+      await expect(host.ingest(event({}))).rejects.toThrow("center consumer failed");
+      expect(state!.countEvents()).toBe(0);
+      expect(committed).toEqual(["feishu-evt-1"]);
+
+      const ordinary = await host.ingest(event({
+        eventId: "mock-evt-1",
+        source: { platform: "mock", accountId: "a", roomId: "in" },
+        providerEventId: "mock-evt-1",
+        sourceDedupKey: "mock:a:evt-1",
+      }));
+      expect(ordinary.duplicate).toBe(false);
+      expect(state!.countEvents()).toBe(1);
+      await Bun.sleep(60);
+      expect(state!.listDeliveries()).toHaveLength(0);
+    } finally {
+      await host.stop();
+    }
+  });
 });

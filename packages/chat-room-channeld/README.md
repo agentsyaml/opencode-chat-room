@@ -6,8 +6,9 @@ event into frozen deliveries for target accounts; each adapter owns one IM
 account and speaks JSON-RPC over stdio.
 
 This is the 0.1 MVP: static rules, text messages, outbound adapters with text and Markdown cards, a mock
-adapter, and an outbound Feishu adapter. Inbound Feishu events are not
-implemented yet.
+adapter, and a Feishu adapter with opt-in inbound long-connection events. Inbound Feishu
+events can be relayed into one chat-room as notifications; they are never matched by
+outbound rules.
 
 This package is bundled inside `@alexsun-top/opencode-chat-room` 0.8.0 as
 source plus the Feishu and mock adapter entry points. Standalone npm
@@ -34,10 +35,11 @@ Inspect queue and integrity counts without writing the state file:
 bun src/cli.ts status --config channeld.yml
 ```
 
-`status` prints counts only: queue depth, oldest backlog, unknown, retryable and
-rate-limited deliveries, and source/integrity gaps. It never prints message text,
-rule ids, error details, provider message ids, room ids, or credentials. A missing
-state file or missing channel tables exit 1 with a clear error.
+`status` prints counts and per-account runtime state: `started`, `failed`,
+`disabled`, or `unknown` (no live host is attached to a CLI read), plus a short
+sanitized `lastError` for failed/disabled accounts. It never prints message text,
+rule ids, provider message ids, room ids, or credentials. A missing state file or
+missing channel tables exit 1 with a clear error.
 
 Run the mock adapter on stdio (the host normally spawns it):
 
@@ -91,11 +93,48 @@ Account ids and rule `(id, version)` pairs must be unique. Only the highest
 configured version of each rule id is active: an explicit newer version
 replaces the older definition.
 
+Each account may add an `env` map for secrets and per-platform settings. Keys
+must match `/^[A-Za-z_][A-Za-z0-9_]*$/`, values are strings, and a map holds at
+most 64 variables. The adapter child inherits the host environment, then receives
+the account `env`, then the forced `CHANNELD_ACCOUNT_ID` and `CHANNELD_PLATFORM`
+values; configuring either reserved key is rejected. Status output never includes
+env values.
+
+An optional top-level `inbound` array turns external events into room notifications
+in the center. It is separate from `rules`: an inbound event is committed, written
+to its target room once, and then skipped by every outbound rule, so it cannot
+ping-pong back to the source.
+
+```yaml
+inbound:
+  - from: { platform: feishu, account: feishu-main, room: oc_xxx }
+    to: { room: lab }
+```
+
+`from.room` is the Feishu `chat_id`; `to.room` is the chat-room id. An omitted
+`from.event` matches every kind. A source account must exist and its platform must
+match. The center appends one system-style message, `[Feishu <account>] <open_id>:
+<text>`, with a marker row in the room database; the marker and message share one
+transaction, so a transport retry cannot duplicate it. If the room write fails, the
+center rolls the channel event back and the adapter acknowledges failure, so Feishu
+retries. A room that stays missing keeps failing until it is created.
+
+```yaml
+accounts:
+  - id: feishu-main
+    platform: feishu
+    adapter: { command: ["node", "/opt/chatroom/feishu-adapter.js"] }
+    env: { FEISHU_APP_ID: "cli_xxx", FEISHU_APP_SECRET: "xxx" }
+```
+
 ## Adapter protocol
 
-The host spawns each adapter with `CHANNELD_ACCOUNT_ID` and
-`CHANNELD_PLATFORM`. Both directions use newline-delimited JSON-RPC 2.0 on
-stdio. **stdout carries protocol frames only; all adapter logs go to stderr.**
+The host spawns each adapter with `CHANNELD_ACCOUNT_ID`,
+`CHANNELD_PLATFORM`, and that account's configured `env`. Both directions use
+newline-delimited JSON-RPC 2.0 on stdio. An `initialize` or `start` result may
+include `platform`; when it differs from the configured account platform, that
+adapter is stopped and only that account is marked `failed` (its queue pauses)
+while the host and other accounts keep running. **stdout carries protocol frames only; all adapter logs go to stderr.**
 An invalid stdout frame disables that account, stops its adapter, and leaves its
 deliveries paused; other accounts keep running. Frames are JSON objects limited
 to 1 MiB (`MAX_FRAME_BYTES`). Host request ids start with `host-`, adapter
@@ -129,13 +168,24 @@ from room `in` after starting, so the relay can be exercised end to end.
 `CHANNELD_MOCK_ECHO=1` makes it emit a provider echo right after a `send` result;
 `CHANNELD_MOCK_ECHO_DELAY_MS` delays that result to exercise buffered ingests.
 
-## Feishu outbound adapter
+## Feishu adapter
 
-`dist/feishu-adapter.js` is an outbound-only adapter for Feishu OpenAPI
-messages. It sends interactive cards using `lark_md` inline formatting and
-declares `reply: "none"`; native Feishu reply/quote requires a Feishu parent
-message and is deferred with inbound support. It speaks the same stdio JSON-RPC protocol as the mock adapter and
-has no room or session concepts. Inbound Feishu events are planned for 0.8.x.
+`dist/feishu-adapter.js` is a Feishu OpenAPI adapter. Outbound it sends interactive
+cards and can reply natively to a Feishu message; inbound it can receive group
+messages over the event long connection. It speaks the same stdio JSON-RPC protocol
+as the mock adapter and has no room or session concepts.
+
+Cards default to card 1.0 with `lark_md`, which keeps the 0.8.0 payload stable.
+Set `FEISHU_CARD_VERSION=2.0` to opt into card 2.0 (`schema: "2.0"` with a
+`markdown` element), where headings, lists, and fenced code render as block
+Markdown. Any other value fails `initialize`.
+
+A payload `parent` with `endpoint.platform: "feishu"`, the same account, and a
+non-empty `nativeMessageId` is sent with
+`POST /open-apis/im/v1/messages/{parent_id}/reply`; the body has no `receive_id`.
+Without a usable Feishu parent the send uses the normal chat endpoint. The center
+fills that parent when a forwarded room reply's `answer_to` parent was already
+delivered to the same target (`channel_echoes` keeps the provider native id).
 
 The adapter command is resolved from the host process working directory, so
 use an absolute path unless the host starts in this package directory.
@@ -146,9 +196,24 @@ The child process reads:
 - `FEISHU_APP_SECRET` (required)
 - `FEISHU_BASE_URL` (optional, default `https://open.feishu.cn`)
 - `FEISHU_HTTP_TIMEOUT_MS` (optional, default `10000`)
+- `FEISHU_CARD_VERSION` (optional, `1.0` default or `2.0`)
+- `FEISHU_INBOUND` (optional, `1` enables the event long connection)
+- `FEISHU_INBOUND_CHATS` (required with `FEISHU_INBOUND=1`; comma-separated
+  group `chat_id` allowlist)
 
 Set these in the host environment; the host passes its environment to adapter
 child processes.
+
+Inbound requires the app to use long-connection event subscription in the Feishu
+developer console and to subscribe `im.message.receive_v1`; the bot must already
+be in each allowlisted group. The adapter obtains the WebSocket URL from
+`POST /callback/ws/endpoint`, pings, reassembles fragmented frames, and
+acknowledges only after the host commits the ingest. Only group `text` and `post`
+messages from human senders in an allowlisted chat are mapped. Bot/self senders,
+other chats, other event types, other apps, and unsupported message types are
+acknowledged without ingest. A long-connection start failure logs a warning,
+keeps the account started for outbound sends, and reports a sanitized
+`inbound failed: ...` in the account status; outbound forwarding keeps working.
 
 ```yaml
 accounts:
@@ -168,10 +233,11 @@ The target room is the Feishu `chat_id`, so an endpoint
 
 `initialize` fails when a credential is missing. `start` fetches a tenant access
 token, so rejected credentials disable only this account. Tokens are cached and
-refreshed when less than 30 minutes remain. A send posts an interactive
-Markdown card (`msg_type: "interactive"` with a `lark_md` element) and a `uuid`
-derived from the delivery idempotency key, so retrying the same delivery cannot
-create a second message.
+refreshed when less than 30 minutes remain. A send posts an interactive card and
+a `uuid` derived from the delivery idempotency key, so retrying the same delivery
+cannot create a second message. Card 1.0 uses one `lark_md` element; card 2.0
+uses one `markdown` element. A Feishu parent reference turns the send into a native
+reply to that message.
 
 Send outcomes:
 
@@ -204,9 +270,16 @@ delivery in `unknown` and never retries automatically; `paused` keeps a disabled
 account's rows out of every claim until the next host start. An adapter that
 fails to start or writes non-protocol stdout disables only that account until
 restart; its queued deliveries move to `paused` and return to `pending` when the
-host starts again. On disable or crash, in-flight deliveries move to `unknown`
-with the reason; a host start resets stale `in_flight` rows from a previous
-crash to `pending`. If every account becomes disabled at runtime, the host logs
+host starts again. Inbound room notifications add one small
+`channel_inbound_relays(event_id, room_id)` marker table to the room database;
+it exists only to make the room append idempotent. Per-account `readChannelStats` states are `started` (adapter
+running), `failed` (startup failure, including a platform mismatch), `disabled`
+(disabled at runtime), or `unknown` without a live host. `lastError` is capped,
+flattened to one line, and redacts credential-shaped `token=…`/`secret=…`
+fragments. On disable or crash, in-flight deliveries move to `unknown`
+with the reason; a deliberate host stop also settles remaining in-flight rows as
+`unknown`, so a centered reload cannot auto-resend them. A host start resets
+stale `in_flight` rows from a previous crash to `pending`. If every account becomes disabled at runtime, the host logs
 `all accounts disabled; host idle until restart` and stays alive; only a startup
 with zero usable adapters fails. `onUnsupported: drop` skips empty renders; otherwise the
 payload carries an `attachment/format unsupported` notice. Replies without a
@@ -237,6 +310,6 @@ same terminal result event and message.
 - no config hot reload — rule changes require a restart (each delivery still freezes ruleId + ruleVersion + rendered payload);
 - no one-click manual resend command — `unknown` deliveries only guarantee no duplicate delivery row if resent (unique idempotency key); they are never auto-resent;
 - no full backpressure (high-water marks, pausing ingress, disk quotas) — only per-account queue/process isolation and `rate_limited` backoff;
-- no attachments, no rule UI, no multi-tenant permission model, no inbound
-  Feishu events (the Feishu adapter is outbound only), no exactly-once
-  guarantee.
+- no attachments, no rule UI, no multi-tenant permission model, no exactly-once
+  guarantee (inbound room notifications are idempotent per event and route, but
+  a crash between the ACK and Feishu's next retry can still lose an event).

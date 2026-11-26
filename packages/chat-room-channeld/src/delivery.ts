@@ -71,11 +71,16 @@ export function applyReceipt(
         providerMessage: providerMessage ?? null,
         lastError: null,
       });
+      const event = state.getEvent(row.eventId);
       const echo = receipt.providerMessage?.nativeMessageId && receipt.providerMessage.endpoint
         ? {
             endpoint: targetKey(receipt.providerMessage.endpoint),
             nativeMessageId: receipt.providerMessage.nativeMessageId,
-            logicalMessageId: row.eventId,
+            // The room's logical id is the selected message for a forward, the
+            // provider message for an adapter ingest, and the event id otherwise.
+            logicalMessageId: event?.selectedMessage?.nativeMessageId
+              ?? event?.message?.nativeMessageId
+              ?? row.eventId,
           }
         : undefined;
       state.recordSent({

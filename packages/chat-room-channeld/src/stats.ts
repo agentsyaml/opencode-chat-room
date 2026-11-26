@@ -1,7 +1,17 @@
 import { DatabaseSync } from "node:sqlite";
 
+export type ChannelAccountState = "started" | "failed" | "disabled" | "unknown";
+
+/** Live state supplied by a running host; stats itself only reads SQLite. */
+export interface ChannelAccountRuntime {
+  state: ChannelAccountState;
+  lastError?: string;
+}
+
 export interface ChannelAccountStats {
   account: string;
+  state: ChannelAccountState;
+  lastError?: string;
   queueDepth: number;
   oldestBacklogAt: number | null;
   unknown: number;
@@ -35,8 +45,17 @@ export interface ChannelStats {
 
 const REQUIRED_TABLES = ["channel_events", "channel_deliveries", "channel_receipts"];
 const QUEUE_STATES = new Set(["pending", "retryable", "rate_limited"]);
+const MAX_LAST_ERROR = 200;
 
 type Row = Record<string, unknown>;
+
+/** Keep status details short and free of credential-shaped fragments. */
+export function sanitizeAccountError(value: string): string {
+  const redacted = value
+    .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/\b(secret|token|password|passwd|authorization|api[_-]?key)\b\s*[:=]\s*\S+/gi, "$1=[redacted]");
+  return redacted.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_LAST_ERROR);
+}
 
 function count(db: DatabaseSync, sql: string): number {
   const row = db.prepare(sql).get() as Row;
@@ -54,7 +73,11 @@ function accountKey(target: string): string {
  * Read queue and integrity counts without touching message content.
  * The database is opened read-only, so a missing state file is never created.
  */
-export function readChannelStats(path: string, now = Date.now()): ChannelStats {
+export function readChannelStats(
+  path: string,
+  now = Date.now(),
+  runtime: ReadonlyMap<string, ChannelAccountRuntime> = new Map(),
+): ChannelStats {
   let db: DatabaseSync | undefined;
   try {
     db = new DatabaseSync(path, { readOnly: true });
@@ -83,6 +106,7 @@ export function readChannelStats(path: string, now = Date.now()): ChannelStats {
       if (!account) {
         account = {
           account: key,
+          state: "unknown",
           queueDepth: 0,
           oldestBacklogAt: null,
           unknown: 0,
@@ -104,6 +128,24 @@ export function readChannelStats(path: string, now = Date.now()): ChannelStats {
           oldestBacklogAt = createdAt;
         }
       }
+    }
+
+    // Runtime entries add configured accounts without deliveries and override
+    // the SQLite-only default of "unknown" for a running host.
+    for (const [key, live] of runtime) {
+      const account = accounts.get(key) ?? {
+        account: key,
+        state: "unknown" as const,
+        queueDepth: 0,
+        oldestBacklogAt: null,
+        unknown: 0,
+        retryable: 0,
+        rateLimited: 0,
+      };
+      account.state = live.state;
+      const lastError = live.lastError ? sanitizeAccountError(live.lastError) : "";
+      if (lastError) account.lastError = lastError;
+      accounts.set(key, account);
     }
 
     const pending = stateCounts.pending ?? 0;

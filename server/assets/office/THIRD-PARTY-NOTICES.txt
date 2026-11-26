@@ -1,0 +1,11 @@
+Third-party packages bundled into the Office previews.
+
+docx-preview 0.4.1 (Apache-2.0) -> licenses/docx-preview-LICENSE.txt
+echarts 6.1.0 (Apache-2.0) -> licenses/echarts-LICENSE.txt
+jszip 3.10.2 ((MIT OR GPL-3.0-or-later)) -> licenses/jszip-LICENSE.txt
+lodash 4.18.1 (MIT) -> licenses/lodash-LICENSE.txt
+pptx-preview 1.0.7 (ISC declared; upstream custom terms) -> licenses/pptx-preview-LICENSE.txt
+tslib 2.8.1 (0BSD) -> licenses/tslib-LICENSE.txt
+uuid 11.1.1 (MIT) -> licenses/uuid-LICENSE.txt
+xlsx 0.20.3 (Apache-2.0) -> licenses/xlsx-LICENSE.txt
+zrender 6.1.0 (BSD-3-Clause) -> licenses/zrender-LICENSE.txt

@@ -30,6 +30,17 @@ export function validateTargets(config: ChannelConfig): void {
       }
     }
   }
+  for (const route of config.inbound) {
+    const account = accounts.get(route.from.account);
+    if (!account) {
+      throw new Error(`config: inbound route sources unknown account "${route.from.account}"`);
+    }
+    if (account.platform !== route.from.platform) {
+      throw new Error(
+        `config: inbound route sources platform "${route.from.platform}" but account "${route.from.account}" is "${account.platform}"`,
+      );
+    }
+  }
 }
 
 export function toEndpoint(config: ChannelConfig, ruleId: string, target: RuleTarget): Endpoint {

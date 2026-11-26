@@ -10,10 +10,11 @@
 .recalled-mark { display: inline-flex; color: var(--ink-3); }
 .recalled-icon { display: block; width: 15px; height: 15px; }
 .recalled-by { margin: 0; color: var(--ink-3); font-size: 12px; }
-.recalled-reveal { min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
-.recalled-reveal:hover, .recalled-reveal:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-.recalled-reveal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.recalled-reveal[disabled] { cursor: progress; opacity: .7; }
+.recalled-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.recalled-reveal, .recalled-reedit { min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-2); background: var(--surface); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.recalled-reveal:hover, .recalled-reveal:focus-visible, .recalled-reedit:hover, .recalled-reedit:focus-visible { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.recalled-reveal:focus-visible, .recalled-reedit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.recalled-reveal[disabled], .recalled-reedit[disabled] { cursor: progress; opacity: .7; }
 .recalled-body { width: 100%; padding-top: 7px; border-top: 1px solid var(--line); color: var(--ink); }
 .recalled-body[hidden] { display: none; }
 .msg.recalled-in .msg-text { animation: recall-in .18s ease both; }

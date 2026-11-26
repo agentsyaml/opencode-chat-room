@@ -5,7 +5,6 @@ import {
   syncComposer,
   syncFocus,
   syncHeader,
-  syncHelp,
   syncLayout,
   syncMessages,
   syncPalette,
@@ -13,9 +12,11 @@ import {
   syncStatus,
 } from "./ui-content.mjs";
 import { createTheme } from "./ui-theme.mjs";
+import { syncHelp } from "./ui-help.mjs";
 import { createView } from "./ui-view.mjs";
 import { handleSuggestKey, syncSuggest } from "./ui-suggest.mjs";
 import { syncMentionHighlights } from "./ui-mentions.mjs";
+import { setLanguage } from "./i18n.mjs";
 
 const printable = (key) => {
   const char = Array.from(key.sequence ?? "")[0];
@@ -26,9 +27,9 @@ export class Tui {
   constructor(renderer, app) {
     this.renderer = renderer;
     this.app = app;
-    this.themeState = createTheme(renderer);
+    this.themeState = createTheme(renderer, app.state.theme);
     this.theme = this.themeState.theme;
-    app.state.theme = this.theme.mode;
+    app.state.theme = this.themeState.mode;
     this.focusKey = null;
     this.roomSignature = "";
     this.messageSignature = "";
@@ -267,6 +268,9 @@ export class Tui {
       } else if (key.sequence === "d" && palette.kind === "announcements") {
         key.preventDefault();
         this.app.askDeleteAnnouncement(palette.detail?.title);
+      } else if (key.sequence === "e" && palette.kind === "settings") {
+        key.preventDefault();
+        this.app.openSettingsEditor();
       } else if (palette.kind === "room-settings") {
         if (key.sequence === "r") {
           key.preventDefault();
@@ -353,12 +357,20 @@ export class Tui {
 
   sync() {
     const state = this.app.state;
+    setLanguage(state.language);
+    if (state.theme !== this.themeState.mode && this.themeState.set(state.theme)) {
+      this.roomSignature = "";
+      this.messageSignature = "";
+      this.helpSignature = "";
+      this.detailSignature = "";
+    }
     syncLayout(this);
     syncHeader(this, state);
     syncRooms(this, state);
     syncMessages(this, state);
     syncComposer(this, state);
     syncStatus(this, state);
+    this.overlayBackdrop.visible = Boolean(state.palette || state.help);
     syncPalette(this, state);
     syncHelp(this, state);
     syncFocus(this, state);

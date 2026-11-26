@@ -5,6 +5,7 @@ import { formatMessage, messageStamp, sanitizeText } from "./messages.mjs";
 import { addNotice, buildMessageBlock, hashText, markdownStyle } from "./message-view.mjs";
 import { syncMentionHighlights } from "./ui-mentions.mjs";
 import { connectionStyle } from "./ui-theme.mjs";
+import { t } from "./i18n.mjs";
 
 const clear = (container) => {
   for (const child of container.getChildren()) {
@@ -13,14 +14,14 @@ const clear = (container) => {
   }
 };
 
-const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
-
 export function syncLayout(ui) {
   const { renderer, theme } = ui;
   const narrow = renderer.width < 70;
   const showRooms = !narrow;
+  const railWidth = renderer.width >= 120 ? 32 : renderer.width >= 100 ? 28 : 24;
   ui.roomsPane.visible = showRooms;
-  ui.roomsPane.width = showRooms ? Math.min(30, Math.max(22, Math.floor(renderer.width * 0.3))) : 0;
+  ui.roomsPane.width = showRooms ? railWidth : 0;
+  ui.roomsFooter.visible = showRooms;
   ui.roomsPane.borderColor = theme.border;
   ui.headerBox.borderColor = theme.border;
   ui.headerBox.paddingX = narrow ? 1 : 2;
@@ -32,18 +33,24 @@ export function syncLayout(ui) {
   ui.textarea.height = ui.composer.height - 2;
   ui.prompt.height = ui.textarea.height;
   ui.statusHints.visible = !narrow;
-  ui.paletteBox.left = narrow ? 0 : 1;
-  ui.paletteBox.right = narrow ? 0 : 1;
-  ui.paletteBox.bottom = narrow ? 0 : 1;
+  // Dialogs keep the OpenCode v2 habit: inset, readable measure and a top-third seat.
+  const paletteMargin = narrow ? 0 : Math.max(1, Math.floor((renderer.width - 76) / 2));
+  ui.paletteBox.left = paletteMargin;
+  ui.paletteBox.right = paletteMargin;
+  ui.paletteBox.bottom = narrow ? 1 : Math.max(1, Math.floor(renderer.height / 4));
   ui.paletteBox.height = Math.min(16, Math.max(9, Math.floor(renderer.height / 2) + 1));
   ui.helpBox.left = narrow ? 0 : 1;
   ui.helpBox.right = narrow ? 0 : 1;
   ui.helpBox.bottom = narrow ? 0 : 1;
-  ui.helpBox.height = Math.min(13, Math.max(8, renderer.height - 4));
+  ui.helpBox.height = Math.min(16, Math.max(8, renderer.height - 4));
   ui.helpBody.gap = narrow ? 1 : 4;
   ui.helpBody.paddingX = narrow ? 1 : 2;
+  ui.helpBody.paddingY = renderer.height < 22 ? 0 : 1;
   ui.roomsTitle.fg = theme.muted;
+  ui.roomsTitle.content = t("rooms.title");
   ui.roomsCount.fg = theme.muted;
+  ui.roomsFooter.fg = theme.faint;
+  ui.roomsFooter.content = ` ${t("rooms.refreshHint")}`;
   ui.chatMeta.fg = theme.muted;
 }
 
@@ -53,7 +60,7 @@ export function syncHeader(ui, state) {
   const left = [bold(fg(theme.accent)("opencode-chat-room"))];
   if (!narrow) {
     left.push(fg(theme.muted)("  ·  "));
-    left.push(fg(theme.muted)(sanitizeText(state.host || "server")));
+    left.push(fg(theme.muted)(sanitizeText(state.host || t("common.server"))));
   }
   ui.headerLeft.content = new StyledText(left);
 
@@ -94,7 +101,7 @@ export function updateRoomStyles(ui, state) {
 
 export function syncRooms(ui, state) {
   const pendingID = state.pending?.roomId;
-  const signature = `${ui.theme.mode}|${pendingID ?? ""}|${state.rooms
+  const signature = `${ui.theme.mode}|${state.language}|${state.connection}|${pendingID ?? ""}|${state.rooms
     .map((room) => `${room.id}:${room.name}:${room.joined}:${room.participants.length}`)
     .join("|")}`;
   ui.roomsCount.content = state.rooms.length ? String(state.rooms.length) : "";
@@ -103,13 +110,18 @@ export function syncRooms(ui, state) {
     clear(ui.roomContent);
     ui.roomRows.clear();
     if (!state.rooms.length) {
+      const emptyLabel = state.connection === "connecting"
+        ? t("connection.connecting")
+        : state.connection === "offline"
+          ? t("connection.offline")
+          : t("rooms.empty");
       ui.roomContent.add(new TextRenderable(ui.renderer, {
         id: "room-empty",
         height: 1,
         wrapMode: "none",
         fg: ui.theme.muted,
         paddingX: 1,
-        content: "No rooms yet",
+        content: emptyLabel,
       }));
     }
     for (const [index, room] of state.rooms.entries()) {
@@ -165,14 +177,15 @@ export function syncMessages(ui, state) {
   const messageKey = messages
     .map((message) => `${message.id}:${message.recalledAt ? 1 : 0}:${message.isQuestion ? 1 : 0}:${message.text?.length ?? 0}`)
     .join("|");
-  const signature = `${ui.theme.mode}:${current?.id ?? ""}:${joined}:${pending?.roomId ?? ""}:${pending?.message ?? ""}:${highlight ?? ""}:${messageKey}`;
+  const signature = `${ui.theme.mode}:${state.language}:${current?.id ?? ""}:${joined}:${pending?.roomId ?? ""}:${pending?.message ?? ""}:${highlight ?? ""}:${messageKey}`;
 
   if (current) {
     ui.chatTitle.content = new StyledText([bold(fg(ui.theme.accent)(`# ${sanitizeText(current.name)}`))]);
-    ui.chatMeta.content = plural(current.participants.length, "member");
+    const count = current.participants.length;
+    ui.chatMeta.content = t(count === 1 ? "common.member" : "common.members", { count });
     ui.chatMeta.fg = ui.theme.muted;
   } else {
-    ui.chatTitle.content = new StyledText([fg(ui.theme.muted)("# no room selected")]);
+    ui.chatTitle.content = new StyledText([fg(ui.theme.muted)(t("chat.noRoom"))]);
     ui.chatMeta.content = "";
   }
 
@@ -188,19 +201,19 @@ export function syncMessages(ui, state) {
     clear(ui.messageContent);
     ui.messageBlocks = [];
     addNotice(ui, "pending", sanitizeText(pending.message), ui.theme.warning);
-    addNotice(ui, "pending-wait", "Waiting for approval...", ui.theme.muted);
+    addNotice(ui, "pending-wait", t("chat.waitingApproval"), ui.theme.muted);
   } else if (!current) {
     clear(ui.messageContent);
     ui.messageBlocks = [];
-    addNotice(ui, "empty", "Select a room and press Enter.", ui.theme.muted);
+    addNotice(ui, "empty", t("chat.selectRoom"), ui.theme.muted);
   } else if (!joined) {
     clear(ui.messageContent);
     ui.messageBlocks = [];
-    addNotice(ui, "empty", "Not joined · press Enter to join again.", ui.theme.muted);
+    addNotice(ui, "empty", t("chat.notJoined"), ui.theme.muted);
   } else if (!messages.length) {
     clear(ui.messageContent);
     ui.messageBlocks = [];
-    addNotice(ui, "empty", "No messages yet. Say hello.", ui.theme.muted);
+    addNotice(ui, "empty", t("chat.noMessages"), ui.theme.muted);
   } else {
     if (!ui.messageBlocks.length && ui.messageContent.getChildren().length) clear(ui.messageContent);
     const nextBlocks = [];
@@ -253,6 +266,7 @@ export function syncMessages(ui, state) {
 
 export function syncComposer(ui, state) {
   const draft = String(state.draft ?? "");
+  ui.textarea.placeholder = t("chat.composerPlaceholder");
   ui.textarea.placeholderColor = ui.theme.faint;
   ui.textarea.textColor = ui.theme.text;
   ui.textarea.focusedTextColor = ui.theme.text;
@@ -276,18 +290,20 @@ export function syncComposer(ui, state) {
 
 export function syncStatus(ui, state) {
   const { theme } = ui;
-  const text = state.status || "Ready";
+  const connection = connectionStyle(theme, state.connection);
+  const text = state.status
+    || (state.connection === "online" ? t("status.ready") : `${connection.dot} ${connection.label}`);
   ui.statusLine.content = sanitizeText(text);
   ui.statusLine.fg = state.statusKind === "error"
     ? theme.error
     : state.statusKind === "success"
       ? theme.success
       : theme.muted;
-  const status = connectionStyle(theme, state.connection);
-  ui.statusHints.content = ui.renderer.width < 70
-    ? "? help"
-    : `${status.dot} ${status.label} · Tab focus · Alt+Space palette · ? help`;
-  ui.statusHints.fg = theme.muted;
+  const hints = state.focus === "composer"
+    ? t("status.composerHints")
+    : t("status.roomHints");
+  ui.statusHints.content = ui.renderer.width < 70 ? t("status.hintsShort") : hints;
+  ui.statusHints.fg = theme.faint;
 }
 
 export function syncFocus(ui, state) {
@@ -343,20 +359,20 @@ export function syncPalette(ui, state) {
   ui.paletteList.selectedBackgroundColor = theme.selectedBg;
   ui.paletteList.selectedTextColor = theme.selectedFg;
 
-  const scope = palette.scope === "all" ? "all joined rooms" : "this room";
+  const scope = palette.scope === "all" ? t("palette.scopeAll") : t("palette.scopeRoom");
   const defaultTitle = mode === "prompt"
-    ? "New room"
+    ? t("palette.newRoom")
     : mode === "search"
-      ? "Search messages"
-      : "Palette";
-  ui.paletteTitle.content = palette.title || defaultTitle;
+      ? t("palette.searchMessages")
+      : t("palette.title");
+  ui.paletteTitle.content = new StyledText([bold(fg(theme.text)(palette.title || defaultTitle))]);
   ui.paletteScope.content = palette.subtitle
-    || (mode === "prompt" ? "create" : mode === "search" ? scope : "commands");
+    || (mode === "prompt" ? t("palette.create") : mode === "search" ? scope : t("palette.commands"));
   ui.paletteInput.placeholder = mode === "prompt"
-    ? palette.prompt?.label || "Enter a value"
+    ? palette.prompt?.label || t("palette.valuePlaceholder")
     : mode === "search"
-      ? "Type to search messages"
-      : "Type to search or run a command";
+      ? t("palette.searchPlaceholder")
+      : t("palette.commandPlaceholder");
 
   const value = mode === "prompt" ? palette.prompt?.value ?? "" : palette.query ?? "";
   if (ui.paletteInput.value !== value) {
@@ -373,9 +389,9 @@ export function syncPalette(ui, state) {
     options = ui.app.paletteCommands().map((command) => ({ name: command.label, description: "", value: command.id }));
   } else if (mode === "search") {
     options = !String(palette.query ?? "").trim()
-      ? [{ name: "Type to search messages", description: "", value: "" }]
+      ? [{ name: t("palette.searchPlaceholder"), description: "", value: "" }]
       : !palette.results.length
-      ? [{ name: palette.searching ? "Searching..." : "No matches", description: "", value: "" }]
+      ? [{ name: palette.searching ? t("palette.searching") : t("palette.noMatches"), description: "", value: "" }]
       : palette.results.map((result) => {
         const info = formatMessage(result.message, null);
         return {
@@ -386,17 +402,17 @@ export function syncPalette(ui, state) {
       });
   } else if (mode === "info") {
     options = palette.loading
-      ? [{ name: "Loading...", description: "", value: "" }]
+      ? [{ name: t("common.loading"), description: "", value: "" }]
       : palette.items.length
         ? palette.items.map((item) => ({ name: item.name, description: "", value: item.value }))
-        : [{ name: palette.error ? "Unavailable" : "Nothing here", description: "", value: "" }];
+        : [{ name: palette.error ? t("palette.unavailable") : t("palette.nothing"), description: "", value: "" }];
   }
   ui.paletteList.options = options;
   if (isList) ui.paletteList.setSelectedIndex(Math.min(palette.selected ?? 0, Math.max(0, options.length - 1)));
 
   let desiredHeight;
   if (mode === "commands" || mode === "info") {
-    desiredHeight = Math.min(ui.renderer.height - 2, Math.max(9, options.length + 5));
+    desiredHeight = Math.min(16, ui.renderer.height - 2, Math.max(9, options.length + 4));
   } else if (isDetail) {
     desiredHeight = Math.min(ui.renderer.height - 2, Math.max(12, Math.floor(ui.renderer.height * 0.8)));
   } else if (isConfirm) {
@@ -404,12 +420,14 @@ export function syncPalette(ui, state) {
   } else {
     desiredHeight = Math.min(16, Math.max(9, Math.floor(ui.renderer.height / 2) + 1));
   }
+  desiredHeight = Math.max(4, Math.min(desiredHeight, ui.renderer.height - Math.max(1, Math.floor(ui.renderer.height / 4)) - 1));
+  paletteBox.bottom = Math.max(1, ui.renderer.height - Math.max(1, Math.floor(ui.renderer.height / 4)) - desiredHeight);
   if (paletteBox.height !== desiredHeight) paletteBox.height = desiredHeight;
 
   ui.paletteDetailMarkdown.syntaxStyle = markdownStyle(ui);
   ui.paletteDetailMarkdown.fg = theme.text;
   if (isDetail) {
-    const signature = `${theme.mode}:${palette.detail?.title}:${palette.detail?.markdown}`;
+    const signature = `${theme.mode}:${state.language}:${palette.detail?.title}:${palette.detail?.markdown}`;
     if (signature !== ui.detailSignature) {
       ui.detailSignature = signature;
       ui.paletteDetailMarkdown.content = palette.detail?.markdown ?? "";
@@ -423,56 +441,17 @@ export function syncPalette(ui, state) {
 
   const footer = palette.error
     || (mode === "prompt"
-      ? palette.hint || "Enter confirm · Esc cancel"
+      ? palette.hint || t("palette.promptHint")
       : mode === "search"
-        ? `↑↓ select · Enter open · Tab: ${palette.scope === "all" ? "this room" : "all rooms"} · Esc close${palette.searching ? " · searching..." : ""}`
+        ? t("palette.searchHint", {
+          scope: palette.scope === "all" ? t("palette.scopeRoom") : t("palette.scopeAll"),
+          searching: palette.searching ? t("palette.searchingSuffix") : "",
+        })
         : mode === "detail"
-          ? palette.hint || "↑↓ scroll · Esc back"
+          ? palette.hint || t("palette.detailHint")
           : mode === "confirm"
-            ? palette.hint || "Enter or y confirms · n or Esc cancels"
-            : palette.hint || (mode === "info" ? "↑↓ select · Enter open · Esc close" : "↑↓ select · Enter run · Esc close"));
-  ui.paletteHint.content = `  ${sanitizeText(footer)}${palette.searching && mode !== "search" ? "  · working..." : ""}`;
+            ? palette.hint || t("palette.confirmHint")
+            : palette.hint || (mode === "info" ? t("palette.listHint") : t("palette.runHint")));
+  ui.paletteHint.content = `  ${sanitizeText(footer)}${palette.searching && mode !== "search" ? `  · ${t("palette.working")}` : ""}`;
   ui.paletteHint.fg = palette.error ? theme.error : theme.muted;
-}
-
-function shortcutChunks(title, rows, theme) {
-  const chunks = [bold(fg(theme.accent)(`${title}\n`))];
-  for (const [key, label] of rows) {
-    chunks.push(fg(theme.accent)(key.padEnd(12)));
-    chunks.push(fg(theme.text)(`${label}\n`));
-  }
-  return chunks;
-}
-
-export function syncHelp(ui, state) {
-  const show = Boolean(state.help) && !state.palette;
-  ui.helpBox.visible = show;
-  if (!show) return;
-  ui.helpBox.borderColor = ui.theme.border;
-  ui.helpBox.backgroundColor = ui.theme.surface;
-  ui.helpBar.backgroundColor = ui.theme.raised;
-  ui.helpTitle.fg = ui.theme.text;
-  ui.helpClose.fg = ui.theme.muted;
-  ui.helpFooter.fg = ui.theme.muted;
-  const signature = ui.theme.mode;
-  if (signature === ui.helpSignature) return;
-  ui.helpSignature = signature;
-  ui.helpLeft.content = new StyledText(shortcutChunks("Navigation", [
-    ["↑ / ↓", "select room"],
-    ["Enter", "open / join"],
-    ["Tab", "focus composer"],
-    ["PgUp / PgDn", "scroll messages"],
-    ["Alt+Home", "first message"],
-    ["Alt+End", "last message"],
-  ], ui.theme));
-  ui.helpRight.content = new StyledText(shortcutChunks("Composer", [
-    ["Enter", "send message"],
-    ["Ctrl+J", "insert newline"],
-    ["Esc", "clear / blur"],
-    ["/", "inline commands"],
-    ["@", "mention members"],
-    ["Alt+Space", "palette / search"],
-    ["Ctrl+R", "refresh rooms"],
-    ["Ctrl+C", "quit"],
-  ], ui.theme));
 }

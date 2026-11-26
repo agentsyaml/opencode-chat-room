@@ -18,7 +18,7 @@ import { pollOwnedSessions } from "./v2-receiver.ts";
 import { pollKnownSessions } from "../../plugin.ts";
 import { locallyOwnedSessions, reportAgentPresence } from "../agent/agent-presence.ts";
 import { flushReceiptCandidates, receiptDestination } from "../agent/agent-receipts.ts";
-import { startServer } from "../../server/http-server.ts";
+import { startServer } from "../platform/http-server.ts";
 
 type WatchRecord = { phase: "starting" | "running"; token: string; nonce: string; instanceID: string; pid: number; port?: number; createdAt?: number };
 function canonicalPath(value: string): string {

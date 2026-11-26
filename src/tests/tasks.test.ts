@@ -9,7 +9,7 @@ const previousDirectory = process.env.CHAT_ROOM_STATE_DIR;
 process.env.CHAT_ROOM_STATE_DIR = directory;
 const { withStateTransaction, readRoomTask } = await import("../state/sqlite-state.ts");
 const { writeState } = await import("../state/store.ts");
-const { clearCompletedTasks, createTask, deleteTask, listTasks, updateTask } = await import("../rooms/tasks.ts");
+const { clearCompletedTasks, createTask, deleteTask, listTasks, maxRoomTasks, updateTask } = await import("../rooms/tasks.ts");
 const { Database } = await import("../state/sqlite.ts");
 const database = path.join(directory, "chat-room.sqlite");
 
@@ -40,6 +40,22 @@ const expectInvalid = (result: Awaited<ReturnType<typeof createTask>>, field: st
   if (!("error" in result)) throw new Error("expected a validation failure");
   expect(result.status).toBe(400);
   expect(result.error).toContain(field);
+};
+
+const limitRoom = (name: string) => writeState((svc, registry) => {
+  const room = svc.createRoom(name, "Owner");
+  svc.joinRoom(room.id, { id: "Alice", name });
+  registry[room.id] = { alice: entry("Alice", `${name}-alice`) };
+  return room.id;
+});
+
+const withTaskLimit = async <T>(value: string, run: () => Promise<T>): Promise<T> => {
+  const previous = process.env.CHAT_ROOM_MAX_ROOM_TASKS;
+  process.env.CHAT_ROOM_MAX_ROOM_TASKS = value;
+  try { return await run(); } finally {
+    if (previous === undefined) delete process.env.CHAT_ROOM_MAX_ROOM_TASKS;
+    else process.env.CHAT_ROOM_MAX_ROOM_TASKS = previous;
+  }
 };
 
 afterAll(() => {
@@ -250,6 +266,64 @@ test("clear completed tasks scopes deletion to admins or the task creator", asyn
   expect(await clearCompletedTasks(directRoomID, "direct-a")).toMatchObject({ status: 409 });
   expect(await clearCompletedTasks("missing-room", "alice")).toMatchObject({ status: 404 });
   expect(await clearCompletedTasks(clearRoom, "bob")).toEqual({ ok: true, count: 0 });
+});
+
+test("room task limit defaults to 10 and rejects the eleventh task", async () => {
+  const limitedRoom = await limitRoom("LimitTen");
+  for (let index = 1; index <= 10; index++) {
+    taskOf(await createTask(limitedRoom, "alice", { title: `Task ${index}` }));
+  }
+  expect(await createTask(limitedRoom, "alice", { title: "Task 11" })).toEqual({
+    status: 409,
+    error: "room task limit reached (10); delete a completed task before adding another",
+  });
+  const listed = await listTasks(limitedRoom, "alice");
+  if (!("tasks" in listed)) throw new Error(listed.error);
+  expect(listed.tasks).toHaveLength(10);
+  expect(listed.limit).toBe(10);
+});
+
+test("CHAT_ROOM_MAX_ROOM_TASKS overrides the limit and deleting a completed task frees a slot", async () => {
+  await withTaskLimit("2", async () => {
+    const limitedRoom = await limitRoom("LimitTwo");
+    const one = taskOf(await createTask(limitedRoom, "alice", { title: "One" }));
+    taskOf(await createTask(limitedRoom, "alice", { title: "Two" }));
+    // Unfinished tasks count, and completing one does not free a slot.
+    expect(await createTask(limitedRoom, "alice", { title: "Three" })).toMatchObject({ status: 409 });
+    await updateTask(limitedRoom, one.id, "alice", { status: "done" });
+    expect(await createTask(limitedRoom, "alice", { title: "Three" })).toMatchObject({ status: 409 });
+
+    expect(await deleteTask(limitedRoom, one.id, "alice")).toEqual({ ok: true });
+    taskOf(await createTask(limitedRoom, "alice", { title: "Three" }));
+    const listed = await listTasks(limitedRoom, "alice");
+    if (!("tasks" in listed)) throw new Error(listed.error);
+    expect(listed.tasks).toHaveLength(2);
+    expect(listed.limit).toBe(2);
+  });
+});
+
+test("concurrent creates do not exceed the room task limit", async () => {
+  await withTaskLimit("3", async () => {
+    const limitedRoom = await limitRoom("LimitConcurrent");
+    const results = await Promise.all(Array.from({ length: 8 }, (_, index) => createTask(limitedRoom, "alice", { title: `Concurrent ${index}` })));
+    let created = 0;
+    for (const result of results) {
+      if ("task" in result) created++;
+      else expect(result).toEqual({ status: 409, error: "room task limit reached (3); delete a completed task before adding another" });
+    }
+    expect(created).toBe(3);
+    const listed = await listTasks(limitedRoom, "alice");
+    if (!("tasks" in listed)) throw new Error(listed.error);
+    expect(listed.tasks).toHaveLength(3);
+  });
+});
+
+test("CHAT_ROOM_MAX_ROOM_TASKS rejects invalid values instead of clamping", () => {
+  expect(maxRoomTasks({})).toBe(10);
+  expect(maxRoomTasks({ CHAT_ROOM_MAX_ROOM_TASKS: " 2 " })).toBe(2);
+  for (const value of ["0", "-1", "2.5", "ten", "1e3"]) {
+    expect(() => maxRoomTasks({ CHAT_ROOM_MAX_ROOM_TASKS: value })).toThrow("CHAT_ROOM_MAX_ROOM_TASKS must be a positive integer");
+  }
 });
 
 test("legacy task rows gain empty detail fields through migration", async () => {

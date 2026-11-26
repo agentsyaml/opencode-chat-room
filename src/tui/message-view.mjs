@@ -18,6 +18,7 @@ import {
   formatAttachments,
   prepareMarkdown,
 } from "./markdown.mjs";
+import { t } from "./i18n.mjs";
 
 let treeSitter;
 const treeClient = () => (treeSitter ??= getTreeSitterClient());
@@ -67,7 +68,7 @@ function messageBody(ui, message, info, highlighted) {
       id: `message-recalled-${message.id}`,
       width: "100%",
       wrapMode: "word",
-      content: new StyledText([dim(italic("[recalled]"))]),
+      content: new StyledText([dim(italic(t("chat.recalled")))]),
     }));
     return body;
   }

@@ -49,6 +49,7 @@ test("non-members and bad requests are rejected with existing route codes", asyn
   expect(await taskRoutes(new Request("http://test/elsewhere"), new URL("http://test/elsewhere"))).toBeUndefined();
   const wired = await memberRoutes(new Request(`http://test${collection}?sessionID=alice`), new URL(`http://test${collection}?sessionID=alice`));
   expect(wired?.status).toBe(200);
+  expect(await (await call("GET", `${collection}?sessionID=alice`))!.json()).toMatchObject({ limit: 10 });
 });
 
 test("creator manages the task while the assignee may only move status", async () => {
@@ -118,6 +119,34 @@ test("task routes round-trip detail fields and assignee step toggles", async () 
   expect(badSteps?.status).toBe(400);
   expect((await badSteps!.json() as { error: string }).error).toContain("steps");
   expect((await call("DELETE", item(task.id as string), { sessionID: "alice" }))?.status).toBe(200);
+});
+
+test("task creation enforces the configurable room limit and lists it", async () => {
+  const room = await writeState((svc, registry) => {
+    const created = svc.createRoom("Task limit", "Owner");
+    svc.joinRoom(created.id, { id: "Alice", name: "Alice" });
+    registry[created.id] = { alice: entry("Alice", "limit-alice-m") };
+    return created.id;
+  });
+  const path = `/rooms/${room}/tasks`;
+  const previous = process.env.CHAT_ROOM_MAX_ROOM_TASKS;
+  process.env.CHAT_ROOM_MAX_ROOM_TASKS = "2";
+  try {
+    expect(await (await call("GET", `${path}?sessionID=alice`))!.json()).toEqual({ tasks: [], limit: 2 });
+    const first = (await (await call("POST", path, { sessionID: "alice", title: "One" }))!.json() as { task: { id: string } }).task;
+    expect((await call("POST", path, { sessionID: "alice", title: "Two" }))?.status).toBe(201);
+    const rejected = await call("POST", path, { sessionID: "alice", title: "Three" });
+    expect(rejected?.status).toBe(409);
+    expect(await rejected!.json()).toEqual({ error: "room task limit reached (2); delete a completed task before adding another" });
+
+    expect((await call("PATCH", `${path}/${first.id}`, { sessionID: "alice", status: "done" }))?.status).toBe(200);
+    expect((await call("POST", path, { sessionID: "alice", title: "Three" }))?.status).toBe(409);
+    expect((await call("DELETE", `${path}/${first.id}`, { sessionID: "alice" }))?.status).toBe(200);
+    expect((await call("POST", path, { sessionID: "alice", title: "Three" }))?.status).toBe(201);
+  } finally {
+    if (previous === undefined) delete process.env.CHAT_ROOM_MAX_ROOM_TASKS;
+    else process.env.CHAT_ROOM_MAX_ROOM_TASKS = previous;
+  }
 });
 
 test("DELETE collection clears completed tasks with member scope", async () => {

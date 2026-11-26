@@ -1,45 +1,51 @@
 // Pure command palette logic: command lists, scoped client-side search,
 // ranking and snippets. No I/O lives here so it is easy to test.
+import { t } from "./i18n.mjs";
 
 const SEARCH_LIMIT = 50;
 
+/** Match the visible label plus optional search aliases such as exit/quit. */
 export function filterCommands(commands, query) {
-  const normalize = (value) => String(value ?? "").trim().toLowerCase().replace(/[-_]+/g, " ");
+  const normalize = (value) => String(value ?? "").trim().toLowerCase()
+    .replace(/^[/\\]+/, "").replace(/[-_]+/g, " ");
   const needle = normalize(query);
   if (!needle) return commands.slice();
-  return commands.filter((command) => normalize(command.label).includes(needle));
+  return commands.filter((command) => {
+    const haystack = normalize([command.label, ...(command.keywords ?? [])].join(" "));
+    return haystack.includes(needle);
+  });
 }
 
 /** Commands shown when the palette query is empty. */
 export function buildCommands({ rooms = [], current = null, joined = false, help = false } = {}) {
   const commands = [
-    { id: "refresh", label: "Refresh rooms" },
-    { id: "new-room", label: "New room..." },
+    { id: "refresh", label: t("command.refresh") },
+    { id: "new-room", label: t("command.newRoom") },
   ];
   for (const room of rooms) {
-    if (!room.joined) commands.push({ id: `join:${room.id}`, label: `Join #${room.name}`, roomId: room.id });
+    if (!room.joined) commands.push({ id: `join:${room.id}`, label: t("command.join", { name: room.name }), roomId: room.id });
   }
-  if (current && joined) commands.push({ id: "leave-room", label: `Leave #${current.name}` });
-  commands.push({ id: "toggle-help", label: help ? "Hide keyboard help" : "Show keyboard help" });
+  if (current && joined) commands.push({ id: "leave-room", label: t("command.leave", { name: current.name }) });
+  commands.push({ id: "toggle-help", label: help ? t("command.hideHelp") : t("command.showHelp") });
   for (const room of rooms) {
-    if (room.joined) commands.push({ id: `switch:${room.id}`, label: `Switch to #${room.name}`, roomId: room.id });
+    if (room.joined) commands.push({ id: `switch:${room.id}`, label: t("command.switch", { name: room.name }), roomId: room.id });
   }
-  commands.push({ id: "search-room", label: "Search this room" });
-  commands.push({ id: "search-all", label: "Search all joined rooms" });
-  commands.push({ id: "members", label: "Members" });
-  commands.push({ id: "join-requests", label: "Join requests" });
-  commands.push({ id: "announcements", label: "Announcements" });
-  commands.push({ id: "questions", label: "Questions" });
-  commands.push({ id: "files", label: "Files" });
-  commands.push({ id: "reminders", label: "Reminders" });
-  commands.push({ id: "settings", label: "Settings" });
-  commands.push({ id: "room-settings", label: "Room settings" });
-  commands.push({ id: "delete-room", label: "Delete room..." });
-  commands.push({ id: "recall-message", label: "Recall message..." });
-  commands.push({ id: "reveal-message", label: "Reveal message..." });
-  commands.push({ id: "reply-message", label: "Reply to message..." });
-  commands.push({ id: "ask-question", label: "Ask question..." });
-  commands.push({ id: "quit", label: "Quit" });
+  commands.push({ id: "search-room", label: t("command.searchRoom") });
+  commands.push({ id: "search-all", label: t("command.searchAll") });
+  commands.push({ id: "members", label: t("command.members") });
+  commands.push({ id: "join-requests", label: t("command.joinRequests") });
+  commands.push({ id: "announcements", label: t("command.announcements") });
+  commands.push({ id: "questions", label: t("command.questions") });
+  commands.push({ id: "files", label: t("command.files") });
+  commands.push({ id: "reminders", label: t("command.reminders") });
+  commands.push({ id: "settings", label: t("command.settings") });
+  commands.push({ id: "room-settings", label: t("command.roomSettings") });
+  commands.push({ id: "delete-room", label: t("command.deleteRoom") });
+  commands.push({ id: "recall-message", label: t("command.recall") });
+  commands.push({ id: "reveal-message", label: t("command.reveal") });
+  commands.push({ id: "reply-message", label: t("command.reply") });
+  commands.push({ id: "ask-question", label: t("command.ask") });
+  commands.push({ id: "quit", label: t("command.quit"), keywords: ["exit", "quit", "q"] });
   return commands;
 }
 

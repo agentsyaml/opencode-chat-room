@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { formatRoomPreview, formatSystemMessage } from "../../server/assets/chat/system-messages.js";
+import { formatRoomPreview, formatSystemMessage, systemMessageKind } from "../../server/assets/chat/system-messages.js";
 import { app } from "../../server/assets/chat/state.js";
 
 const say = (text: string) => formatSystemMessage({ senderId: "system", text }, app);
@@ -38,6 +38,14 @@ test("joined changes translate every segment", () => {
   app.locale = "en";
   expect(say('Alex updated the room description; Alex set join approval to open'))
     .toBe("Alex updated the room description; Alex opened this room to join without approval");
+});
+
+test("system rows expose the kind used by the event icon", () => {
+  expect(systemMessageKind({ id: "event-1", text: "Peer joined the room" })).toBe("join");
+  expect(systemMessageKind({ id: "event-2", text: "Peer was removed from the room" })).toBe("remove");
+  expect(systemMessageKind({ id: "event-3", text: "Alex renamed the room from \"Old\" to \"New\"" })).toBe("admin");
+  expect(systemMessageKind({ id: "reminder:1", text: "Standup in five minutes" })).toBe("reminder");
+  expect(systemMessageKind({ id: "event-4", text: "Delivered to telegram/test" })).toBe("notice");
 });
 
 test("broadcast mentions use the current locale in previews", () => {

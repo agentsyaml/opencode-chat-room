@@ -1,7 +1,8 @@
 import { createRandomId, LS, LOADED_MESSAGE_LIMIT } from "./state.js";
 import { renderMarkdown } from "./markdown.js";
 import { hasMessageSelection, pruneMessageRows, trimMessages, focusedMessage } from "./message-window.js";
-import { formatSystemMessage, setRoomPreview } from "./system-messages.js";
+import { setRoomPreview } from "./system-messages.js";
+import { renderSystemRow } from "./system-events.js";
 import { installEditor } from "./editor.js";
 import { adminAgentBadge, isAdminAgent } from "./admin-badge.js";
 import { initMessagePolling } from "./message-polling.js";
@@ -104,6 +105,8 @@ export function initMessages(app) {
     }
   };
   app.jumpToBottom = () => {
+    app.cancelThreadScrollAnimation?.();
+    app.state.userScrollIntentUntil = 0;
     app.state.readAnchorGuard = null;
     app.state.followBottom = true;
     if (app.state.focusMessageId) {
@@ -207,10 +210,7 @@ export function initMessages(app) {
     row.dataset.ts = message.createdAt;
     row.dataset.msgId = message.id;
     if (message.senderId === "system") {
-      row.className = "sys";
-      const text = document.createElement("span");
-      text.textContent = formatSystemMessage(message, app);
-      row.append(text);
+      renderSystemRow(row, message, app);
     } else {
       const direct = app.state.room.kind === "direct";
       const own = isOwnMessage(message, app);

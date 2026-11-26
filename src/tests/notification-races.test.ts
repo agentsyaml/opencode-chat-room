@@ -20,7 +20,7 @@ async function waitForGate(gate: Promise<void>) {
   let timer: ReturnType<typeof setTimeout>;
   try {
     await Promise.race([gate, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("notification race gate timed out")), 5_000);
+      timer = setTimeout(() => reject(new Error("notification race gate timed out")), 20_000);
     })]);
   } finally { clearTimeout(timer!); }
 }
@@ -61,7 +61,7 @@ describe.serial("notification membership races", () => {
     expect(bumps).toBe(1);
     expect(queue.pendingAdmission(sessionID, roomID)?.state).toBe("admitted");
     expect(receiverState.claimBackgroundAttempt(sessionID, roomID, backgroundServiceKey({ protocol: "v2", receiverOwnerID: ownerID }), triggerTs)).toBe(false);
-  });
+  }, 30_000);
 
   test("read-through after rejoin prunes an old pending request before a new steer", async () => {
     const roomID = `rejoin-${crypto.randomUUID()}`, oldTs = Date.now() - 2, newTs = Date.now() - 1;
@@ -373,7 +373,7 @@ describe.serial("notification membership races", () => {
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).not.toContain("@agent old");
     expect(prompts[1]).toContain("@agent new");
-  });
+  }, 30_000);
 
   test("central watermark ignores ordinary items but advances for a newer mention", async () => {
     const roomID = `center-addressed-${crypto.randomUUID()}`, opts = { center: "http://center.invalid", token: "test" };

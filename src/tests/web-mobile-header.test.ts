@@ -62,7 +62,7 @@ test.skipIf(!browserModule)("the mobile chat header stays compact with usable co
       if (metrics.title.scroll > metrics.title.client) expect(metrics.title.scroll).toBeGreaterThan(metrics.title.client);
       expect(metrics.drawer.width).toBeGreaterThanOrEqual(44);
       expect(metrics.drawer.height).toBeGreaterThanOrEqual(44);
-      expect(metrics.chips.length).toBe(4);
+      expect(metrics.chips.length).toBe(3);
       const chipMin = width <= 380 ? 40 : 44;
       expect(metrics.chips.every((chip: { width: number; height: number }) => chip.width >= chipMin && chip.height >= chipMin)).toBe(true);
       expect(metrics.sameRow).toBe(true);

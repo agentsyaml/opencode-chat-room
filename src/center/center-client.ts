@@ -17,6 +17,7 @@ import {
 import type { InboxItem } from "./center-inbox.ts";
 import { assertDeliveryLease } from "./session-delivery.ts";
 import { formatTasks, taskFields, validateTaskFields, type Task } from "../agent/task-tool.ts";
+import type { CatchUpOptions, CatchUpPage } from "../protocol/addressing.ts";
 export { queueAdmissionId } from "./queue.ts";
 export { createQueueTransport, sendAsyncNotification, sendQueue } from "./queue-transport.ts";
 export type { QueueTransport, PushResult } from "./queue-transport.ts";
@@ -141,16 +142,7 @@ export async function getMessage(opts: CenterOpts, roomId: string, messageId: st
   );
 }
 
-export type CatchUpOptions = { sessionID: string; afterSeq?: number; limit?: number };
-export type CatchUpPage = {
-  messages: Array<Record<string, unknown>>;
-  nextCursor: number;
-  hasMore: boolean;
-  unreadMentions: Array<{ id: string; seq: number }>;
-  unreadMentionCount: number;
-  unansweredQuestions: Array<{ id: string; seq: number }>;
-  unansweredQuestionCount: number;
-};
+export type { CatchUpOptions, CatchUpPage };
 
 /** Page forward from a persisted seq. Strictly read-only: no receipts, read
  * watermark, wake, or model call happens on this path. */

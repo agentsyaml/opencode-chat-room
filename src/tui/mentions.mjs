@@ -1,5 +1,7 @@
 // Mention helpers shared by the composer suggestions and outgoing messages.
 // Display names stay visible while typing; the wire format is applied on send.
+import { t } from "./i18n.mjs";
+
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function mentionNames(participants = []) {
@@ -21,7 +23,7 @@ export function mentionItems(participants, query = "") {
     insert: `@${name}`,
     label: name,
   }));
-  items.push({ name: "all", insert: "@all", label: "Everyone (@all)" });
+  items.push({ name: "all", insert: "@all", label: t("mentions.everyone") });
   return items.filter((item) => {
     const haystack = `${item.label} ${item.name}`.toLowerCase();
     return !needle || haystack.includes(needle);

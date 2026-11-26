@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "A chat-room server, web client, terminal client, and OpenCode/Codex/dsh plugins.",
   "license": "MIT",
   "repository": {
@@ -34,7 +34,12 @@
     "!src/tui/test",
     "skills/chatroom/SKILL.md",
     "server/chat-server.ts",
+    "server/startup.ts",
+    "server/routes",
+    "server/app.ts",
     "server/channels.ts",
+    "server/channel-settings.ts",
+    "server/channel-integration.ts",
     "server/http-server.ts",
     "server/json-body.ts",
     "server/inbox.ts",
@@ -72,7 +77,9 @@
     "build:cli": "bun build cli.ts --target=node --packages external --outfile dist/cli.js >&2",
     "build:channeld-mock": "bun build packages/chat-room-channeld/src/mock-adapter.ts --target=node --packages external --outfile packages/chat-room-channeld/dist/mock-adapter.js >&2",
     "build:channeld-feishu": "bun build packages/chat-room-channeld/src/feishu-adapter.ts --target=node --packages external --outfile packages/chat-room-channeld/dist/feishu-adapter.js >&2",
-    "prepack": "bun run build:cli && bun run build:channeld-mock && bun run build:channeld-feishu",
+    "build:monaco": "bun scripts/build-monaco.ts",
+    "build:office": "bun scripts/build-office.ts",
+    "prepack": "bun run build:cli && bun run build:channeld-mock && bun run build:channeld-feishu && bun scripts/build-monaco.ts --quiet && bun scripts/build-office.ts --quiet",
     "server": "node cli.ts",
     "server:bun": "bun cli.ts",
     "server:deno": "deno run --allow-env --allow-read --allow-write --allow-net cli.ts",
@@ -85,18 +92,31 @@
   "devDependencies": {
     "@opencode/plugin": "2.0.29",
     "@types/bun": "latest",
+    "@types/pg": "^8.23.1",
+    "docx-preview": "0.4.1",
+    "jszip": "3.10.2",
+    "monaco-editor": "0.58.0",
     "playwright": "1.64.1",
-    "shiki": "4.6.0"
+    "pptx-preview": "1.0.7",
+    "shiki": "4.6.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1178.0",
     "@opencode-ai/plugin": "^1.18.29",
     "@opencode/client": "2.0.32",
     "@opentui/core": "0.2.16",
     "croner": "11.0.0",
+    "pg": "^8.23.1",
     "yaml": "^2.9.0",
     "zod": "4.1.8"
+  },
+  "overrides": {
+    "echarts": "6.1.0",
+    "lodash": "4.18.1",
+    "uuid": "11.1.1"
   }
 }

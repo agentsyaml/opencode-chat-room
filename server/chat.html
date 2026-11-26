@@ -10,11 +10,15 @@
 <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <meta name="theme-color" content="#f3f1ea">
 <script>
-  // Resolve the saved theme before the first paint so a dark choice never flashes light.
+  // Resolve the saved theme and outer window frame before the first paint.
   try {
     var savedTheme = localStorage.getItem("chat.theme");
     document.documentElement.dataset.theme = ["light", "dark", "forest", "sand"].includes(savedTheme) ? savedTheme : "system";
   } catch { document.documentElement.dataset.theme = "system"; }
+  document.documentElement.dataset.windowFrame = "framed";
+  try {
+    if (localStorage.getItem("chat.windowFrame") === "borderless") document.documentElement.dataset.windowFrame = "borderless";
+  } catch { /* A blocked localStorage keeps the framed default. */ }
 </script>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -35,7 +39,7 @@
 <link rel="stylesheet" href="/assets/doc-preview.css?v={{version}}">
 <link rel="stylesheet" href="/assets/diagram-viewer.css?v={{version}}">
 </head>
-<body data-channeld="{{channeld}}">
+<body data-channeld="{{channeld}}" data-integrations-admin="{{integrationsAdmin}}">
 
 <main id="app">
   <section id="restoreView" class="restore-view" role="status" aria-live="polite">
@@ -152,6 +156,10 @@
           <svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-circle_half_fill-24"></use></svg>
           <span data-i18n="settingsAppearance">Appearance</span>
         </button>
+        <button id="settingsTabIntegrations" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settingsPanelIntegrations" tabindex="-1" data-settings-tab="integrations">
+          <svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-plug_connected-24"></use></svg>
+          <span data-i18n="settingsIntegrations">Integrations</span>
+        </button>
         <button id="settingsTabConnection" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settingsPanelConnection" tabindex="-1" data-settings-tab="connection">
           <svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-plug_connected-24"></use></svg>
           <span data-i18n="settingsConnection">Connection</span>
@@ -225,6 +233,91 @@
               </label>
             </div>
           </fieldset>
+          <div class="settings-row">
+            <div class="settings-copy">
+              <label class="settings-label" for="inWindowFrame"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-options-24"></use></svg><span data-i18n="windowFrameLabel">Window frame</span></label>
+              <p id="windowFrameHint" class="settings-hint" data-i18n="windowFrameHint">Framed keeps the inset card; Borderless fills the window.</p>
+            </div>
+            <select id="inWindowFrame" class="input settings-select" aria-describedby="windowFrameHint">
+              <option value="framed" data-i18n="windowFrameFramed" selected>Framed</option>
+              <option value="borderless" data-i18n="windowFrameBorderless">Borderless</option>
+            </select>
+          </div>
+          <fieldset class="settings-block panel-mode-block">
+            <legend class="settings-label"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-options-24"></use></svg><span data-i18n="settingsPanelMode">Tool windows</span></legend>
+            <p class="settings-hint" data-i18n="settingsPanelModeHint">Choose how each room tool opens on wide screens. Narrow or short windows always use a dialog.</p>
+            <div class="panel-mode-grid">
+              <label class="panel-mode-row"><span data-i18n="announcements">Announcements</span><select class="input settings-select" data-panel-mode="announcements"><option value="dialog" data-i18n="panelModeDialog">Dialog</option><option value="pane" data-i18n="panelModePane">Side pane</option></select></label>
+              <label class="panel-mode-row"><span data-i18n="filesTitle">Files</span><select class="input settings-select" data-panel-mode="files"><option value="dialog" data-i18n="panelModeDialog">Dialog</option><option value="pane" data-i18n="panelModePane">Side pane</option></select></label>
+              <label class="panel-mode-row"><span data-i18n="tasksTitle">Tasks</span><select class="input settings-select" data-panel-mode="tasks"><option value="dialog" data-i18n="panelModeDialog">Dialog</option><option value="pane" data-i18n="panelModePane">Side pane</option></select></label>
+              <label class="panel-mode-row"><span data-i18n="reminders">Reminders</span><select class="input settings-select" data-panel-mode="reminders"><option value="dialog" data-i18n="panelModeDialog">Dialog</option><option value="pane" data-i18n="panelModePane">Side pane</option></select></label>
+            </div>
+          </fieldset>
+        </section>
+        <section id="settingsPanelIntegrations" class="settings-panel integration-panel" role="tabpanel" aria-labelledby="settingsTabIntegrations" hidden>
+          <div class="integration-lead">
+            <p class="settings-hint" data-i18n="integrationsHint">Connect rooms with external platforms through uploaded plugins. Secret values stay on the server.</p>
+            <button id="btnRefreshIntegrations" class="btn ghost small" type="button" data-i18n="refreshQuestions">Refresh</button>
+          </div>
+          <p id="integrationStatus" class="hint" role="status" aria-live="polite"></p>
+          <p id="integrationError" class="alert integration-error" role="alert" hidden></p>
+          <p id="integrationExternalNotice" class="integration-external-notice" data-i18n="integrationsExternalConfig" role="status" hidden>This integration uses an external configuration file. Edit that file, or disable it before saving managed settings.</p>
+          <div class="settings-row integration-enable-row">
+            <div class="settings-copy">
+              <label class="settings-label" for="inIntegrationsEnabled"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-plug_connected-24"></use></svg><span data-i18n="integrationsEnable">Enable integrations</span></label>
+              <p class="settings-hint" data-i18n="integrationsEnableHint">Starts or stops the integration runtime immediately.</p>
+            </div>
+            <input id="inIntegrationsEnabled" class="settings-switch" type="checkbox" role="switch">
+          </div>
+          <section class="integration-section" aria-labelledby="integrationAccountsHeading">
+            <header class="integration-section-head">
+              <h3 id="integrationAccountsHeading" data-i18n="integrationsAccounts">Accounts</h3>
+              <button id="btnAddIntegrationAccount" class="btn ghost small" type="button" data-i18n="integrationsAddAccount">Add account</button>
+            </header>
+            <ul id="integrationAccounts" class="integration-accounts"></ul>
+            <p id="integrationAccountsEmpty" class="hint" data-i18n="integrationsEmptyAccounts" hidden>No accounts yet.</p>
+          </section>
+          <section class="integration-section" aria-labelledby="integrationPluginsHeading">
+            <header class="integration-section-head">
+              <h3 id="integrationPluginsHeading" data-i18n="integrationsPlugins">Plugins</h3>
+              <button id="btnUploadPlugin" class="btn ghost small" type="button" data-i18n="integrationsUploadPlugin">Upload plugin</button>
+            </header>
+            <ul id="integrationPlugins" class="integration-plugins"></ul>
+            <p id="integrationPluginsEmpty" class="hint" data-i18n="integrationsEmptyPlugins" hidden>No plugins uploaded yet.</p>
+          </section>
+          <section class="integration-section integration-rules-section" aria-labelledby="integrationRulesHeading">
+            <header class="integration-section-head">
+              <h3 id="integrationRulesHeading" data-i18n="integrationsRules">Outbound rules</h3>
+              <div id="integrationRulesFormat" class="integration-format-toggle" role="group" aria-label="Rules format" data-i18n-aria-label="integrationsRulesFormat" hidden>
+                <button id="integrationRulesFormatJson" class="integration-format-btn" type="button" data-format="json" aria-pressed="true">JSON</button>
+                <button id="integrationRulesFormatYaml" class="integration-format-btn" type="button" data-format="yaml" aria-pressed="false">YAML</button>
+              </div>
+            </header>
+            <p class="settings-hint" data-i18n="integrationsRulesHint">Outbound rules forward room events to connected accounts. Use JSON or YAML; each target must use an existing account.</p>
+            <div id="integrationRulesEditor" class="integration-rules-editor" aria-label="Outbound rules editor" data-i18n-aria-label="integrationsRules" hidden></div>
+            <textarea id="integrationRules" class="input integration-rules" rows="8" spellcheck="false" aria-describedby="integrationRulesError"></textarea>
+            <p id="integrationRulesFallback" class="settings-hint" data-i18n="integrationsEditorUnavailable" hidden></p>
+            <p id="integrationRulesError" class="hint integration-field-error" role="alert" hidden></p>
+            <ul id="integrationRulesErrorList" class="integration-rule-errors" aria-label="Outbound rule errors" hidden></ul>
+          </section>
+          <section class="integration-section integration-rules-section" aria-labelledby="integrationInboundHeading">
+            <header class="integration-section-head">
+              <h3 id="integrationInboundHeading" data-i18n="integrationsInboundRules">Inbound routes</h3>
+              <div id="integrationInboundFormat" class="integration-format-toggle" role="group" aria-label="Rules format" data-i18n-aria-label="integrationsRulesFormat" hidden>
+                <button id="integrationInboundFormatJson" class="integration-format-btn" type="button" data-format="json" aria-pressed="true">JSON</button>
+                <button id="integrationInboundFormatYaml" class="integration-format-btn" type="button" data-format="yaml" aria-pressed="false">YAML</button>
+              </div>
+            </header>
+            <p class="settings-hint" data-i18n="integrationsInboundHint">Inbound routes bring external messages into a room. Each route needs a configured account and a room.</p>
+            <div id="integrationInboundEditor" class="integration-rules-editor" aria-label="Inbound routes editor" data-i18n-aria-label="integrationsInboundRules" hidden></div>
+            <textarea id="integrationInbound" class="input integration-rules" rows="6" spellcheck="false" aria-describedby="integrationInboundError"></textarea>
+            <p id="integrationInboundFallback" class="settings-hint" data-i18n="integrationsEditorUnavailable" hidden></p>
+            <p id="integrationInboundError" class="hint integration-field-error" role="alert" hidden></p>
+            <ul id="integrationInboundErrorList" class="integration-rule-errors" aria-label="Inbound route errors" hidden></ul>
+          </section>
+          <div class="integration-actions">
+            <button id="btnSaveIntegrations" class="btn primary small" type="button" data-i18n="integrationsSave">Save integrations</button>
+          </div>
         </section>
         <section id="settingsPanelConnection" class="settings-panel" role="tabpanel" aria-labelledby="settingsTabConnection" hidden>
           <div class="settings-row settings-row-stack">
@@ -242,6 +335,48 @@
         </section>
       </div>
     </div>
+  </dialog>
+  <dialog id="integrationAccountDialog" class="admin-dialog integration-dialog" aria-labelledby="integrationAccountHeading">
+    <header class="admin-dialog-head"><h2 id="integrationAccountHeading" data-i18n="integrationsAccountTitle">Integration account</h2><button id="btnCloseIntegrationAccount" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button></header>
+    <form id="integrationAccountForm" class="integration-form" novalidate>
+      <p id="integrationAccountError" class="alert integration-error" role="alert" hidden></p>
+      <label class="field"><span class="field-label" data-i18n="integrationsAccountId">Account ID</span><input id="integrationAccountId" class="input" maxlength="128" autocomplete="off" required></label>
+      <label class="field"><span class="field-label" data-i18n="integrationsPlugin">Plugin</span><select id="integrationAccountPlugin" class="input" required></select></label>
+      <label class="field"><span class="field-label" data-i18n="integrationsPlatform">Platform</span><input id="integrationAccountPlatform" class="input" readonly></label>
+      <fieldset class="field integration-env-field">
+        <legend class="field-label" data-i18n="integrationsEnv">Environment values</legend>
+        <div id="integrationAccountEnv" class="integration-env-rows"></div>
+        <div class="integration-env-actions">
+          <button id="btnAddAccountEnv" class="btn ghost small" type="button" data-i18n="integrationsAddEnv">Add variable</button>
+          <button id="btnClearAccountEnv" class="btn ghost small" type="button" data-i18n="integrationsClearEnv">Clear stored values</button>
+        </div>
+        <p id="integrationAccountEnvNote" class="hint integration-env-note" hidden></p>
+        <p class="hint" data-i18n="integrationsEnvHint">Leave all values blank to keep the stored set. Entering a value replaces it.</p>
+      </fieldset>
+      <div class="announcement-actions">
+        <button id="btnSaveIntegrationAccount" class="btn primary small" type="submit" data-i18n="save">Save</button>
+        <button id="btnCancelIntegrationAccount" class="btn ghost small" type="button" data-i18n="cancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="integrationPluginDialog" class="admin-dialog integration-dialog integration-plugin-dialog" aria-labelledby="integrationPluginHeading">
+    <header class="admin-dialog-head"><h2 id="integrationPluginHeading" data-i18n="integrationsUploadPlugin">Upload plugin</h2><button id="btnCloseIntegrationPlugin" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button></header>
+    <form id="integrationPluginForm" class="integration-form" novalidate>
+      <p id="integrationPluginError" class="alert integration-error" role="alert" hidden></p>
+      <label class="field"><span class="field-label" data-i18n="integrationsPluginFile">Choose a JS file</span><input id="integrationPluginFile" class="input" type="file" accept=".js,.mjs,.cjs"></label>
+      <label class="field"><span class="field-label" data-i18n="integrationsPluginName">Plugin name</span><input id="integrationPluginName" class="input" maxlength="128" autocomplete="off" placeholder="adapter.js"></label>
+      <label class="field"><span class="field-label" data-i18n="integrationsPlatform">Platform</span><input id="integrationPluginPlatform" class="input" maxlength="128" autocomplete="off"></label>
+      <label class="field"><span class="field-label" data-i18n="integrationsPluginSource">JavaScript source</span><textarea id="integrationPluginSource" class="input integration-source" rows="8" spellcheck="false" placeholder="Paste plugin JavaScript (max 256 KiB)" data-i18n-placeholder="integrationsPluginPaste"></textarea></label>
+      <fieldset class="field integration-env-field">
+        <legend class="field-label" data-i18n="integrationsEnv">Environment values</legend>
+        <div id="integrationPluginEnv" class="integration-env-rows"></div>
+        <button id="btnAddPluginEnv" class="btn ghost small" type="button" data-i18n="integrationsAddEnv">Add variable</button>
+      </fieldset>
+      <div class="announcement-actions">
+        <button id="btnSaveIntegrationPlugin" class="btn primary small" type="submit" data-i18n="integrationsUpload">Upload plugin</button>
+        <button id="btnCancelIntegrationPlugin" class="btn ghost small" type="button" data-i18n="cancel">Cancel</button>
+      </div>
+    </form>
   </dialog>
 
    <!-- Shared room workspace. -->
@@ -355,7 +490,7 @@
         </footer>
       </form>
     </dialog>
-    <dialog id="filesDialog" class="admin-dialog files-dialog" aria-labelledby="filesHeading">
+    <dialog id="filesDialog" class="admin-dialog files-dialog pane-surface" aria-labelledby="filesHeading">
       <header class="files-head">
         <div class="files-heading">
           <p class="files-eyebrow" data-i18n="filesEyebrow">Room files</p>
@@ -383,7 +518,7 @@
         <p class="hint files-hint" data-i18n="filesHint">Preview images, audio, and video. Download any file.</p>
       </footer>
     </dialog>
-    <dialog id="tasksDialog" class="admin-dialog tasks-dialog" aria-labelledby="tasksHeading">
+    <dialog id="tasksDialog" class="admin-dialog tasks-dialog pane-surface" aria-labelledby="tasksHeading">
       <header class="tasks-head">
         <div class="tasks-heading">
           <p class="tasks-eyebrow"><span data-i18n="tasksEyebrow">Room tasks</span><span id="tasksRoomName" class="tasks-room-name"></span></p>
@@ -417,6 +552,7 @@
         <button id="btnRetryTasks" class="btn ghost small" type="button" data-i18n="retry">Retry</button>
       </div>
       <div class="tasks-scroll">
+        <p id="tasksLimitNotice" class="tasks-limit-notice" role="status" hidden></p>
         <details id="taskCreateDetails" class="task-create">
           <summary class="task-create-summary"><span data-i18n="tasksCreate">Add task</span></summary>
           <form id="taskCreateForm" class="task-create-form" novalidate>
@@ -457,6 +593,46 @@
         </details>
         <div id="taskGroups" class="task-groups"></div>
         <p id="tasksEmpty" class="hint tasks-empty" hidden></p>
+      </div>
+    </dialog>
+    <dialog id="announcementsDialog" class="admin-dialog announcements-dialog pane-surface" aria-labelledby="announcementHeading">
+      <header class="admin-dialog-head announcements-dialog-head">
+        <h2 id="announcementHeading" tabindex="-1" data-i18n="announcements">Announcements</h2>
+        <div class="admin-dialog-actions">
+          <button type="button" id="btnNewAnnouncement" class="btn primary small" aria-haspopup="dialog" data-i18n="announcementNew">New announcement</button>
+          <button type="button" id="btnRefreshAnnouncements" class="question-refresh" data-i18n="refreshQuestions">Refresh</button>
+          <button id="btnCloseAnnouncements" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button>
+        </div>
+      </header>
+      <div class="announcements-body">
+        <p id="announcementStatus" class="hint" role="status" aria-live="polite"></p>
+        <ul id="announcementList" class="announcement-list" aria-label="Announcements" data-i18n-aria-label="announcements"></ul>
+      </div>
+    </dialog>
+    <dialog id="remindersDialog" class="admin-dialog reminders-dialog pane-surface" aria-labelledby="reminderHeading">
+      <header class="admin-dialog-head reminders-dialog-head">
+        <h2 id="reminderHeading" tabindex="-1" data-i18n="reminders">Reminders</h2>
+        <div class="admin-dialog-actions">
+          <button type="button" id="btnNewReminder" class="btn primary small" data-i18n="reminderCreate">Create reminder</button>
+          <button type="button" id="btnRefreshReminders" class="question-refresh" data-i18n="refreshQuestions">Refresh</button>
+          <button id="btnCloseReminders" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button>
+        </div>
+      </header>
+      <div class="reminders-body">
+        <p id="reminderStatus" class="hint" role="status" aria-live="polite"></p>
+        <ul id="reminderList" class="reminder-list"></ul>
+      </div>
+    </dialog>
+    <dialog id="taskEditDialog" class="admin-dialog task-edit-dialog" aria-labelledby="taskEditHeading">
+      <header class="admin-dialog-head">
+        <h2 id="taskEditHeading" data-i18n="tasksEditHeading">Edit task</h2>
+        <div class="admin-dialog-actions">
+          <button id="btnCloseTaskEdit" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button>
+        </div>
+      </header>
+      <div class="task-edit-body">
+        <p id="taskEditError" class="alert task-edit-error" role="alert" hidden><span id="taskEditErrorText"></span></p>
+        <div id="taskEditFormHost"></div>
       </div>
     </dialog>
     <dialog id="reminderDialog" class="admin-dialog reminder-dialog" aria-labelledby="reminderDialogHeading">
@@ -509,13 +685,6 @@
           </section>
         </div>
         <div class="anchor">
-          <button class="chip" type="button" id="btnReminders" aria-haspopup="true" aria-expanded="false" aria-controls="reminderPanel"><svg class="fluent-icon action-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-alert-24"></use></svg><span class="action-label" data-i18n="reminders">Reminders</span></button>
-          <section class="panel reminder-panel" id="reminderPanel" aria-labelledby="reminderHeading" hidden>
-            <div class="announcement-head"><h3 id="reminderHeading" tabindex="-1" data-i18n="reminders">Reminders</h3><div class="reminder-tools"><button type="button" id="btnNewReminder" class="btn primary small" data-i18n="reminderCreate">Create reminder</button><button type="button" id="btnRefreshReminders" class="question-refresh" data-i18n="refreshQuestions">Refresh</button></div></div>
-            <p id="reminderStatus" class="hint" role="status" aria-live="polite"></p><ul id="reminderList" class="reminder-list"></ul>
-          </section>
-        </div>
-        <div class="anchor">
           <button class="chip" type="button" id="btnMembers" aria-label="Members" data-i18n-aria-label="members" aria-haspopup="true" aria-expanded="false"><svg class="fluent-icon action-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-people-24"></use></svg><span class="action-label" data-i18n="members">Members</span><span id="joinRequestBadge" class="question-badge join-request-badge" aria-hidden="true" hidden><span id="joinRequestBadgeCount"></span></span></button>
           <div class="panel" id="memberPanel" hidden>
             <h3 data-i18n="members">Members</h3>
@@ -536,18 +705,14 @@
         <div class="anchor room-options-anchor">
           <button class="chip" type="button" id="btnRoomOptions" aria-haspopup="true" aria-expanded="false" aria-controls="roomOptions"><svg class="fluent-icon action-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-more_horizontal-24"></use></svg><span class="action-label" data-i18n="roomOptions">Options</span></button>
           <div class="panel room-options-panel" id="roomOptions" hidden>
-            <button class="menu-action" type="button" id="btnAnnouncements" aria-controls="announcementPanel"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-megaphone-24"></use></svg><span data-i18n="announcements">Announcements</span></button>
-            <button class="menu-action files-menu-action" type="button" id="btnFiles"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-folder-24"></use></svg><span data-i18n="filesTitle">Files</span></button>
-            <button class="menu-action" type="button" id="btnTasks"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-checkmark-24"></use></svg><span data-i18n="tasksTitle">Tasks</span></button>
+            <button class="menu-action" type="button" id="btnAnnouncements" aria-haspopup="dialog" aria-controls="announcementsDialog"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-megaphone-24"></use></svg><span data-i18n="announcements">Announcements</span></button>
+            <button class="menu-action files-menu-action" type="button" id="btnFiles" aria-haspopup="dialog" aria-controls="filesDialog"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-folder-24"></use></svg><span data-i18n="filesTitle">Files</span></button>
+            <button class="menu-action" type="button" id="btnTasks" aria-haspopup="dialog" aria-controls="tasksDialog"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-checkmark-24"></use></svg><span data-i18n="tasksTitle">Tasks</span></button>
+            <button class="menu-action" type="button" id="btnReminders" aria-haspopup="dialog" aria-controls="remindersDialog"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-alert-24"></use></svg><span data-i18n="reminders">Reminders</span></button>
             <button class="menu-action" type="button" id="btnEditRoom"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-edit-24"></use></svg><span data-i18n="editRoom">Edit room</span></button>
             <button class="menu-action" type="button" id="btnLeave"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-arrow_exit-24"></use></svg><span data-i18n="leave">Leave room</span></button>
             <button class="menu-action danger-text" type="button" id="btnDeleteRoom"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-delete-24"></use></svg><span data-i18n="deleteRoom">Delete room</span></button>
           </div>
-          <section class="panel announcement-panel" id="announcementPanel" aria-labelledby="announcementHeading" hidden>
-            <div class="announcement-head"><h3 id="announcementHeading" tabindex="-1" data-i18n="announcements">Announcements</h3><div class="announcement-tools"><button type="button" id="btnNewAnnouncement" class="btn primary small" aria-haspopup="dialog" data-i18n="announcementNew">New announcement</button><button type="button" id="btnRefreshAnnouncements" class="question-refresh" data-i18n="refreshQuestions">Refresh</button></div></div>
-            <p id="announcementStatus" class="hint" role="status" aria-live="polite"></p>
-            <ul id="announcementList" class="announcement-list" aria-label="Announcements" data-i18n-aria-label="announcements"></ul>
-          </section>
         </div>
       </div>
     </header>
@@ -615,7 +780,8 @@
           <p class="doc-preview-meta"><span id="docPreviewSize"></span><span id="docPreviewLanguage" class="doc-preview-language" hidden></span><span id="docPreviewStatus" role="status" aria-live="polite"></span></p>
         </div>
         <div class="doc-preview-actions">
-          <button id="btnDocPreviewDownload" class="btn ghost small doc-preview-download" type="button" data-i18n="resourceDownload"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-arrow_download-24"></use></svg><span class="i18n-label">Download</span></button>
+          <button id="btnDocPreviewFullscreen" class="btn ghost small doc-preview-fullscreen-toggle" type="button" aria-label="Full screen" title="Full screen" data-i18n-aria-label="docPreviewFullscreen" data-i18n-title="docPreviewFullscreen"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-arrow_maximize-24"></use></svg></button>
+          <button id="btnDocPreviewDownload" class="btn ghost small doc-preview-download" type="button" aria-label="Download" data-i18n-aria-label="resourceDownload"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-arrow_download-24"></use></svg></button>
           <button id="btnCloseDocPreview" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button>
         </div>
       </header>
@@ -727,7 +893,7 @@
     <section class="keys-section">
       <h3 data-i18n="shortcutsSearch">Search and commands</h3>
       <ul class="keys-list">
-        <li><span class="keys-combo"><kbd class="keys-key shortcut-mod">Alt</kbd><span class="keys-sep">+</span><kbd class="keys-key">Space</kbd></span><span class="keys-sep">/</span><span class="keys-combo"><kbd class="keys-key">Ctrl</kbd><span class="keys-sep">+</span><kbd class="keys-key">P</kbd></span><span data-i18n="shortcutsOpenPalette">Open search and commands</span></li>
+        <li><span class="keys-group"><span class="keys-combo"><kbd class="keys-key shortcut-mod">Alt</kbd><span class="keys-sep">+</span><kbd class="keys-key">Space</kbd></span><span class="keys-sep">/</span><span class="keys-combo"><kbd class="keys-key">Ctrl</kbd><span class="keys-sep">+</span><kbd class="keys-key">P</kbd></span></span><span data-i18n="shortcutsOpenPalette">Open search and commands</span></li>
       </ul>
     </section>
     <section class="keys-section">

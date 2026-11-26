@@ -92,6 +92,8 @@ export type CommitResult =
 
 export interface ChannelState {
   commitIngest(event: IngestEvent): CommitResult;
+  /** Remove a freshly committed event when a downstream consumer failed. */
+  deleteIngestEvent(eventId: string): void;
   enqueueDeliveries(
     triggerEventId: string,
     rule: RuleConfig,
@@ -110,6 +112,8 @@ export interface ChannelState {
   getPublishedResult(deliveryId: string): PublishedResultEvent | undefined;
   recordEcho(endpoint: string, nativeMessageId: string, logicalMessageId: string, deliveryId?: string): void;
   findEcho(endpoint: string, nativeMessageId: string): string | undefined;
+  /** Latest sent provider message for one logical message at one endpoint. */
+  findProviderMessage(endpoint: string, logicalMessageId: string): string | undefined;
   getDelivery(deliveryId: string): DeliveryRow | undefined;
   getEvent(eventId: string): IngestEvent | undefined;
   listDeliveries(): DeliveryRow[];
@@ -239,6 +243,10 @@ export function openState(path: string): ChannelState {
         ).run(event.eventId, event.sourceDedupKey, JSON.stringify(stored), ingressSeq, Date.now());
         return { duplicate: false, eventId: event.eventId, ingressSeq };
       });
+    },
+
+    deleteIngestEvent(eventId) {
+      db.prepare("DELETE FROM channel_events WHERE event_id = ?").run(eventId);
     },
 
     enqueueDeliveries(triggerEventId, rule, targets, payloads) {
@@ -445,6 +453,15 @@ export function openState(path: string): ChannelState {
         "SELECT logical_message_id FROM channel_echoes WHERE endpoint = ? AND native_message_id = ?",
       ).get(endpoint, nativeMessageId) as RawRow | undefined;
       return row ? String(row.logical_message_id) : undefined;
+    },
+
+    findProviderMessage(endpoint, logicalMessageId) {
+      const row = db.prepare(
+        `SELECT native_message_id FROM channel_echoes
+         WHERE endpoint = ? AND logical_message_id = ? AND delivery_id IS NOT NULL
+         ORDER BY rowid DESC LIMIT 1`,
+      ).get(endpoint, logicalMessageId) as RawRow | undefined;
+      return row ? String(row.native_message_id) : undefined;
     },
 
     getDelivery,

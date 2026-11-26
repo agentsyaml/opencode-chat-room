@@ -211,6 +211,21 @@ test.skipIf(!browserModule)("the room file browser filters, previews, downloads,
     await agentPage.waitForFunction(() => document.querySelectorAll("#fileList .file-row").length === 1);
     expect((await listResources(origin, roomId, ownerSession)).total).toBe(1);
 
+    // close() queues its close event. Reopening in the same task must not let
+    // that stale event clear the new dialog and cancel its in-flight load.
+    await page.locator("#btnRoomOptions").click();
+    await page.locator("#btnFiles").click();
+    await page.waitForFunction(() => document.querySelectorAll("#fileList .file-row").length === 1);
+    const reopened = await page.evaluate(() => {
+      const dialog = document.querySelector<HTMLDialogElement>("#filesDialog")!;
+      dialog.close();
+      document.querySelector<HTMLButtonElement>("#btnFiles")!.click();
+      return dialog.open;
+    });
+    expect(reopened).toBe(true);
+    await page.waitForFunction(() => document.querySelectorAll("#fileList .file-row").length === 1);
+    expect(await page.locator("#filesSummary").textContent()).toContain("1 file");
+
     expect(nativeDialogs).toEqual([]);
     expect(pageErrors).toEqual([]);
     await agentContext.close();

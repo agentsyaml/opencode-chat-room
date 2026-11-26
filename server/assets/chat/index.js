@@ -30,10 +30,12 @@ import { initSidePaneSplitter } from "./side-pane.js";
 import { initDiagramViewer } from "./diagram-viewer.js";
 import { initViewport } from "./viewport.js";
 import { initSettings } from "./settings.js";
+import { initIntegrations } from "./integrations.js";
 
 if (isMobileDevice()) document.documentElement.dataset.mobile = "true";
 
 initSettings(app);
+initIntegrations(app);
 initConfirmDialog(app);
 initDiagramViewer(app);
 initMentions(app);

@@ -1,10 +1,13 @@
 import { LS } from "./state.js";
 
 export function initReminders(app) {
-  const $ = app.$, panel = $("#reminderPanel"), trigger = $("#btnReminders"), list = $("#reminderList"), dialog = $("#reminderDialog"), newButton = $("#btnNewReminder");
-  const heading = $("#reminderDialogHeading"), submit = $("#btnSubmitReminder");
+  const $ = app.$, surface = $("#remindersDialog"), trigger = $("#btnReminders"), list = $("#reminderList");
+  const dialog = $("#reminderDialog"), newButton = $("#btnNewReminder");
+  const heading = $("#reminderDialogHeading"), panelHeading = $("#reminderHeading"), submit = $("#btnSubmitReminder");
+  const chatView = $("#chatView");
   app.setText($("#reminderTemplateHint"), "reminderTemplateHint", { time: "{time}", initiator: "{initiator}", room: "{room}" });
   let reminders = [], generation = 0, roomGeneration = 0, activeRoomId, editing = null, createDraft = null, saving = false, saveToken = 0;
+  let opener = null, pendingReopen = false, restoreSurfaceFocus = true;
   const drafts = new Map();
   const roomId = () => app.state.room?.id;
   const status = (text) => { $("#reminderStatus").textContent = text; };
@@ -22,6 +25,47 @@ export function initReminders(app) {
     formStatus("");
     if (!dialog.open) dialog.showModal();
     $("#reminderText").focus();
+  }
+  const clearPane = () => {
+    surface.classList.remove("is-pane");
+    if (chatView.dataset.sidePane !== "reminders") return;
+    delete chatView.dataset.sidePane;
+    chatView.classList.remove("has-pane");
+  };
+  const showSurface = () => {
+    if (app.panelPlacement("reminders") === "pane") {
+      app.closeOtherPanelSurfaces?.("reminders");
+      surface.classList.add("is-pane");
+      chatView.classList.add("has-pane");
+      chatView.dataset.sidePane = "reminders";
+      if (!surface.open) surface.show();
+    } else {
+      clearPane();
+      if (!surface.open) surface.showModal();
+    }
+  };
+  const syncMode = () => {
+    if (!surface.open || (app.panelPlacement("reminders") === "pane") === surface.classList.contains("is-pane")) return;
+    pendingReopen = true;
+    surface.close();
+    showSurface();
+    panelHeading.focus({ preventScroll: true });
+  };
+  const closeSurface = (focus = true) => {
+    restoreSurfaceFocus = focus;
+    if (surface.open) surface.close();
+  };
+  function openSurface() {
+    if (!roomId()) return;
+    if (app.panelPlacement("reminders") === "pane") app.closeDocPreview?.(false);
+    if (surface.open) { panelHeading.focus(); return; }
+    app.closePanels?.();
+    const active = document.activeElement;
+    opener = active instanceof HTMLElement && active !== document.body && !active.closest("dialog") && !$("#roomOptions")?.contains(active)
+      ? active : $("#btnRoomOptions");
+    showSurface();
+    panelHeading.focus();
+    void load();
   }
   const current = (id, context) => roomId() === id && roomGeneration === context;
   const invalidateLoads = () => { generation++; };
@@ -142,16 +186,33 @@ export function initReminders(app) {
   $("#btnCancelReminder").addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   dialog.addEventListener("close", () => { editing = null; });
-  trigger.addEventListener("click", () => {
-    const open = panel.hidden; app.closePanels(); panel.hidden = !open; trigger.setAttribute("aria-expanded", String(open));
-    if (open) { void load(); $("#reminderHeading").focus(); }
+  trigger.addEventListener("click", () => { app.closePanels(); openSurface(); });
+  $("#btnCloseReminders").addEventListener("click", () => closeSurface());
+  surface.addEventListener("click", (event) => { if (event.target === surface) closeSurface(); });
+  surface.addEventListener("cancel", (event) => { event.preventDefault(); closeSurface(); });
+  surface.addEventListener("close", () => {
+    if (pendingReopen) { pendingReopen = false; return; }
+    clearPane();
+    const focus = restoreSurfaceFocus;
+    restoreSurfaceFocus = true;
+    const target = opener;
+    opener = null;
+    if (focus && target?.isConnected) target.focus({ preventScroll: true });
   });
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !dialog.open && !panel.hidden) { app.closePanels(); trigger.focus(); } });
-  const close = app.closePanels;
-  app.closePanels = () => { close(); panel.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !surface.open || !surface.classList.contains("is-pane")) return;
+    if (!surface.contains(document.activeElement)) return;
+    event.preventDefault();
+    closeSurface();
+  });
+  app.registerPanelSurface?.("reminders", { close: () => closeSurface(false) });
+  app.watchPanel?.("reminders", syncMode);
+  const closePanels = app.closePanels;
+  app.closePanels = () => { closePanels(); if (dialog.open) dialog.close(); };
   document.addEventListener("chat-room-activated", (event) => {
     if (activeRoomId) drafts.set(activeRoomId, createDraft ?? formDraft());
     if (dialog.open) dialog.close();
+    if (surface.open && !surface.classList.contains("is-pane")) closeSurface(false);
     formStatus("");
     editing = null; createDraft = null; saving = false; saveToken++; submit.disabled = false;
     activeRoomId = event.detail; restoreDraft(drafts.get(activeRoomId));

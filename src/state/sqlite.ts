@@ -37,7 +37,23 @@ export class Statement {
 
 export type Transaction<T> = (() => T) & { deferred(): T; immediate(): T };
 
-export class Database {
+export type QueryStatement = {
+  all(...params: SQLQueryBindings[]): unknown[];
+  get(...params: SQLQueryBindings[]): unknown;
+  run(...params: SQLQueryBindings[]): RunResult;
+};
+
+// The synchronous surface used by the state layer. Implemented by the
+// node:sqlite adapter and by PgDatabase's worker-thread bridge.
+export interface StateDatabase {
+  query(sql: string): QueryStatement;
+  prepare(sql: string): QueryStatement;
+  exec(sql: string): void;
+  transaction<T>(fn: () => T): Transaction<T>;
+  close(): void;
+}
+
+export class Database implements StateDatabase {
   readonly #db: DatabaseSync;
   #savepoints = 0;
 
@@ -47,6 +63,7 @@ export class Database {
   }
 
   query(sql: string): Statement { return new Statement(this.#db.prepare(sql)); }
+  prepare(sql: string): Statement { return this.query(sql); }
   exec(sql: string): void { this.#db.exec(sql); }
 
   transaction<T>(fn: () => T): Transaction<T> {
@@ -75,6 +92,9 @@ export class Database {
 export function isBusyError(error: unknown): boolean {
   const err = error as { code?: string; errcode?: number; message?: string } | null;
   if (!err) return false;
+  // PostgreSQL serialization failure and deadlock detected. The existing
+  // immediate() retry loop treats these like SQLITE_BUSY/SQLITE_LOCKED.
+  if (err.code === "40001" || err.code === "40P01") return true;
   if (typeof err.errcode === "number" && ((err.errcode & 0xff) === 5 || (err.errcode & 0xff) === 6)) return true;
   return /SQLITE_(BUSY|LOCKED)/.test(err.code ?? "") || /database (?:is|table is) locked/i.test(err.message ?? "");
 }

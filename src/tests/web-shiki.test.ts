@@ -87,7 +87,7 @@ test.skipIf(!browserModule)("Shiki highlights messages and previews after the la
       const root = document.documentElement, original = root.dataset.theme;
       const read = (theme: string) => {
         root.dataset.theme = theme;
-        return { token: getComputedStyle(span).color, background: getComputedStyle(code.closest("pre")!).backgroundColor };
+        return { token: getComputedStyle(span).color, background: getComputedStyle(code.closest(".code-block")!).backgroundColor };
       };
       const light = read("light"), dark = read("dark");
       root.dataset.theme = original || "system";

@@ -101,6 +101,22 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     await page.locator('#readerList [data-reader-session-id="twin-a"]').waitFor();
     await page.screenshot({ path: path.join(artifactDir, "chat-own-readers-confirmed.png"), fullPage: true });
     await page.keyboard.press("Escape");
+    await page.locator("#readerPanel").waitFor({ state: "hidden" });
+    // Once every other member has read the note, the count becomes a check mark.
+    const twinB = members.find((member: any) => member.sessionID === "twin-b");
+    for (const reader of [twinB, agent]) {
+      await api(origin, `/rooms/${roomId}/receipts`, "POST", { sessionID: reader.sessionID, membershipID: reader.membershipID, messageIDs: [ownMessageID], evidence: "displayed", ...(reader.sessionID === "agent-twin" ? { receiverOwnerID } : {}) });
+    }
+    await refreshReceiptView(page, origin, roomId, ownMessageID);
+    await page.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-readers`)?.getAttribute("data-reader-state") === "all", ownMessageID);
+    expect(await ownReceiptButton.textContent()).toBe("");
+    expect(await ownReceiptButton.locator("svg.message-read-check").count()).toBe(1);
+    expect(await ownReceiptButton.getAttribute("aria-label")).toBe("Everyone has read this message");
+    await ownReceiptButton.click();
+    await page.locator('#readerList [data-reader-session-id="twin-b"]').waitFor();
+    expect(await page.locator("#readerList li").count()).toBe(3);
+    await page.keyboard.press("Escape");
+    await page.locator("#readerPanel").waitFor({ state: "hidden" });
     await page.locator("#btnMembers").click();
     await page.locator('#memberList [data-member-session-id="agent-twin"] .member-activity').waitFor();
     expect(await page.locator('#memberList [data-member-session-id="agent-twin"] .member-activity').textContent()).toBe("Status unknown");
@@ -156,7 +172,11 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     expect(await copyButton.getAttribute("aria-label")).toBe("复制失败，请手动选择并复制消息。");
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
     const receiptButton = page.locator(`[data-msg-id="${targetMessageID}"] .message-readers`);
-    await receiptButton.scrollIntoViewIfNeeded();
+    // Center and focus the trigger first. A Playwright click would otherwise focus
+// a partly obscured button and scroll the thread, which is unrelated to the
+// reader panel's layout and makes this assertion timing-dependent.
+    await receiptButton.evaluate((node: HTMLElement) => { node.scrollIntoView({ block: "center" }); node.focus({ preventScroll: true }); });
+    await page.waitForTimeout(80);
     const targetTop = (await page.locator(`[data-msg-id="${targetMessageID}"]`).boundingBox())!.y;
     await receiptButton.click();
     await page.locator("#readerPanel").waitFor({ state: "visible" });

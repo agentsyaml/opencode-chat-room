@@ -42,6 +42,12 @@ export function initRecall(app) {
     if (revealTarget && app.state.room) {
       const message = app.state.room.messages.find((item) => item.id === revealTarget.dataset.revealMessage);
       if (message) void toggleOriginal(revealTarget, message, app);
+      return;
+    }
+    const reeditTarget = event.target.closest?.("[data-reedit-message]");
+    if (reeditTarget && app.state.room) {
+      const message = app.state.room.messages.find((item) => item.id === reeditTarget.dataset.reeditMessage);
+      if (message) void reedit(message, reeditTarget, app);
     }
   });
 
@@ -195,7 +201,11 @@ function renderTombstone(row, message, app, live) {
   const shown = Boolean(message._revealed) && message._revealedText !== undefined;
   body.hidden = !shown;
   setRevealButton(reveal, shown, app);
-  bubble.append(body, reveal);
+  const actions = document.createElement("div");
+  actions.className = "recalled-actions";
+  actions.append(reveal);
+  if (isOwnMessage(message, app)) actions.append(reeditButton(message, app));
+  bubble.append(body, actions);
   if (live) { row.classList.remove("recalled-in"); void row.offsetWidth; row.classList.add("recalled-in"); }
   return row;
 }
@@ -227,6 +237,15 @@ function renderSystemTombstone(row, message, app, live) {
   return row;
 }
 
+function reeditButton(message, app) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "recalled-reedit";
+  button.dataset.reeditMessage = message.id;
+  button.textContent = app.t("reeditMessage");
+  return button;
+}
+
 function fillRevealed(body, message, text, app) {
   body.textContent = "";
   if (message.senderId === "system") body.textContent = formatSystemMessage({ senderId: "system", text }, app);
@@ -240,7 +259,7 @@ function setRevealButton(button, shown, app) {
 
 async function toggleOriginal(button, message, app) {
   if (button.disabled) return;
-  const body = button.parentElement?.querySelector(".recalled-body");
+  const body = button.closest(".msg-text, .sys")?.querySelector(".recalled-body");
   if (!body) return;
   if (message._revealedText !== undefined) {
     message._revealed = !message._revealed;
@@ -251,17 +270,49 @@ async function toggleOriginal(button, message, app) {
   button.disabled = true;
   setRevealButton(button, false, app);
   try {
-    const roomId = app.state.room?.id;
-    const result = await app.api(`/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(message.id)}/content?sessionID=${encodeURIComponent(LS.sessionID)}`);
-    const text = typeof result?.message?.text === "string" ? result.message.text : typeof result?.text === "string" ? result.text : undefined;
-    if (text === undefined) throw new Error(app.t("revealFailed"));
-    message._revealedText = text;
+    const text = await loadOriginalText(message, app);
     message._revealed = true;
     fillRevealed(body, message, text, app);
     body.hidden = false;
     setRevealButton(button, true, app);
   } catch {
     button.textContent = app.t("revealFailed");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function loadOriginalText(message, app) {
+  if (message._revealedText !== undefined) return message._revealedText;
+  const roomId = app.state.room?.id;
+  const result = await app.api(`/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(message.id)}/content?sessionID=${encodeURIComponent(LS.sessionID)}`);
+  const text = typeof result?.message?.text === "string" ? result.message.text : typeof result?.text === "string" ? result.text : undefined;
+  if (text === undefined) throw new Error(app.t("revealFailed"));
+  message._revealedText = text;
+  return text;
+}
+
+async function reedit(message, button, app) {
+  const roomId = app.state.room?.id, input = app.$("#msgInput");
+  if (!roomId || !input || button.disabled || !isOwnMessage(message, app)) return;
+  if (input.draftValue.trim() && !(await app.confirmAction(app.t("reeditReplaceDraft")))) return;
+  button.disabled = true;
+  try {
+    const text = await loadOriginalText(message, app);
+    if (app.state.room?.id !== roomId) return;
+    input.draftValue = text;
+    app.saveDraft(roomId, text);
+    app.autoGrow(input);
+    app.updateDraftCount();
+    app.updateSendState();
+    // A click is explicit intent, so focus the editor even on touch layouts.
+    if (!app.focusChatComposer({ force: true })) {
+      input.focus({ preventScroll: true });
+      input.setCaret?.(input.value.length);
+    }
+  } catch (error) {
+    if (error.status === 401) app.openChatSettings();
+    app.showSendError(error.status === 401 ? "sendAuth" : "revealFailed", { message: error.message });
   } finally {
     button.disabled = false;
   }

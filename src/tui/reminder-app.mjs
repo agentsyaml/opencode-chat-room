@@ -3,18 +3,19 @@
 // info-content.mjs so errors can be tested without a renderer.
 import { parseReminderSchedule, reminderRows } from "./info-content.mjs";
 import { sanitizeText } from "./messages.mjs";
+import { t } from "./i18n.mjs";
 
 const errorText = (error) => (error instanceof Error ? error.message : String(error ?? "unknown error"));
-export const REMINDER_HINT = "n new · p pause/resume · e edit · d delete · Esc close";
+const reminderHint = () => t("reminder.hint");
 
 function promptScheduleLabel() {
-  return 'Schedule: once 2026-11-23T09:00 or cron 0 9 * * *';
+  return t("reminder.schedulePrompt");
 }
 
 export function attachReminders(Class) {
   Object.assign(Class.prototype, {
     openReminders() {
-      return this.openInfo("reminders", "Reminders", REMINDER_HINT, async (room) =>
+      return this.openInfo("reminders", t("reminder.title"), reminderHint(), async (room) =>
         reminderRows(await this.api.reminders(room.id, this.sessionID)));
     },
 
@@ -37,8 +38,8 @@ export function attachReminders(Class) {
       if (!palette) return;
       palette.mode = "prompt";
       palette.error = "";
-      palette.prompt = { label: "Reminder text", value: "", action: "reminder-text", data: {} };
-      palette.hint = "Enter next · Esc cancel";
+      palette.prompt = { label: t("reminder.textPrompt"), value: "", action: "reminder-text", data: {} };
+      palette.hint = t("palette.enterNextHint");
       this.touch();
     },
 
@@ -49,12 +50,12 @@ export function attachReminders(Class) {
       palette.mode = "prompt";
       palette.error = "";
       palette.prompt = {
-        label: "Reminder text",
+        label: t("reminder.textPrompt"),
         value: reminder.text,
         action: "reminder-edit-text",
         data: { id: reminder.value },
       };
-      palette.hint = "Enter save · Esc cancel";
+      palette.hint = t("palette.enterSaveHint");
       this.touch();
     },
 
@@ -68,7 +69,7 @@ export function attachReminders(Class) {
       this.touch();
       try {
         await this.api.updateReminder(roomId, reminder.value, this.sessionID, { paused: !reminder.paused });
-        this.setStatus(`${reminder.paused ? "resumed" : "paused"} reminder`, "success");
+        this.setStatus(t(reminder.paused ? "reminder.resumed" : "reminder.paused"), "success");
         await this.openReminders();
       } catch (error) {
         if (this.state.palette === palette) {
@@ -87,11 +88,11 @@ export function attachReminders(Class) {
       palette.error = "";
       palette.previous = { mode: "info", hint: palette.hint };
       palette.confirm = {
-        text: `Delete reminder "${sanitizeText(reminder.text).slice(0, 50)}"?`,
+        text: t("reminder.deleteConfirm", { text: sanitizeText(reminder.text).slice(0, 50) }),
         action: "reminder-delete",
         data: { id: reminder.value },
       };
-      palette.hint = "Enter or y deletes · n or Esc cancels";
+      palette.hint = t("palette.deleteHint");
       this.touch();
     },
 
@@ -100,14 +101,14 @@ export function attachReminders(Class) {
       const roomId = this.reminderRoomId(palette);
       if (!palette || palette.mode !== "prompt") return;
       if (!roomId) {
-        palette.error = "open a joined room first";
+        palette.error = t("info.joinFirst");
         this.touch();
         return;
       }
       if (prompt.action === "reminder-text") {
         const text = String(value ?? "").trim();
         if (!text) {
-          palette.error = "reminder text is required";
+          palette.error = t("reminder.textRequired");
           this.touch();
           return;
         }
@@ -117,7 +118,7 @@ export function attachReminders(Class) {
           action: "reminder-schedule",
           data: { text },
         };
-        palette.hint = "once ISO datetime or cron 5 fields · Enter create";
+        palette.hint = t("reminder.scheduleHint");
         palette.error = "";
         this.touch();
         return;
@@ -136,7 +137,7 @@ export function attachReminders(Class) {
         this.touch();
         try {
           await this.api.createReminder(roomId, this.sessionID, prompt.data.text, schedule);
-          this.setStatus("reminder created", "success");
+          this.setStatus(t("reminder.created"), "success");
           await this.openReminders();
         } catch (error) {
           if (this.state.palette === palette) {
@@ -150,7 +151,7 @@ export function attachReminders(Class) {
       if (prompt.action === "reminder-edit-text") {
         const text = String(value ?? "").trim();
         if (!text) {
-          palette.error = "reminder text is required";
+          palette.error = t("reminder.textRequired");
           this.touch();
           return;
         }
@@ -159,7 +160,7 @@ export function attachReminders(Class) {
         this.touch();
         try {
           await this.api.updateReminder(roomId, prompt.data.id, this.sessionID, { text });
-          this.setStatus("reminder updated", "success");
+          this.setStatus(t("reminder.updated"), "success");
           await this.openReminders();
         } catch (error) {
           if (this.state.palette === palette) {
@@ -179,7 +180,7 @@ export function attachReminders(Class) {
       this.touch();
       try {
         await this.api.deleteReminder(roomId, confirm.data.id, this.sessionID);
-        this.setStatus("reminder deleted", "success");
+        this.setStatus(t("reminder.deleted"), "success");
         await this.openReminders();
       } catch (error) {
         if (this.state.palette === palette) {

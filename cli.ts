@@ -14,6 +14,8 @@ Options:
   -t, --token <token>    Enable bearer token authentication
 
 Commands:
+  migrate [--to-postgres] --yes
+                         Copy the SQLite state database to PostgreSQL
   cli [--name <name>]    Open the terminal client
   watch run|start|status|stop`;
 
@@ -92,6 +94,30 @@ if (args[0] === "watch") {
   }
   process.exit(process.exitCode ?? 0);
 }
+if (args[0] === "migrate") {
+  const rest = args.slice(1);
+  if (rest.includes("--help") || rest.includes("-h")) {
+    console.log("Usage: opencode-chat-room migrate [--to-postgres] --yes\n" +
+      "Copies CHAT_ROOM_STATE_DIR/chat-room.sqlite into CHAT_ROOM_DATABASE_URL.\n" +
+      "Stop the server and make a WAL-safe backup before using --yes.");
+    process.exit(0);
+  }
+  for (const arg of rest) {
+    if (arg !== "--to-postgres" && arg !== "--yes") fail(`Unknown migrate option: ${arg}`);
+  }
+  const { migrateToPostgres } = await import("./src/state/pg-migrate.ts");
+  const { loadRoomConfig, resolveServerSettings } = await import("./src/config/file-config.ts");
+  const settings = resolveServerSettings(loadRoomConfig());
+  if (!process.env.CHAT_ROOM_STATE_DIR && settings.stateDir) process.env.CHAT_ROOM_STATE_DIR = settings.stateDir;
+  const { databasePath } = await import("./src/state/store.ts");
+  try {
+    await migrateToPostgres({ sourcePath: databasePath(), assumeYes: rest.includes("--yes") });
+  } catch (error) {
+    console.error(`migrate: ${error instanceof Error ? error.message : "operation failed"}`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
 for (let i = 0; i < args.length; i += 1) {
   const arg = args[i]!;
   if (arg === "-h" || arg === "--help") {
@@ -160,5 +186,5 @@ if (values.token !== undefined) {
 }
 
 const { default: server } = await import("./server/chat-server.ts");
-const { startServer } = await import("./server/http-server.ts");
+const { startServer } = await import("./src/platform/http-server.ts");
 await startServer(server);

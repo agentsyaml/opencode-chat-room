@@ -1,20 +1,20 @@
 // Pending join-request review for the current room. Reuses the info/confirm
 // overlay and maps 403s to the server's reviewer rule in plain language.
 import { joinRequestRows } from "./info-content.mjs";
+import { t } from "./i18n.mjs";
 
-const ADMIN_ERROR = "only a human administrator or the designated management agent may decide";
-const REVIEW_HINT = "Enter approve · d deny · Esc close";
+const reviewHint = () => t("join.reviewHint");
 const errorText = (error) => (error instanceof Error ? error.message : String(error ?? "unknown error"));
 
 export function attachJoinRequests(Class) {
   Object.assign(Class.prototype, {
     openJoinRequests() {
-      return this.openInfo("join-requests", "Join requests", REVIEW_HINT, async (room) => {
+      return this.openInfo("join-requests", t("join.title"), reviewHint(), async (room) => {
         try {
           const result = await this.api.joinRequests(room.id, this.sessionID);
           return joinRequestRows(result.requests);
         } catch (error) {
-          if (error?.status === 403) throw new Error(ADMIN_ERROR);
+          if (error?.status === 403) throw new Error(t("join.adminError"));
           throw error;
         }
       });
@@ -34,12 +34,12 @@ export function attachJoinRequests(Class) {
       palette.mode = "confirm";
       palette.previous = { mode: "info", hint: palette.hint };
       palette.confirm = {
-        text: `${decision === "approve" ? "Approve" : "Deny"} "${name}"?`,
+        text: decision === "approve" ? t("join.approve", { name }) : t("join.deny", { name }),
         action: `join-${decision}`,
         data: { sessionID: request.value, name },
       };
       palette.error = "";
-      palette.hint = "Enter or y confirms · n or Esc cancels";
+      palette.hint = t("palette.confirmHint");
       this.touch();
     },
 
@@ -53,7 +53,7 @@ export function attachJoinRequests(Class) {
       this.touch();
       try {
         await this.api.decideJoin(roomId, confirm.data.sessionID, this.sessionID, decision);
-        this.setStatus(`${decision === "approve" ? "approved" : "denied"} ${confirm.data.name}`, "success");
+        this.setStatus(t(decision === "approve" ? "join.approved" : "join.denied", { name: confirm.data.name }), "success");
         await this.openJoinRequests();
       } catch (error) {
         if (this.state.palette === palette) {
@@ -61,8 +61,8 @@ export function attachJoinRequests(Class) {
           palette.confirm = null;
           palette.previous = null;
           palette.searching = false;
-          palette.hint = REVIEW_HINT;
-          palette.error = error?.status === 403 ? ADMIN_ERROR : errorText(error);
+          palette.hint = reviewHint();
+          palette.error = error?.status === 403 ? t("join.adminError") : errorText(error);
           this.touch();
         }
       }

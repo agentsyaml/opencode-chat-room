@@ -27,10 +27,22 @@ class FakeFeishu {
   readonly requests: RecordedRequest[] = [];
   tokenResponse: (call: number) => FakeResponse = () => tokenOk();
   sendResponse: (call: number) => FakeResponse = () => ({ body: { code: 0, msg: "ok", data: { message_id: "om_default" } } });
+  wsResponse: (call: number) => FakeResponse = () => ({
+    body: {
+      code: 0,
+      msg: "ok",
+      data: {
+        URL: this.wsUrl,
+        ClientConfig: { PingInterval: 60, ReconnectCount: -1, ReconnectInterval: 60, ReconnectNonce: 0 },
+      },
+    },
+  });
+  wsUrl = "";
   readonly #server: Server;
   #port = 0;
   #tokenCalls = 0;
   #sendCalls = 0;
+  #wsCalls = 0;
   constructor() {
     this.#server = createServer((request, response) => {
       void this.#handle(request, response);
@@ -62,8 +74,14 @@ class FakeFeishu {
   async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const body = await readBody(request);
     this.requests.push({ method: request.method ?? "", url: request.url ?? "", headers: request.headers, body });
-    const isToken = (request.url ?? "").startsWith("/open-apis/auth/");
-    const spec = isToken ? this.tokenResponse(this.#tokenCalls++) : this.sendResponse(this.#sendCalls++);
+    const url = request.url ?? "";
+    const isToken = url.startsWith("/open-apis/auth/");
+    const isWs = url.startsWith("/callback/ws/endpoint");
+    const spec = isToken
+      ? this.tokenResponse(this.#tokenCalls++)
+      : isWs
+        ? this.wsResponse(this.#wsCalls++)
+        : this.sendResponse(this.#sendCalls++);
     if (spec.delayMs) await Bun.sleep(spec.delayMs);
     if (spec.destroy) {
       request.socket.destroy();
@@ -89,6 +107,8 @@ function tokenOk(token = "t-1", expire = 7200): FakeResponse {
 
 interface AdapterFrame {
   id?: string | number;
+  method?: string;
+  params?: any;
   result?: any;
   error?: { code: number; message: string };
 }
@@ -99,11 +119,19 @@ interface Waiter {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface IngestSpec {
+  result?: unknown;
+  error?: { code: number; message: string };
+}
+
 class Child {
   readonly child: ChildProcessWithoutNullStreams;
+  readonly requests: AdapterFrame[] = [];
+  readonly statuses: Array<{ inbound?: string; detail?: string }> = [];
+  readonly ingestResults: IngestSpec[] = [];
   readonly #stderr: string[] = [];
-  readonly #queue: AdapterFrame[] = [];
-  readonly #waiters: Waiter[] = [];
+  readonly #responses = new Map<string, AdapterFrame>();
+  readonly #waiters = new Map<string, Waiter>();
   #buffer = "";
   #sequence = 0;
 
@@ -118,10 +146,11 @@ class Child {
     this.child.stderr.on("data", (chunk: string) => this.#stderr.push(chunk));
     this.child.once("exit", () => {
       const error = new Error(`adapter exited; stderr: ${this.stderr}`);
-      for (const waiter of this.#waiters.splice(0)) {
+      for (const waiter of this.#waiters.values()) {
         clearTimeout(waiter.timer);
         waiter.reject(error);
       }
+      this.#waiters.clear();
     });
   }
 
@@ -137,34 +166,74 @@ class Child {
       this.#buffer = this.#buffer.slice(newline + 1);
       if (line) {
         const frame = JSON.parse(line) as AdapterFrame;
-        const waiter = this.#waiters.shift();
-        if (waiter) {
-          clearTimeout(waiter.timer);
-          waiter.resolve(frame);
-        } else {
-          this.#queue.push(frame);
-        }
+        if (frame.method && frame.id !== undefined) this.#answerRequest(frame);
+        else this.#settle(frame);
       }
       newline = this.#buffer.indexOf("\n");
     }
   }
 
-  next(timeoutMs = 5000): Promise<AdapterFrame> {
-    const queued = this.#queue.shift();
-    if (queued) return Promise.resolve(queued);
+  #settle(frame: AdapterFrame): void {
+    const key = String(frame.id);
+    const waiter = this.#waiters.get(key);
+    if (waiter) {
+      clearTimeout(waiter.timer);
+      this.#waiters.delete(key);
+      waiter.resolve(frame);
+    } else {
+      this.#responses.set(key, frame);
+    }
+  }
+
+  #answerRequest(frame: AdapterFrame): void {
+    this.requests.push(frame);
+    let result: unknown = {};
+    let error: { code: number; message: string } | undefined;
+    if (frame.method === "ingest") {
+      const spec = this.ingestResults.shift();
+      if (spec?.error) error = spec.error;
+      else result = spec?.result ?? { committed: true };
+    } else if (frame.method === "status") {
+      this.statuses.push(frame.params ?? {});
+      result = { ok: true };
+    } else if (frame.method === "ping") {
+      result = { pong: true };
+    }
+    const reply = error
+      ? { jsonrpc: "2.0", id: frame.id, error }
+      : { jsonrpc: "2.0", id: frame.id, result };
+    this.child.stdin.write(`${JSON.stringify(reply)}\n`);
+  }
+
+  #waitFor(id: string, timeoutMs: number): Promise<AdapterFrame> {
+    const settled = this.#responses.get(id);
+    if (settled) {
+      this.#responses.delete(id);
+      return Promise.resolve(settled);
+    }
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error(`timed out waiting for adapter frame; stderr: ${this.stderr}`)),
-        timeoutMs,
-      );
-      this.#waiters.push({ resolve, reject, timer });
+      const timer = setTimeout(() => {
+        this.#waiters.delete(id);
+        reject(new Error(`timed out waiting for adapter response; stderr: ${this.stderr}`));
+      }, timeoutMs);
+      this.#waiters.set(id, { resolve, reject, timer });
     });
   }
 
-  request(method: string, params?: unknown): Promise<AdapterFrame> {
+  request(method: string, params?: unknown, timeoutMs = 5000): Promise<AdapterFrame> {
     const id = `t-${++this.#sequence}`;
     this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-    return this.next();
+    return this.#waitFor(id, timeoutMs);
+  }
+
+  async waitForRequest(method: string, timeoutMs = 5000): Promise<AdapterFrame> {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const found = this.requests.find((frame) => frame.method === method);
+      if (found) return found;
+      await Bun.sleep(10);
+    }
+    throw new Error(`timed out waiting for adapter ${method}; stderr: ${this.stderr}`);
   }
 
   async close(): Promise<void> {
@@ -245,8 +314,9 @@ describe("feishu adapter", () => {
     expect(initialized.result.accounts.main.send).toEqual({
       text: true,
       format: ["text", "markdown"],
-      reply: "none",
+      reply: "native",
       idempotency: "persistent_delivery_key",
+      card: ["1.0", "2.0"],
     });
     expect(fake.tokenRequests()).toHaveLength(0);
 
@@ -481,6 +551,83 @@ describe("feishu adapter", () => {
     expect(started.error?.message).toContain("invalid param");
     expect(started.error?.message).not.toContain("secret_test");
     expect(child.stderr).not.toContain("secret_test");
+  });
+
+  test("card 2.0 is opt-in and renders block Markdown content", async () => {
+    const fake = await startFake();
+    const child = await boot(fake, { FEISHU_CARD_VERSION: "2.0" });
+
+    const text = "## heading\n\n- one\n- two\n\n```js\nconst x = 1;\n```";
+    const sent = await send(child, "card-2", text);
+    expect(sent.result.state).toBe("sent");
+
+    const posted = JSON.parse(fake.sendRequests()[0]!.body) as { content: string; msg_type: string };
+    expect(posted.msg_type).toBe("interactive");
+    expect(JSON.parse(posted.content)).toEqual({
+      schema: "2.0",
+      config: { update_multi: true },
+      body: { elements: [{ tag: "markdown", content: text }] },
+    });
+  });
+
+  test("an invalid card version fails initialize with a clear prerequisite", async () => {
+    const child = newChild({
+      FEISHU_APP_ID: "cli_test",
+      FEISHU_APP_SECRET: "secret_test",
+      FEISHU_CARD_VERSION: "3",
+    });
+
+    const initialized = await child.request("initialize", INIT_PARAMS);
+    expect(initialized.result).toBeUndefined();
+    expect(initialized.error?.message).toBe("FEISHU_CARD_VERSION must be 1.0 or 2.0");
+  });
+
+  test("a Feishu parent reference replies natively without receive_id", async () => {
+    const fake = await startFake();
+    fake.sendResponse = () => ({ body: { code: 0, msg: "ok", data: { message_id: "om_reply" } } });
+    const child = await boot(fake);
+
+    const sent = await child.request("send", {
+      deliveryId: "d1",
+      attemptId: "a1",
+      idempotencyKey: "reply-key",
+      target: TARGET,
+      payload: {
+        text: "answer",
+        parent: { endpoint: TARGET, nativeMessageId: "om_parent" },
+      },
+    });
+    expect(sent.result).toEqual({
+      state: "sent",
+      providerMessage: { endpoint: TARGET, nativeMessageId: "om_reply" },
+    });
+
+    const requests = fake.sendRequests();
+    expect(requests[0]!.url).toBe("/open-apis/im/v1/messages/om_parent/reply");
+    const posted = JSON.parse(requests[0]!.body) as Record<string, unknown>;
+    expect(posted).not.toHaveProperty("receive_id");
+    expect(posted).toMatchObject({ msg_type: "interactive" });
+    expect(posted.uuid).toBe(createHash("sha256").update("reply-key").digest("hex").slice(0, 32));
+  });
+
+  test("a parent outside this account falls back to plain outbound", async () => {
+    const fake = await startFake();
+    const child = await boot(fake);
+
+    const sent = await child.request("send", {
+      deliveryId: "d1",
+      attemptId: "a1",
+      idempotencyKey: "fallback-key",
+      target: TARGET,
+      payload: {
+        text: "plain",
+        parent: { endpoint: { ...TARGET, accountId: "other" }, nativeMessageId: "om_other" },
+      },
+    });
+    expect(sent.result.state).toBe("sent");
+    const requests = fake.sendRequests();
+    expect(requests[0]!.url).toBe("/open-apis/im/v1/messages?receive_id_type=chat_id");
+    expect(JSON.parse(requests[0]!.body)).toMatchObject({ receive_id: "oc_chat" });
   });
 
   test.skipIf(!existsSync(DIST_PATH))("built dist runs the stdio handshake under node", async () => {

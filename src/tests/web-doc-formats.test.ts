@@ -11,6 +11,22 @@ const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
 const token = "chat-doc-formats-token";
 const tooLargeLabel = "This file is too large to preview (over 2 MB). Download it instead.";
 
+test("office formats classify by MIME type and extension", async () => {
+  const { docPreviewFormat, isDocPreviewResource, OFFICE_PREVIEW_LIMIT } = await import("../../server/assets/chat/resource-format.js");
+  const docxMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  const pptxMime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  expect(docPreviewFormat({ name: "report.docx", mimeType: "application/octet-stream" })?.kind).toBe("docx");
+  expect(docPreviewFormat({ name: "sheet.xlsx", mimeType: xlsxMime })?.kind).toBe("xlsx");
+  expect(docPreviewFormat({ name: "deck.pptx", mimeType: "application/octet-stream" })?.kind).toBe("pptx");
+  expect(docPreviewFormat({ name: "upload", mimeType: docxMime })?.kind).toBe("docx");
+  expect(docPreviewFormat({ name: "upload", mimeType: pptxMime })?.kind).toBe("pptx");
+  expect(docPreviewFormat({ name: "notes.txt", mimeType: "text/plain" })?.kind).toBe("text");
+  expect(isDocPreviewResource({ name: "report.docx", mimeType: "application/octet-stream" })).toBe(true);
+  expect(isDocPreviewResource({ name: "archive.bin", mimeType: "application/octet-stream" })).toBe(false);
+  expect(OFFICE_PREVIEW_LIMIT).toBe(20 * 1024 * 1024);
+});
+
 test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the reading pane", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const dir = await mkdtemp(path.join(os.tmpdir(), "chat-doc-formats-"));
@@ -194,11 +210,12 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("zh-CN"), "/assets/chat/state.js");
     await page.waitForFunction(() => document.querySelector("#docPreviewNotice")?.textContent?.includes("2 MB"));
     expect(await page.locator("#docPreviewNotice").textContent()).toContain("文件太大");
-    // Switching language swaps the label and keeps the download icon in place.
-    expect(await page.locator("#btnDocPreviewDownload .i18n-label").textContent()).toBe("下载");
+    // Switching language swaps the accessible name and keeps the download icon in place.
+    expect(await page.locator("#btnDocPreviewDownload").getAttribute("aria-label")).toBe("下载");
+    expect((await page.locator("#btnDocPreviewDownload").textContent())?.trim()).toBe("");
     expect(await page.locator("#btnDocPreviewDownload svg.fluent-icon").count()).toBe(1);
     await page.evaluate(async (url: string) => (await import(url)).app.setLocale("en"), "/assets/chat/state.js");
-    expect(await page.locator("#btnDocPreviewDownload .i18n-label").textContent()).toBe("Download");
+    expect(await page.locator("#btnDocPreviewDownload").getAttribute("aria-label")).toBe("Download");
     await closePreview();
 
     // A failed content load leaves the copy action hidden.

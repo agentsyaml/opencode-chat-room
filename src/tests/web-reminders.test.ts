@@ -54,7 +54,7 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
     await page.goto(`${origin}/chat`);
     await page.locator("#inName").fill("Reminder tester"); await page.locator("#inRoomName").fill("Reminder room"); await page.locator("#btnCreate").click();
     await page.locator("#chatView").waitFor({ state: "visible" });
-    await page.locator("#btnReminders").click();
+    await openReminders(page);
     await page.locator("#btnNewReminder").click();
     const form = await page.locator("#reminderDialog").evaluate((node: HTMLElement) => {
       const box = node.getBoundingClientRect(), area = document.querySelector<HTMLElement>("#reminderText")!.getBoundingClientRect();
@@ -161,6 +161,7 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
     await page.waitForFunction((id: string) => document.querySelector("#roomName")?.textContent === "Second reminder room", other.id);
     expect(await page.locator("#reminderText").inputValue()).toBe("");
     expect(reminders.get(other.id)).toBeUndefined();
+    await openReminders(page);
     await page.locator("#btnNewReminder").click();
     await page.locator("#reminderText").fill("Room B private draft"); await page.locator("#reminderType").selectOption("cron");
     await page.locator("#reminderCron").fill("30 8 * * *");
@@ -178,6 +179,13 @@ test.skipIf(!browserModule)("reminders use the room API and preserve drafts on e
     await rm(directory, { recursive: true, force: true });
   }
 }, 90000);
+
+async function openReminders(page: any) {
+  if (await page.locator("#remindersDialog").evaluate((node: HTMLDialogElement) => node.open)) return;
+  await page.locator("#btnRoomOptions").click();
+  await page.locator("#btnReminders").click();
+  await page.locator("#remindersDialog[open]").waitFor();
+}
 
 function isolatedEnv(directory: string, port: number): NodeJS.ProcessEnv {
   const env = { ...process.env };

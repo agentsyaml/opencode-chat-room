@@ -54,7 +54,9 @@ test.skipIf(!browserModule)("mobile header, drawer, composer, and shortcut hint 
       expect(metrics.head.height).toBeLessThanOrEqual(width <= 380 ? 60 : 64);
       expect(metrics.headFits).toBe(true);
       expect(metrics.head.padding).toBeLessThanOrEqual(10);
-      expect(metrics.actions.length).toBe(4);
+      expect(metrics.actions.length).toBe(3);
+      expect(await page.locator("#btnReminders").isVisible()).toBe(false);
+      expect(await page.locator("#roomOptions #btnReminders").count()).toBe(1);
       expect(metrics.actions.every((size: number) => size >= (width <= 380 ? 40 : 44))).toBe(true);
       expect(metrics.sameRow).toBe(true);
       expect(metrics.metaVisible).toBe(false);

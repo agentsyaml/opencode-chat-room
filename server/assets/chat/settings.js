@@ -1,4 +1,4 @@
-// Browser settings shared by the join page and the chat: language, theme, and the optional token.
+// Browser settings shared by the join page and the chat: language, theme, window frame, and the optional token.
 export const THEMES = ["system", "light", "dark", "forest", "sand"];
 
 export function initSettings(app) {
@@ -8,18 +8,28 @@ export function initSettings(app) {
   const tokenInput = $("#inTokenChat"), tokenHint = $("#tokenHint");
   const contentInput = $("#inContentTransition");
   const pageInput = $("#inPageStep"), pageValue = $("#pageStepValue");
+  const frameSelect = $("#inWindowFrame");
+  const panelInputs = [...dialog.querySelectorAll("[data-panel-mode]")];
+  if (document.body.dataset.integrationsAdmin !== "true") {
+    $("#settingsTabIntegrations")?.remove();
+    $("#settingsPanelIntegrations")?.remove();
+  }
   const tabs = [...dialog.querySelectorAll('[role="tab"]')];
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   let opener = null;
 
   const syncThemeColor = () => {
     const meta = document.querySelector('meta[name="theme-color"]');
-    const background = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+    const token = document.documentElement.dataset.windowFrame === "borderless" ? "--surface" : "--bg";
+    const background = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
     if (meta && background) meta.content = background;
   };
   const syncThemeInputs = () => {
     const stored = THEMES.includes(app.LS.theme) ? app.LS.theme : "system";
     for (const input of dialog.querySelectorAll('input[name="theme"]')) input.checked = input.value === stored;
+  };
+  const syncPanelInputs = () => {
+    for (const select of panelInputs) select.value = app.panelMode(select.dataset.panelMode);
   };
   const applyTheme = (value, persist) => {
     const theme = THEMES.includes(value) ? value : "system";
@@ -31,6 +41,16 @@ export function initSettings(app) {
   app.setTheme = (value) => applyTheme(value, true);
   app.settingsOpen = () => dialog.open;
 
+  const framePreference = () => app.LS.windowFrame === "borderless" ? "borderless" : "framed";
+  const applyWindowFrame = (mode, persist) => {
+    const preference = mode === "borderless" ? "borderless" : "framed";
+    document.documentElement.dataset.windowFrame = preference;
+    if (frameSelect) frameSelect.value = preference;
+    if (persist) app.LS.windowFrame = preference;
+    syncThemeColor();
+  };
+  app.setWindowFrame = (value) => applyWindowFrame(value, true);
+
   // One tab stop for the whole tablist; arrow keys move selection like a native tab widget.
   const activateTab = (name, { focus = false } = {}) => {
     for (const tab of tabs) {
@@ -41,6 +61,7 @@ export function initSettings(app) {
       if (panel) panel.hidden = !selected;
       if (selected && focus) tab.focus();
     }
+    if (name === "integrations") app.loadIntegrations?.();
   };
   const onTabKey = (event) => {
     const index = tabs.indexOf(event.target);
@@ -59,6 +80,8 @@ export function initSettings(app) {
   const open = ({ token = false } = {}) => {
     app.closePanels?.();
     syncThemeInputs();
+    syncPanelInputs();
+    applyWindowFrame(framePreference(), false);
     if (contentInput) contentInput.checked = app.LS.contentTransition;
     if (pageInput) pageInput.value = String(app.LS.pageStep);
     if (pageValue) pageValue.textContent = `${app.LS.pageStep}%`;
@@ -96,6 +119,10 @@ export function initSettings(app) {
   });
   dialog.addEventListener("change", (event) => {
     if (event.target instanceof HTMLInputElement && event.target.name === "theme") app.setTheme(event.target.value);
+    if (event.target === frameSelect) app.setWindowFrame(frameSelect.value);
+    if (event.target instanceof HTMLSelectElement && event.target.dataset.panelMode) {
+      app.setPanelMode(event.target.dataset.panelMode, event.target.value);
+    }
     if (event.target === contentInput) app.LS.contentTransition = contentInput.checked;
     if (event.target === pageInput) {
       app.LS.pageStep = pageInput.value;
@@ -114,4 +141,5 @@ export function initSettings(app) {
   scheme.addEventListener("change", () => { if (app.LS.theme === "system") syncThemeColor(); });
 
   applyTheme(app.LS.theme, false);
+  applyWindowFrame(framePreference(), false);
 }

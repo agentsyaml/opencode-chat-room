@@ -1,15 +1,17 @@
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { loadRoomConfig, resolveServerSettings, type ServerSettings } from "../config/file-config.ts";
-import { databasePath, readState, recallMessage, writeState } from "../state/store.ts";
+import { databasePath, readState, recallMessage, sendReply, writeState } from "../state/store.ts";
 import {
   channelRoutes,
+  createChannelController,
   createDeliveryResultHandler,
   startChannels,
   stopChannels,
+  type ChannelController,
   type ChannelsRuntime,
 } from "../../server/channels.ts";
 import type { SpawnAdapter } from "../../packages/chat-room-channeld/src/host.ts";
@@ -85,6 +87,84 @@ rules:
   return file;
 }
 
+function writeNamedChannelConfig(directory: string, name: string, roomId: string, account: string): string {
+  const file = path.join(directory, name);
+  writeFileSync(file, `stateFile: ignored.sqlite
+accounts:
+  - id: ${account}
+    platform: telegram
+    adapter: { command: ["unused"] }
+rules:
+  - id: forward
+    version: 1
+    from: { platform: chatroom, account: center, room: ${roomId}, event: message.forward_requested }
+    to: [ { platform: telegram, account: ${account}, room: chat } ]
+`);
+  return file;
+}
+
+function adminEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return { ...process.env, ...extra };
+}
+
+function adminRequest(url: URL, body?: unknown): Request {
+  return new Request(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+function adminPut(url: URL, body: unknown): Request {
+  return new Request(url, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+const PLUGIN_SOURCE = `
+let buffer = "";
+const respond = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString("utf8");
+  let newline = buffer.indexOf("\\n");
+  while (newline !== -1) {
+    const request = JSON.parse(buffer.slice(0, newline));
+    buffer = buffer.slice(newline + 1);
+    if (request.method === "send") {
+      respond(request.id, {
+        state: "sent",
+        providerMessage: { endpoint: request.params.target, nativeMessageId: "native-" + request.id },
+      });
+    } else {
+      respond(request.id, {
+        version: 1,
+        eventSchema: 1,
+        maxFrameBytes: 1048576,
+        accounts: {},
+        platform: process.env.PLUGIN_REPORT_PLATFORM || "telegram",
+      });
+    }
+    newline = buffer.indexOf("\\n");
+  }
+});
+process.stdin.on("end", () => process.exit(0));
+setInterval(() => {}, 1000);
+`;
+
+async function uploadPlugin(
+  controller: ChannelController,
+  body: Record<string, unknown>,
+): Promise<{ response: Response | undefined; json: Record<string, unknown> }> {
+  const url = new URL("http://center.test/channeld/plugins");
+  const response = await controller.handle(adminRequest(url, body), url);
+  return {
+    response,
+    json: response ? await response.clone().json() as Record<string, unknown> : {},
+  };
+}
+
 async function makeRoom(label: string): Promise<{ roomId: string; directory: string }> {
   const directory = useState(label);
   const roomId = await writeState((svc, registry) => {
@@ -100,6 +180,21 @@ async function makeRoom(label: string): Promise<{ roomId: string; directory: str
 async function sendMessage(roomId: string, text: string): Promise<string> {
   const result = await writeState((svc) => svc.sendMessage(roomId, "Alice", text, "session-alice"));
   return result.id;
+}
+
+async function forwardMessage(
+  runtime: ChannelsRuntime | undefined,
+  roomId: string,
+  messageId: string,
+  target: { platform: string; account: string; room: string },
+): Promise<number> {
+  const url = new URL(`http://center.test/rooms/${roomId}/forward`);
+  const response = await channelRoutes(new Request(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionID: "session-alice", messageId, target }),
+  }), url, runtime);
+  return response?.status ?? 0;
 }
 
 /** Store sends and accept every delivery with the given terminal state. */
@@ -563,6 +658,953 @@ test("a forward creates one delivery, one system message, and a stable dedup key
   }
 });
 
+test("admin control routes stay hidden unless CHATROOM_ALLOW_ADMIN is true", async () => {
+  const { roomId, directory } = await makeRoom("admin-gate");
+  const configPath = writeChannelConfig(directory, roomId);
+  const { spawnAdapter } = fakeAdapter("sent");
+  const env = adminEnv();
+  delete env.CHATROOM_ALLOW_ADMIN;
+  const controller = createChannelController(settings(configPath), {
+    spawnAdapter,
+    deliveryIntervalMs: 10,
+    env,
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const reloadUrl = new URL("http://center.test/channeld/reload");
+    expect(await controller.handle(adminRequest(reloadUrl, {}), reloadUrl)).toBeUndefined();
+    const pluginsUrl = new URL("http://center.test/channeld/plugins");
+    expect(await controller.handle(adminRequest(pluginsUrl, { name: "x.js" }), pluginsUrl)).toBeUndefined();
+    const integrationUrl = new URL("http://center.test/channeld/integration");
+    expect(await controller.handle(new Request(integrationUrl), integrationUrl)).toBeUndefined();
+
+    const statusUrl = new URL("http://center.test/channeld/status");
+    expect((await controller.handle(new Request(statusUrl), statusUrl))?.status).toBe(200);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("a disabled relay enables with a valid config without restarting", async () => {
+  const { roomId, directory } = await makeRoom("admin-enable");
+  const configPath = writeChannelConfig(directory, roomId);
+  const { sends, spawnAdapter } = fakeAdapter("sent");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    expect(controller.enabled).toBe(false);
+    const targetsUrl = new URL(`http://center.test/rooms/${roomId}/forward-targets?sessionID=session-alice`);
+    expect(await controller.handle(new Request(targetsUrl), targetsUrl)).toBeUndefined();
+
+    const enableUrl = new URL("http://center.test/channeld/enable");
+    const enable = await controller.handle(adminRequest(enableUrl, { config: configPath }), enableUrl);
+    expect(enable?.status).toBe(200);
+    expect(await enable?.json()).toMatchObject({ enabled: true, persisted: false, restartRequired: true });
+    expect(controller.enabled).toBe(true);
+    expect((await controller.handle(new Request(targetsUrl), targetsUrl))?.status).toBe(200);
+
+    const messageId = await sendMessage(roomId, "live enable");
+    const url = new URL(`http://center.test/rooms/${roomId}/forward`);
+    const forwarded = await controller.handle(new Request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionID: "session-alice",
+        messageId,
+        target: { platform: "telegram", account: "test", room: "chat" },
+      }),
+    }), url);
+    expect(forwarded?.status).toBe(202);
+    await waitFor(() => sends.length === 1);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("enabling without a config, or with an invalid one, stays off", async () => {
+  const { roomId } = await makeRoom("admin-enable-invalid");
+  const directory = useState("admin-enable-invalid");
+  const invalidPath = writeNamedChannelConfig(directory, "broken.yml", roomId, "test");
+  writeFileSync(invalidPath, "accounts:\n  - id: test\nrules: []\n");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const enableUrl = new URL("http://center.test/channeld/enable");
+    const noConfig = await controller.handle(adminRequest(enableUrl, {}), enableUrl);
+    expect(noConfig?.status).toBe(400);
+    expect(await noConfig?.json()).toMatchObject({ error: expect.stringContaining("configuration") });
+    expect(controller.enabled).toBe(false);
+
+    const invalid = await controller.handle(adminRequest(enableUrl, { config: invalidPath }), enableUrl);
+    expect(invalid?.status).toBe(400);
+    expect(controller.enabled).toBe(false);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("an invalid reload keeps the old runtime and config untouched", async () => {
+  const { roomId, directory } = await makeRoom("admin-invalid-reload");
+  const configPath = writeNamedChannelConfig(directory, "good.yml", roomId, "test");
+  const invalidPath = path.join(directory, "invalid.yml");
+  writeFileSync(invalidPath, `accounts:
+  - id: test
+    platform: telegram
+    adapter: { command: ["unused"] }
+rules:
+  - id: broken
+    version: 1
+    from: { platform: chatroom, account: center, room: ${roomId} }
+    to: [ { platform: telegram, account: missing, room: chat } ]
+`);
+  const { sends, spawnAdapter } = fakeAdapter("sent");
+  const controller = createChannelController(settings(configPath), {
+    spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const before = controller.runtime;
+    const reloadUrl = new URL("http://center.test/channeld/reload");
+    const response = await controller.handle(adminRequest(reloadUrl, { config: invalidPath }), reloadUrl);
+    expect(response?.status).toBe(400);
+    const text = await response?.text();
+    expect(text?.toLowerCase()).not.toContain("channeld");
+    expect(controller.runtime).toBe(before);
+
+    const messageId = await sendMessage(roomId, "old config still works");
+    const url = new URL(`http://center.test/rooms/${roomId}/forward`);
+    const forwarded = await controller.handle(new Request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionID: "session-alice",
+        messageId,
+        target: { platform: "telegram", account: "test", room: "chat" },
+      }),
+    }), url);
+    expect(forwarded?.status).toBe(202);
+    await waitFor(() => sends.length === 1);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("disable stops forwarding and status without affecting other routes", async () => {
+  const { roomId, directory } = await makeRoom("admin-disable");
+  const configPath = writeChannelConfig(directory, roomId);
+  const controller = createChannelController(settings(configPath), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const targetsUrl = new URL(`http://center.test/rooms/${roomId}/forward-targets?sessionID=session-alice`);
+    const statusUrl = new URL("http://center.test/channeld/status");
+    expect((await controller.handle(new Request(targetsUrl), targetsUrl))?.status).toBe(200);
+    expect((await controller.handle(new Request(statusUrl), statusUrl))?.status).toBe(200);
+
+    const disableUrl = new URL("http://center.test/channeld/disable");
+    const disabled = await controller.handle(adminRequest(disableUrl), disableUrl);
+    expect(disabled?.status).toBe(200);
+    expect(await disabled?.json()).toMatchObject({ enabled: false });
+    expect(controller.enabled).toBe(false);
+    expect(await controller.handle(new Request(targetsUrl), targetsUrl)).toBeUndefined();
+    expect(await controller.handle(new Request(statusUrl), statusUrl)).toBeUndefined();
+    const { request, url } = forwardRequest(roomId);
+    expect(await controller.handle(request, url)).toBeUndefined();
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("a failed new host restores the previous runtime without echoing details", async () => {
+  const { roomId, directory } = await makeRoom("admin-restore");
+  const oldPath = writeNamedChannelConfig(directory, "old.yml", roomId, "test");
+  const brokenPath = writeNamedChannelConfig(directory, "broken-host.yml", roomId, "broken");
+  const sends: unknown[] = [];
+  const spawnAdapter: SpawnAdapter = (account) => {
+    if (account.id === "broken") {
+      return {
+        start: async () => { throw new Error("token=topsecret channeld"); },
+        send: async () => ({ state: "permanent", detail: "unused" }),
+        stop: async () => {},
+      };
+    }
+    return {
+      start: async () => {},
+      send: async (_deliveryId, _attemptId, _idempotencyKey, target) => {
+        sends.push(target);
+        return { state: "sent", providerMessage: { endpoint: target, nativeMessageId: `native-${sends.length}` } };
+      },
+      stop: async () => {},
+    };
+  };
+  const controller = createChannelController(settings(oldPath), {
+    spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const reloadUrl = new URL("http://center.test/channeld/reload");
+    const failed = await controller.handle(adminRequest(reloadUrl, { config: brokenPath }), reloadUrl);
+    expect(failed?.status).toBe(502);
+    const text = await failed!.text();
+    expect(text.toLowerCase()).not.toContain("channeld");
+    expect(text).not.toContain("topsecret");
+    expect(JSON.parse(text)).toMatchObject({ enabled: true, restored: true });
+    expect(controller.enabled).toBe(true);
+    expect(controller.runtime?.config.accounts.map((account) => account.id)).toEqual(["test"]);
+
+    const messageId = await sendMessage(roomId, "restored runtime");
+    const url = new URL(`http://center.test/rooms/${roomId}/forward`);
+    const forwarded = await controller.handle(new Request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionID: "session-alice",
+        messageId,
+        target: { platform: "telegram", account: "test", room: "chat" },
+      }),
+    }), url);
+    expect(forwarded?.status).toBe(202);
+    await waitFor(() => sends.length === 1);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("reloading the same config does not duplicate terminal system messages", async () => {
+  const { roomId, directory } = await makeRoom("admin-no-duplicate");
+  const configPath = writeChannelConfig(directory, roomId);
+  const { sends, spawnAdapter } = fakeAdapter("sent");
+  const controller = createChannelController(settings(configPath), {
+    spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const messageId = await sendMessage(roomId, "one message");
+    const url = new URL(`http://center.test/rooms/${roomId}/forward`);
+    const forwarded = await controller.handle(new Request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionID: "session-alice",
+        messageId,
+        target: { platform: "telegram", account: "test", room: "chat" },
+      }),
+    }), url);
+    expect(forwarded?.status).toBe(202);
+    await waitFor(async () => {
+      const texts = await readState((svc) => svc.getRoom(roomId).messages.map((message) => message.text));
+      return sends.length === 1 && texts.includes("Forwarded to telegram/test/chat");
+    });
+
+    const reloadUrl = new URL("http://center.test/channeld/reload");
+    expect((await controller.handle(adminRequest(reloadUrl, { config: configPath }), reloadUrl))?.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const texts = await readState((svc) => svc.getRoom(roomId).messages.map((message) => message.text));
+    expect(texts.filter((text) => text.startsWith("Forwarded to "))).toHaveLength(1);
+    expect(sends).toHaveLength(1);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("admin changes persist in an existing JSON room config and report it", async () => {
+  const { roomId, directory } = await makeRoom("admin-persist");
+  const configPath = writeChannelConfig(directory, roomId);
+  const roomConfig = path.join(directory, "chatroom.json");
+  writeFileSync(roomConfig, JSON.stringify({
+    server: { token: "keep-me", channeld: { enabled: false, config: "stale.yml" } },
+    client: { url: "http://example.invalid" },
+  }));
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true", CHAT_ROOM_CONFIG: roomConfig }),
+  });
+  try {
+    await controller.start();
+    const enableUrl = new URL("http://center.test/channeld/enable");
+    const enabled = await controller.handle(adminRequest(enableUrl, { config: configPath }), enableUrl);
+    expect(await enabled?.json()).toMatchObject({ enabled: true, persisted: true, restartRequired: false });
+    const saved = JSON.parse(await Bun.file(roomConfig).text()) as {
+      server: { token: string; channeld: { enabled: boolean; config: string } };
+      client: { url: string };
+    };
+    expect(saved.server.token).toBe("keep-me");
+    expect(saved.server.channeld).toMatchObject({ enabled: true, config: configPath });
+    expect(saved.client.url).toBe("http://example.invalid");
+
+    const disableUrl = new URL("http://center.test/channeld/disable");
+    const disabled = await controller.handle(adminRequest(disableUrl), disableUrl);
+    expect(await disabled?.json()).toMatchObject({ enabled: false, persisted: true });
+    const afterDisable = JSON.parse(await Bun.file(roomConfig).text()) as {
+      server: { channeld: { enabled: boolean; config: string } };
+    };
+    expect(afterDisable.server.channeld).toMatchObject({ enabled: false, config: configPath });
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("admin changes persist in an existing YAML room config", async () => {
+  const { roomId, directory } = await makeRoom("admin-persist-yaml");
+  const configPath = writeChannelConfig(directory, roomId);
+  const roomConfig = path.join(directory, "chatroom.yaml");
+  writeFileSync(roomConfig, "server:\n  token: keep-yaml\n  channeld:\n    enabled: false\n");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true", CHAT_ROOM_CONFIG: roomConfig }),
+  });
+  try {
+    await controller.start();
+    const enableUrl = new URL("http://center.test/channeld/enable");
+    const enabled = await controller.handle(adminRequest(enableUrl, { config: configPath }), enableUrl);
+    expect(await enabled?.json()).toMatchObject({ enabled: true, persisted: true });
+    const saved = await Bun.file(roomConfig).text();
+    expect(saved).toContain("token: keep-yaml");
+    expect(saved).toContain("enabled: true");
+    expect(saved).toContain(configPath);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("without a writable config location admin changes report restart required", async () => {
+  const { roomId, directory } = await makeRoom("admin-no-persist");
+  const configPath = writeChannelConfig(directory, roomId);
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({
+      CHATROOM_ALLOW_ADMIN: "true",
+      CHAT_ROOM_CONFIG: path.join(directory, "missing-chatroom.json"),
+    }),
+  });
+  try {
+    await controller.start();
+    const enableUrl = new URL("http://center.test/channeld/enable");
+    const enabled = await controller.handle(adminRequest(enableUrl, { config: configPath }), enableUrl);
+    expect(await enabled?.json()).toMatchObject({ enabled: true, persisted: false, restartRequired: true });
+    expect(existsSync(path.join(directory, "missing-chatroom.json"))).toBe(false);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("plugin upload validates the handshake, platform, and file limits", async () => {
+  const { directory } = await makeRoom("plugin-upload");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const good = await uploadPlugin(controller, {
+      name: "adapter.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+      env: { PLUGIN_REPORT_PLATFORM: "telegram", SECRET_VALUE: "top-secret" },
+    });
+    expect(good.response?.status).toBe(201);
+    expect(good.json).toMatchObject({ name: "adapter.js", platform: "telegram" });
+    expect(JSON.stringify(good.json)).not.toContain("top-secret");
+    const pluginId = good.json.pluginId as string;
+    expect(typeof pluginId).toBe("string");
+    expect(existsSync(path.join(directory, "integrations", "plugins", pluginId, "adapter.js"))).toBe(true);
+
+    const mismatch = await uploadPlugin(controller, {
+      name: "mismatch.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+      env: { PLUGIN_REPORT_PLATFORM: "slack", SECRET_VALUE: "top-secret" },
+    });
+    expect(mismatch.response?.status).toBe(400);
+    const mismatchText = await mismatch.response!.text();
+    expect(mismatchText).not.toContain("top-secret");
+    expect(mismatchText.toLowerCase()).not.toContain("channeld");
+    expect(mismatchText).toContain("reported platform");
+
+    const oversized = await uploadPlugin(controller, {
+      name: "big.js",
+      platform: "telegram",
+      source: "x".repeat(256 * 1024 + 1),
+    });
+    expect(oversized.response?.status).toBe(400);
+
+    const unsafe = await uploadPlugin(controller, {
+      name: "../escape.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+    });
+    expect(unsafe.response?.status).toBe(400);
+
+    const plugins = path.join(directory, "integrations", "plugins");
+    expect(readdirSync(plugins)).toEqual([pluginId]);
+
+    const integrationUrl = new URL("http://center.test/channeld/integration");
+    const listed = await controller.handle(new Request(integrationUrl), integrationUrl);
+    const listedText = await listed!.text();
+    expect((JSON.parse(listedText) as { plugins: unknown[] }).plugins).toEqual([
+      { pluginId, name: "adapter.js", platform: "telegram" },
+    ]);
+    expect(listedText).not.toContain(directory);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("integration PUT creates managed accounts and GET hides env values and paths", async () => {
+  const { roomId, directory } = await makeRoom("integration-put");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const uploaded = await uploadPlugin(controller, {
+      name: "adapter.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+    });
+    const pluginId = uploaded.json.pluginId as string;
+    const rule = {
+      id: "forward",
+      version: 1,
+      from: { platform: "chatroom", account: "center", room: roomId, event: "message.forward_requested" },
+      transforms: [],
+      to: [{ platform: "telegram", account: "acct", room: "chat" }],
+    };
+    const url = new URL("http://center.test/channeld/integration");
+    const put = await controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: [{ id: "acct", platform: "telegram", pluginId, env: { API_TOKEN: "secret-value" } }],
+      rules: [rule],
+    }), url);
+    expect(put?.status).toBe(200);
+    const putText = await put!.text();
+    expect(putText).not.toContain("secret-value");
+    expect(putText).not.toContain("command");
+    const putBody = JSON.parse(putText) as {
+      enabled: boolean;
+      accounts: Array<{ id: string; pluginId: string; envKeys: string[]; state: string }>;
+      rules: unknown[];
+    };
+    expect(putBody.enabled).toBe(true);
+    expect(putBody.accounts[0]).toMatchObject({
+      id: "acct",
+      pluginId,
+      envKeys: ["API_TOKEN"],
+      state: "started",
+    });
+    expect(putBody.rules).toHaveLength(1);
+
+    const managedFile = path.join(directory, "integrations", "channeld.yml");
+    const managed = await Bun.file(managedFile).text();
+    expect(managed).toContain("node");
+    expect(managed).toContain(pluginId);
+    expect(managed).toContain("secret-value");
+
+    const get = await controller.handle(new Request(url), url);
+    expect(get?.status).toBe(200);
+    const getText = await get!.text();
+    expect(getText).not.toContain("secret-value");
+    expect(getText).not.toContain("command");
+    expect(getText).not.toContain(path.join(directory, "integrations"));
+    expect(JSON.parse(getText)).toMatchObject({
+      enabled: true,
+      accounts: [{ id: "acct", platform: "telegram", pluginId, envKeys: ["API_TOKEN"] }],
+    });
+    expect(controller.runtime?.config.accounts[0]?.adapter.command[0]).toBe("node");
+
+    const targetsUrl = new URL(`http://center.test/rooms/${roomId}/forward-targets?sessionID=session-alice`);
+    expect((await controller.handle(new Request(targetsUrl), targetsUrl))?.status).toBe(200);
+
+    const disabled = await controller.handle(adminPut(url, {
+      enabled: false,
+      accounts: [{ id: "acct", platform: "telegram", pluginId, env: { API_TOKEN: "secret-value" } }],
+      rules: [],
+    }), url);
+    expect(disabled?.status).toBe(200);
+    expect((JSON.parse(await disabled!.text()) as { enabled: boolean }).enabled).toBe(false);
+    expect(controller.enabled).toBe(false);
+    expect(await controller.handle(new Request(targetsUrl), targetsUrl)).toBeUndefined();
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("integration PUT preserves, replaces, and validates inbound routes", async () => {
+  const { roomId, directory } = await makeRoom("integration-inbound");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const uploaded = await uploadPlugin(controller, {
+      name: "adapter.js",
+      platform: "feishu",
+      source: PLUGIN_SOURCE,
+      env: { PLUGIN_REPORT_PLATFORM: "feishu" },
+    });
+    const pluginId = uploaded.json.pluginId as string;
+    const accounts = [{ id: "acct", platform: "feishu", pluginId, env: { PLUGIN_REPORT_PLATFORM: "feishu" } }];
+    const inbound = [{
+      from: { platform: "feishu", account: "acct", room: "oc_allowed" },
+      to: { room: roomId },
+    }];
+    const url = new URL("http://center.test/channeld/integration");
+    const put = await controller.handle(adminPut(url, { enabled: true, accounts, inbound }), url);
+    expect(put?.status).toBe(200);
+    expect((JSON.parse(await put!.text()) as { inbound: unknown[] }).inbound).toEqual(inbound);
+
+    // Saving accounts/rules without inbound keeps the existing route.
+    const saveAgain = await controller.handle(adminPut(url, { enabled: true, accounts }), url);
+    expect(saveAgain?.status).toBe(200);
+    expect((JSON.parse(await saveAgain!.text()) as { inbound: unknown[] }).inbound).toEqual(inbound);
+    expect(await Bun.file(path.join(directory, "integrations", "channeld.yml")).text()).toContain("oc_allowed");
+
+    // Explicit [] clears it.
+    const cleared = await controller.handle(adminPut(url, { enabled: true, accounts, inbound: [] }), url);
+    expect(cleared?.status).toBe(200);
+    expect((JSON.parse(await cleared!.text()) as { inbound: unknown[] }).inbound).toEqual([]);
+    expect(await Bun.file(path.join(directory, "integrations", "channeld.yml")).text()).not.toContain("oc_allowed");
+
+    const restored = await controller.handle(adminPut(url, { enabled: true, accounts, inbound }), url);
+    expect(restored?.status).toBe(200);
+    const invalid = await controller.handle(adminPut(url, {
+      enabled: true,
+      accounts,
+      inbound: [{ from: { platform: "feishu", account: "missing", room: "oc_allowed" }, to: { room: roomId } }],
+    }), url);
+    expect(invalid?.status).toBe(400);
+    const invalidText = await invalid!.text();
+    expect(invalidText).toContain("unknown account");
+    expect(invalidText).not.toContain(directory);
+
+    const get = await controller.handle(new Request(url), url);
+    expect(get?.status).toBe(200);
+    expect((JSON.parse(await get!.text()) as { inbound: unknown[] }).inbound).toEqual(inbound);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("an external channeld config is read-only in the integration API", async () => {
+  const { roomId, directory } = await makeRoom("integration-external");
+  const configPath = path.join(directory, "external-channeld.yml");
+  const externalYaml = `stateFile: ignored.sqlite
+accounts:
+  - id: external
+    platform: telegram
+    adapter: { command: ["unused"] }
+    env: { API_TOKEN: "external-secret" }
+rules:
+  - id: forward
+    version: 1
+    from: { platform: chatroom, account: center, room: ${roomId}, event: message.forward_requested }
+    to: [ { platform: telegram, account: external, room: chat } ]
+inbound:
+  - from: { platform: telegram, account: external, room: oc_allowed }
+    to: { room: ${roomId} }
+`;
+  writeFileSync(configPath, externalYaml);
+  const controller = createChannelController(settings(configPath), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    expect(controller.enabled).toBe(true);
+    const url = new URL("http://center.test/channeld/integration");
+    const get = await controller.handle(new Request(url), url);
+    expect(get?.status).toBe(200);
+    const getText = await get!.text();
+    expect(getText).not.toContain("external-secret");
+    const snapshot = JSON.parse(getText) as {
+      source: string;
+      editable: boolean;
+      accounts: Array<Record<string, unknown>>;
+      rules: unknown[];
+      inbound: unknown[];
+    };
+    expect(snapshot.source).toBe("external");
+    expect(snapshot.editable).toBe(false);
+    expect(snapshot.accounts).toEqual([{
+      id: "external",
+      platform: "telegram",
+      pluginId: "",
+      envKeys: ["API_TOKEN"],
+      state: "started",
+    }]);
+    expect(snapshot.rules).toHaveLength(1);
+    expect(snapshot.inbound).toHaveLength(1);
+
+    const put = await controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: [{ id: "replacement", platform: "telegram", pluginId: "missing" }],
+    }), url);
+    expect(put?.status).toBe(409);
+    expect(await put!.text()).toContain("external configuration file");
+    expect(controller.enabled).toBe(true);
+    expect(await Bun.file(configPath).text()).toBe(externalYaml);
+    expect(existsSync(path.join(directory, "integrations", "channeld.yml"))).toBe(false);
+
+    const disableUrl = new URL("http://center.test/channeld/disable");
+    expect((await controller.handle(adminRequest(disableUrl), disableUrl))?.status).toBe(200);
+    expect(controller.enabled).toBe(false);
+
+    const uploaded = await uploadPlugin(controller, {
+      name: "adapter.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+    });
+    const pluginId = uploaded.json.pluginId as string;
+    const create = await controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: [{ id: "managed", platform: "telegram", pluginId }],
+      rules: [],
+    }), url);
+    expect(create?.status).toBe(200);
+    expect((JSON.parse(await create!.text()) as { source: string }).source).toBe("managed");
+    expect(existsSync(path.join(directory, "integrations", "channeld.yml"))).toBe(true);
+    expect(await Bun.file(configPath).text()).toBe(externalYaml);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("integration env edits merge, prune, clear, and never expose values", async () => {
+  const { roomId, directory } = await makeRoom("integration-env");
+  const envs: Array<[string, Record<string, string> | undefined]> = [];
+  const spawnAdapter: SpawnAdapter = (account) => {
+    envs.push([account.id, account.env]);
+    return {
+      start: async () => {},
+      send: async () => ({ state: "sent" }),
+      stop: async () => {},
+    };
+  };
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const uploaded = await uploadPlugin(controller, {
+      name: "adapter.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+    });
+    const pluginId = uploaded.json.pluginId as string;
+    const url = new URL("http://center.test/channeld/integration");
+    const rule = {
+      id: "forward",
+      version: 1,
+      from: { platform: "chatroom", account: "center", room: roomId, event: "message.forward_requested" },
+      transforms: [],
+      to: [{ platform: "telegram", account: "acct", room: "chat" }],
+    };
+    const put = (env?: Record<string, string>, envDelete?: string[]) => controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: [{
+        id: "acct",
+        platform: "telegram",
+        pluginId,
+        ...(env === undefined ? {} : { env }),
+        ...(envDelete === undefined ? {} : { envDelete }),
+      }],
+      rules: [rule],
+    }), url);
+    const managedFile = path.join(directory, "integrations", "channeld.yml");
+    const lastEnv = (): Record<string, string> | undefined => {
+      for (let index = envs.length - 1; index >= 0; index -= 1) {
+        if (envs[index]?.[0] === "acct") return envs[index]?.[1];
+      }
+      return undefined;
+    };
+
+    const created = await put({ API_TOKEN: "first-secret", OTHER: "kept" });
+    expect(created?.status).toBe(200);
+    expect((JSON.parse(await created!.text()) as {
+      accounts: Array<{ envKeys: string[] }>;
+    }).accounts[0]?.envKeys).toEqual(["API_TOKEN", "OTHER"]);
+    expect(lastEnv()).toEqual({ API_TOKEN: "first-secret", OTHER: "kept" });
+
+    const merged = await put({ API_TOKEN: "second-secret" });
+    expect(merged?.status).toBe(200);
+    const mergedText = await merged!.text();
+    expect((JSON.parse(mergedText) as {
+      accounts: Array<{ envKeys: string[] }>;
+    }).accounts[0]?.envKeys).toEqual(["API_TOKEN", "OTHER"]);
+    expect(lastEnv()).toEqual({ API_TOKEN: "second-secret", OTHER: "kept" });
+    expect(mergedText).not.toContain("second-secret");
+
+    const preserved = await put();
+    expect(preserved?.status).toBe(200);
+    expect(lastEnv()).toEqual({ API_TOKEN: "second-secret", OTHER: "kept" });
+
+    const pruned = await put(undefined, ["OTHER"]);
+    expect(pruned?.status).toBe(200);
+    expect(lastEnv()).toEqual({ API_TOKEN: "second-secret" });
+
+    const patched = await put({ FRESH: "value" }, ["API_TOKEN"]);
+    expect(patched?.status).toBe(200);
+    expect(lastEnv()).toEqual({ FRESH: "value" });
+
+    const cleared = await put({});
+    expect(cleared?.status).toBe(200);
+    expect((JSON.parse(await cleared!.text()) as {
+      accounts: Array<{ envKeys: string[] }>;
+    }).accounts[0]?.envKeys).toEqual([]);
+    expect(lastEnv()).toEqual({});
+    const clearedText = await Bun.file(managedFile).text();
+    expect(clearedText).not.toContain("first-secret");
+    expect(clearedText).not.toContain("second-secret");
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("integration env edits reject overlap and enforce bounds after merge", async () => {
+  const { roomId, directory } = await makeRoom("integration-env-bounds");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const uploaded = await uploadPlugin(controller, {
+      name: "adapter.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+    });
+    const pluginId = uploaded.json.pluginId as string;
+    const url = new URL("http://center.test/channeld/integration");
+    const rule = {
+      id: "forward",
+      version: 1,
+      from: { platform: "chatroom", account: "center", room: roomId, event: "message.forward_requested" },
+      transforms: [],
+      to: [{ platform: "telegram", account: "acct", room: "chat" }],
+    };
+    const put = (items: Array<Record<string, unknown>>) => controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: items.map((item) => ({ id: "acct", platform: "telegram", pluginId, ...item })),
+      rules: [rule],
+    }), url);
+    const managedFile = path.join(directory, "integrations", "channeld.yml");
+    const envOf = (id: string) => controller.runtime?.config.accounts.find((item) => item.id === id)?.env;
+
+    const created = await put([{ env: { KEEP: "one" } }]);
+    expect(created?.status).toBe(200);
+    const before = await Bun.file(managedFile).text();
+
+    const command = await put([{ command: ["sh", "-c", "echo pwn"], args: ["--bad"] }]);
+    expect(command?.status).toBe(400);
+    expect(await command!.text()).toContain("managed by the server");
+    expect(await Bun.file(managedFile).text()).toBe(before);
+    expect(envOf("acct")).toEqual({ KEEP: "one" });
+
+    const overlap = await put([{ env: { SECRET: "new" }, envDelete: ["SECRET"] }]);
+    expect(overlap?.status).toBe(400);
+    expect(await overlap!.text()).toContain("both env and envDelete");
+    expect(await Bun.file(managedFile).text()).toBe(before);
+    expect(envOf("acct")).toEqual({ KEEP: "one" });
+
+    expect((await put([{ envDelete: "KEEP" }]))?.status).toBe(400);
+    expect((await put([{ envDelete: ["1BAD"] }]))?.status).toBe(400);
+    expect((await put([{ env: { CHANNELD_ACCOUNT_ID: "x" } }]))?.status).toBe(400);
+    const kept = await put([{ envDelete: ["GHOST"] }]);
+    expect(kept?.status).toBe(200);
+    expect(envOf("acct")).toEqual({ KEEP: "one" });
+    const removed = await put([{ envDelete: ["KEEP"] }]);
+    expect(removed?.status).toBe(200);
+    expect(envOf("acct")).toEqual({});
+    expect((await put([{ env: {} }]))?.status).toBe(200);
+
+    const full = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`KEY_${index}`, "v"]));
+    const filled = await put([{ env: full }]);
+    expect(filled?.status).toBe(200);
+    expect(Object.keys(envOf("acct") ?? {})).toHaveLength(64);
+    const overflow = await put([{ env: { EXTRA: "v" } }]);
+    expect(overflow?.status).toBe(400);
+    expect(await overflow!.text()).toContain("64");
+    expect(Object.keys(envOf("acct") ?? {})).toHaveLength(64);
+    expect((await put([{ env: { LONG: "x".repeat(8193) } }]))?.status).toBe(400);
+
+    const fresh = await put([{ env: {} }, { id: "fresh", envDelete: ["GHOST"] }]);
+    expect(fresh?.status).toBe(200);
+    expect(controller.runtime?.config.accounts.map((item) => [item.id, item.env]))
+      .toEqual([["acct", {}], ["fresh", {}]]);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("invalid integration input keeps the old runtime and managed config", async () => {
+  const { roomId, directory } = await makeRoom("integration-invalid");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const uploaded = await uploadPlugin(controller, {
+      name: "adapter.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+    });
+    const pluginId = uploaded.json.pluginId as string;
+    const url = new URL("http://center.test/channeld/integration");
+    const baseRule = {
+      id: "forward",
+      version: 1,
+      from: { platform: "chatroom", account: "center", room: roomId, event: "message.forward_requested" },
+      transforms: [],
+      to: [{ platform: "telegram", account: "acct", room: "chat" }],
+    };
+    const valid = await controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: [{ id: "acct", platform: "telegram", pluginId }],
+      rules: [baseRule],
+    }), url);
+    expect(valid?.status).toBe(200);
+    const beforeRuntime = controller.runtime;
+    const managedFile = path.join(directory, "integrations", "channeld.yml");
+    const beforeText = await Bun.file(managedFile).text();
+
+    const missingTarget = await controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: [{ id: "acct", platform: "telegram", pluginId }],
+      rules: [{ ...baseRule, to: [{ platform: "telegram", account: "missing", room: "chat" }] }],
+    }), url);
+    expect(missingTarget?.status).toBe(400);
+    expect((await missingTarget!.text()).toLowerCase()).not.toContain("channeld");
+    expect(controller.runtime).toBe(beforeRuntime);
+    expect(await Bun.file(managedFile).text()).toBe(beforeText);
+
+    const missingPlugin = await controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: [{ id: "acct", platform: "telegram", pluginId: "missing-plugin" }],
+      rules: [baseRule],
+    }), url);
+    expect(missingPlugin?.status).toBe(400);
+    expect(controller.runtime).toBe(beforeRuntime);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("removing a plugin through PUT stops only its account and deletes its files", async () => {
+  const { roomId, directory } = await makeRoom("integration-remove");
+  const { sends, spawnAdapter } = fakeAdapter("sent");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const first = await uploadPlugin(controller, {
+      name: "first.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+    });
+    const second = await uploadPlugin(controller, {
+      name: "second.js",
+      platform: "telegram",
+      source: PLUGIN_SOURCE,
+    });
+    const firstId = first.json.pluginId as string;
+    const secondId = second.json.pluginId as string;
+    const url = new URL("http://center.test/channeld/integration");
+    const ruleFor = (account: string) => ({
+      id: `forward-${account}`,
+      version: 1,
+      from: { platform: "chatroom", account: "center", room: roomId, event: "message.forward_requested" },
+      transforms: [],
+      to: [{ platform: "telegram", account, room: "chat" }],
+    });
+    const both = await controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: [
+        { id: "first", platform: "telegram", pluginId: firstId },
+        { id: "second", platform: "telegram", pluginId: secondId },
+      ],
+      rules: [ruleFor("first"), ruleFor("second")],
+    }), url);
+    expect(both?.status).toBe(200);
+    expect(controller.runtime?.config.accounts.map((account) => account.id)).toEqual(["first", "second"]);
+
+    const removed = await controller.handle(adminPut(url, {
+      enabled: true,
+      accounts: [{ id: "first", platform: "telegram", pluginId: firstId }],
+      rules: [ruleFor("first")],
+    }), url);
+    expect(removed?.status).toBe(200);
+    expect(controller.runtime?.config.accounts.map((account) => account.id)).toEqual(["first"]);
+    expect(controller.runtime?.host.targetStatus("telegram", "first")).toBe("ready");
+    expect(controller.runtime?.host.targetStatus("telegram", "second")).toBe("missing");
+    expect(existsSync(path.join(directory, "integrations", "plugins", secondId))).toBe(false);
+    expect(existsSync(path.join(directory, "integrations", "plugins", firstId))).toBe(true);
+
+    const messageId = await sendMessage(roomId, "still healthy");
+    const forwardUrl = new URL(`http://center.test/rooms/${roomId}/forward`);
+    const forwarded = await controller.handle(new Request(forwardUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sessionID: "session-alice",
+        messageId,
+        target: { platform: "telegram", account: "first", room: "chat" },
+      }),
+    }), forwardUrl);
+    expect(forwarded?.status).toBe(202);
+    await waitFor(() => sends.length === 1);
+  } finally {
+    await controller.stop();
+  }
+});
+
 test("a terminal unknown without a receipt publishes one failure message", async () => {
   const { roomId } = await makeRoom("unknown-no-receipt");
   const handler = createDeliveryResultHandler();
@@ -577,4 +1619,132 @@ test("a terminal unknown without a receipt publishes one failure message", async
   });
   const texts = await readState((svc) => svc.getRoom(roomId).messages.map((message) => message.text));
   expect(texts.filter((text) => text.startsWith("Forward to "))).toHaveLength(1);
+});
+test("a reply forward quotes its provider parent only for the same target", async () => {
+  const { roomId, directory } = await makeRoom("native-reply");
+  const configPath = path.join(directory, "channeld.yml");
+  writeFileSync(configPath, `stateFile: ignored.sqlite
+accounts:
+  - id: test
+    platform: telegram
+    adapter: { command: ["unused"] }
+  - id: other
+    platform: telegram
+    adapter: { command: ["unused"] }
+rules:
+  - id: forward
+    version: 1
+    from: { platform: chatroom, account: center, room: ${roomId}, event: message.forward_requested }
+    to:
+      - { platform: telegram, account: test, room: chat }
+      - { platform: telegram, account: other, room: chat }
+`);
+  const target = { platform: "telegram", account: "test", room: "chat" };
+  const other = { platform: "telegram", account: "other", room: "chat" };
+  const { sends, spawnAdapter } = fakeAdapter("sent");
+  let runtime: ChannelsRuntime | undefined;
+  try {
+    runtime = await startChannels(settings(configPath), { spawnAdapter, deliveryIntervalMs: 10 });
+    expect(runtime).toBeDefined();
+
+    const first = await sendMessage(roomId, "A");
+    expect(await forwardMessage(runtime, roomId, first, target)).toBe(202);
+    await waitFor(() => sends.length === 1);
+    await Bun.sleep(50);
+
+    const reply = await sendReply(roomId, first, "session-alice", "B reply");
+    if (reply.status !== "ok") throw new Error(`reply failed: ${reply.status}`);
+    expect(await forwardMessage(runtime, roomId, reply.message.id, target)).toBe(202);
+    await waitFor(() => sends.length === 2);
+    expect(sends[1]!.payload).toEqual({
+      text: "B reply",
+      parent: { endpoint: { platform: "telegram", accountId: "test", roomId: "chat" }, nativeMessageId: "native-1" },
+    });
+
+    expect(await forwardMessage(runtime, roomId, reply.message.id, other)).toBe(202);
+    await waitFor(() => sends.length === 3);
+    expect(sends[2]!.payload).toEqual({ text: "B reply" });
+
+    const unfowarded = await sendMessage(roomId, "A2");
+    const reply2 = await sendReply(roomId, unfowarded, "session-alice", "B2 reply");
+    if (reply2.status !== "ok") throw new Error(`reply failed: ${reply2.status}`);
+    expect(await forwardMessage(runtime, roomId, reply2.message.id, target)).toBe(202);
+    await waitFor(() => sends.length === 4);
+    expect(sends[3]!.payload).toEqual({ text: "B2 reply" });
+  } finally {
+    await stopChannels(runtime);
+  }
+});
+
+test("inbound Feishu events become one room notification and never outbound rules", async () => {
+  const { roomId, directory } = await makeRoom("inbound-notification");
+  const configPath = path.join(directory, "channeld.yml");
+  writeFileSync(configPath, `stateFile: ignored.sqlite
+accounts:
+  - id: feishu-main
+    platform: feishu
+    adapter: { command: ["unused"] }
+  - id: sink
+    platform: telegram
+    adapter: { command: ["unused"] }
+rules:
+  - id: must-not-run
+    version: 1
+    from: { platform: feishu, account: feishu-main, room: oc_allowed, event: message.created }
+    to: [ { platform: telegram, account: sink, room: chat } ]
+inbound:
+  - from: { platform: feishu, account: feishu-main, room: oc_allowed }
+    to: { room: ${roomId} }
+  - from: { platform: feishu, account: feishu-main, room: oc_missing }
+    to: { room: room-that-does-not-exist }
+`);
+  const { sends, spawnAdapter } = fakeAdapter("sent");
+  let runtime: ChannelsRuntime | undefined;
+  try {
+    runtime = await startChannels(settings(configPath), { spawnAdapter, deliveryIntervalMs: 10 });
+    expect(runtime).toBeDefined();
+    const channels = runtime!;
+    const event = (eventId: string, chatId = "oc_allowed"): IngestEvent => ({
+      schemaVersion: 1,
+      eventId,
+      kind: "message.created",
+      source: { platform: "feishu", accountId: "feishu-main", roomId: chatId },
+      actor: { platform: "feishu", identityNamespace: "open_id", nativeUserId: "ou_alice" },
+      providerEventId: eventId,
+      sourceDedupKey: `feishu:feishu-main:${eventId}`,
+      receivedAt: new Date(0).toISOString(),
+      content: { text: "hello from feishu" },
+    });
+
+    expect((await channels.host.ingest(event("evt-1"))).duplicate).toBe(false);
+    expect((await channels.host.ingest(event("evt-1"))).duplicate).toBe(true);
+    await waitFor(async () => {
+      const texts = await readState((svc) => svc.getRoom(roomId).messages.map((message) => message.text));
+      return texts.filter((text) => text.startsWith("[Feishu ")).length === 1;
+    });
+
+    // A missing room target must fail the ingest (no successful ack) and stay contained.
+    await expect(channels.host.ingest(event("evt-missing", "oc_missing"))).rejects.toThrow();
+    const db = new DatabaseSync(databasePath());
+    db.prepare("INSERT OR IGNORE INTO rooms(id,name,owner_id,created_at,kind) VALUES(?,?,?,?, 'group')")
+      .run("room-that-does-not-exist", "Inbound target", "Alice", Date.now());
+    db.close();
+
+    // The retry commits and writes exactly once; a duplicate retry adds nothing.
+    expect((await channels.host.ingest(event("evt-missing", "oc_missing"))).duplicate).toBe(false);
+    expect((await channels.host.ingest(event("evt-missing", "oc_missing"))).duplicate).toBe(true);
+    expect((await channels.host.ingest(event("evt-2"))).duplicate).toBe(false);
+    await waitFor(async () => {
+      const texts = await readState((svc) => svc.getRoom(roomId).messages.map((message) => message.text));
+      return texts.filter((text) => text === "[Feishu feishu-main] ou_alice: hello from feishu").length === 2
+        && texts.some((text) => text.startsWith("[Feishu "));
+    });
+    const missingRoomTexts = await readState((svc) =>
+      svc.getRoom("room-that-does-not-exist").messages.map((message) => message.text)
+    );
+    expect(missingRoomTexts).toHaveLength(1);
+    expect(sends).toHaveLength(0);
+  } finally {
+    await stopChannels(runtime);
+  }
 });

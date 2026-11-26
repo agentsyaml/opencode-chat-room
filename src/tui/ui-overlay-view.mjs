@@ -4,14 +4,29 @@ import {
   BoxRenderable,
   InputRenderable,
   MarkdownRenderable,
+  RGBA,
   ScrollBoxRenderable,
   SelectRenderable,
   TextRenderable,
   getTreeSitterClient,
 } from "@opentui/core";
 import { createMarkdownSyntax } from "./markdown.mjs";
+import { t } from "./i18n.mjs";
 
 export function createOverlays(renderer, theme, view) {
+  view.overlayBackdrop = new BoxRenderable(renderer, {
+    id: "overlay-backdrop",
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: "100%",
+    height: "100%",
+    zIndex: 89,
+    visible: false,
+    backgroundColor: RGBA.fromInts(0, 0, 0, 130),
+  });
+  renderer.root.add(view.overlayBackdrop);
+
   view.paletteBox = new BoxRenderable(renderer, {
     id: "palette",
     position: "absolute",
@@ -44,7 +59,7 @@ export function createOverlays(renderer, theme, view) {
     height: 1,
     wrapMode: "none",
     fg: theme.text,
-    content: "Palette",
+    content: t("palette.title"),
   });
   view.paletteBar.add(view.paletteTitle);
 
@@ -63,7 +78,7 @@ export function createOverlays(renderer, theme, view) {
     height: 1,
     flexDirection: "row",
     gap: 1,
-    paddingX: 1,
+    paddingX: 2,
   });
   view.paletteBox.add(view.paletteInputRow);
 
@@ -80,7 +95,7 @@ export function createOverlays(renderer, theme, view) {
     id: "palette-input",
     flexGrow: 1,
     height: 1,
-    placeholder: "Search or run a command",
+    placeholder: t("palette.commandPlaceholder"),
     placeholderColor: theme.faint,
     backgroundColor: "transparent",
     focusedBackgroundColor: "transparent",
@@ -93,6 +108,7 @@ export function createOverlays(renderer, theme, view) {
     id: "palette-list",
     flexGrow: 1,
     minHeight: 0,
+    paddingX: 1,
     options: [],
     showDescription: false,
     showScrollIndicator: false,
@@ -163,7 +179,7 @@ export function createOverlays(renderer, theme, view) {
     truncate: true,
     wrapMode: "none",
     fg: theme.muted,
-    paddingX: 1,
+    paddingX: 2,
     content: "",
   });
   view.paletteBox.add(view.paletteHint);
@@ -200,7 +216,7 @@ export function createOverlays(renderer, theme, view) {
     height: 1,
     wrapMode: "none",
     fg: theme.text,
-    content: "Keyboard shortcuts",
+    content: t("help.title"),
   });
   view.helpBar.add(view.helpTitle);
 
@@ -210,7 +226,7 @@ export function createOverlays(renderer, theme, view) {
     height: 1,
     wrapMode: "none",
     fg: theme.muted,
-    content: "? or Esc closes",
+    content: t("help.close"),
   });
   view.helpBar.add(view.helpClose);
 
@@ -249,7 +265,7 @@ export function createOverlays(renderer, theme, view) {
     wrapMode: "none",
     fg: theme.muted,
     paddingX: 2,
-    content: "  ? or Esc closes · Alt+Space or Ctrl+P palette · Ctrl+C quit",
+    content: t("help.footer"),
   });
   view.helpBox.add(view.helpFooter);
 }

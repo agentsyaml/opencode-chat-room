@@ -130,6 +130,37 @@ test.skipIf(!browserModule)("PageUp and PageDown scroll the thread while the com
     const rapidTop = await page.evaluate(() => document.querySelector<HTMLElement>("#thread")!.scrollTop);
     expect(rapidTop - rapidStart.top).toBeGreaterThan(rapidStart.page * 3.5);
 
+    // Rapid PageUp starts a page animation; jumping to the latest must cancel it,
+    // otherwise the next animation frame pulls the thread back up.
+    await page.evaluate(() => document.querySelector<HTMLElement>("#thread")!.scrollTop = document.querySelector<HTMLElement>("#thread")!.scrollHeight);
+    await page.locator("#msgInput").focus();
+    for (let index = 0; index < 5; index++) await page.keyboard.press("PageUp");
+    await page.waitForTimeout(90);
+    await page.locator("#btnJump").click();
+    await page.waitForTimeout(650);
+    const jumpedGap = await page.evaluate(() => {
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      return thread.scrollHeight - thread.clientHeight - thread.scrollTop;
+    });
+    expect(jumpedGap).toBeLessThan(2);
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => {
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      return thread.scrollHeight - thread.clientHeight - thread.scrollTop;
+    })).toBeLessThan(2);
+
+    // Alt+End must replace the page animation too, not lose to its next frame.
+    await page.evaluate(() => document.querySelector<HTMLElement>("#thread")!.scrollTop = document.querySelector<HTMLElement>("#thread")!.scrollHeight);
+    await page.locator("#msgInput").focus();
+    for (let index = 0; index < 5; index++) await page.keyboard.press("PageUp");
+    await page.waitForTimeout(90);
+    await page.keyboard.press("Alt+End");
+    await page.waitForTimeout(650);
+    expect(await page.evaluate(() => {
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      return thread.scrollHeight - thread.clientHeight - thread.scrollTop;
+    })).toBeLessThan(2);
+
     // Conversation jumps animate the scroll position itself, with no flash.
     const animation = await page.evaluate(async (modulePath: string) => {
       const { app } = await import(modulePath);
@@ -162,6 +193,25 @@ test.skipIf(!browserModule)("PageUp and PageDown scroll the thread while the com
       return thread.scrollTop;
     }, "/assets/chat/state.js");
     expect(cancelled).toBe(200);
+
+    // Trackpad pinch is Ctrl/Cmd + wheel. At a scroll edge it must reach the
+    // browser so pinch-out can undo pinch-in; only plain wheel is contained.
+    const pinch = await page.evaluate(() => {
+      const thread = document.querySelector<HTMLElement>("#thread")!;
+      const dispatch = (deltaY: number, ctrlKey: boolean) => thread.dispatchEvent(
+        new WheelEvent("wheel", { deltaY, ctrlKey, bubbles: true, cancelable: true }),
+      );
+      thread.scrollTop = thread.scrollHeight;
+      const zoomOut = dispatch(120, true);
+      thread.scrollTop = 0;
+      const zoomIn = dispatch(-120, true);
+      thread.scrollTop = thread.scrollHeight;
+      const plain = dispatch(120, false);
+      return { zoomOut, zoomIn, plain };
+    });
+    expect(pinch.zoomOut).toBe(true);
+    expect(pinch.zoomIn).toBe(true);
+    expect(pinch.plain).toBe(false);
 
     // Reduced motion jumps directly instead of animating.
     await page.emulateMedia({ reducedMotion: "reduce" });

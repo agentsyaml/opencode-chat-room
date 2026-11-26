@@ -24,7 +24,7 @@ export async function taskRoutes(req: Request, url: URL): Promise<Response | und
       const session = sessionID(url.searchParams.get("sessionID"));
       if (!session) return json({ error: "sessionID is required" }, 400);
       const result = await listTasks(roomID, session);
-      return "error" in result ? json({ error: result.error }, result.status) : json({ tasks: result.tasks });
+      return "error" in result ? json({ error: result.error }, result.status) : json({ tasks: result.tasks, limit: result.limit });
     }
     if (req.method !== "POST" && req.method !== "DELETE") return json({ error: "method not allowed" }, 405);
     const body = await jsonObject<Record<string, unknown>>(req);

@@ -6,13 +6,13 @@ import {
   fileRows,
   memberRows,
   questionRows,
-  settingsMarkdown,
 } from "./info-content.mjs";
+import { t } from "./i18n.mjs";
 import { sanitizeText } from "./messages.mjs";
 
 const errorText = (error) => (error instanceof Error ? error.message : String(error ?? "unknown error"));
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
-export const ANNOUNCEMENT_HINT = "n new · d delete · Enter read · Esc close";
+const announcementHint = () => t("info.announcementHint");
 
 export function createInfoPalette(kind, title, subtitle) {
   return {
@@ -41,7 +41,7 @@ export function attachInfo(Class) {
     currentInfoRoom() {
       if (this.state.current && this.state.joined) return this.state.current;
       this.state.palette = null;
-      this.setStatus("open a joined room first", "error");
+      this.setStatus(t("info.joinFirst"), "error");
       return null;
     },
 
@@ -51,7 +51,7 @@ export function attachInfo(Class) {
     paletteRoomId(palette) {
       const roomId = palette.roomId || this.state.current?.id;
       if (!roomId) {
-        palette.error = "open a joined room first";
+        palette.error = t("info.joinFirst");
         this.touch();
       }
       return roomId;
@@ -82,42 +82,25 @@ export function attachInfo(Class) {
     },
 
     openMembers() {
-      return this.openInfo("members", "Members", "Read-only · Esc close", async (room) =>
+      return this.openInfo("members", t("info.members"), t("info.readOnlyHint"), async (room) =>
         memberRows(await this.api.members(room.id), this.sessionID));
     },
 
     openAnnouncements() {
-      return this.openInfo("announcements", "Announcements", ANNOUNCEMENT_HINT, async (room) =>
+      return this.openInfo("announcements", t("info.announcements"), announcementHint(), async (room) =>
         announcementRows(await this.api.announcements(room.id)));
     },
 
     openQuestions() {
-      return this.openInfo("questions", "Questions", "Enter answer · Esc close", async (room) =>
+      return this.openInfo("questions", t("info.questions"), t("info.questionHint"), async (room) =>
         questionRows(await this.api.questions(room.id), this.state.messages));
     },
 
     openFiles() {
-      return this.openInfo("files", "Files", "Enter download · u upload · d delete · Esc close", async (room) => {
+      return this.openInfo("files", t("info.files"), t("info.fileHint"), async (room) => {
         const result = await this.api.resources(room.id, this.sessionID);
         return fileRows(Array.isArray(result) ? result : result?.resources);
       });
-    },
-
-    openSettings() {
-      const text = settingsMarkdown({
-        ...this.settings,
-        participant: this.participant,
-        theme: this.state.theme,
-        token: this.token,
-      });
-      this.state.help = false;
-      this.state.palette = {
-        ...createInfoPalette("settings", "Settings", "read-only"),
-        mode: "detail",
-        detail: { title: "Settings", markdown: text, kind: "settings" },
-        hint: "↑↓ scroll · Esc close",
-      };
-      this.touch();
     },
 
     async runInfoSelection() {
@@ -125,26 +108,30 @@ export function attachInfo(Class) {
       if (!palette || palette.mode !== "info" || palette.loading) return;
       const item = this.paletteItems()[palette.selected];
       if (!item) return;
+      if (palette.kind === "settings") {
+        this.editSetting(item);
+        return;
+      }
       if (palette.kind === "announcements") {
         palette.mode = "detail";
         palette.detail = {
           title: String(item.value),
-          markdown: String(item.content ?? "").trim() || "(empty announcement)",
+          markdown: String(item.content ?? "").trim() || t("common.emptyAnnouncement"),
           kind: "announcements",
         };
-        palette.hint = "d delete · Esc back";
+        palette.hint = t("info.announcementBackHint");
         this.touch();
         return;
       }
       if (palette.kind === "questions" && item.open) {
         palette.mode = "prompt";
         palette.prompt = {
-          label: `Answer "${sanitizeText(item.text).slice(0, 40)}"`,
+          label: t("info.answerLabel", { text: sanitizeText(item.text).slice(0, 40) }),
           value: "",
           action: "question-answer",
           data: { id: String(item.value) },
         };
-        palette.hint = "Enter post · Esc cancel";
+        palette.hint = t("palette.enterPostHint");
         this.touch();
         return;
       }
@@ -159,9 +146,9 @@ export function attachInfo(Class) {
       const palette = this.state.palette;
       if (!palette || palette.mode !== "info" || palette.kind !== "announcements") return;
       palette.mode = "prompt";
-      palette.prompt = { label: "Announcement name (existing name replaces)", value: "", action: "announcement-name", data: {} };
+      palette.prompt = { label: t("info.announcementName"), value: "", action: "announcement-name", data: {} };
       palette.error = "";
-      palette.hint = "Enter next · Esc cancel";
+      palette.hint = t("palette.enterNextHint");
       this.touch();
     },
 
@@ -173,12 +160,12 @@ export function attachInfo(Class) {
       palette.mode = "confirm";
       palette.previous = { mode: "info", hint: palette.hint };
       palette.confirm = {
-        text: `Delete file "${sanitizeText(item.resource.name)}"?`,
+        text: t("info.deleteFile", { name: sanitizeText(item.resource.name) }),
         action: "file-delete",
         data: { id: item.resource.id, name: item.resource.name },
       };
       palette.error = "";
-      palette.hint = "Enter or y deletes · n or Esc cancels";
+      palette.hint = t("palette.deleteHint");
       this.touch();
     },
 
@@ -192,7 +179,7 @@ export function attachInfo(Class) {
       this.touch();
       try {
         await this.api.deleteResource(roomId, confirm.data.id, this.sessionID);
-        this.setStatus(`deleted ${confirm.data.name}`, "success");
+        this.setStatus(t("info.fileDeleted", { name: confirm.data.name }), "success");
         await this.openFiles();
       } catch (error) {
         if (this.state.palette === palette) {
@@ -200,7 +187,7 @@ export function attachInfo(Class) {
           palette.confirm = null;
           palette.previous = null;
           palette.searching = false;
-          palette.hint = "Enter download · u upload · d delete · Esc close";
+          palette.hint = t("info.fileHint");
           palette.error = errorText(error);
           this.touch();
         }
@@ -211,9 +198,9 @@ export function attachInfo(Class) {
       const palette = this.state.palette;
       if (!palette || palette.mode !== "info" || palette.kind !== "files") return;
       palette.mode = "prompt";
-      palette.prompt = { label: "Absolute file path (max 100 MiB)", value: "", action: "file-upload", data: {} };
+      palette.prompt = { label: t("info.filePath"), value: "", action: "file-upload", data: {} };
       palette.error = "";
-      palette.hint = "Enter upload · Esc cancel";
+      palette.hint = t("palette.enterUploadHint");
       this.touch();
     },
 
@@ -225,11 +212,11 @@ export function attachInfo(Class) {
       palette.error = "";
       palette.previous = { mode: "info", hint: palette.hint };
       palette.confirm = {
-        text: `Delete announcement "${sanitizeText(selected)}"?`,
+        text: t("info.deleteAnnouncement", { name: sanitizeText(selected) }),
         action: "announcement-delete",
         data: { name: String(selected) },
       };
-      palette.hint = "Enter or y deletes · n or Esc cancels";
+      palette.hint = t("palette.deleteHint");
       this.touch();
     },
 
@@ -262,7 +249,7 @@ export function attachInfo(Class) {
         this.touch();
         try {
           await this.api.deleteAnnouncement(palette.roomId, confirm.data.name, this.sessionID);
-          this.setStatus(`deleted announcement "${confirm.data.name}"`, "success");
+          this.setStatus(t("info.announcementDeleted", { name: confirm.data.name }), "success");
           await this.openAnnouncements();
         } catch (error) {
           if (this.state.palette === palette) {
@@ -286,7 +273,7 @@ export function attachInfo(Class) {
         palette.hint = previous.hint ?? "";
       } else {
         palette.mode = "info";
-        palette.hint = ANNOUNCEMENT_HINT;
+        palette.hint = announcementHint();
       }
       this.touch();
     },
@@ -294,13 +281,21 @@ export function attachInfo(Class) {
     backFromDetail() {
       const palette = this.state.palette;
       if (!palette) return;
+      if (palette.previous?.mode === "info") {
+        palette.mode = "info";
+        palette.detail = null;
+        palette.hint = palette.previous.hint ?? t("palette.listHint");
+        palette.previous = null;
+        this.touch();
+        return;
+      }
       if (palette.kind !== "announcements") {
         this.closePalette();
         return;
       }
       palette.mode = "info";
       palette.detail = null;
-      palette.hint = ANNOUNCEMENT_HINT;
+      palette.hint = announcementHint();
       this.touch();
     },
 
@@ -329,7 +324,7 @@ export function attachInfo(Class) {
         }
         await writeFile(target, payload.bytes ?? payload);
         this.closePalette();
-        this.setStatus(`saved ${target}`, "success");
+        this.setStatus(t("info.fileSaved", { target }), "success");
       } catch (error) {
         if (this.state.palette === palette) {
           palette.searching = false;
@@ -342,6 +337,10 @@ export function attachInfo(Class) {
     async submitCommandPrompt(prompt, value) {
       const palette = this.state.palette;
       if (!palette || palette.mode !== "prompt") return;
+      if (typeof prompt.action === "string" && prompt.action.startsWith("settings-")) {
+        await this.submitPreferencePrompt(prompt, value);
+        return;
+      }
       if (typeof prompt.action === "string" && prompt.action.startsWith("reminder-")) {
         await this.submitReminderPrompt(prompt, value);
         return;
@@ -359,11 +358,11 @@ export function attachInfo(Class) {
       if (prompt.action === "announcement-name") {
         const name = String(value ?? "").trim();
         if (!name) {
-          palette.error = "enter an announcement name";
+          palette.error = t("info.announcementNameRequired");
           this.touch();
           return;
         }
-        palette.prompt = { label: `Content for "${sanitizeText(name)}"`, value: "", action: "announcement-content", data: { name } };
+        palette.prompt = { label: t("info.announcementContent", { name: sanitizeText(name) }), value: "", action: "announcement-content", data: { name } };
         palette.error = "";
         this.touch();
         return;
@@ -375,7 +374,7 @@ export function attachInfo(Class) {
         this.touch();
         try {
           await this.api.saveAnnouncement(roomId, name, String(value ?? ""), this.sessionID);
-          this.setStatus(`saved announcement "${name}"`, "success");
+          this.setStatus(t("info.announcementSaved", { name }), "success");
           await this.openAnnouncements();
         } catch (error) {
           if (this.state.palette === palette) {
@@ -389,7 +388,7 @@ export function attachInfo(Class) {
       if (prompt.action === "question-answer") {
         const answer = String(value ?? "").trim();
         if (!answer) {
-          palette.error = "answer text is required";
+          palette.error = t("info.answerRequired");
           this.touch();
           return;
         }
@@ -397,7 +396,7 @@ export function attachInfo(Class) {
         this.touch();
         try {
           await this.api.answerQuestion(roomId, prompt.data?.id, this.sessionID, answer);
-          this.setStatus("answer posted", "success");
+          this.setStatus(t("info.answerPosted"), "success");
           await this.openQuestions();
         } catch (error) {
           if (this.state.palette === palette) {
@@ -412,7 +411,7 @@ export function attachInfo(Class) {
         const file = String(value ?? "").trim();
         const path = await import("node:path");
         if (!file || !path.isAbsolute(file)) {
-          palette.error = "enter an absolute file path";
+          palette.error = t("info.filePathRequired");
           this.touch();
           return;
         }
@@ -423,13 +422,13 @@ export function attachInfo(Class) {
           const info = await fs.stat(file);
           if (info.size > MAX_UPLOAD_BYTES) {
             palette.searching = false;
-            palette.error = "file is too large for terminal upload; limit 100 MiB";
+            palette.error = t("info.fileTooLarge");
             this.touch();
             return;
           }
           const bytes = new Uint8Array(await fs.readFile(file));
           await this.api.uploadResource(roomId, this.sessionID, path.basename(file), bytes);
-          this.setStatus(`uploaded ${path.basename(file)}`, "success");
+          this.setStatus(t("info.fileUploaded", { name: path.basename(file) }), "success");
           await this.openFiles();
         } catch (error) {
           if (this.state.palette === palette) {

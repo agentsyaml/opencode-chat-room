@@ -1,34 +1,35 @@
 // Semantic colors for the OpenTUI view. Dark and light variants follow the
 // same roles OpenCode uses: background surface, text, muted metadata, border,
 // selection, accent and feedback colors.
+import { t } from "./i18n.mjs";
 const PALETTES = {
   dark: {
-    surface: "#111827",
-    raised: "#1f2937",
-    text: "#e5e7eb",
-    muted: "#9ca3af",
-    faint: "#6b7280",
-    border: "#374151",
-    accent: "#22d3ee",
-    selectedBg: "#164e63",
+    surface: "#0e1116",
+    raised: "#171c24",
+    text: "#e6e9ef",
+    muted: "#98a2b3",
+    faint: "#667085",
+    border: "#2a313d",
+    accent: "#5eead4",
+    selectedBg: "#12333a",
     selectedFg: "#ecfeff",
-    error: "#f87171",
-    success: "#4ade80",
-    warning: "#fbbf24",
+    error: "#fca5a5",
+    success: "#6ee7b7",
+    warning: "#fcd34d",
   },
   light: {
     surface: "#f8fafc",
-    raised: "#e2e8f0",
-    text: "#111827",
-    muted: "#64748b",
-    faint: "#94a3b8",
-    border: "#cbd5e1",
-    accent: "#0e7490",
-    selectedBg: "#0e7490",
-    selectedFg: "#ecfeff",
-    error: "#b91c1c",
-    success: "#15803d",
-    warning: "#b45309",
+    raised: "#eef2f7",
+    text: "#101828",
+    muted: "#5a6475",
+    faint: "#98a2b3",
+    border: "#d0d5dd",
+    accent: "#0f766e",
+    selectedBg: "#0f766e",
+    selectedFg: "#f0fdfa",
+    error: "#b42318",
+    success: "#087443",
+    warning: "#b54708",
   },
 };
 
@@ -37,15 +38,18 @@ export function themeFor(mode) {
   return { mode: normalized, ...PALETTES[normalized] };
 }
 
-export function createTheme(renderer) {
-  const theme = themeFor(renderer.themeMode);
+export function createTheme(renderer, preferred) {
+  const mode = preferred === "light" || preferred === "dark"
+    ? preferred
+    : renderer.themeMode === "light" ? "light" : "dark";
+  const theme = themeFor(mode);
   return {
     theme,
-    mode: renderer.themeMode === "light" ? "light" : "dark",
-    set(mode) {
-      if (mode !== "light" && mode !== "dark") return false;
-      Object.assign(theme, themeFor(mode));
-      this.mode = mode;
+    mode,
+    set(next) {
+      if (next !== "light" && next !== "dark") return false;
+      Object.assign(theme, themeFor(next));
+      this.mode = next;
       return true;
     },
   };
@@ -53,9 +57,9 @@ export function createTheme(renderer) {
 
 export function connectionStyle(theme, connection) {
   switch (connection) {
-    case "online": return { label: "connected", dot: "●", color: theme.success };
-    case "reconnecting": return { label: "reconnecting", dot: "◌", color: theme.warning };
-    case "offline": return { label: "offline", dot: "●", color: theme.error };
-    default: return { label: "connecting", dot: "○", color: theme.muted };
+    case "online": return { label: t("connection.online"), dot: "●", color: theme.success };
+    case "reconnecting": return { label: t("connection.reconnecting"), dot: "◌", color: theme.warning };
+    case "offline": return { label: t("connection.offline"), dot: "●", color: theme.error };
+    default: return { label: t("connection.connecting"), dot: "○", color: theme.muted };
   }
 }

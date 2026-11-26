@@ -32,6 +32,8 @@ export interface AdapterContext {
   onIngest(event: IngestEvent): Promise<{ duplicate: boolean; eventId?: string }>;
   onExit(code: number | null, signal: NodeJS.Signals | null): void;
   onUnavailable?(reason: string): void;
+  /** Optional adapter health, e.g. inbound long-connection readiness. */
+  onStatus?(status: { inbound?: string; detail?: string }): void;
 }
 
 export interface AdapterProcessOptions extends AdapterContext {
@@ -64,6 +66,7 @@ export class AdapterProcess {
   readonly #onIngest: AdapterContext["onIngest"];
   readonly #onExit: AdapterContext["onExit"];
   readonly #onUnavailable: AdapterContext["onUnavailable"];
+  readonly #onStatus: AdapterContext["onStatus"];
   readonly #initializeTimeoutMs: number;
   readonly #sendTimeoutMs: number;
   readonly #pending = new Map<string, PendingCall>();
@@ -81,6 +84,7 @@ export class AdapterProcess {
     this.#onIngest = options.onIngest;
     this.#onExit = options.onExit;
     this.#onUnavailable = options.onUnavailable;
+    this.#onStatus = options.onStatus;
     this.#initializeTimeoutMs = options.initializeTimeoutMs ?? DEFAULT_INITIALIZE_TIMEOUT_MS;
     this.#sendTimeoutMs = options.sendTimeoutMs ?? DEFAULT_SEND_TIMEOUT_MS;
   }
@@ -97,6 +101,8 @@ export class AdapterProcess {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
+        ...this.#account.env,
+        // Forced after account env: config validation also rejects these keys.
         CHANNELD_ACCOUNT_ID: this.#account.id,
         CHANNELD_PLATFORM: this.#account.platform,
       },
@@ -105,7 +111,7 @@ export class AdapterProcess {
     this.#attach(child);
 
     try {
-      await this.#call(
+      const initialized = await this.#call(
         "initialize",
         {
           protocolVersions: [PROTOCOL_VERSION],
@@ -117,11 +123,13 @@ export class AdapterProcess {
         },
         this.#initializeTimeoutMs,
       );
-      await this.#call(
+      this.#assertReportedPlatform("initialize", initialized);
+      const started = await this.#call(
         "start",
         { accounts: [this.#account.id], cursors: {} },
         this.#initializeTimeoutMs,
       );
+      this.#assertReportedPlatform("start", started);
     } catch (error) {
       const tail = this.#stderrTail.trim();
       const message = this.#pollutionError?.message
@@ -212,6 +220,21 @@ export class AdapterProcess {
     }
   }
 
+  /** A result may declare its platform; a mismatch makes this account unusable. */
+  #assertReportedPlatform(method: string, result: unknown): void {
+    if (!result || typeof result !== "object") return;
+    const reported = (result as { platform?: unknown }).platform;
+    if (reported === undefined) return;
+    if (typeof reported !== "string" || !reported.trim()) {
+      throw new Error(`${method} returned an invalid platform`);
+    }
+    if (reported !== this.#account.platform) {
+      throw new Error(
+        `${method} reported platform "${reported}" but account ${this.#account.id} is configured for "${this.#account.platform}"`,
+      );
+    }
+  }
+
   #attach(child: ChildProcessWithoutNullStreams): void {
     child.stdin.on("error", (error: Error) => this.#handleStdioError("stdin", error));
     child.stdout.on("error", (error: Error) => this.#handleStdioError("stdout", error));
@@ -297,6 +320,17 @@ export class AdapterProcess {
           child.stdin,
           rpcResult(id, result.duplicate ? { duplicate: true } : { committed: true }),
         );
+      } else if (method === "status") {
+        const input = (params ?? {}) as { inbound?: unknown; detail?: unknown };
+        try {
+          this.#onStatus?.({
+            inbound: typeof input.inbound === "string" ? input.inbound : undefined,
+            detail: typeof input.detail === "string" ? input.detail : undefined,
+          });
+        } catch {
+          // Status is advisory; a consumer failure must not break the adapter.
+        }
+        await writeFrame(child.stdin, rpcResult(id, { ok: true }));
       } else if (method === "ping") {
         await writeFrame(child.stdin, rpcResult(id, { pong: true }));
       } else {

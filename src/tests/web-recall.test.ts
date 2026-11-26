@@ -82,6 +82,32 @@ test.skipIf(!browserModule)("authors and human admins recall messages and member
     await row.locator(".recalled-body").waitFor({ state: "visible" });
     expect(contentRequests.length).toBe(1);
 
+    // Re-edit an own recalled message: fill the composer, never resend or restore.
+    const reedit = row.locator(".recalled-reedit");
+    expect(await reedit.count()).toBe(1);
+    const rowsBefore = await page.locator("#msgList [data-msg-id]").count();
+    await reedit.click();
+    expect(await page.evaluate(async (url: string) => (await import(url)).app.$("#msgInput").draftValue, "/assets/chat/state.js")).toBe("Original **hidden** text");
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("msgInput");
+    expect(await page.locator("#btnSend").isEnabled()).toBe(true);
+    expect(await page.locator("#draftCount").textContent()).not.toBe("0 / 5000");
+    expect(contentRequests.length).toBe(1);
+    expect(await page.locator("#msgList [data-msg-id]").count()).toBe(rowsBefore);
+
+    // A non-empty draft needs confirmation; cancel keeps it untouched.
+    await page.locator("#msgInput").fill("Keep my draft");
+    await reedit.click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" });
+    expect(await page.locator("#confirmMessage").textContent()).toContain("Replace the current draft");
+    await page.locator("#btnCancelConfirm").click();
+    expect(await page.evaluate(async (url: string) => (await import(url)).app.$("#msgInput").draftValue, "/assets/chat/state.js")).toBe("Keep my draft");
+    await reedit.click();
+    await page.locator("#confirmDialog").waitFor({ state: "visible" });
+    await page.locator("#btnAcceptConfirm").click();
+    expect(await page.evaluate(async (url: string) => (await import(url)).app.$("#msgInput").draftValue, "/assets/chat/state.js")).toBe("Original **hidden** text");
+    expect(contentRequests.length).toBe(1);
+    await page.locator("#msgInput").fill("");
+
     // The control stays tappable at phone width.
     await page.setViewportSize({ width: 360, height: 720 });
     await reveal.scrollIntoViewIfNeeded();
@@ -126,6 +152,7 @@ test.skipIf(!browserModule)("authors and human admins recall messages and member
     await page.locator("#btnAcceptConfirm").click();
     await peerRow.locator(".recalled-note").waitFor();
     expect((await peerRow.locator(".recalled-by").textContent())?.trim()).toBe("Recalled by Recall tester");
+    expect(await peerRow.locator(".recalled-reedit").count()).toBe(0);
 
     // A recall made elsewhere reaches this tab through the room recall version.
     const second = new Database(path.join(stateDir, "chat-room.sqlite"));
