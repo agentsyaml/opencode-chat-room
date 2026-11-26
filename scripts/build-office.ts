@@ -52,14 +52,26 @@ try {
   }
   const licenses = path.join(out, "licenses");
   await mkdir(licenses, { recursive: true });
+  // Some packages put the text under a licenses/ directory (echarts), so a
+  // directory named "licenses" is not itself a license file.
+  const findLicense = async (dir: string): Promise<string | null> => {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    const direct = entries.find((entry) => entry.isFile() && /^(licen[cs]e|copying|notice)/i.test(entry.name));
+    if (direct) return path.join(dir, direct.name);
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !/^licen[cs]es$/i.test(entry.name)) continue;
+      const nested = await findLicense(path.join(dir, entry.name));
+      if (nested) return nested;
+    }
+    return null;
+  };
   const notice = ["Third-party packages bundled into the Office previews.", ""];
   for (const name of [...packages].sort()) {
     const dir = path.join(root, "node_modules", name);
     const info = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")) as { version?: string; license?: string };
-    const files = await readdir(dir).catch(() => []);
-    const licenseFile = files.find((file) => /^(licen[cs]e|copying|notice)/i.test(file));
+    const licenseFile = await findLicense(dir);
     const target = path.join(licenses, `${name.replace("/", "-")}-LICENSE.txt`);
-    if (licenseFile) await copyFile(path.join(dir, licenseFile), target);
+    if (licenseFile) await copyFile(licenseFile, target);
     else if (name === "pptx-preview") await copyFile(path.join(root, "scripts/office-licenses/pptx-preview-LICENSE.txt"), target);
     else await writeFile(target, `${name} ${info.version}\nLicense: ${info.license || "see package metadata"}\n`);
     const label = name === "pptx-preview" ? "ISC declared; upstream custom terms" : info.license || "unknown";
