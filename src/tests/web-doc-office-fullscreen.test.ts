@@ -11,6 +11,22 @@ import path from "node:path";
 const browserModule = process.env.CHAT_UI_BROWSER_MODULE;
 const token = "chat-office-fullscreen-token";
 const OFFICE_ROUTE = "**/assets/chat/office-preview.js";
+// The browser's internal PDF viewer is a separate extension frame; errors it
+// raises (for example a denied localStorage lookup) are not application errors.
+const collectTopFrameErrors = (page: any) => page.addInitScript(() => {
+  if (window.top !== window) return;
+  const errors: string[] = [];
+  (window as any).__topFrameErrors = errors;
+  window.addEventListener("error", (event) => {
+    const error = (event as ErrorEvent).error;
+    if (error) errors.push(String(error.stack || error.message || event.message));
+    else if (event.message) errors.push(String(event.message));
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = (event as PromiseRejectionEvent).reason;
+    errors.push(String(reason?.stack || reason?.message || reason));
+  });
+});
 // The Office engine belongs to another lane; this mock proves the preview bridge.
 const OFFICE_MOCK = `
 export async function renderOffice(kind, blob, body, options = {}) {
@@ -35,13 +51,12 @@ test.skipIf(!browserModule)("Office previews and full screen work for every read
   const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(dir, port), stdio: "ignore" });
   let browser: any, roomID = "", sessionID = "";
-  const pageErrors: string[] = [];
   try {
     await waitForServer(origin);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: "light", acceptDownloads: true });
     page.setDefaultTimeout(20000);
-    page.on("pageerror", (error: Error) => pageErrors.push(error.message));
+    await collectTopFrameErrors(page);
     await page.route(OFFICE_ROUTE, (route: any) => route.fulfill({ status: 200, contentType: "application/javascript", body: OFFICE_MOCK }));
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
     await page.goto(`${origin}/chat`);
@@ -173,6 +188,19 @@ test.skipIf(!browserModule)("Office previews and full screen work for every read
     await dialog.waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Preview: spec.docx");
 
+    // Polling rerenders the message list while the preview is open; closing must
+    // focus the replacement control rather than a detached opener.
+    await openPreview("spec.docx");
+    await page.locator("#docPreviewBody .mock-office-doc").waitFor();
+    await page.evaluate(async (url: string) => {
+      const { app } = await import(url);
+      app.rerenderMessages();
+    }, "/assets/chat/state.js");
+    await page.waitForFunction(() => document.querySelectorAll("#msgList [data-preview-resource]").length === 8);
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Preview: spec.docx");
+
     // The close button exits full screen and restores the opener in one step.
     await openPreview("spec.docx");
     await page.locator("#docPreviewBody .mock-office-doc").waitFor();
@@ -267,14 +295,29 @@ test.skipIf(!browserModule)("Office previews and full screen work for every read
     await closePreview();
 
     // Over 20 MiB: localized notice, no fetch, no engine call, download still offered.
+    // A previous render may still be in flight; it must not repaint this preview.
+    await openPreview("deck.pptx");
+    await page.locator("#docPreviewBody .mock-office-doc").waitFor();
+    await closePreview();
     const callsBeforeHuge = await page.evaluate(() => ((window as any).__officeCalls || []).length as number);
     await openPreview("huge.xlsx");
     await page.locator("#docPreviewNotice").waitFor({ state: "visible" });
+    await page.waitForTimeout(350);
     expect(await page.locator("#docPreviewNotice").textContent()).toBe("This Office file is too large to preview (over 20 MB). Download it instead.");
     expect(await page.locator("#docPreviewLanguage").isVisible()).toBe(false);
     expect(await page.locator("#btnDocPreviewDownload").isEnabled()).toBe(true);
     expect(await page.locator("#docPreviewBody").textContent()).toBe("");
     expect(await page.evaluate(() => ((window as any).__officeCalls || []).length as number)).toBe(callsBeforeHuge);
+    await closePreview();
+    // The reverse order: a too-large preview must not contaminate the next Office file.
+    await openPreview("huge.xlsx");
+    await page.locator("#docPreviewNotice").waitFor({ state: "visible" });
+    await closePreview();
+    await openPreview("deck.pptx");
+    await page.locator("#docPreviewBody .mock-office-doc").waitFor();
+    await page.waitForTimeout(350);
+    expect(await page.locator("#docPreviewBody .mock-office-doc").count()).toBe(1);
+    expect(await page.locator("#docPreviewBody").textContent()).toBe("Rendered PPTX (19 bytes)");
     await closePreview();
 
     // Files rows route all three Office formats to the reading pane without a copy action.
@@ -295,7 +338,7 @@ test.skipIf(!browserModule)("Office previews and full screen work for every read
     await page.screenshot({ path: path.join(artifacts, "web-doc-office-files-1440.png") });
     await closePreview();
 
-    expect(pageErrors).toEqual([]);
+    expect(await page.evaluate(() => (window as any).__topFrameErrors)).toEqual([]);
   } finally {
     if (roomID && sessionID) await fetch(`${origin}/rooms/${encodeURIComponent(roomID)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ sessionID }) }).catch(() => {});
     await browser?.close(); server.kill("SIGTERM");
@@ -313,13 +356,12 @@ test.skipIf(!browserModule || !existsSync(path.join(process.cwd(), "server/asset
   const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, ["run", "server/chat-server.ts"], { cwd: process.cwd(), env: isolatedEnv(dir, port), stdio: "ignore" });
   let browser: any, roomID = "", sessionID = "";
-  const pageErrors: string[] = [];
   try {
     await waitForServer(origin);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
     page.setDefaultTimeout(30000);
-    page.on("pageerror", (error: Error) => pageErrors.push(error.message));
+    await collectTopFrameErrors(page);
     await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
     await page.goto(`${origin}/chat`);
     await page.locator("#inName").fill("__Test_RealOfficeOwner");
@@ -356,7 +398,7 @@ test.skipIf(!browserModule || !existsSync(path.join(process.cwd(), "server/asset
     await page.waitForFunction(() => document.querySelector("#docPreview")!.classList.contains("is-fullscreen"));
     await page.waitForTimeout(120);
     await page.screenshot({ path: path.join(artifacts, "web-doc-office-real-1440.png") });
-    expect(pageErrors).toEqual([]);
+    expect(await page.evaluate(() => (window as any).__topFrameErrors)).toEqual([]);
   } finally {
     if (roomID && sessionID) await fetch(`${origin}/rooms/${encodeURIComponent(roomID)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ sessionID }) }).catch(() => {});
     await browser?.close(); server.kill("SIGTERM");

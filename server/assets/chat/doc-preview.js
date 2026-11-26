@@ -17,7 +17,7 @@ export function initDocPreview(app) {
   const eyebrow = app.$("#docPreviewEyebrow");
   const fullscreenButton = app.$("#btnDocPreviewFullscreen");
   const chatView = app.$("#chatView"), pane = matchMedia(PANE_QUERY);
-  let current = null, blob = null, objectUrl = null, token = 0, opener = null, pendingReopen = false, restoreOnClose = true;
+  let current = null, blob = null, objectUrl = null, token = 0, opener = null, openerResourceID = null, restoreOnClose = true;
   let rawText = "", fullscreen = false, paneMode = false;
   let officeKind = null, officeRender = 0, pptxWidth = 0, pptxTimer = 0;
 
@@ -59,7 +59,6 @@ export function initDocPreview(app) {
     dialog.classList.toggle("is-fullscreen", fullscreen);
     chatView.classList.toggle("has-doc", targetPane);
     if (dialog.open && paneMode !== targetPane) {
-      pendingReopen = true;
       dialog.close();
     }
     if (!dialog.open) {
@@ -123,6 +122,9 @@ export function initDocPreview(app) {
     clearFrame();
     const office = OFFICE_KINDS.has(format.kind);
     copyButton.hidden = office;
+    // A render from the previous document may still be running. Invalidate it
+    // before clearing the body so it cannot append into the new preview.
+    if (office) { officeRender++; officeKind = null; }
     body.textContent = "";
     empty.hidden = true;
     languageLabel.textContent = office ? "" : format.label || "";
@@ -142,18 +144,23 @@ export function initDocPreview(app) {
     dialog.classList.add("is-office");
     copyButton.hidden = true;
     languageLabel.hidden = true;
-    body.textContent = "";
+    // Render into a private container. A render from an earlier document can
+    // finish after the user has switched files; it must never touch the live body.
+    const host = document.createElement("div");
+    host.className = "office-preview";
+    body.replaceChildren(host);
     empty.hidden = true;
     notice.hidden = true;
     // The blob is already here, so download stays available while parsing or after a failure.
     download.disabled = false;
     const module = await import("/assets/chat/office-preview.js");
     if (request !== token || render !== officeRender) return;
-    await module.renderOffice(kind, data, body, {
+    await module.renderOffice(kind, data, host, {
       width: width || undefined,
       onProgress: () => { if (request === token && render === officeRender) status.textContent = app.t("resourceLoading"); },
     });
-    if (request !== token || render !== officeRender) return;
+    if (request !== token || render !== officeRender || !host.isConnected) return;
+    body.replaceChildren(host);
     if (kind === "pptx") pptxWidth = Math.round(width || body.clientWidth);
     status.textContent = "";
     empty.hidden = body.children.length > 0;
@@ -201,6 +208,7 @@ export function initDocPreview(app) {
 
   const open = async (roomId, resource, source) => {
     opener = source instanceof HTMLElement ? source : null;
+    openerResourceID = source instanceof HTMLElement ? source.dataset.previewResource || null : null;
     restoreOnClose = true;
     current = { roomId, resource };
     const request = ++token;
@@ -270,9 +278,39 @@ export function initDocPreview(app) {
     }
   };
 
+  const focusReplacement = (resourceID, allowComposer = false) => {
+    if (!resourceID) {
+      if (allowComposer) app.focusChatComposer?.({ force: true });
+      return;
+    }
+    const query = `#msgList [data-preview-resource="${CSS.escape(resourceID)}"]`;
+    const replacement = query ? document.querySelector(query) : null;
+    if (replacement instanceof HTMLElement && replacement.getClientRects().length) {
+      replacement.focus({ preventScroll: true });
+      return;
+    }
+    // The message list may be halfway through an async card rerender. Retry
+    // briefly, but never steal focus if the reader has already clicked elsewhere.
+    const active = document.activeElement;
+    if (active && active !== document.body && active.id !== "msgInput") return;
+    if (performance.now() < focusReplacement.until) {
+      requestAnimationFrame(() => focusReplacement(resourceID, allowComposer));
+      return;
+    }
+    if (allowComposer && (document.activeElement === document.body || document.activeElement?.id === "msgInput")) {
+      document.querySelector("#msgInput")?.focus({ preventScroll: true });
+    }
+  };
+
   const close = (restoreFocus = true) => {
     restoreOnClose = restoreFocus;
     if (!restoreFocus) opener = null;
+    // Invalidate in-flight fetches and Office renders before the close event
+    // runs, so none of them can repaint the preview after it starts closing.
+    token++;
+    officeRender++;
+    officeKind = null;
+    clearTimeout(pptxTimer);
     // Closing from full screen leaves the locked page as part of the same step.
     if (fullscreen) leaveFullscreen();
     // Remove the column class now; the queued close event must not leave Tasks
@@ -316,21 +354,25 @@ export function initDocPreview(app) {
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog && !fullscreen && !dialog.classList.contains("is-pane")) close();
   });
-  dialog.addEventListener("cancel", (event) => {
+  const escapePreview = (event) => {
+    if (!event || event.key !== "Escape" || !dialog.open) return;
     event.preventDefault();
+    event.stopPropagation();
     // The first Esc leaves full screen; the next one closes the preview.
     if (fullscreen) setFullscreen(false);
     else close();
-  });
+  };
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !dialog.open || fullscreen || !dialog.classList.contains("is-pane")) return;
-    event.preventDefault();
-    close();
-  });
+    // Capture Escape while the preview is open: leaving full screen closes and
+    // reopens the dialog, and the reopened dialog must still obey the next Esc.
+    escapePreview(event);
+  }, true);
+  dialog.addEventListener("cancel", escapePreview);
   dialog.addEventListener("close", () => {
-    // A breakpoint switch closes and reopens the same dialog; its queued close event
-    // must not wipe the document that is already back on screen.
-    if (pendingReopen) { pendingReopen = false; restoreOnClose = true; return; }
+    // A breakpoint switch or leaving full screen closes and reopens the same
+    // dialog. Its queued close event must not wipe the document that is already
+    // back on screen, so it is stale whenever the dialog has been reopened.
+    if (dialog.open) { restoreOnClose = true; return; }
     const shouldRestore = restoreOnClose;
     restoreOnClose = true;
     token++;
@@ -351,8 +393,13 @@ export function initDocPreview(app) {
     notice.hidden = true; notice.textContent = ""; delete notice.dataset.i18n;
     const target = opener; opener = null;
     if (!shouldRestore) return;
-    if (target?.isConnected && target.getClientRects().length) target.focus({ preventScroll: true });
-    else app.focusChatComposer?.({ force: true });
+    if (target?.isConnected && target.getClientRects().length) { target.focus({ preventScroll: true }); return; }
+    // Inbox polling can rerender the message list while the preview is open,
+    // replacing the button that opened it. Focus the current equivalent.
+    const resourceID = openerResourceID;
+    openerResourceID = null;
+    focusReplacement.until = performance.now() + 600;
+    focusReplacement(resourceID, true);
   });
   const onChange = () => syncMode();
   if (pane.addEventListener) pane.addEventListener("change", onChange);

@@ -241,6 +241,7 @@ async function loadResourceCard(card, roomId, app) {
       const preview = resourceButton("resourcePreview", resource.name, () => docFormat
         ? app.openDocPreview(roomId, resource, preview)
         : previewResource(card, roomId, id, resource, type, preview, app, status), app);
+      preview.dataset.previewResource = resource.id;
       actions.append(preview);
       // Media you sent yourself is shown inline; other people's media stays collapsed.
       if (!docFormat && card.closest(".msg.own")) void previewResource(card, roomId, id, resource, type, preview, app, status);
