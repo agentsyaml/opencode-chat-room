@@ -52,18 +52,36 @@ try {
   }
   const licenses = path.join(out, "licenses");
   await mkdir(licenses, { recursive: true });
-  // Some packages put the text under a licenses/ directory (echarts), so a
-  // directory named "licenses" is not itself a license file.
+  // Pick a license deterministically. Directory order differs between macOS
+  // and Linux, and echarts ships both a root LICENSE and a root NOTICE, so the
+  // old readdir-order match could copy the 168-byte NOTICE on Linux.
+  const licenseRank = (name: string): number => {
+    const lower = name.toLowerCase();
+    if (lower === "license" || lower === "licence") return 0;
+    if (lower === "copying") return 1;
+    if (/^licen[cs]e/.test(lower)) return 2;
+    return 99;
+  };
   const findLicense = async (dir: string): Promise<string | null> => {
     const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-    const direct = entries.find((entry) => entry.isFile() && /^(licen[cs]e|copying|notice)/i.test(entry.name));
-    if (direct) return path.join(dir, direct.name);
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !/^licen[cs]es$/i.test(entry.name)) continue;
+    const files = entries
+      .filter((entry) => entry.isFile() && licenseRank(entry.name) < 99)
+      .sort((left, right) => licenseRank(left.name) - licenseRank(right.name) || left.name.localeCompare(right.name));
+    if (files[0]) return path.join(dir, files[0].name);
+    // Some packages put the text under a licenses/ directory (echarts), so a
+    // directory named "licenses" is not itself a license file.
+    const nestedDirs = entries
+      .filter((entry) => entry.isDirectory() && /^licen[cs]es$/i.test(entry.name))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of nestedDirs) {
       const nested = await findLicense(path.join(dir, entry.name));
       if (nested) return nested;
     }
-    return null;
+    // NOTICE is a last resort, never a substitute for an available license.
+    const notice = entries
+      .filter((entry) => entry.isFile() && /^notice/i.test(entry.name))
+      .sort((left, right) => left.name.localeCompare(right.name))[0];
+    return notice ? path.join(dir, notice.name) : null;
   };
   const notice = ["Third-party packages bundled into the Office previews.", ""];
   for (const name of [...packages].sort()) {
