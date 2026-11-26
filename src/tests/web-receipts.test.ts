@@ -295,7 +295,12 @@ test.skipIf(!browserModule)("a focused human reader produces a displayed receipt
     await alicePage.evaluate(async ({ url, id }: any) => {
       const { app } = await import(url); await app.loadVisibleReceipts(id, app.state.pollGeneration);
     }, { url: "/assets/chat/state.js", id: room.id });
-    await alicePage.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-readers`)?.textContent === "1", messageID);
+    // Alice and Bob are the only members, so Bob's receipt makes everyone eligible
+    // a reader: the button becomes the all-read check instead of showing "1".
+    await alicePage.waitForFunction((id: string) => {
+      const button = document.querySelector<HTMLElement>(`[data-msg-id="${id}"] .message-readers`);
+      return button?.textContent === "1" || button?.dataset.readerState === "all";
+    }, messageID);
   } finally {
     await browser?.close(); server.kill("SIGTERM");
     await new Promise((resolve) => server.once("exit", resolve));
