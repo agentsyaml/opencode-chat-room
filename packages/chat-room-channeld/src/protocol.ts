@@ -13,6 +13,57 @@ export type MessageRef = {
 
 export type ActorKey = { platform: string; identityNamespace: string; nativeUserId: string };
 
+/**
+ * One attachment carried by an event. Outbound chatroom forwards name a
+ * `resourceId` the host resolves at send time; inbound adapter events supply a
+ * local `path` the host imports into the room.
+ */
+export type AttachmentRef = {
+  kind: "image" | "file";
+  name: string;
+  mimeType?: string;
+  size?: number;
+  resourceId?: string;
+  roomId?: string;
+  path?: string;
+  sourceId?: string;
+  error?: string;
+};
+
+export type AttachmentCapabilities = {
+  kinds: Array<"image" | "file">;
+  imageMaxBytes?: number;
+  fileMaxBytes?: number;
+};
+
+/**
+ * One account setting declared by an adapter. `key` is the env variable the
+ * adapter process reads; the UI renders the field and stores its value there.
+ */
+export type AccountField = {
+  key: string;
+  label?: string;
+  type?: "string" | "secret" | "boolean" | "number" | "select";
+  required?: boolean;
+  default?: string;
+  description?: string;
+  options?: Array<{ value: string; label?: string }>;
+};
+
+export type AccountCapabilities = {
+  /** Primary form fields, in display order. */
+  schema?: AccountField[];
+  /** Advanced env declarations; keys not covered here stay free-form. */
+  env?: AccountField[];
+};
+
+/** Adapter-declared platform facts the generic host must not hardcode. */
+export type AdapterCapabilities = {
+  displayName?: string;
+  attachments?: AttachmentCapabilities;
+  account?: AccountCapabilities;
+};
+
 export interface IngestEvent {
   schemaVersion: number;
   eventId: string;
@@ -25,7 +76,7 @@ export interface IngestEvent {
   parent?: MessageRef;
   occurredAt?: string;
   receivedAt: string;
-  content?: { text?: string; attachmentRefs?: string[] };
+  content?: { text?: string; attachmentRefs?: string[]; attachments?: AttachmentRef[] };
   selectedMessage?: MessageRef;
   requestedTarget?: Endpoint;
   cause?: { rootEventId: string; visitedEndpoints: Endpoint[]; hopCount: number };

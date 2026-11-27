@@ -24,6 +24,13 @@ function formatLine(line, app) {
   return line;
 }
 
+export function formatRelayMessage(message, app) {
+  // Relay rows keep resource markers: the renderer turns them into attachment cards.
+  return String(message?.text ?? "")
+    .replace(/<at>@all<\/at>/g, `@${app.t("allMembers")}`)
+    .replace(/<at>([\s\S]*?)<\/at>/g, "$1");
+}
+
 export function formatSystemMessage(message, app) {
   // `<at>@name</at>` is an editor token; system rows and previews show the plain mention.
   let text = String(message?.text ?? "")
@@ -44,6 +51,8 @@ export function formatSystemMessage(message, app) {
 export function systemMessageKind(message) {
   if (String(message?.id ?? "").startsWith("reminder:")) return "reminder";
   const line = String(message?.text ?? "").split("; ")[0];
+  // Inbound relay lines carry provider ids and read like messages, not notices.
+  if (/^\[[A-Za-z][\w .-]*\] message_id=\S+/.test(line)) return "relay";
   for (const [pattern, , , kind] of patterns) if (pattern.test(line)) return kind;
   return "notice";
 }

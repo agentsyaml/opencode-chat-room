@@ -79,7 +79,7 @@ export const de = {
   integrationsAddEnv: "Variable hinzufügen", integrationsClearEnv: "Alle Variablen löschen", integrationsKeepEnv: "Alle Variablen behalten",
   integrationsClearEnvActive: "Alle gespeicherten Variablen werden beim Speichern gelöscht.", integrationsEnvInvalid: "Variablennamen dürfen nur Buchstaben, Ziffern und Unterstriche enthalten und müssen eindeutig sein.",
   integrationsAccountTitle: "Integrationskonto", integrationsAccountId: "Konto-ID", integrationsPlatform: "Plattform",
-  integrationsAccountInvalid: "Konto-ID eingeben und ein Plugin wählen.", integrationsDuplicateAccount: "Ein Konto mit dieser ID existiert bereits.",
+  integrationsAccountInvalid: "Wählen Sie ein Plugin.", integrationsDuplicateAccount: "Ein Konto mit dieser ID existiert bereits.",
   integrationsAccountSaved: "Konto gespeichert. Integrationen speichern, um es anzuwenden.", integrationsAccountRemoved: "Konto entfernt. Integrationen speichern, um es anzuwenden.",
   integrationsLastError: "Letzter Fehler", integrationsEdit: "Bearbeiten", integrationsRemove: "Entfernen",
   integrationsInvalidJson: "Regel-JSON ist nahe Zeile {line} ungültig.", integrationsInvalidRules: "Regeln müssen ein JSON-Array sein.",

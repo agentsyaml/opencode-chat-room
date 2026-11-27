@@ -47,14 +47,15 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     expect(rows).toContainEqual([modifier, "Home", "End"]);
     expect(rows).toContainEqual(["PageUp", "PageDown"]);
     expect(rows).toContainEqual(["Esc"]);
-    // The palette row keeps its two key combos together and leaves a normal gap
-    // before the description instead of pushing it to the far edge.
+    // The palette row keeps its two key combos together and right-aligns the
+    // description to the row edge.
     const paletteRow = page.locator("#shortcutsDialog .keys-list li").filter({ hasText: "Open search and commands" });
     const keysBox = await paletteRow.locator(".keys-group").boundingBox();
     const labelBox = await paletteRow.locator(":scope > span:last-child").boundingBox();
-    if (!keysBox || !labelBox) throw new Error("palette shortcut row is not visible");
+    const rowBox = await paletteRow.boundingBox();
+    if (!keysBox || !labelBox || !rowBox) throw new Error("palette shortcut row is not visible");
     expect(labelBox.x - (keysBox.x + keysBox.width)).toBeGreaterThanOrEqual(0);
-    expect(labelBox.x - (keysBox.x + keysBox.width)).toBeLessThanOrEqual(24);
+    expect(Math.abs(labelBox.x + labelBox.width - (rowBox.x + rowBox.width))).toBeLessThanOrEqual(1);
     const sheet = await page.locator("#shortcutsDialog").textContent();
     expect(sheet).toContain("Switch to the previous or next room");
     expect(sheet).toContain("Scroll messages while typing");
@@ -69,6 +70,8 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     await page.keyboard.press("Alt+/");
     await page.locator("#shortcutsDialog").waitFor({ state: "visible" });
     await page.mouse.click(4, 4);
+    expect(await page.locator("#shortcutsDialog").isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
     await page.locator("#shortcutsDialog").waitFor({ state: "hidden" });
     await page.keyboard.press("Alt+/");
     await page.locator("#shortcutsDialog").waitFor({ state: "visible" });
@@ -101,6 +104,8 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
     await page.locator("#btnShortcuts").click();
     await page.locator("#shortcutsDialog").waitFor({ state: "visible" });
     await page.mouse.click(4, 4);
+    expect(await page.locator("#shortcutsDialog").isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
     await page.locator("#shortcutsDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
     await page.locator("#btnShortcuts").click();
@@ -111,6 +116,28 @@ test.skipIf(!browserModule)("Alt+/ opens the shortcut sheet and no control tags 
 
     // Alt+Arrow keeps the motion in the room list and never animates the thread.
     await page.setViewportSize({ width: 1280, height: 800 });
+    // Alt+Esc closes the room dialogs and returns focus to the Options trigger.
+    for (const [button, dialog, heading] of [
+      ["#btnAnnouncements", "#announcementsDialog", "#announcementHeading"],
+      ["#btnReminders", "#remindersDialog", "#reminderHeading"],
+    ] as const) {
+      await page.locator("#btnRoomOptions").click();
+      await page.locator(button).click();
+      await page.locator(`${dialog}[open]`).waitFor();
+      await page.waitForFunction((id: string) => document.activeElement?.id === id, heading.slice(1));
+      await page.keyboard.press("Alt+Escape");
+      await page.locator(dialog).waitFor({ state: "hidden" });
+      await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
+    }
+    // With no surface open the shortcut is left to the browser.
+    await page.locator("#msgInput").click();
+    const prevented = await page.evaluate(() => {
+      const event = new KeyboardEvent("keydown", { key: "Escape", code: "Escape", altKey: true, bubbles: true, cancelable: true });
+      document.querySelector("#msgInput")!.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    expect(prevented).toBe(false);
+    expect(await page.locator("dialog[open]").count()).toBe(0);
     await page.evaluate(async (modulePath: string) => {
       const { app } = await import(modulePath);
       await app.createRoom({ name: "Shortcut tester", roomName: "__Test_Second", joinPolicy: "open", fromChat: true });

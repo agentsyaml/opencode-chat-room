@@ -501,7 +501,7 @@ const roomExecute = async (
             );
             const room = svc.getRoom(args.roomId);
             notifications.push({ roomId: args.roomId, roomName: room.name, messages: [...room.messages] });
-            return `sent: ${args.text}\nmessage id: ${msg.id}\n${formatRoom(svc, room)}`;
+            return `sent: ${args.text}\nmessage_id=${msg.id} room_id=${room.id}\n${formatRoom(svc, room)}`;
           }
           case "poll": {
             if (!args.roomId) {

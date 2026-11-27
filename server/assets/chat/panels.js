@@ -6,7 +6,7 @@ const PANE_QUERY = "(min-width: 1100px) and (min-height: 560px)";
 export function initPanels(app) {
   const $ = app.$;
   const pane = matchMedia(PANE_QUERY);
-  const watchers = new Map(), surfaces = new Map();
+  const watchers = new Map(), surfaces = new Map(), dismissibles = new Map();
   const readModes = () => {
     const stored = app.LS.panelMode;
     return Object.fromEntries(Object.entries(PANEL_DEFAULTS)
@@ -26,11 +26,31 @@ export function initPanels(app) {
     // Settings is modal; layout changes behind it wait until it closes.
     if (!app.settingsOpen?.()) notify(kind);
   };
-  app.registerPanelSurface = (kind, handlers) => surfaces.set(kind, handlers);
+  app.registerPanelSurface = (kind, handlers) => {
+    surfaces.set(kind, handlers);
+    dismissibles.set(kind, handlers);
+  };
+  app.registerDismissibleSurface = (id, handlers) => dismissibles.set(id, handlers);
   app.closeOtherPanelSurfaces = (except) => {
-    for (const [kind, surface] of surfaces) if (kind !== except) surface.close?.();
+    for (const [kind, surface] of surfaces) if (kind !== except) surface.close?.(false);
     app.closeDocPreview?.(false);
   };
+  // Alt+Esc closes the top right-hand surface. A modal dialog above it keeps
+  // ownership of the key, and IME composition never closes the pane.
+  app.dismissTopSurface = () => {
+    const top = [...dismissibles.values()].find((surface) => surface.element?.open && surface.element.getClientRects().length);
+    if (!top) return false;
+    if ([...document.querySelectorAll("dialog[open]:modal")].some((dialog) => dialog !== top.element)) return "blocked";
+    top.close?.(true);
+    return "closed";
+  };
+  document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key !== "Escape" && event.code !== "Escape") return;
+    if (!app.dismissTopSurface()) return;
+    event.preventDefault();
+  });
   pane.addEventListener("change", () => {
     // Keep the settings modal on top; its close listener re-syncs every surface.
     if (app.settingsOpen?.()) return;

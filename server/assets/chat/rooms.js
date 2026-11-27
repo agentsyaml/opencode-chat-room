@@ -38,8 +38,6 @@ export function initRooms(app) {
     // A late restore must not steal the caret from someone already typing in the join form.
     const active = document.activeElement;
     if (!active || active === document.body || !active.closest?.("#joinView, dialog")) $("#inRoomId").focus();
-    // First visit without a stored key: prompt once per tab instead of a dead page.
-    if (!LS.token && !keyPromptDismissed()) app.openTokenBox();
   };
   app.showChat = () => {
     document.documentElement.classList.remove("session-restore");
@@ -503,10 +501,7 @@ async function bounded(items, limit, action) {
   }));
 }
 
-// A closed key prompt stays closed for this tab; a server refusal reopens it anyway.
-function keyPromptDismissed() {
-  try { return sessionStorage.getItem("chat.keyPromptDismissed") === "1"; } catch { return false; }
-}
+
 
 function syncCachedRooms(rooms, app) {
   const remote = new Map(rooms.map((room) => [room.id, room]));

@@ -122,10 +122,8 @@ export function initAdmin(app) {
   });
   $("#btnCloseOwnerOnly").addEventListener("click", () => ownerDialog.close());
   $("#btnOwnerOnlyOk").addEventListener("click", () => ownerDialog.close());
-  ownerDialog.addEventListener("click", (event) => { if (event.target === ownerDialog) ownerDialog.close(); });
   $("#btnCloseEditRoom").addEventListener("click", () => dialog.close());
   $("#btnCancelEditRoom").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   dialog.addEventListener("close", () => {
     const target = opener;
     opener = null;

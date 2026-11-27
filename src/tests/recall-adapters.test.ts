@@ -70,7 +70,7 @@ describe.serial("recall adapters", () => {
     await local.tool.room.execute({ action: "join", roomId, name: "author" }, { sessionID: "author-session" });
     await local.tool.room.execute({ action: "join", roomId, name: "bystander" }, { sessionID: "bystander-session" });
     const sent = await local.tool.room.execute({ action: "send", roomId, text: "first" }, { sessionID: "author-session" });
-    const messageId = /message id: (\S+)/.exec(sent)![1]!;
+    const messageId = /message_id=(\S+)/.exec(sent)![1]!;
     expect(await local.tool.room.execute({ action: "poll", roomId }, { sessionID: "bystander-session" }))
       .toContain(`first (id: ${messageId})`);
     expect(await local.tool.room.execute({ action: "recall", roomId, messageId }, { sessionID: "bystander-session" }))
@@ -80,8 +80,8 @@ describe.serial("recall adapters", () => {
     expect(await local.tool.room.execute({ action: "poll", roomId }, { sessionID: "bystander-session" }))
       .toBe("no new messages");
     const second = await local.tool.room.execute({ action: "send", roomId, text: "second" }, { sessionID: "author-session" });
-    const secondID = /message id: (\S+)/.exec(second)![1]!;
-    expect(second).toContain(`message id: ${secondID}`);
+    const secondID = /message_id=(\S+)/.exec(second)![1]!;
+    expect(second).toContain(`message_id=${secondID}`);
     expect(await local.tool.room.execute({ action: "recall", roomId, messageId: secondID }, { sessionID: "owner-session" }))
       .toBe("error: only the sender or a room admin can recall this message");
     expect(await local.tool.room.execute({ action: "recall", roomId, messageId: secondID }, { sessionID: "author-session" }))

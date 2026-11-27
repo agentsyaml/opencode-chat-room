@@ -122,6 +122,24 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     expect(medium.pane).toBeGreaterThanOrEqual(430);
     expect(medium.pane).toBeLessThanOrEqual(434);
     expect(medium.chat).toBeGreaterThanOrEqual(700);
+    // 1920x1080 spends the extra width on the pane: the app grows to 2200,
+    // the task pane defaults to 920 and the chat keeps its 700px column.
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.waitForTimeout(120);
+    const huge = await page.evaluate(() => { const width = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().width; return { app: width("#app"), pane: width("#tasksDialog"), chat: width("#msgScroll"), rail: width("#roomRail"), overflow: document.documentElement.scrollWidth - innerWidth }; });
+    expect(huge).toMatchObject({ rail: 252, overflow: 0 });
+    expect(huge.app).toBeGreaterThan(1440);
+    expect(huge.app).toBeLessThanOrEqual(2200);
+    expect(huge.pane).toBeGreaterThanOrEqual(918);
+    expect(huge.pane).toBeLessThanOrEqual(922);
+    expect(huge.chat).toBeGreaterThanOrEqual(700);
+    // Double-click reset returns to the new wide default, not the 1440 one.
+    await handle.focus();
+    await page.keyboard.press("End");
+    await page.waitForFunction(() => document.querySelector("#tasksDialog")!.getBoundingClientRect().width > 780);
+    await handle.dblclick();
+    await page.waitForFunction(() => Math.abs(document.querySelector("#tasksDialog")!.getBoundingClientRect().width - 920) <= 2);
+    expect(await page.evaluate(() => localStorage.getItem("chat.sidePaneWidth"))).toBeNull();
     await page.setViewportSize({ width: 1280, height: 850 });
     // The pane is not modal: the conversation stays usable beside it.
     await page.locator("#msgInput").click();
@@ -264,11 +282,13 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     expect(await page.locator("#tasksDialog").getAttribute("open")).not.toBeNull();
     expect(await page.locator("#taskGroups .task-title").textContent()).toBe("Review launch checklist");
     await page.waitForFunction(() => document.activeElement?.getAttribute("data-task-action") === "edit");
-    // A backdrop click is another cancel path that keeps the old card.
+    // A backdrop click keeps the editor open; Escape is the cancel path that keeps the old card.
     await page.locator('#taskGroups [data-task-action="edit"]').click();
     await page.locator("#taskEditDialog[open]").waitFor();
     await page.locator(".task-edit-title").fill("Backdrop title");
     await page.mouse.click(4, 4);
+    expect(await page.locator("#taskEditDialog").isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
     await page.locator("#taskEditDialog").waitFor({ state: "hidden" });
     expect(await page.locator("#taskGroups .task-title").textContent()).toBe("Review launch checklist");
 
@@ -382,6 +402,39 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
     await page.locator("#tasksDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
 
+    // Alt+Esc is the dedicated pane close: same focus return, no plain-Escape regression.
+    await openTasks(page);
+    await page.waitForFunction(() => document.querySelectorAll("#taskGroups .task-row").length === 1);
+    await page.keyboard.press("Alt+Escape");
+    await page.locator("#tasksDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
+    // A modal editor above the pane keeps Alt+Esc for itself.
+    await openTasks(page);
+    await page.locator('#taskGroups [data-task-action="edit"]').click();
+    await page.locator("#taskEditDialog[open]").waitFor();
+    await page.keyboard.press("Alt+Escape");
+    await page.waitForTimeout(100);
+    expect(await page.locator("#taskEditDialog").isVisible()).toBe(true);
+    expect(await page.locator("#tasksDialog").isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
+    await page.locator("#taskEditDialog").waitFor({ state: "hidden" });
+    expect(await page.locator("#tasksDialog").isVisible()).toBe(true);
+    // IME composition must not close the pane either.
+    await page.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", altKey: true, isComposing: true, bubbles: true, cancelable: true })));
+    await page.waitForTimeout(100);
+    expect(await page.locator("#tasksDialog").isVisible()).toBe(true);
+    await page.keyboard.press("Alt+Escape");
+    await page.locator("#tasksDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
+    // The narrow fallback modal uses the same shortcut.
+    await page.setViewportSize({ width: 900, height: 700 });
+    await openTasks(page);
+    await page.waitForFunction(() => !document.querySelector("#tasksDialog")!.classList.contains("is-pane"));
+    await page.keyboard.press("Alt+Escape");
+    await page.locator("#tasksDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
+    await page.setViewportSize({ width: 1280, height: 850 });
+
     // The Alt+Space palette offers Tasks and closes without stealing dialog focus.
     await page.locator("#msgInput").click();
     await page.keyboard.press("Alt+Space");
@@ -449,11 +502,7 @@ test.skipIf(!browserModule)("room tasks pane, fields, steps, permissions, and cl
         expect(rect.right).toBeLessThanOrEqual(metrics.dialog.right + 0.5);
       }
       await page.screenshot({ path: path.join(screenshotDir, `web-tasks-mobile-${width}.png`) });
-      if (width === 390) {
-        await page.mouse.click(4, 4);
-      } else {
-        await page.keyboard.press("Escape");
-      }
+      await page.keyboard.press("Escape");
       await page.locator("#tasksDialog").waitFor({ state: "hidden" });
       await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
     }

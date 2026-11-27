@@ -37,11 +37,13 @@ const REPORT = [
   "- First item",
   "- Second item",
   "",
-  "Footnote reference.[^sdk]",
+  "Footnote reference.[^sdk][^one][^two]",
   "",
   "[relative API link](/rooms/summary)",
   "",
   "[^sdk]: OpenCode SDK, <https://opencode.ai/docs/build/sdk>.",
+  "[^one]: First adjacent note.",
+  "[^two]: Second adjacent note.",
 ].join("\n");
 
 test.skipIf(!browserModule)("markdown resources preview in a right pane and a mobile overlay", async () => {
@@ -95,6 +97,7 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await previewButton.click();
     await dialog.waitFor({ state: "visible" });
     await page.locator("#docPreviewBody h1").getByText("Quarterly Report").waitFor();
+    await settledPane(page);
     expect(await page.locator("#docPreviewTitle").textContent()).toBe("REPORT.md");
     expect(await page.locator("#docPreviewSize").textContent()).toMatch(/\d/);
     const openWidth = await page.locator("#msgScroll").evaluate((node: HTMLElement) => node.getBoundingClientRect().width);
@@ -155,6 +158,8 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
       const footnoteRef = body.querySelector<HTMLAnchorElement>(".footnote-ref a");
       const footnoteItem = body.querySelector<HTMLElement>(".footnotes li");
       const footnoteBackref = footnoteItem?.querySelector<HTMLAnchorElement>(".footnote-backref");
+      const footnoteRefs = Array.from(body.querySelectorAll<HTMLElement>(".footnote-ref"));
+      const firstRef = footnoteRefs[0]?.getBoundingClientRect(), secondRef = footnoteRefs[1]?.getBoundingClientRect();
       return {
         scripts: body.querySelectorAll("script").length,
         handlers: body.querySelectorAll("[onclick], [onerror], [onload]").length,
@@ -165,6 +170,9 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
         relativeHref: relative?.getAttribute("href"),
         footnoteHref: footnoteRef?.getAttribute("href"),
         footnoteTarget: footnoteRef?.getAttribute("target"),
+        footnoteRefText: footnoteRef?.textContent,
+        footnoteLabels: footnoteRefs.slice(0, 2).map((ref) => ref.textContent),
+        footnoteGap: firstRef && secondRef ? secondRef.left - firstRef.right : 0,
         footnoteId: footnoteItem?.id,
         footnoteText: footnoteItem?.textContent || "",
         footnoteBackref: footnoteBackref?.getAttribute("href"),
@@ -186,6 +194,9 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     expect(safe.relativeHref).toBe("/rooms/summary");
     expect(safe.footnoteHref).toMatch(/^#fn-[0-9a-f-]+-1$/);
     expect(safe.footnoteTarget).toBeNull();
+    expect(safe.footnoteRefText).toBe("[1]");
+    expect(safe.footnoteLabels).toEqual(["[1]", "[2]"]);
+    expect(safe.footnoteGap).toBeGreaterThan(0);
     expect(safe.footnoteId).toBe(safe.footnoteHref?.slice(1));
     expect(safe.footnoteText).toContain("OpenCode SDK");
     expect(safe.footnoteBackref).toMatch(/^#fn-[0-9a-f-]+-ref-1$/);
@@ -246,6 +257,21 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await dialog.waitFor({ state: "hidden" });
     // The row button is gone with the file list, so focus lands in the composer.
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
+
+    // Alt+Esc closes the preview from the message card and returns focus there.
+    await previewButton.click();
+    await dialog.waitFor({ state: "visible" });
+    await page.keyboard.press("Alt+Escape");
+    await dialog.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Preview: REPORT.md");
+
+    // The Files browser is a modal at this width; the same shortcut closes it.
+    await page.locator("#btnRoomOptions").click();
+    await page.locator("#btnFiles").click();
+    await page.locator("#filesDialog[open]").waitFor();
+    await page.keyboard.press("Alt+Escape");
+    await page.locator("#filesDialog").waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
 
     // A narrow window swaps the pane for a modal with a backdrop.
     await page.setViewportSize({ width: 390, height: 740 });
@@ -309,8 +335,9 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     expect(phone.right).toBeLessThanOrEqual(phone.width);
     await page.waitForTimeout(200);
     await page.screenshot({ path: path.join(artifacts, "web-doc-preview-phone-320.png") });
-    await page.keyboard.press("Escape");
+    await page.keyboard.press("Alt+Escape");
     await dialog.waitFor({ state: "hidden" });
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Preview: REPORT.md");
 
     // A wide but short window also keeps the overlay: no squeezed chat column.
     await page.setViewportSize({ width: 1280, height: 520 });
@@ -329,6 +356,7 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await dialog.waitFor({ state: "visible" });
     const handle = page.locator("#sidePaneHandle");
     await handle.waitFor({ state: "visible" });
+    await settledPane(page);
     expect(await handle.getAttribute("role")).toBe("separator");
     expect(await handle.getAttribute("aria-orientation")).toBe("vertical");
     expect(await handle.getAttribute("tabindex")).toBe("0");
@@ -374,7 +402,7 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     expect(await page.evaluate(() => document.querySelector<HTMLElement>("#chatView")!.style.getPropertyValue("--side-pane-width"))).toBe("");
 
     // At 1500x900 the file preview uses the same wider workspace as the task board:
-    // the app grows to 1600 max, the pane takes the extra width, and chat keeps 700px.
+    // the app grows past 1440, the pane takes the extra width, and chat keeps 700px.
     await page.setViewportSize({ width: 1500, height: 900 });
     await page.waitForFunction(() => document.querySelector("#docPreview")!.getBoundingClientRect().width > 500);
     const largePreview = await page.evaluate(() => {
@@ -382,11 +410,53 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
       return { app: width("#app"), pane: width("#docPreview"), chat: width("#msgScroll"), rail: width("#roomRail") };
     });
     expect(largePreview.app).toBeGreaterThan(1440);
-    expect(largePreview.app).toBeLessThanOrEqual(1600);
+    expect(largePreview.app).toBeLessThanOrEqual(2200);
     expect(largePreview.pane).toBeGreaterThanOrEqual(502);
     expect(largePreview.pane).toBeLessThanOrEqual(506);
     expect(largePreview.chat).toBeGreaterThanOrEqual(699);
     expect(largePreview.rail).toBe(252);
+    // 1920x1080 widens the app to 2200 max and the preview to about 960 while chat keeps 650.
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.waitForFunction(() => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - 964) <= 2);
+    const hugePreview = await page.evaluate(() => {
+      const width = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().width;
+      return { app: width("#app"), pane: width("#docPreview"), chat: width("#msgScroll"), rail: width("#roomRail"), overflow: document.documentElement.scrollWidth - innerWidth };
+    });
+    expect(hugePreview).toMatchObject({ rail: 252, overflow: 0 });
+    expect(hugePreview.app).toBeGreaterThan(1440);
+    expect(hugePreview.app).toBeLessThanOrEqual(2200);
+    expect(hugePreview.pane).toBeGreaterThanOrEqual(950);
+    expect(hugePreview.pane).toBeLessThanOrEqual(1000);
+    expect(hugePreview.chat).toBeGreaterThanOrEqual(650);
+    // The pane column animates open and close, and reduced motion turns it off.
+    const paneTransition = await page.evaluate(() => {
+      const view = document.querySelector<HTMLElement>("#chatView")!;
+      view.classList.add("pane-animating");
+      const style = getComputedStyle(view);
+      const result = { property: style.transitionProperty, duration: style.transitionDuration };
+      view.classList.remove("pane-animating");
+      return result;
+    });
+    expect(paneTransition.property).toContain("grid-template-columns");
+    expect(parseFloat(paneTransition.duration)).toBeGreaterThan(0);
+    expect(parseFloat(paneTransition.duration)).toBeLessThan(0.3);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const reducedTransition = await page.evaluate(() => {
+      const view = document.querySelector<HTMLElement>("#chatView")!;
+      view.classList.add("pane-animating");
+      const duration = getComputedStyle(view).transitionDuration;
+      view.classList.remove("pane-animating");
+      return duration;
+    });
+    expect(parseFloat(reducedTransition)).toBe(0);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    // A user width yields to double-click reset, which uses the new wide default.
+    await handle.focus();
+    await page.keyboard.press("End");
+    await page.waitForFunction(() => document.querySelector("#docPreview")!.getBoundingClientRect().width > 780);
+    await handle.dblclick();
+    await page.waitForFunction(() => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - 964) <= 2);
+    expect(await page.evaluate(() => localStorage.getItem("chat.sidePaneWidth"))).toBeNull();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.waitForFunction(() => Math.abs(document.querySelector("#docPreview")!.getBoundingClientRect().width - 432) <= 2);
 
@@ -429,6 +499,42 @@ test.skipIf(!browserModule)("markdown resources preview in a right pane and a mo
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
 
+    // Code files open in a read-only Monaco editor instead of the custom highlighter.
+    const source = [
+      "export function total(items: number[]): number {",
+      "  return items.reduce((sum, item) => sum + item, 0);",
+      "}",
+    ].join("\n");
+    const script = await uploadMarkdown(origin, roomID, sessionID, "SUMMARY.ts", source);
+    await page.evaluate(async ({ url, id, sessionID, text }: any) => {
+      const { app } = await import(url);
+      await app.api(`/rooms/${encodeURIComponent(id)}/messages`, { method: "POST", body: JSON.stringify({ sessionID, text }) });
+    }, { url: "/assets/chat/state.js", id: roomID, sessionID, text: `[[resource:${script.id}]]` });
+    const scriptCard = page.locator(`.chat-resource[data-resource-id="${script.id}"]`);
+    await scriptCard.getByText("SUMMARY.ts").waitFor();
+    await scriptCard.getByRole("button", { name: "Preview: SUMMARY.ts" }).click();
+    await dialog.waitFor({ state: "visible" });
+    await dialog.locator(".doc-monaco .monaco-editor").waitFor();
+    expect(await dialog.locator("pre.doc-code").count()).toBe(0);
+    const editorBox = (await dialog.locator(".doc-monaco .monaco-editor").boundingBox())!;
+    expect(editorBox.height).toBeGreaterThan(200);
+    expect(editorBox.width).toBeGreaterThan(300);
+    await dialog.locator(".doc-monaco .monaco-editor .view-lines").click();
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+f" : "Control+f");
+    await dialog.locator(".monaco-editor .find-widget").waitFor({ state: "visible" });
+    // The earlier reload dropped the clipboard stub installed for the Markdown copy.
+    await page.evaluate(() => {
+      (window as any).__copies = [];
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (value: string) => { (window as any).__copies.push(value); } } });
+    });
+    await docCopy.click();
+    await page.waitForFunction((text: string) => (window as any).__copies.at(-1) === text, source);
+    const scriptDownload = page.waitForEvent("download");
+    await headerDownload.click();
+    expect((await scriptDownload).suggestedFilename()).toBe("SUMMARY.ts");
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+
     expect(pageErrors).toEqual([]);
   } finally {
     if (roomID && sessionID) await fetch(`${origin}/rooms/${encodeURIComponent(roomID)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ sessionID }) }).catch(() => {});
@@ -443,6 +549,10 @@ async function paneMetrics(page: any) {
     const width = (selector: string) => document.querySelector<HTMLElement>(selector)!.getBoundingClientRect().width;
     return { rail: width("#roomRail"), pane: width("#docPreview"), chat: width("#msgScroll") };
   });
+}
+
+async function settledPane(page: any) {
+  await page.waitForFunction(() => !document.querySelector("#chatView")!.classList.contains("pane-animating"));
 }
 
 async function uploadMarkdown(origin: string, roomID: string, sessionID: string, name: string, content: string) {

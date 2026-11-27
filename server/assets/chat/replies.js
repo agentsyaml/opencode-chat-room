@@ -42,12 +42,6 @@ function bindMessageActions(app) {
       reply.type = "button"; reply.className = "message-reply"; reply.innerHTML = icon("arrow_reply", "message-reply-icon");
       reply.setAttribute("aria-label", app.t("replyMessage")); reply.dataset.i18nAriaLabel = "replyMessage"; reply.dataset.replyMessage = message.id;
       copy.before(actions); actions.append(copy, reply);
-      if (document.body.dataset.channeld === "on") {
-        const forward = document.createElement("button");
-        forward.type = "button"; forward.className = "message-reply message-forward"; forward.innerHTML = icon("arrow_right", "message-reply-icon");
-        forward.setAttribute("aria-label", app.t("forwardMessage")); forward.dataset.i18nAriaLabel = "forwardMessage"; forward.dataset.forwardMessage = message.id;
-        actions.append(forward);
-      }
     }
     return row;
   };

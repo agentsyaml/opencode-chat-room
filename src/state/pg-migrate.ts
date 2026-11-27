@@ -3,9 +3,9 @@ import { PgDatabase } from "./pg-database.ts";
 import { Database, type SQLQueryBindings } from "./sqlite.ts";
 import { closeStateDatabases, initializeAdminSchema, initializeReminderSchema, openStateDatabase } from "./sqlite-state.ts";
 
-// One-shot SQLite -> PostgreSQL copy. PostgreSQL support is experimental and
-// single-instance in 0.8.1; the target connection holds the same session lock
-// as the server, so a running server makes this command fail before writing.
+// One-shot SQLite -> PostgreSQL copy. PostgreSQL support is experimental through
+// the 0.8.2 multi-instance milestone; nothing stops a running server from
+// writing to the target, so the operator must stop it before migrating.
 
 export type MigrationOptions = {
   sourcePath: string;
@@ -20,9 +20,9 @@ const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
 function backupGuidance(sourcePath: string): string[] {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return [
-    "PostgreSQL state is experimental and single-instance in 0.8.1.",
+    "PostgreSQL state is experimental (0.8.2 multi-instance milestone).",
     "Stop the chat-room server before migrating; this command takes a SQLite write lock,",
-    "but only --yes confirms that the server is actually stopped.",
+    "but nothing blocks a running PostgreSQL writer. Only --yes confirms the server is stopped.",
     "",
     "Make a WAL-safe SQLite backup first (do not copy only chat-room.sqlite while WAL is active):",
     `  sqlite3 ${JSON.stringify(sourcePath)} ".backup '${sourcePath}.backup-${stamp}'"`,
@@ -102,8 +102,8 @@ export async function migrateToPostgres(options: MigrationOptions): Promise<Migr
       probe.close();
     }
 
-    // Opening the PostgreSQL state database also acquires the process-wide
-    // single-instance lock, so a running server blocks the migration here.
+    // The target copy runs in one immediate transaction; a running server is
+    // not detected here, so operator confirmation is the only guard.
     const target = await openStateDatabase(options.sourcePath);
     await initializeAdminSchema(options.sourcePath);
     await initializeReminderSchema(options.sourcePath);

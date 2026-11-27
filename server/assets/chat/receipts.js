@@ -45,7 +45,7 @@ export function initReceipts(app) {
     if (selectedID && !event.target.closest("#readerPanel, .message-readers")) close(false);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && selectedID) { event.preventDefault(); close(true); }
+    if (event.key === "Escape" && !event.altKey && selectedID) { event.preventDefault(); close(true); }
   });
   window.addEventListener("resize", positionPanel);
   window.addEventListener("scroll", positionPanel, true);
@@ -54,7 +54,7 @@ export function initReceipts(app) {
     selectedID = id; trigger = button;
     button.setAttribute("aria-expanded", "true");
     panel.hidden = false; renderPanel(); positionPanel();
-    requestAnimationFrame(() => $("#readerHeading").focus({ preventScroll: true }));
+    requestAnimationFrame(() => panel.focus({ preventScroll: true }));
   }
   function close(restoreFocus) {
     if (!selectedID) return;
@@ -84,7 +84,6 @@ export function initReceipts(app) {
     const message = app.state.room?.messages.find((item) => item.id === selectedID);
     if (!message) return close(false);
     const readers = readersFor(message);
-    $("#readerHeading").textContent = app.t("readerPanelTitle");
     $("#readerCount").textContent = readerStatus(message, readers);
     const list = $("#readerList"); list.textContent = "";
     const members = app.state.memberSessions.get(app.state.room.id) || [];

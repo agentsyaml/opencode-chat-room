@@ -12,6 +12,8 @@ const token = "chat-markdown-layout-token";
 const longToken = "averylongunbrokenwordthatmustwrapinsidethebubblewithoutwideningthepage";
 const longLine = `const veryLongLine = "${"segment-".repeat(16)}end";`;
 const reminderText = "Standup reminder: review the renderer rhythm, the table scroll frame, and the event-row hierarchy before the release window closes.";
+const feishuNotice = "[Feishu feishu-main] message_id=om_x100 chat_id=oc_abc sender=ou_alice: Permission list: im:chat.members:read granted, im:chat:read granted, im:message:readonly granted, im:resource granted, im:message granted. ".repeat(3);
+const longNotice = "**Release checklist**\n\n- Verify the renderer rhythm\n- Check the table frame\n- Confirm the event-row hierarchy\n- Review the date ordering and muted timestamp before the release window closes.";
 const CONTENT = [
   "# Release review",
   "",
@@ -68,13 +70,19 @@ test.skipIf(!browserModule)("markdown rhythm and room notices hold at desktop an
     await api(origin, `/rooms/${roomId}/join`, "POST", {
       sessionID: "markdown-peer-session", participantId: "MarkdownPeer", participantName: "MarkdownPeer",
     });
-    await page.evaluate(async ({ url, id, text }: { url: string; id: string; text: string }) => {
+    await page.evaluate(async ({ url, id, text, notice, long }: { url: string; id: string; text: string; notice: string; long: string }) => {
       const { app } = await import(url), updated = await app.api(`/rooms/${encodeURIComponent(id)}`);
-      const createdAt = (updated.messages.at(-1)?.createdAt ?? Date.now()) + 1;
+      let createdAt = (updated.messages.at(-1)?.createdAt ?? Date.now()) + 1;
       updated.messages.push({ id: "reminder:layout-test", roomId: id, senderId: "system", text, createdAt });
+      createdAt += 1;
+      updated.messages.push({ id: "relay:layout-test", roomId: id, senderId: "system", text: notice, createdAt });
+      createdAt += 1;
+      updated.messages.push({ id: "notice:layout-test", roomId: id, senderId: "system", text: "A short room notice", createdAt });
+      createdAt += 1;
+      updated.messages.push({ id: "long-notice:layout-test", roomId: id, senderId: "system", text: long, createdAt });
       app.state.room = updated;
       app.rerenderMessages();
-    }, { url: "/assets/chat/state.js", id: roomId, text: reminderText });
+    }, { url: "/assets/chat/state.js", id: roomId, text: reminderText, notice: feishuNotice, long: longNotice });
 
     const message = page.locator("#msgList .msg-text").last();
     await message.locator("h1").waitFor();
@@ -116,7 +124,10 @@ test.skipIf(!browserModule)("markdown rhythm and room notices hold at desktop an
 
     const block = message.locator(".code-block").first();
     expect((await block.locator(".code-language").textContent())?.trim()).toBe("ts");
-    expect(await block.locator(".code-toolbar").evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
+    const codeHead = block.locator(".code-block-head");
+    expect(await codeHead.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("0");
+    await block.hover();
+    expect(await codeHead.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
     expect(await block.locator(".code-toolbar button").count()).toBe(2);
     const codeScroll = await block.locator("pre").evaluate((node: HTMLElement) => ({
       scrollWidth: node.scrollWidth, clientWidth: node.clientWidth,
@@ -125,6 +136,7 @@ test.skipIf(!browserModule)("markdown rhythm and room notices hold at desktop an
     await page.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (value: string) => { (window as any).__copiedMarkdownCode = value; } } });
     });
+    await block.hover();
     await block.locator(".code-copy-button").click();
     await page.waitForFunction(() => typeof (window as any).__copiedMarkdownCode === "string");
     expect(await page.evaluate(() => (window as any).__copiedMarkdownCode)).toContain("veryLongLine");
@@ -152,7 +164,7 @@ test.skipIf(!browserModule)("markdown rhythm and room notices hold at desktop an
     expect(joinEvent.border).not.toBe("rgba(0, 0, 0, 0)");
     expect(joinEvent.iconHidden).toBe("true");
     expect(joinEvent.iconWidth).toBeGreaterThan(6);
-    expect(joinEvent.text).toBe("MarkdownPeer joined the room");
+    expect(joinEvent.text?.trim()).toBe("MarkdownPeer joined the room");
     expect(joinEvent.time).toBeTruthy();
     expect(joinEvent.dateTime).toBeTruthy();
     expect(joinEvent.fits).toBe(true);
@@ -169,10 +181,85 @@ test.skipIf(!browserModule)("markdown rhythm and room notices hold at desktop an
         wraps: (event.querySelector(".sys-text") as HTMLElement).scrollWidth <= (event.querySelector(".sys-text") as HTMLElement).clientWidth + 1,
       };
     });
-    expect(reminderEvent.text).toBe(reminderText);
+    expect(reminderEvent.text?.trim()).toBe(reminderText);
     expect(reminderEvent.height).toBeGreaterThan(30);
     expect(reminderEvent.fits).toBe(true);
     expect(reminderEvent.wraps).toBe(true);
+
+    const notice = page.locator('#msgList li.sys[data-kind="relay"]').last();
+    await notice.waitFor();
+    const noticeEvent = await notice.evaluate((row: HTMLElement) => {
+      const event = row.querySelector<HTMLElement>(".sys-event")!;
+      const style = getComputedStyle(event), box = event.getBoundingClientRect();
+      const list = document.querySelector<HTMLElement>("#msgList")!.getBoundingClientRect();
+      const time = event.querySelector<HTMLElement>(".sys-time")!;
+      const icon = event.querySelector<HTMLElement>(".sys-icon")!;
+      return {
+        radius: parseFloat(style.borderTopLeftRadius),
+        background: style.backgroundColor,
+        textAlign: style.textAlign,
+        leftGap: box.left - list.left,
+        width: box.width,
+        fits: box.right <= innerWidth + 1 && box.left >= -1,
+        wraps: (event.querySelector(".sys-text") as HTMLElement).scrollWidth <= (event.querySelector(".sys-text") as HTMLElement).clientWidth + 1,
+        timeFirst: time.getBoundingClientRect().left < icon.getBoundingClientRect().left,
+        timeMuted: parseFloat(getComputedStyle(time).opacity) < 1,
+        timeText: time.textContent,
+      };
+    });
+    expect(noticeEvent.radius).toBeLessThanOrEqual(16);
+    expect(noticeEvent.background).not.toBe("rgba(0, 0, 0, 0)");
+    expect(noticeEvent.textAlign).toBe("left");
+    expect(noticeEvent.leftGap).toBeLessThan(40);
+    expect(noticeEvent.width).toBeLessThan(800);
+    expect(noticeEvent.fits).toBe(true);
+    expect(noticeEvent.wraps).toBe(true);
+    expect(noticeEvent.timeFirst).toBe(true);
+    expect(noticeEvent.timeMuted).toBe(true);
+    expect(noticeEvent.timeText).toBeTruthy();
+
+    const shortNotice = await page.locator('#msgList li.sys[data-kind="notice"]').filter({ hasText: "A short room notice" }).last().evaluate((row: HTMLElement) => {
+      const event = row.querySelector<HTMLElement>(".sys-event")!;
+      const time = row.querySelector<HTMLElement>(".sys-time")!;
+      const icon = row.querySelector<HTMLElement>(".sys-icon")!;
+      return {
+        radius: parseFloat(getComputedStyle(event).borderTopLeftRadius),
+        textAlign: getComputedStyle(event).textAlign,
+        timeFirst: time.getBoundingClientRect().left < icon.getBoundingClientRect().left,
+        timeMuted: parseFloat(getComputedStyle(time).opacity) < 1,
+      };
+    });
+    expect(shortNotice.radius).toBeGreaterThan(100);
+    expect(shortNotice.textAlign).toBe("left");
+    expect(shortNotice.timeFirst).toBe(true);
+    expect(shortNotice.timeMuted).toBe(true);
+
+    await page.waitForFunction(() => Boolean(document.querySelector('#msgList li.sys[data-long="true"]')));
+    const longNoticeShape = await page.locator('#msgList li.sys[data-kind="notice"]').filter({ hasText: "Release checklist" }).last().evaluate((row: HTMLElement) => {
+      const event = row.querySelector<HTMLElement>(".sys-event")!;
+      const time = row.querySelector<HTMLElement>(".sys-time")!;
+      const icon = row.querySelector<HTMLElement>(".sys-icon")!;
+      const text = row.querySelector<HTMLElement>(".sys-text")!;
+      const rect = event.getBoundingClientRect();
+      return {
+        long: row.dataset.long,
+        radius: parseFloat(getComputedStyle(event).borderTopLeftRadius),
+        textAlign: getComputedStyle(event).textAlign,
+        strong: Boolean(text.querySelector("strong")),
+        list: Boolean(text.querySelector("ul")),
+        timeFirst: time.getBoundingClientRect().left < icon.getBoundingClientRect().left,
+        timeMuted: parseFloat(getComputedStyle(time).opacity) < 1,
+        fits: rect.left >= 0 && rect.right <= innerWidth,
+      };
+    });
+    expect(longNoticeShape.long).toBe("true");
+    expect(longNoticeShape.radius).toBeLessThanOrEqual(16);
+    expect(longNoticeShape.textAlign).toBe("left");
+    expect(longNoticeShape.strong).toBe(true);
+    expect(longNoticeShape.list).toBe(true);
+    expect(longNoticeShape.timeFirst).toBe(true);
+    expect(longNoticeShape.timeMuted).toBe(true);
+    expect(longNoticeShape.fits).toBe(true);
     await page.evaluate(async (url: string) => {
       const { app } = await import(url);
       app.cancelThreadScrollAnimation?.();
@@ -205,7 +292,7 @@ test.skipIf(!browserModule)("markdown rhythm and room notices hold at desktop an
       return {
         pageOverflow: document.documentElement.scrollWidth > innerWidth + 1,
         tableScrolls: table.scrollWidth > table.clientWidth + 10,
-        headerVisible: getComputedStyle(block.querySelector<HTMLElement>(".code-toolbar")!).opacity === "1",
+        headerVisible: getComputedStyle(block.querySelector<HTMLElement>(".code-block-head")!).opacity === "1",
         language: block.querySelector(".code-language")?.textContent,
         eventFits: event.getBoundingClientRect().right <= innerWidth + 1,
         eventText: event.querySelector(".sys-text")?.textContent,
@@ -216,7 +303,7 @@ test.skipIf(!browserModule)("markdown rhythm and room notices hold at desktop an
     expect(mobileLayout.headerVisible).toBe(true);
     expect(mobileLayout.language).toBe("ts");
     expect(mobileLayout.eventFits).toBe(true);
-    expect(mobileLayout.eventText).toBe("MarkdownPeer joined the room");
+    expect(mobileLayout.eventText.trim()).toBe("MarkdownPeer joined the room");
     await mobileMessage.screenshot({ path: path.join(artifactDir, "markdown-message-mobile.png") });
     await mobile.evaluate(() => { const thread = document.querySelector<HTMLElement>("#thread")!; thread.scrollTop = thread.scrollHeight; });
     await mobile.screenshot({ path: path.join(artifactDir, "markdown-layout-mobile-events.png") });

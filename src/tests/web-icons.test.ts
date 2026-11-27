@@ -69,6 +69,19 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
         missingFill: visible.filter((node) => getComputedStyle(node).fill === "none").length,
         stroked: visible.filter((node) => getComputedStyle(node).stroke !== "none").length,
         empty: visible.filter((node) => { const box = node.getBoundingClientRect(); return box.width < 1 || box.height < 1; }).length,
+        offCenter: Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+          .filter((button) => {
+            const style = getComputedStyle(button);
+            return style.display !== "none" && style.visibility !== "hidden" && button.getClientRects().length > 0
+              && button.textContent?.trim() === "" && button.querySelectorAll("svg.fluent-icon").length === 1;
+          })
+          .filter((button) => {
+            const icon = button.querySelector<SVGGraphicsElement>("svg.fluent-icon")!;
+            const box = button.getBoundingClientRect(), glyph = icon.getBoundingClientRect();
+            return Math.abs((box.left + box.width / 2) - (glyph.left + glyph.width / 2)) > 0.75
+              || Math.abs((box.top + box.height / 2) - (glyph.top + glyph.height / 2)) > 0.75;
+          })
+          .map((button) => button.id || button.getAttribute("aria-label") || button.className),
       };
     });
 
@@ -79,6 +92,7 @@ test.skipIf(!browserModule)("Fluent icons render consistently across the web UI"
       expect(audit.missingFill).toBe(0);
       expect(audit.stroked).toBe(0);
       expect(audit.empty).toBe(0);
+      expect(audit.offCenter).toEqual([]);
     };
 
     // Header chips, message actions, and the code toolbar use the shared helper.

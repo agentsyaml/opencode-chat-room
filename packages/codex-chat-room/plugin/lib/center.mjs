@@ -173,7 +173,7 @@ export async function centerAction(cfg, args, sessionID) {
       const messages = room.messages || [];
       const sentID = [...messages].reverse().find((message) => message.senderSessionID === sessionID && message.text === text)?.id
         ?? messages.at(-1)?.id;
-      return `sent: ${text}\n${sentID ? `message id: ${sentID}\n` : ""}${formatRoom(room)}`;
+      return `sent: ${text}\n${sentID ? `message_id=${sentID} room_id=${room.id ?? room.roomId ?? ""}\n` : ""}${formatRoom(room)}`;
     }
     case "recall": {
       if (!args.roomId) return "error: roomId is required";

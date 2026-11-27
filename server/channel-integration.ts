@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { AdapterProcess } from "../packages/chat-room-channeld/src/adapter.ts";
+import type { AccountCapabilities } from "../packages/chat-room-channeld/src/protocol.ts";
 import {
   parseConfig,
   type AccountConfig,
@@ -38,7 +39,13 @@ export interface IntegrationControl {
   disable(): Promise<Response>;
 }
 
-type PluginMeta = { id: string; name: string; platform: string };
+type PluginMeta = {
+  id: string;
+  name: string;
+  platform: string;
+  displayName?: string;
+  account?: AccountCapabilities;
+};
 type ManagedAccount = {
   id: string;
   platform: string;
@@ -47,7 +54,7 @@ type ManagedAccount = {
 };
 
 const IDENTIFIER = /^[A-Za-z0-9._-]{1,128}$/;
-const PLUGIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:js|mjs|cjs)$/;
+const PLUGIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:js|mjs|cjs|ts)$/;
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const RESERVED_ENV = new Set(["CHANNELD_ACCOUNT_ID", "CHANNELD_PLATFORM"]);
 const MAX_ENV = 64;
@@ -56,7 +63,7 @@ const MAX_PLUGIN_BYTES = 256 * 1024;
 const MAX_REQUEST_BYTES = 1024 * 1024;
 const HANDSHAKE_TIMEOUT_MS = 3000;
 
-const json = (body: unknown, status = 200) => Response.json(body, { status });
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
 function integrationRoot(): string {
   return path.resolve(path.dirname(databasePath()), "integrations");
@@ -195,10 +202,38 @@ function readPlugin(pluginId: string): { dir: string; file: string; meta: Plugin
   if (typeof platform !== "string" || !IDENTIFIER.test(platform)) return undefined;
   const file = path.join(dir, name);
   if (path.dirname(file) !== dir || !existsSync(file)) return undefined;
-  return { dir, file, meta: { id, name, platform } };
+  const displayName = typeof meta.displayName === "string" && meta.displayName.trim()
+    ? meta.displayName.trim()
+    : undefined;
+  const account = isRecord(meta.account) ? meta.account as AccountCapabilities : undefined;
+  return {
+    dir,
+    file,
+    meta: { id, name, platform, ...(displayName ? { displayName } : {}), ...(account ? { account } : {}) },
+  };
 }
 
-function uploadedPlugins(): Array<{ pluginId: string; name: string; platform: string }> {
+function downloadPlugin(pluginId: string): Response {
+  const plugin = readPlugin(pluginId);
+  if (!plugin) return json({ error: "plugin not found" }, 404);
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(plugin.file);
+  } catch {
+    return json({ error: "plugin not found" }, 404);
+  }
+  const name = plugin.meta.name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  return new Response(new Uint8Array(bytes), {
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(plugin.meta.name)}`,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
+function uploadedPlugins(): Array<{ pluginId: string; name: string; platform: string; displayName?: string; account?: AccountCapabilities }> {
   let entries: string[];
   try {
     entries = readdirSync(pluginsRoot());
@@ -209,7 +244,13 @@ function uploadedPlugins(): Array<{ pluginId: string; name: string; platform: st
     .flatMap((pluginId) => {
       const plugin = readPlugin(pluginId);
       return plugin
-        ? [{ pluginId: plugin.meta.id, name: plugin.meta.name, platform: plugin.meta.platform }]
+        ? [{
+            pluginId: plugin.meta.id,
+            name: plugin.meta.name,
+            platform: plugin.meta.platform,
+            ...(plugin.meta.displayName ? { displayName: plugin.meta.displayName } : {}),
+            ...(plugin.meta.account ? { account: plugin.meta.account } : {}),
+          }]
         : [];
     })
     .sort((left, right) => left.pluginId.localeCompare(right.pluginId));
@@ -441,6 +482,13 @@ export async function handleIntegrationAdmin(
   url: URL,
   control: IntegrationControl,
 ): Promise<Response | undefined> {
+  const download = /^\/channeld\/plugins\/([^/]+)\/download$/.exec(url.pathname);
+  if (download) {
+    if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
+    let pluginId: string;
+    try { pluginId = decodeURIComponent(download[1]!); } catch { return json({ error: "plugin not found" }, 404); }
+    return downloadPlugin(pluginId);
+  }
   if (url.pathname === "/channeld/plugins") {
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
     return uploadPlugin(req);
@@ -458,21 +506,12 @@ async function uploadPlugin(req: Request): Promise<Response> {
   if (!body.ok || !isRecord(body.value)) {
     return json({ error: "plugin body must be a JSON object" }, 400);
   }
-  const { name, platform, source } = body.value;
+  const { name = "plugin.js", source } = body.value;
   if (typeof name !== "string" || !PLUGIN_NAME.test(name) || name.length > 128) {
-    return json({ error: "name must be a safe .js, .mjs, or .cjs file name" }, 400);
-  }
-  if (typeof platform !== "string" || !IDENTIFIER.test(platform)) {
-    return json({ error: "platform must be a safe identifier" }, 400);
+    return json({ error: "name must be a safe .js, .mjs, .cjs, or .ts file name" }, 400);
   }
   if (typeof source !== "string" || Buffer.byteLength(source, "utf8") > MAX_PLUGIN_BYTES) {
     return json({ error: `source must be UTF-8 text of at most ${MAX_PLUGIN_BYTES} bytes` }, 400);
-  }
-  let env: Record<string, string> | undefined;
-  try {
-    env = envValue(body.value.env);
-  } catch (error) {
-    return json({ error: publicError(error) }, 400);
   }
 
   const root = integrationRoot();
@@ -483,14 +522,14 @@ async function uploadPlugin(req: Request): Promise<Response> {
   try {
     mkdirSync(tempDir, { recursive: true, mode: 0o700 });
     writeFileSync(pluginFile, source, { mode: 0o600 });
-    const meta: PluginMeta = { id: pluginId, name, platform };
-    writeFileSync(path.join(tempDir, "meta.json"), `${JSON.stringify(meta)}\n`, { mode: 0o600 });
 
+    // A probe runs initialize only: it proves the adapter speaks the protocol
+    // and declares its platform/capabilities without starting the account or
+    // requiring credentials.
     const account: AccountConfig = {
       id: `plugin-${pluginId}`,
-      platform,
+      platform: "plugin",
       adapter: { command: ["node", pluginFile] },
-      env,
     };
     const adapter = new AdapterProcess({
       account,
@@ -498,16 +537,30 @@ async function uploadPlugin(req: Request): Promise<Response> {
       onExit: () => {},
       initializeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
     });
-    try {
-      await adapter.start();
-    } finally {
-      await adapter.stop();
+    const probed = await adapter.probe();
+    const platform = probed.platform;
+    if (!platform || !IDENTIFIER.test(platform)) {
+      throw new Error("plugin must declare a platform in initialize");
     }
+    const meta: PluginMeta = {
+      id: pluginId,
+      name,
+      platform,
+      ...(probed.capabilities?.displayName ? { displayName: probed.capabilities.displayName } : {}),
+      ...(probed.capabilities?.account ? { account: probed.capabilities.account } : {}),
+    };
+    writeFileSync(path.join(tempDir, "meta.json"), `${JSON.stringify(meta)}\n`, { mode: 0o600 });
 
     mkdirSync(pluginsRoot(), { recursive: true, mode: 0o700 });
     if (existsSync(finalDir)) throw new Error("plugin id collision");
     renameSync(tempDir, finalDir);
-    return json({ pluginId, name, platform }, 201);
+    return json({
+      pluginId,
+      name,
+      platform,
+      ...(meta.displayName ? { displayName: meta.displayName } : {}),
+      ...(meta.account ? { account: meta.account } : {}),
+    }, 201);
   } catch (error) {
     try {
       rmSync(tempDir, { recursive: true, force: true });

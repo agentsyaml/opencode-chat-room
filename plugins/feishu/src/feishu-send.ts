@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import type { CardVersion } from "./feishu-card.ts";
 import { buildCard } from "./feishu-card.ts";
-import type { Endpoint } from "./protocol.ts";
+import type { AttachmentRef, Endpoint } from "../../../packages/chat-room-channeld/src/protocol.ts";
 
 const DEFAULT_BASE_URL = "https://open.feishu.cn";
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -193,6 +195,10 @@ function isApiFailure(raw: RawResponse): boolean {
 }
 
 const CLIENT_ERROR_STATUSES = new Set([400, 401, 403, 404]);
+// Feishu platform limits; declared to the host as adapter capabilities.
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_FILE_BYTES = 30 * 1024 * 1024;
+const RESOURCE_MARKER = /\s*\[\[resource:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\]\]\s*/gi;
 
 function apiResponseDetail(body: unknown, status: number): string {
   const code = isRecord(body) && typeof body.code === "number" ? body.code : undefined;
@@ -255,11 +261,11 @@ function postMessage(
   body: string,
   replyTo?: string,
 ): Promise<RawResponse> {
-  const path = replyTo
+  const pathname = replyTo
     ? `/open-apis/im/v1/messages/${encodeURIComponent(replyTo)}/reply`
     : "/open-apis/im/v1/messages?receive_id_type=chat_id";
   return fetchJson(
-    `${config.baseUrl}${path}`,
+    `${config.baseUrl}${pathname}`,
     {
       method: "POST",
       headers: {
@@ -270,6 +276,117 @@ function postMessage(
     },
     config.timeoutMs,
   );
+}
+
+/** One forced token refresh covers both sending and attachment uploads. */
+async function withToken(
+  config: FeishuConfig,
+  state: TokenState,
+  request: (token: string) => Promise<RawResponse>,
+): Promise<RawResponse> {
+  let raw = await request(await ensureToken(config, state));
+  if (raw.status !== 429 && raw.status < 500 && apiCode(raw) === TOKEN_INVALID_CODE) {
+    raw = await request(await ensureToken(config, state, true));
+  }
+  return raw;
+}
+
+async function sendPart(
+  config: FeishuConfig,
+  state: TokenState,
+  chatId: string,
+  endpoint: Endpoint,
+  parentId: string | undefined,
+  messageType: "interactive" | "image" | "file",
+  content: unknown,
+  idempotencyKey: string,
+): Promise<SendReceipt> {
+  const message = {
+    msg_type: messageType,
+    content: JSON.stringify(content),
+    uuid: deterministicUuid(idempotencyKey),
+  };
+  const body = JSON.stringify(parentId ? message : { receive_id: chatId, ...message });
+  try {
+    const raw = await withToken(config, state, (token) => postMessage(config, token, body, parentId));
+    // A token that is still rejected after a forced refresh will not fix itself.
+    if (isApiFailure(raw) && apiCode(raw) === TOKEN_INVALID_CODE) {
+      return { state: "permanent", detail: `feishu code ${TOKEN_INVALID_CODE}` };
+    }
+    return mapSendResponse(raw, endpoint);
+  } catch (error) {
+    return failureReceipt(error);
+  }
+}
+
+function mapUploadResponse(raw: RawResponse, field: "image_key" | "file_key"): { key?: string; receipt?: SendReceipt } {
+  if (raw.status === 429) {
+    return { receipt: { state: "rate_limited", retryAfterMs: parseRetryAfter(raw.headers.get("retry-after")) } };
+  }
+  if (raw.status >= 500) return { receipt: { state: "retryable", detail: `feishu http ${raw.status}` } };
+  const code = apiCode(raw);
+  if (code !== undefined && RATE_LIMIT_CODES.has(code)) {
+    return { receipt: { state: "rate_limited", retryAfterMs: parseRetryAfter(raw.headers.get("retry-after")), detail: `feishu code ${code}` } };
+  }
+  if (CLIENT_ERROR_STATUSES.has(raw.status)) {
+    return { receipt: { state: "permanent", detail: apiResponseDetail(raw.body, raw.status) } };
+  }
+  if (!isRecord(raw.body) || typeof raw.body.code !== "number") {
+    return { receipt: { state: "unknown", detail: "feishu upload response was malformed" } };
+  }
+  if (raw.body.code !== 0) {
+    const msg = typeof raw.body.msg === "string" ? raw.body.msg : "";
+    return { receipt: { state: "permanent", detail: msg ? `feishu code ${raw.body.code}: ${msg}` : `feishu code ${raw.body.code}` } };
+  }
+  const data = isRecord(raw.body.data) ? raw.body.data : undefined;
+  const key = data && typeof data[field] === "string" ? data[field] : undefined;
+  return key ? { key } : { receipt: { state: "unknown", detail: "feishu upload response was malformed" } };
+}
+
+async function uploadAttachment(
+  config: FeishuConfig,
+  state: TokenState,
+  attachment: AttachmentRef,
+): Promise<{ key?: string; receipt?: SendReceipt }> {
+  if (attachment.error) return { receipt: { state: "permanent", detail: attachment.error } };
+  if (!attachment.path) return { receipt: { state: "permanent", detail: `attachment ${attachment.name} has no local file` } };
+  const image = attachment.kind === "image";
+  const limit = image ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
+  let bytes: Buffer;
+  try {
+    bytes = await fs.readFile(attachment.path);
+  } catch {
+    return { receipt: { state: "permanent", detail: `attachment ${attachment.name} could not be read` } };
+  }
+  if (bytes.length > limit) {
+    return { receipt: { state: "permanent", detail: `attachment ${attachment.name} exceeds ${image ? "10 MiB" : "30 MiB"}` } };
+  }
+  const form = new FormData();
+  if (image) {
+    form.set("image_type", "message");
+  } else {
+    form.set("file_type", "stream");
+    form.set("file_name", attachment.name || path.basename(attachment.path));
+  }
+  form.set(image ? "image" : "file", new Blob([new Uint8Array(bytes)]), attachment.name || path.basename(attachment.path));
+  try {
+    const raw = await withToken(config, state, (token) => fetchJson(
+      `${config.baseUrl}${image ? "/open-apis/im/v1/images" : "/open-apis/im/v1/files"}`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form },
+      config.timeoutMs,
+    ));
+    if (isApiFailure(raw) && apiCode(raw) === TOKEN_INVALID_CODE) {
+      return { receipt: { state: "permanent", detail: `feishu code ${TOKEN_INVALID_CODE}` } };
+    }
+    return mapUploadResponse(raw, image ? "image_key" : "file_key");
+  } catch (error) {
+    return { receipt: failureReceipt(error) };
+  }
+}
+
+function partialFailure(receipt: SendReceipt, sent: string[]): SendReceipt {
+  if (sent.length === 0) return receipt;
+  return { ...receipt, detail: `${receipt.detail ?? receipt.state} (already sent: ${sent.join(", ")})` };
 }
 
 export async function sendMessage(
@@ -287,44 +404,47 @@ export async function sendMessage(
   const text = isRecord(params.payload) && typeof params.payload.text === "string"
     ? params.payload.text
     : undefined;
-  if (text === undefined) return { state: "permanent", detail: "send payload.text must be a string" };
+  const attachments = isRecord(params.payload) && Array.isArray(params.payload.attachments)
+    ? params.payload.attachments.filter((item): item is AttachmentRef => isRecord(item) && typeof item.kind === "string" && typeof item.name === "string")
+    : [];
+  if (text === undefined && attachments.length === 0) {
+    return { state: "permanent", detail: "send payload.text must be a string" };
+  }
   if (typeof params.idempotencyKey !== "string" || params.idempotencyKey.length === 0) {
     return { state: "permanent", detail: "send requires an idempotency key" };
   }
 
   const endpoint = target as unknown as Endpoint;
-  // Card 2.0 renders block Markdown; card 1.0 keeps the 0.8.0 lark_md payload.
-  const card = buildCard(config.cardVersion, text);
   const parentId = replyParentId(params.payload, state.accountId);
-  const message = {
-    msg_type: "interactive",
-    content: JSON.stringify(card),
-    uuid: deterministicUuid(params.idempotencyKey),
-  };
-  const body = JSON.stringify(parentId ? message : { receive_id: chatId, ...message });
-
-  let token: string;
-  let raw: RawResponse;
-  try {
-    token = await ensureToken(config, state);
-    raw = await postMessage(config, token, body, parentId);
-  } catch (error) {
-    return failureReceipt(error);
+  const key = params.idempotencyKey;
+  // Resource markers are rendered natively as attachments below; leaving them
+  // in the card would show internal ids to the external room.
+  const clean = (text ?? "").replace(RESOURCE_MARKER, " ").trim();
+  let receipt: SendReceipt | undefined;
+  const sent: string[] = [];
+  if (clean || attachments.length === 0) {
+    // Card 2.0 renders block Markdown; card 1.0 keeps the 0.8.0 lark_md payload.
+    receipt = await sendPart(
+      config, state, chatId, endpoint, parentId, "interactive",
+      buildCard(config.cardVersion, clean),
+      attachments.length ? `${key}:text` : key,
+    );
+    if (receipt.state !== "sent") return receipt;
+    sent.push("text");
   }
-
-  if (raw.status !== 429 && raw.status < 500 && apiCode(raw) === TOKEN_INVALID_CODE) {
-    try {
-      token = await ensureToken(config, state, true);
-      raw = await postMessage(config, token, body, parentId);
-    } catch (error) {
-      return failureReceipt(error);
-    }
-    // A token that is still rejected after a forced refresh will not fix itself.
-    if (isApiFailure(raw) && apiCode(raw) === TOKEN_INVALID_CODE) {
-      return { state: "permanent", detail: `feishu code ${TOKEN_INVALID_CODE}` };
-    }
+  for (const [index, attachment] of attachments.entries()) {
+    const uploaded = await uploadAttachment(config, state, attachment);
+    if (uploaded.receipt) return partialFailure(uploaded.receipt, sent);
+    receipt = await sendPart(
+      config, state, chatId, endpoint, parentId,
+      attachment.kind === "image" ? "image" : "file",
+      attachment.kind === "image" ? { image_key: uploaded.key } : { file_key: uploaded.key },
+      `${key}:attachment:${index}`,
+    );
+    if (receipt.state !== "sent") return partialFailure(receipt, sent);
+    sent.push(`attachment ${index + 1}`);
   }
-  return mapSendResponse(raw, endpoint);
+  return receipt ?? { state: "permanent", detail: "send produced no message" };
 }
 
 export function startupFailureDetail(error: unknown): string {

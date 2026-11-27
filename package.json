@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/opencode-chat-room",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "A chat-room server, web client, terminal client, and OpenCode/Codex/dsh plugins.",
   "license": "MIT",
   "repository": {
@@ -28,7 +28,6 @@
     "src",
     "packages/chat-room-channeld/src",
     "packages/chat-room-channeld/dist/mock-adapter.js",
-    "packages/chat-room-channeld/dist/feishu-adapter.js",
     "!src/tests",
     "!src/**/*.test.*",
     "!src/tui/test",
@@ -38,6 +37,7 @@
     "server/routes",
     "server/app.ts",
     "server/channels.ts",
+    "server/channel-attachments.ts",
     "server/channel-settings.ts",
     "server/channel-integration.ts",
     "server/http-server.ts",
@@ -76,10 +76,10 @@
   "scripts": {
     "build:cli": "bun build cli.ts --target=node --packages external --outfile dist/cli.js >&2",
     "build:channeld-mock": "bun build packages/chat-room-channeld/src/mock-adapter.ts --target=node --packages external --outfile packages/chat-room-channeld/dist/mock-adapter.js >&2",
-    "build:channeld-feishu": "bun build packages/chat-room-channeld/src/feishu-adapter.ts --target=node --packages external --outfile packages/chat-room-channeld/dist/feishu-adapter.js >&2",
+    "build:adapter-feishu": "bun scripts/build-feishu-adapter.ts",
     "build:monaco": "bun scripts/build-monaco.ts",
     "build:office": "bun scripts/build-office.ts",
-    "prepack": "bun run build:cli && bun run build:channeld-mock && bun run build:channeld-feishu && bun scripts/build-monaco.ts --quiet && bun scripts/build-office.ts --quiet",
+    "prepack": "bun run build:cli && bun run build:channeld-mock && bun scripts/build-monaco.ts --quiet && bun scripts/build-office.ts --quiet",
     "server": "node cli.ts",
     "server:bun": "bun cli.ts",
     "server:deno": "deno run --allow-env --allow-read --allow-write --allow-net cli.ts",

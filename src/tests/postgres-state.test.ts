@@ -6,7 +6,9 @@ import { randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import RoomService from "../rooms/room-service.ts";
 import { PgDatabase } from "../state/pg-database.ts";
+import { cloneState, persistStateDiff, readState as readRawState } from "../state/sqlite-rooms.ts";
 import { closeStateDatabases, initializeAdminSchema, initializeReminderSchema, openStateDatabase } from "../state/sqlite-state.ts";
 import * as store from "../state/store.ts";
 
@@ -44,8 +46,8 @@ async function dropSchema(): Promise<void> {
   db.close();
 }
 
-function runHelper(mode: string, stateDir: string): ReturnType<typeof spawnSync> {
-  return spawnSync(process.execPath, [helperPath, mode], {
+function runHelper(mode: string, stateDir: string, ...args: string[]): ReturnType<typeof spawnSync> {
+  return spawnSync(process.execPath, [helperPath, mode, ...args], {
     cwd: repoRoot,
     env: envFor(stateDir, true),
     encoding: "utf8",
@@ -207,7 +209,7 @@ async function stopChatServer(started: ReturnType<typeof startChatServer>): Prom
     await closeStateDatabases();
   });
 
-  test("rejects a second instance and keeps state across a restart", async () => {
+  test("allows independent instances to write and keeps state across a restart", async () => {
     const stateDir = path.join(root, "instance");
     mkdirSync(stateDir, { recursive: true });
     await dropSchema();
@@ -219,12 +221,10 @@ async function stopChatServer(started: ReturnType<typeof startChatServer>): Prom
     holdChild.stderr?.on("data", (chunk) => { errors += chunk; });
     await waitForOutput(holdChild, "holding", () => output);
 
-    const locked = runHelper("expect-locked", stateDir);
-    expect(locked.status).toBe(0);
-    const guard = JSON.parse(lastLine(String(locked.stdout))) as { code: string; message: string };
-    expect(guard.code).toBe("PG_SINGLE_INSTANCE");
-    expect(guard.message).toContain("single-instance");
-    expect(guard.message).toContain("0.8.2");
+    const first = runHelper("create", stateDir, "first room", "first-session");
+    expect(first.status).toBe(0);
+    const second = runHelper("create", stateDir, "second room", "second-session");
+    expect(second.status).toBe(0);
 
     holdChild.kill("SIGKILL");
     await exitOf(holdChild);
@@ -235,17 +235,61 @@ async function stopChatServer(started: ReturnType<typeof startChatServer>): Prom
     expect(written.status).toBe(0);
     const read = runHelper("read", stateDir);
     expect(read.status).toBe(0);
-    expect(JSON.parse(lastLine(String(read.stdout)))).toEqual(["restart room"]);
+    expect(JSON.parse(lastLine(String(read.stdout))).sort()).toEqual(["first room", "restart room", "second room"]);
     expect(errors).toBe("");
   });
 
-  test("runs the HTTP server on PostgreSQL, restarts, and rejects a concurrent instance", async () => {
+  test("two stale snapshots keep each other's rooms and registry entries", async () => {
+    const stateDir = path.join(root, "stale-snapshots");
+    mkdirSync(stateDir, { recursive: true });
+    await dropSchema();
+    process.env.CHAT_ROOM_DATABASE_URL = url;
+    process.env.CHAT_ROOM_STATE_DIR = stateDir;
+    await openStateDatabase(store.databasePath());
+    await closeStateDatabases();
+
+    const first = new PgDatabase(url);
+    const second = new PgDatabase(url);
+    try {
+      const beforeFirst = first.transaction(() => readRawState(first)).deferred();
+      const beforeSecond = second.transaction(() => readRawState(second)).deferred();
+
+      const workingFirst = cloneState(beforeFirst);
+      const serviceFirst = new RoomService();
+      serviceFirst.hydrate(workingFirst.rooms);
+      const roomFirst = serviceFirst.createRoom("instance first", "owner-one");
+      serviceFirst.sendMessage(roomFirst.id, "owner-one", "from first");
+      workingFirst.registry[roomFirst.id] = { "session-one": { serverUrl: "", apiPrefix: "/api", name: "one", lastReadTs: 0 } };
+      first.transaction(() => persistStateDiff(first, beforeFirst, { rooms: serviceFirst.listRooms(), registry: workingFirst.registry })).immediate();
+
+      const workingSecond = cloneState(beforeSecond);
+      const serviceSecond = new RoomService();
+      serviceSecond.hydrate(workingSecond.rooms);
+      const roomSecond = serviceSecond.createRoom("instance second", "owner-two");
+      serviceSecond.sendMessage(roomSecond.id, "owner-two", "from second");
+      workingSecond.registry[roomSecond.id] = { "session-two": { serverUrl: "", apiPrefix: "/api", name: "two", lastReadTs: 0 } };
+      second.transaction(() => persistStateDiff(second, beforeSecond, { rooms: serviceSecond.listRooms(), registry: workingSecond.registry })).immediate();
+
+      const state = readRawState(first);
+      expect(state.rooms.map((room) => room.name).sort()).toEqual(["instance first", "instance second"]);
+      expect(Object.keys(state.registry).sort()).toEqual([roomFirst.id, roomSecond.id].sort());
+      expect(state.rooms.find((room) => room.id === roomFirst.id)?.messages.map((message) => message.text)).toEqual(["from first"]);
+      expect(state.rooms.find((room) => room.id === roomSecond.id)?.messages.map((message) => message.text)).toEqual(["from second"]);
+    } finally {
+      first.close();
+      second.close();
+    }
+  });
+
+  test("runs the HTTP server on PostgreSQL, restarts, and serves concurrent instances", async () => {
     const stateDir = path.join(root, "http-server");
     mkdirSync(stateDir, { recursive: true });
     await dropSchema();
     const port = await freePort();
+    const secondPort = await freePort();
     const token = `pg-server-${randomBytes(6).toString("hex")}`;
     const base = `http://127.0.0.1:${port}`;
+    const secondBase = `http://127.0.0.1:${secondPort}`;
     const first = startChatServer(stateDir, port, token);
     let restarted: ReturnType<typeof startChatServer> | undefined;
     let second: ReturnType<typeof startChatServer> | undefined;
@@ -256,6 +300,19 @@ async function stopChatServer(started: ReturnType<typeof startChatServer>): Prom
       const sent = await api(base, token, `/rooms/${encodeURIComponent(room.id)}/messages`, "POST", { sessionID: "owner", text: "server hello" }) as { messages: Array<{ text: string }> };
       expect(sent.messages.at(-1)?.text).toBe("server hello");
 
+      second = startChatServer(stateDir, secondPort, token);
+      await waitForServer(secondBase, token, second);
+      const secondRoom = await api(secondBase, token, "/rooms", "POST", { name: "second instance room", ownerId: "owner", sessionID: "owner" }) as { id: string };
+      const secondSent = await api(secondBase, token, `/rooms/${encodeURIComponent(room.id)}/messages`, "POST", { sessionID: "owner", text: "from second instance" }) as { messages: Array<{ text: string }> };
+      expect(secondSent.messages.at(-1)?.text).toBe("from second instance");
+
+      for (const address of [base, secondBase]) {
+        const rooms = await api(address, token, "/rooms") as Array<{ id: string }>;
+        expect(rooms.map((item) => item.id)).toEqual(expect.arrayContaining([room.id, secondRoom.id]));
+      }
+
+      await stopChatServer(second);
+      second = undefined;
       first.child.kill("SIGTERM");
       await exitOf(first.child);
       await sleep(500);
@@ -263,16 +320,7 @@ async function stopChatServer(started: ReturnType<typeof startChatServer>): Prom
       restarted = startChatServer(stateDir, port, token);
       await waitForServer(base, token, restarted);
       const history = await api(base, token, `/rooms/${encodeURIComponent(room.id)}/history?limit=100`) as { messages: Array<{ text: string }> };
-      expect(history.messages.map((message) => message.text)).toContain("server hello");
-
-      second = startChatServer(stateDir, await freePort(), token);
-      await Promise.race([
-        exitOf(second.child),
-        sleep(15_000).then(() => { throw new Error("a second chat-room instance stayed alive on the same PostgreSQL database"); }),
-      ]);
-      expect(second.child.exitCode).not.toBeNull();
-      expect(second.child.exitCode).not.toBe(0);
-      expect(second.errors()).toMatch(/single-instance|0\.8\.2/);
+      expect(history.messages.map((message) => message.text)).toEqual(expect.arrayContaining(["server hello", "from second instance"]));
     } finally {
       if (restarted) await stopChatServer(restarted);
       if (second) await stopChatServer(second);

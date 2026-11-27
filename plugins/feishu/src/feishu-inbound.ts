@@ -1,4 +1,4 @@
-import type { IngestEvent, MessageRef } from "./protocol.ts";
+import type { IngestEvent, MessageRef } from "../../../packages/chat-room-channeld/src/protocol.ts";
 
 export interface InboundOptions {
   accountId: string;
@@ -73,6 +73,42 @@ function messageText(messageType: string, raw: string, mentions: unknown): strin
   return undefined;
 }
 
+type ParsedAttachment = { kind: "image" | "file"; name: string; sourceId: string };
+
+/** Files and images carry a provider key instead of text; post images live inline. */
+function messageAttachments(messageType: string, raw: string): ParsedAttachment[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed)) return [];
+  if (messageType === "image") {
+    const key = stringValue(parsed.image_key);
+    return key ? [{ kind: "image", name: "image", sourceId: key }] : [];
+  }
+  if (messageType === "file") {
+    const key = stringValue(parsed.file_key);
+    return key ? [{ kind: "file", name: stringValue(parsed.file_name) ?? "file", sourceId: key }] : [];
+  }
+  if (messageType !== "post") return [];
+  const post = isRecord(parsed.content)
+    ? Object.values(parsed.content).find((item) => Array.isArray(item))
+    : parsed.content;
+  if (!Array.isArray(post)) return [];
+  const attachments: ParsedAttachment[] = [];
+  for (const line of post) {
+    if (!Array.isArray(line)) continue;
+    for (const item of line) {
+      if (!isRecord(item) || item.tag !== "img") continue;
+      const key = stringValue(item.image_key);
+      if (key) attachments.push({ kind: "image", name: "image", sourceId: key });
+    }
+  }
+  return attachments;
+}
+
 function occurredAt(value: unknown): string | undefined {
   const text = stringValue(value);
   if (!text || !/^\d{10,16}$/.test(text)) return undefined;
@@ -84,7 +120,7 @@ function occurredAt(value: unknown): string | undefined {
 
 /**
  * Map one Feishu `im.message.receive_v1` payload to a Channel D ingest event.
- * Only allowlisted group text/post messages from human senders are relayed.
+ * Only allowlisted group text/post/image/file messages from human senders are relayed.
  */
 export function parseInboundEvent(payload: string, options: InboundOptions): ParsedInbound {
   let root: unknown;
@@ -121,15 +157,17 @@ export function parseInboundEvent(payload: string, options: InboundOptions): Par
     ?? stringValue(senderIds.union_id);
   if (!nativeUserId) return { ignored: "sender identity is unavailable" };
 
-  const text = messageText(messageType, stringValue(message.content) ?? "", message.mentions);
-  if (!text) return { ignored: `unsupported or empty ${messageType} message` };
+  const rawContent = stringValue(message.content) ?? "";
+  const text = messageText(messageType, rawContent, message.mentions);
+  const attachments = messageAttachments(messageType, rawContent);
+  if (!text && attachments.length === 0) return { ignored: `unsupported or empty ${messageType} message` };
 
   const source = { platform: "feishu", accountId: options.accountId, roomId: chatId };
   const parentId = stringValue(message.parent_id) ?? stringValue(message.root_id);
   const parent: MessageRef | undefined = parentId
     ? { endpoint: source, nativeMessageId: parentId }
     : undefined;
-  const eventRef: MessageRef = { endpoint: source, nativeMessageId: messageId, text };
+  const eventRef: MessageRef = { endpoint: source, nativeMessageId: messageId, ...(text ? { text } : {}) };
   const providerEventId = stringValue(header.event_id) ?? messageId;
   const eventId = `feishu-${options.accountId}-${providerEventId}`;
   const createTime = occurredAt(message.create_time);
@@ -152,7 +190,10 @@ export function parseInboundEvent(payload: string, options: InboundOptions): Par
       ...(parent ? { parent } : {}),
       ...(createTime ? { occurredAt: createTime } : {}),
       receivedAt: new Date().toISOString(),
-      content: { text },
+      content: {
+        ...(text ? { text } : {}),
+        ...(attachments.length ? { attachments } : {}),
+      },
     },
   };
 }

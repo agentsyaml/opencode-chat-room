@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
 const ADAPTER_PATH = path.resolve(import.meta.dir, "../src/feishu-adapter.ts");
-const DIST_PATH = path.resolve(import.meta.dir, "../dist/feishu-adapter.js");
+const DIST_PATH = path.resolve(import.meta.dir, "../dist/feishu-adapter.ts");
 const TARGET = { platform: "feishu", accountId: "main", roomId: "oc_chat" };
 interface FakeResponse {
   status?: number;
@@ -525,13 +525,15 @@ describe("feishu adapter", () => {
     }
   });
 
-  test("missing credentials fail initialize", async () => {
+  test("missing credentials pass initialize and fail start", async () => {
     const child = newChild({ FEISHU_APP_ID: "", FEISHU_APP_SECRET: "" });
 
     const initialized = await child.request("initialize", INIT_PARAMS);
-    expect(initialized.result).toBeUndefined();
-    expect(initialized.error?.message).toContain("FEISHU_APP_ID");
-    expect(initialized.error?.message).toContain("FEISHU_APP_SECRET");
+    expect(initialized.result?.platform).toBe("feishu");
+    const started = await child.request("start", START_PARAMS);
+    expect(started.result).toBeUndefined();
+    expect(started.error?.message).toContain("FEISHU_APP_ID");
+    expect(started.error?.message).toContain("FEISHU_APP_SECRET");
   });
 
   test("invalid credentials fail start with code and message only", async () => {
@@ -570,7 +572,7 @@ describe("feishu adapter", () => {
     });
   });
 
-  test("an invalid card version fails initialize with a clear prerequisite", async () => {
+  test("an invalid card version fails start with a clear prerequisite", async () => {
     const child = newChild({
       FEISHU_APP_ID: "cli_test",
       FEISHU_APP_SECRET: "secret_test",
@@ -578,8 +580,10 @@ describe("feishu adapter", () => {
     });
 
     const initialized = await child.request("initialize", INIT_PARAMS);
-    expect(initialized.result).toBeUndefined();
-    expect(initialized.error?.message).toBe("FEISHU_CARD_VERSION must be 1.0 or 2.0");
+    expect(initialized.result?.platform).toBe("feishu");
+    const started = await child.request("start", START_PARAMS);
+    expect(started.result).toBeUndefined();
+    expect(started.error?.message).toBe("FEISHU_CARD_VERSION must be 1.0 or 2.0");
   });
 
   test("a Feishu parent reference replies natively without receive_id", async () => {
@@ -628,6 +632,16 @@ describe("feishu adapter", () => {
     const requests = fake.sendRequests();
     expect(requests[0]!.url).toBe("/open-apis/im/v1/messages?receive_id_type=chat_id");
     expect(JSON.parse(requests[0]!.body)).toMatchObject({ receive_id: "oc_chat" });
+  });
+
+  test.skipIf(!existsSync(DIST_PATH))("built dist keeps real TypeScript types and has no relative imports", () => {
+    const source = readFileSync(DIST_PATH, "utf8");
+    expect(source).toContain("export interface IngestEvent");
+    expect(source).toContain("export type AttachmentRef");
+    expect(source).toContain("export interface FeishuConfig");
+    expect(source).toContain("function parseInboundEvent(");
+    expect(source).toMatch(/\): ParsedInbound \{/);
+    expect(source).not.toMatch(/\bfrom\s+["']\.\.?\//);
   });
 
   test.skipIf(!existsSync(DIST_PATH))("built dist runs the stdio handshake under node", async () => {

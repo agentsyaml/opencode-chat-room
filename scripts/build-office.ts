@@ -3,6 +3,7 @@
 import { build } from "bun";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { assertEchartsLicense, collectLicenseFiles } from "./office-licenses.ts";
 
 const root = path.resolve(import.meta.dir, "..");
 const out = path.join(root, "server/assets/office");
@@ -53,37 +54,12 @@ try {
   const licenses = path.join(out, "licenses");
   await mkdir(licenses, { recursive: true });
   // Pick licenses deterministically. Directory order differs between macOS
-  // and Linux, and echarts ships LICENSE, NOTICE and licenses/ together, so
-  // collect every license/notice file instead of trusting readdir order.
-  const licenseRank = (name: string): number => {
-    const lower = name.toLowerCase();
-    if (lower === "license" || lower === "licence") return 0;
-    if (lower === "copying") return 1;
-    if (/^licen[cs]e/.test(lower)) return 2;
-    return 99;
-  };
-  const collectLicenses = async (dir: string): Promise<string[]> => {
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-    const licenses = entries
-      .filter((entry) => entry.isFile() && licenseRank(entry.name) < 99)
-      .sort((left, right) => licenseRank(left.name) - licenseRank(right.name) || left.name.localeCompare(right.name))
-      .map((entry) => path.join(dir, entry.name));
-    const notices = entries
-      .filter((entry) => entry.isFile() && /^notice/i.test(entry.name))
-      .sort((left, right) => left.name.localeCompare(right.name))
-      .map((entry) => path.join(dir, entry.name));
-    const nestedDirs = entries
-      .filter((entry) => entry.isDirectory() && /^licen[cs]es$/i.test(entry.name))
-      .sort((left, right) => left.name.localeCompare(right.name));
-    const nested: string[] = [];
-    for (const entry of nestedDirs) nested.push(...await collectLicenses(path.join(dir, entry.name)));
-    return [...licenses, ...nested, ...notices];
-  };
+  // and Linux, and echarts ships LICENSE, NOTICE and licenses/ together.
   const notice = ["Third-party packages bundled into the Office previews.", ""];
   for (const name of [...packages].sort()) {
     const dir = path.join(root, "node_modules", name);
     const info = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")) as { version?: string; license?: string };
-    const licenseFiles = await collectLicenses(dir);
+    const licenseFiles = await collectLicenseFiles(dir);
     const target = path.join(licenses, `${name.replace("/", "-")}-LICENSE.txt`);
     // Copy the highest-ranked license verbatim; NOTICE/nested texts are listed
     // in THIRD-PARTY-NOTICES.txt but do not replace the main license file.
@@ -98,9 +74,7 @@ try {
   // Linux readdir order can put echarts/NOTICE first. Fail the prepack instead
   // of publishing a NOTICE in place of the Apache License text.
   const echarts = await readFile(path.join(licenses, "echarts-LICENSE.txt"), "utf8");
-  if (!/Apache License/i.test(echarts) || Buffer.byteLength(echarts) < 10_000) {
-    throw new Error("Office prepack copied the echarts NOTICE instead of its Apache License");
-  }
+  assertEchartsLicense(echarts);
 
   const files = (await readdir(out)).filter((file) => file.endsWith(".bundle.js")).sort();
   if (files.length !== 3) throw new Error(`Expected 3 bundles, found ${files.length}.`);

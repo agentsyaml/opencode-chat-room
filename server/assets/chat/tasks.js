@@ -462,7 +462,7 @@ export function initTasks(app) {
   });
 
   trigger.addEventListener("click", () => { app.closePanels(); open(); });
-  app.registerPanelSurface?.("tasks", { close: () => close(false) });
+  app.registerPanelSurface?.("tasks", { element: dialog, close: (restore = false) => close(restore) });
   app.watchPanel?.("tasks", syncMode);
   $("#btnCloseTasks")?.addEventListener("click", () => close());
   refresh.addEventListener("click", () => { if (!editingId) void load(); });
@@ -542,16 +542,10 @@ export function initTasks(app) {
   });
 
   $("#btnCloseTaskEdit")?.addEventListener("click", () => closeEdit(true));
-  editDialog.addEventListener("click", (event) => {
-    if (event.target === editDialog) closeEdit(true);
-  });
   editDialog.addEventListener("cancel", (event) => { event.preventDefault(); closeEdit(true); });
-  dialog.addEventListener("click", (event) => {
-    if (event.target === dialog && !dialog.classList.contains("is-pane")) close();
-  });
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
+    if (event.key !== "Escape" || event.altKey) return;
     if (!menu.hidden) {
       event.preventDefault();
       setMenu(false);

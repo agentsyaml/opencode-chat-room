@@ -20,7 +20,6 @@ export function initConfirmDialog(app) {
   accept.addEventListener("click", () => close(true));
   cancel.addEventListener("click", () => close(false));
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(false); });
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) close(false); });
   dialog.addEventListener("close", () => {
     // A close from outside the buttons still settles the promise; a re-open in the
     // same task leaves the dialog open, so the stale event must not clear it.

@@ -29,7 +29,10 @@ await compile({
 });
 
 await compile({
-  entrypoints: [path.join(root, "src/web/editor.worker.ts"), path.join(root, "src/web/json.worker.ts")],
+  entrypoints: [
+    path.join(root, "src/web/editor.worker.ts"),
+    path.join(root, "src/web/json.worker.ts"),
+  ],
   outdir: out,
   target: "browser",
   format: "iife",

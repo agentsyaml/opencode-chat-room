@@ -1,8 +1,8 @@
 // Channel D integration: opt-in forwarding from a room message to an external
 // IM endpoint through the channeld relay host. The host keeps its own SQLite
 // file, so disabling the feature (or deleting channeld.sqlite) is a full rollback.
-import { mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { ServerSettings } from "../src/config/file-config.ts";
@@ -26,6 +26,7 @@ import { validateTargets } from "../packages/chat-room-channeld/src/host-helpers
 import { EVENT_SCHEMA_VERSION, type Endpoint, type IngestEvent } from "../packages/chat-room-channeld/src/protocol.ts";
 import { matchRules, targetKey } from "../packages/chat-room-channeld/src/rules.ts";
 import { inboundRoomText, matchInboundRoutes } from "../packages/chat-room-channeld/src/inbound.ts";
+import { forwardAttachments, inboundAttachments, prepareSendPayload } from "./channel-attachments.ts";
 import {
   isTerminalDeliveryState,
   readChannelStats,
@@ -64,7 +65,7 @@ export type DeliveryResultCallback = (
   receipt: ReceiptRow | undefined,
 ) => void;
 
-const json = (body: unknown, status = 200) => Response.json(body, { status });
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const IDENTIFIER = /^[A-Za-z0-9._-]{1,128}$/;
 const MAX_SESSION = 128;
 const MAX_REQUEST_ID = 200;
@@ -150,7 +151,12 @@ export function createInboundRelay(config: ChannelConfig): {
     onIngestCommitted: async (event) => {
       for (const route of matchInboundRoutes(config, event)) {
         const text = inboundRoomText(event, route);
-        if (!text) continue;
+        if (!text && !event.content?.attachments?.length) continue;
+        // Resource uploads are idempotent per event, room, and index, so a
+        // retried event reuses the same rows instead of duplicating files.
+        const markers = await inboundAttachments(event, route.to.room);
+        const body = [text, ...markers].filter(Boolean).join("\n");
+        if (!body) continue;
         await writeSqliteStateWithDatabase(databasePath(), (svc, _registry, db) => {
           db.exec(
             `CREATE TABLE IF NOT EXISTS channel_inbound_relays (
@@ -164,7 +170,7 @@ export function createInboundRelay(config: ChannelConfig): {
             "INSERT OR IGNORE INTO channel_inbound_relays (event_id, room_id, relayed_at) VALUES (?, ?, ?)",
           ).run(event.eventId, route.to.room, Date.now());
           if (Number(inserted.changes) === 0) return;
-          svc.addEvent(route.to.room, text);
+          svc.addEvent(route.to.room, body);
         });
       }
     },
@@ -196,6 +202,7 @@ async function activateRuntime(
     spawnAdapter: deps.spawnAdapter,
     deliveryIntervalMs: deps.deliveryIntervalMs,
     onDeliveryResult: createDeliveryResultHandler(),
+    prepareSendPayload,
     ...inbound,
   });
   try {
@@ -327,6 +334,7 @@ export function createChannelController(
       || url.pathname === "/channeld/enable"
       || url.pathname === "/channeld/disable";
     const integrationPath = url.pathname === "/channeld/plugins"
+      || url.pathname.startsWith("/channeld/plugins/")
       || url.pathname === "/channeld/integration";
     if (!adminPath && !integrationPath) return channelRoutes(req, url, runtime);
     if (env.CHATROOM_ALLOW_ADMIN !== "true") return undefined;
@@ -518,6 +526,8 @@ export async function channelRoutes(
       return json({ error: "forward target is unavailable" }, 409);
     }
 
+    const attachments = await forwardAttachments(roomId, message.text);
+
     const source: Endpoint = { platform: "chatroom", accountId: "center", roomId };
     const requestedTarget: Endpoint = { platform: target.platform, accountId: target.account, roomId: target.room };
     // A room reply quotes its parent only when that parent already went to the
@@ -539,7 +549,7 @@ export async function channelRoutes(
       ...(parent ? { parent } : {}),
       occurredAt: new Date(message.createdAt).toISOString(),
       receivedAt: new Date().toISOString(),
-      content: { text: message.text },
+      content: { text: message.text, ...(attachments.length ? { attachments } : {}) },
     };
     const result = await runtime.host.ingest(event);
     return json({ eventId: result.eventId ?? event.eventId }, 202);

@@ -92,9 +92,9 @@ export class Database implements StateDatabase {
 export function isBusyError(error: unknown): boolean {
   const err = error as { code?: string; errcode?: number; message?: string } | null;
   if (!err) return false;
-  // PostgreSQL serialization failure and deadlock detected. The existing
-  // immediate() retry loop treats these like SQLITE_BUSY/SQLITE_LOCKED.
-  if (err.code === "40001" || err.code === "40P01") return true;
+  // PostgreSQL serialization failure, deadlock, and advisory-lock timeout. The
+  // existing immediate() retry loop treats these like SQLITE_BUSY/SQLITE_LOCKED.
+  if (err.code === "40001" || err.code === "40P01" || err.code === "55P03") return true;
   if (typeof err.errcode === "number" && ((err.errcode & 0xff) === 5 || (err.errcode & 0xff) === 6)) return true;
   return /SQLITE_(BUSY|LOCKED)/.test(err.code ?? "") || /database (?:is|table is) locked/i.test(err.message ?? "");
 }

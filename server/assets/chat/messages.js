@@ -218,6 +218,7 @@ export function initMessages(app) {
         ? app.state.room.participants.find((person) => person.id === message.senderId)?.name || app.t("guest")
         : message.senderId;
       row.className = `msg${own ? " own" : ""}`;
+      row.dataset.initial = Array.from((own ? app.state.myName : sender).trim())[0]?.toLocaleUpperCase() || "?";
       const meta = document.createElement("div"), name = document.createElement("span"), time = document.createElement("span");
       meta.className = "msg-meta";
       name.className = "msg-name";

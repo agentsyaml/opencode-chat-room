@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -54,8 +54,9 @@ afterAll(() => {
 describe("chat-room-channeld cli", () => {
   test("--version prints the package version", () => {
     const result = cli(["--version"]);
+    const { version } = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version: string };
     expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe("chat-room-channeld 0.1.0");
+    expect(result.stdout.trim()).toBe(`chat-room-channeld ${version}`);
   });
 
   test("--help exits zero and lists the config flag", () => {

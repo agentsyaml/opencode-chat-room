@@ -64,7 +64,7 @@ export function replaceFootnoteTokens(fragment, notes) {
       ids.push(id); notes.refIds.set(label, ids);
       const sup = document.createElement("sup"), link = document.createElement("a");
       sup.className = "footnote-ref";
-      link.id = id; link.href = `#${notes.idPrefix}-${number}`; link.textContent = String(number);
+      link.id = id; link.href = `#${notes.idPrefix}-${number}`; link.textContent = `[${number}]`;
       link.setAttribute("role", "doc-noteref");
       sup.append(link); replacement.append(sup);
     }

@@ -14,6 +14,8 @@ import {
   rpcRequest,
   rpcResult,
   type Endpoint,
+  type AccountField,
+  type AdapterCapabilities,
   type IngestEvent,
   type JsonRpcId,
   type MessageRef,
@@ -61,6 +63,98 @@ const STDERR_TAIL_LIMIT = 4096;
 const DEFAULT_INITIALIZE_TIMEOUT_MS = 10_000;
 const DEFAULT_SEND_TIMEOUT_MS = 15_000;
 
+const ADAPTER_NODE_OPTIONS = [
+  "--experimental-transform-types",
+  "--disable-warning=ExperimentalWarning",
+] as const;
+
+/**
+ * Adapter children execute uploaded .ts plugins, so they get Node's full
+ * TypeScript transform; the server process itself stays strip-only.
+ */
+export function adapterChildEnv(account: AccountConfig): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...account.env };
+  let options = env.NODE_OPTIONS?.trim() ?? "";
+  for (const flag of ADAPTER_NODE_OPTIONS) {
+    if (!options.split(/\s+/).includes(flag)) options = options ? `${options} ${flag}` : flag;
+  }
+  env.NODE_OPTIONS = options;
+  // Forced after account env: config validation also rejects these keys.
+  env.CHANNELD_ACCOUNT_ID = account.id;
+  env.CHANNELD_PLATFORM = account.platform;
+  return env;
+}
+
+/** Keep only well-formed adapter-declared facts; unknown fields are ignored. */
+function readAccountFields(value: unknown): AccountField[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const fields: AccountField[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const raw = item as Record<string, unknown>;
+    const key = typeof raw.key === "string" ? raw.key.trim() : "";
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || seen.has(key)) continue;
+    const field: AccountField = { key };
+    if (typeof raw.label === "string" && raw.label.trim()) field.label = raw.label.trim();
+    if (typeof raw.type === "string" && ["string", "secret", "boolean", "number", "select"].includes(raw.type)) {
+      field.type = raw.type as AccountField["type"];
+    }
+    if (raw.required === true) field.required = true;
+    if (typeof raw.default === "string") field.default = raw.default;
+    if (typeof raw.description === "string" && raw.description.trim()) field.description = raw.description.trim();
+    if (Array.isArray(raw.options)) {
+      const options = raw.options
+        .filter((option): option is Record<string, unknown> => Boolean(option) && typeof option === "object")
+        .map((option) => typeof option.value === "string" && option.value
+          ? { value: option.value, ...(typeof option.label === "string" && option.label ? { label: option.label } : {}) }
+          : undefined)
+        .filter((option): option is { value: string; label?: string } => Boolean(option));
+      if (options.length) field.options = options;
+    }
+    seen.add(key);
+    fields.push(field);
+  }
+  return fields.length ? fields : undefined;
+}
+
+function readCapabilities(result: unknown, accountId: string): AdapterCapabilities | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  const accounts = (result as { accounts?: unknown }).accounts;
+  if (!accounts || typeof accounts !== "object") return undefined;
+  const raw = (accounts as Record<string, unknown>)[accountId];
+  if (!raw || typeof raw !== "object") return undefined;
+  const entry = raw as Record<string, unknown>;
+  const capabilities: AdapterCapabilities = {};
+  if (typeof entry.displayName === "string" && entry.displayName.trim()) {
+    capabilities.displayName = entry.displayName.trim();
+  }
+  const attachment = entry.attachments;
+  if (attachment && typeof attachment === "object") {
+    const value = attachment as Record<string, unknown>;
+    const kinds = Array.isArray(value.kinds)
+      ? value.kinds.filter((kind): kind is "image" | "file" => kind === "image" || kind === "file")
+      : [];
+    if (kinds.length) {
+      capabilities.attachments = { kinds };
+      if (Number.isSafeInteger(value.imageMaxBytes) && (value.imageMaxBytes as number) > 0) {
+        capabilities.attachments.imageMaxBytes = value.imageMaxBytes as number;
+      }
+      if (Number.isSafeInteger(value.fileMaxBytes) && (value.fileMaxBytes as number) > 0) {
+        capabilities.attachments.fileMaxBytes = value.fileMaxBytes as number;
+      }
+    }
+  }
+  const account = entry.account;
+  if (account && typeof account === "object") {
+    const value = account as Record<string, unknown>;
+    const schema = readAccountFields(value.schema);
+    const env = readAccountFields(value.env);
+    if (schema || env) capabilities.account = { ...(schema ? { schema } : {}), ...(env ? { env } : {}) };
+  }
+  return Object.keys(capabilities).length ? capabilities : undefined;
+}
+
 export class AdapterProcess {
   readonly #account: AccountConfig;
   readonly #onIngest: AdapterContext["onIngest"];
@@ -78,6 +172,7 @@ export class AdapterProcess {
   #stopping = false;
   #gone = false;
   #pollutionError?: Error;
+  #capabilities?: AdapterCapabilities;
 
   constructor(options: AdapterProcessOptions) {
     this.#account = options.account;
@@ -93,19 +188,17 @@ export class AdapterProcess {
     return this.#account.id;
   }
 
+  get capabilities(): AdapterCapabilities | undefined {
+    return this.#capabilities;
+  }
+
   async start(): Promise<void> {
     if (this.#child) throw new Error(`adapter ${this.#account.id} already started`);
     const [command, ...args] = this.#account.adapter.command;
     if (!command) throw new Error(`adapter ${this.#account.id} has an empty command`);
     const child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        ...this.#account.env,
-        // Forced after account env: config validation also rejects these keys.
-        CHANNELD_ACCOUNT_ID: this.#account.id,
-        CHANNELD_PLATFORM: this.#account.platform,
-      },
+      env: adapterChildEnv(this.#account),
     });
     this.#child = child;
     this.#attach(child);
@@ -124,6 +217,7 @@ export class AdapterProcess {
         this.#initializeTimeoutMs,
       );
       this.#assertReportedPlatform("initialize", initialized);
+      this.#capabilities = readCapabilities(initialized, this.#account.id);
       const started = await this.#call(
         "start",
         { accounts: [this.#account.id], cursors: {} },
@@ -143,6 +237,50 @@ export class AdapterProcess {
 
     this.#started = true;
     log.info("adapter started", { account: this.#account.id });
+  }
+
+  /**
+   * Read-only handshake used when a plugin is uploaded: initialize only, then
+   * kill. It does not start the account and does not need credentials.
+   */
+  async probe(): Promise<{ platform?: string; capabilities?: AdapterCapabilities }> {
+    if (this.#child) throw new Error(`adapter ${this.#account.id} already started`);
+    const [command, ...args] = this.#account.adapter.command;
+    if (!command) throw new Error(`adapter ${this.#account.id} has an empty command`);
+    const child = spawn(command, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: adapterChildEnv(this.#account),
+    });
+    this.#child = child;
+    this.#attach(child);
+    try {
+      const initialized = await this.#call(
+        "initialize",
+        {
+          protocolVersions: [PROTOCOL_VERSION],
+          eventSchemas: [EVENT_SCHEMA_VERSION],
+          sessionEpoch: `${Date.now().toString(36)}-${process.pid}`,
+          platform: this.#account.platform,
+          accounts: [this.#account.id],
+          maxFrameBytes: MAX_FRAME_BYTES,
+        },
+        this.#initializeTimeoutMs,
+      );
+      const reported = initialized && typeof initialized === "object"
+        ? (initialized as { platform?: unknown }).platform
+        : undefined;
+      this.#capabilities = readCapabilities(initialized, this.#account.id);
+      return {
+        ...(typeof reported === "string" && reported.trim() ? { platform: reported.trim() } : {}),
+        ...(this.#capabilities ? { capabilities: this.#capabilities } : {}),
+      };
+    } catch (error) {
+      const tail = this.#stderrTail.trim();
+      const message = this.#pollutionError?.message ?? (error instanceof Error ? error.message : String(error));
+      throw new Error(`adapter probe failed: ${message}${tail ? `\nstderr:\n${tail}` : ""}`);
+    } finally {
+      await this.stop().catch(() => undefined);
+    }
   }
 
   /**

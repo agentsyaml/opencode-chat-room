@@ -100,6 +100,55 @@ test.skipIf(!browserModule)("pinch zoom does not resize the app", async () => {
   }
 }, 90000);
 
+// The thread blocks wheel events at its scroll edges. While pinch-zoomed the
+// document cannot scroll, so that block must yield to the visual viewport.
+test.skipIf(!browserModule)("pinch zoom keeps wheel panning responsive", async () => {
+  const { chromium } = await import(pathToFileURL(browserModule!).href);
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-pinch-scroll-"));
+  const port = await unusedPort(), origin = `http://127.0.0.1:${port}`;
+  const server = spawn(process.execPath, ["run", "server/chat-server.ts"], {
+    cwd: process.cwd(), env: isolatedEnv(stateDir, port), stdio: "ignore",
+  });
+  let browser: any;
+  try {
+    await waitForServer(origin);
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.addInitScript((value: string) => localStorage.setItem("chat.token", value), token);
+    await page.goto(`${origin}/chat`);
+    await page.locator("#inName").fill("Pinch tester");
+    await page.locator("#inRoomName").fill("Pinch room");
+    await page.locator("#btnCreate").click();
+    await page.locator("#chatView").waitFor({ state: "visible" });
+    await page.locator("#msgInput").fill("one short message");
+    await page.locator("#btnSend").click();
+    await page.locator(".msg").first().waitFor();
+
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 });
+    await page.waitForTimeout(250);
+    const thread = await page.locator("#thread").boundingBox();
+    if (!thread) throw new Error("thread is not visible");
+    await page.mouse.move(thread.x + thread.width / 2, thread.y + thread.height / 2);
+    await page.mouse.wheel(0, 240);
+    await page.waitForTimeout(300);
+    const panned = await page.evaluate(() => ({
+      scale: visualViewport?.scale ?? 1,
+      offsetTop: visualViewport?.offsetTop ?? 0,
+      scrollY: document.scrollingElement?.scrollTop ?? 0,
+    }));
+    expect(panned.scale).toBeGreaterThan(1.5);
+    expect(panned.offsetTop + panned.scrollY).toBeGreaterThan(0);
+
+    await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: 1 });
+    await page.waitForTimeout(250);
+  } finally {
+    await browser?.close(); server.kill("SIGTERM");
+    await new Promise((resolve) => server.once("exit", resolve));
+    await rm(stateDir, { recursive: true, force: true });
+  }
+}, 90000);
+
 async function unusedPort() {
   const server = createServer(); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); if (!address || typeof address === "string") throw new Error("No local port");

@@ -79,7 +79,7 @@ export const ja = {
   integrationsAddEnv: "変数を追加", integrationsClearEnv: "すべての変数を消去", integrationsKeepEnv: "すべての変数を保持",
   integrationsClearEnvActive: "保存時に保存済みの変数がすべて消去されます。", integrationsEnvInvalid: "変数名は英数字とアンダースコアのみの一意な名前にしてください。",
   integrationsAccountTitle: "連携アカウント", integrationsAccountId: "アカウント ID", integrationsPlatform: "プラットフォーム",
-  integrationsAccountInvalid: "アカウント ID を入力し、プラグインを選択してください。", integrationsDuplicateAccount: "この ID のアカウントは既に存在します。",
+  integrationsAccountInvalid: "プラグインを選択してください。", integrationsDuplicateAccount: "この ID のアカウントは既に存在します。",
   integrationsAccountSaved: "アカウントを保存しました。連携を保存すると反映されます。", integrationsAccountRemoved: "アカウントを削除しました。連携を保存すると反映されます。",
   integrationsLastError: "最後のエラー", integrationsEdit: "編集", integrationsRemove: "削除",
   integrationsInvalidJson: "ルール JSON の {line} 行目付近が無効です。", integrationsInvalidRules: "ルールは JSON 配列である必要があります。",

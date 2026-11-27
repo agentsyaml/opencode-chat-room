@@ -13,8 +13,20 @@
   // Resolve the saved theme and outer window frame before the first paint.
   try {
     var savedTheme = localStorage.getItem("chat.theme");
-    document.documentElement.dataset.theme = ["light", "dark", "forest", "sand"].includes(savedTheme) ? savedTheme : "system";
-  } catch { document.documentElement.dataset.theme = "system"; }
+    var savedCustom = localStorage.getItem("chat.customTheme");
+    var customColor = /^#[0-9a-f]{6}$/i.test(savedCustom) ? savedCustom : "#22695c";
+    var customChannels = customColor.slice(1).match(/../g).map(function (part) {
+      var value = parseInt(part, 16) / 255;
+      return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+    });
+    document.documentElement.style.setProperty("--custom-bg", customColor);
+    document.documentElement.dataset.customDark = (0.2126 * customChannels[0] + 0.7152 * customChannels[1] + 0.0722 * customChannels[2]) < 0.4 ? "true" : "false";
+    document.documentElement.dataset.theme = ["light", "dark", "forest", "sand", "custom"].includes(savedTheme) ? savedTheme : "system";
+  } catch {
+    document.documentElement.dataset.theme = "system";
+    document.documentElement.style.setProperty("--custom-bg", "#22695c");
+    document.documentElement.dataset.customDark = "true";
+  }
   document.documentElement.dataset.windowFrame = "framed";
   try {
     if (localStorage.getItem("chat.windowFrame") === "borderless") document.documentElement.dataset.windowFrame = "borderless";
@@ -30,6 +42,7 @@
 <link rel="stylesheet" href="/assets/recall.css?v={{version}}">
 <link rel="stylesheet" href="/assets/attachments.css?v={{version}}">
 <link rel="stylesheet" href="/assets/responsive.css?v={{version}}">
+<link rel="stylesheet" href="/assets/window-controls.css?v={{version}}">
 <link rel="stylesheet" href="/assets/code-highlight.css?v={{version}}">
 <link rel="stylesheet" href="/assets/room-create.css?v={{version}}">
 <link rel="stylesheet" href="/assets/edit-room.css?v={{version}}">
@@ -161,7 +174,7 @@
           <span data-i18n="settingsIntegrations">Integrations</span>
         </button>
         <button id="settingsTabConnection" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settingsPanelConnection" tabindex="-1" data-settings-tab="connection">
-          <svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-plug_connected-24"></use></svg>
+          <svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-shield_checkmark-24"></use></svg>
           <span data-i18n="settingsConnection">Connection</span>
         </button>
       </nav>
@@ -231,16 +244,46 @@
                 <span class="theme-preview" aria-hidden="true"></span>
                 <span class="theme-name" data-i18n="themeSand">Sand</span>
               </label>
+              <label class="theme-option" data-theme-choice="custom">
+                <input type="radio" name="theme" value="custom">
+                <span class="theme-preview" aria-hidden="true"></span>
+                <span class="theme-name" data-i18n="themeCustom">Custom</span>
+                <input id="inCustomThemeColor" class="input theme-color-input" type="color" aria-label="Custom theme color" data-i18n-aria-label="themeCustomColor">
+              </label>
             </div>
+          </fieldset>
+          <fieldset class="settings-block chat-background-block">
+            <legend class="settings-label"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-image-24"></use></svg><span data-i18n="chatBackgroundLabel">Chat background</span></legend>
+            <p class="settings-hint" data-i18n="chatBackgroundHint">Fills the browser window behind the app in this browser only. A lower opacity keeps text readable.</p>
+            <div class="chat-background-controls">
+              <label class="chat-background-field">
+                <span class="field-label" data-i18n="chatBackgroundMode">Mode</span>
+                <select id="inChatBackgroundMode" class="input settings-select">
+                  <option value="default" data-i18n="chatBackgroundDefault">Default</option>
+                  <option value="image" data-i18n="chatBackgroundImage">Image</option>
+                </select>
+              </label>
+              <label id="chatBackgroundOpacityField" class="chat-background-field" hidden>
+                <span class="field-label" data-i18n="chatBackgroundOpacity">Opacity</span>
+                <span class="settings-range chat-background-opacity"><input id="inChatBackgroundOpacity" type="range" min="0" max="100" step="5" value="35" aria-describedby="chatBackgroundHint"><output id="chatBackgroundOpacityValue" class="settings-range-value" for="inChatBackgroundOpacity">35%</output></span>
+              </label>
+              <label id="chatBackgroundImageField" class="chat-background-field chat-background-image-field" hidden>
+                <span class="field-label" data-i18n="chatBackgroundImage">Image</span>
+                <input id="inChatBackgroundImage" class="input" type="file" accept="image/*">
+                <img id="chatBackgroundPreview" class="chat-background-preview" alt="" hidden>
+                <span id="chatBackgroundFileName" class="chat-background-file-name" hidden></span>
+              </label>
+            </div>
+            <p id="chatBackgroundStatus" class="settings-hint chat-background-status" role="status" aria-live="polite" hidden></p>
           </fieldset>
           <div class="settings-row">
             <div class="settings-copy">
-              <label class="settings-label" for="inWindowFrame"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-options-24"></use></svg><span data-i18n="windowFrameLabel">Window frame</span></label>
-              <p id="windowFrameHint" class="settings-hint" data-i18n="windowFrameHint">Framed keeps the inset card; Borderless fills the window.</p>
+              <label class="settings-label" for="inWindowFrame"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-options-24"></use></svg><span data-i18n="windowFrameLabel">Display mode</span></label>
+              <p id="windowFrameHint" class="settings-hint" data-i18n="windowFrameHint">Fill window uses the entire window; Window mode keeps the inset card border.</p>
             </div>
             <select id="inWindowFrame" class="input settings-select" aria-describedby="windowFrameHint">
-              <option value="framed" data-i18n="windowFrameFramed" selected>Framed</option>
-              <option value="borderless" data-i18n="windowFrameBorderless">Borderless</option>
+              <option value="framed" data-i18n="windowFrameFramed" selected>Window mode</option>
+              <option value="borderless" data-i18n="windowFrameBorderless">Fill window</option>
             </select>
           </div>
           <fieldset class="settings-block panel-mode-block">
@@ -265,10 +308,12 @@
           <div class="settings-row integration-enable-row">
             <div class="settings-copy">
               <label class="settings-label" for="inIntegrationsEnabled"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-plug_connected-24"></use></svg><span data-i18n="integrationsEnable">Enable integrations</span></label>
-              <p class="settings-hint" data-i18n="integrationsEnableHint">Starts or stops the integration runtime immediately.</p>
+              <p class="settings-hint" data-i18n="integrationsEnableHint">Changes apply when you save.</p>
             </div>
             <input id="inIntegrationsEnabled" class="settings-switch" type="checkbox" role="switch">
           </div>
+          <p id="integrationDisabledHint" class="settings-hint" data-i18n="integrationsDisabledHint" hidden>Enable integrations and save to edit accounts, plugins, and rules.</p>
+          <div id="integrationBody" class="integration-body" hidden>
           <section class="integration-section" aria-labelledby="integrationAccountsHeading">
             <header class="integration-section-head">
               <h3 id="integrationAccountsHeading" data-i18n="integrationsAccounts">Accounts</h3>
@@ -289,8 +334,8 @@
             <header class="integration-section-head">
               <h3 id="integrationRulesHeading" data-i18n="integrationsRules">Outbound rules</h3>
               <div id="integrationRulesFormat" class="integration-format-toggle" role="group" aria-label="Rules format" data-i18n-aria-label="integrationsRulesFormat" hidden>
-                <button id="integrationRulesFormatJson" class="integration-format-btn" type="button" data-format="json" aria-pressed="true">JSON</button>
-                <button id="integrationRulesFormatYaml" class="integration-format-btn" type="button" data-format="yaml" aria-pressed="false">YAML</button>
+                <button id="integrationRulesFormatYaml" class="integration-format-btn" type="button" data-format="yaml" aria-pressed="true">YAML</button>
+                <button id="integrationRulesFormatJson" class="integration-format-btn" type="button" data-format="json" aria-pressed="false">JSON</button>
               </div>
             </header>
             <p class="settings-hint" data-i18n="integrationsRulesHint">Outbound rules forward room events to connected accounts. Use JSON or YAML; each target must use an existing account.</p>
@@ -304,8 +349,8 @@
             <header class="integration-section-head">
               <h3 id="integrationInboundHeading" data-i18n="integrationsInboundRules">Inbound routes</h3>
               <div id="integrationInboundFormat" class="integration-format-toggle" role="group" aria-label="Rules format" data-i18n-aria-label="integrationsRulesFormat" hidden>
-                <button id="integrationInboundFormatJson" class="integration-format-btn" type="button" data-format="json" aria-pressed="true">JSON</button>
-                <button id="integrationInboundFormatYaml" class="integration-format-btn" type="button" data-format="yaml" aria-pressed="false">YAML</button>
+                <button id="integrationInboundFormatYaml" class="integration-format-btn" type="button" data-format="yaml" aria-pressed="true">YAML</button>
+                <button id="integrationInboundFormatJson" class="integration-format-btn" type="button" data-format="json" aria-pressed="false">JSON</button>
               </div>
             </header>
             <p class="settings-hint" data-i18n="integrationsInboundHint">Inbound routes bring external messages into a room. Each route needs a configured account and a room.</p>
@@ -315,6 +360,7 @@
             <p id="integrationInboundError" class="hint integration-field-error" role="alert" hidden></p>
             <ul id="integrationInboundErrorList" class="integration-rule-errors" aria-label="Inbound route errors" hidden></ul>
           </section>
+          </div>
           <div class="integration-actions">
             <button id="btnSaveIntegrations" class="btn primary small" type="button" data-i18n="integrationsSave">Save integrations</button>
           </div>
@@ -340,19 +386,22 @@
     <header class="admin-dialog-head"><h2 id="integrationAccountHeading" data-i18n="integrationsAccountTitle">Integration account</h2><button id="btnCloseIntegrationAccount" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button></header>
     <form id="integrationAccountForm" class="integration-form" novalidate>
       <p id="integrationAccountError" class="alert integration-error" role="alert" hidden></p>
-      <label class="field"><span class="field-label" data-i18n="integrationsAccountId">Account ID</span><input id="integrationAccountId" class="input" maxlength="128" autocomplete="off" required></label>
+      <label class="field"><span class="field-label" data-i18n="integrationsAccountId">Account ID</span><input id="integrationAccountId" class="input" maxlength="128" autocomplete="off" placeholder="Leave blank to generate" data-i18n-placeholder="integrationsAccountIdHint"></label>
       <label class="field"><span class="field-label" data-i18n="integrationsPlugin">Plugin</span><select id="integrationAccountPlugin" class="input" required></select></label>
-      <label class="field"><span class="field-label" data-i18n="integrationsPlatform">Platform</span><input id="integrationAccountPlatform" class="input" readonly></label>
-      <fieldset class="field integration-env-field">
-        <legend class="field-label" data-i18n="integrationsEnv">Environment values</legend>
+      <fieldset id="integrationAccountSchemaField" class="field integration-schema">
+        <legend class="field-label" data-i18n="integrationsAccountDetails">Account details</legend>
+        <div id="integrationAccountSchema"></div>
+      </fieldset>
+      <details id="integrationAccountAdvanced" class="field integration-advanced">
+        <summary class="field-label"><svg class="fluent-icon integration-advanced-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-chevron_down-24"></use></svg><span data-i18n="integrationsAdvanced">Advanced settings</span></summary>
         <div id="integrationAccountEnv" class="integration-env-rows"></div>
         <div class="integration-env-actions">
-          <button id="btnAddAccountEnv" class="btn ghost small" type="button" data-i18n="integrationsAddEnv">Add variable</button>
+          <button id="btnAddAccountEnv" class="btn ghost small integration-env-add" type="button" aria-label="Add variable" data-i18n-aria-label="integrationsAddEnv"><svg class="fluent-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-add-24"></use></svg></button>
           <button id="btnClearAccountEnv" class="btn ghost small" type="button" data-i18n="integrationsClearEnv">Clear stored values</button>
         </div>
         <p id="integrationAccountEnvNote" class="hint integration-env-note" hidden></p>
         <p class="hint" data-i18n="integrationsEnvHint">Leave all values blank to keep the stored set. Entering a value replaces it.</p>
-      </fieldset>
+      </details>
       <div class="announcement-actions">
         <button id="btnSaveIntegrationAccount" class="btn primary small" type="submit" data-i18n="save">Save</button>
         <button id="btnCancelIntegrationAccount" class="btn ghost small" type="button" data-i18n="cancel">Cancel</button>
@@ -363,15 +412,8 @@
     <header class="admin-dialog-head"><h2 id="integrationPluginHeading" data-i18n="integrationsUploadPlugin">Upload plugin</h2><button id="btnCloseIntegrationPlugin" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button></header>
     <form id="integrationPluginForm" class="integration-form" novalidate>
       <p id="integrationPluginError" class="alert integration-error" role="alert" hidden></p>
-      <label class="field"><span class="field-label" data-i18n="integrationsPluginFile">Choose a JS file</span><input id="integrationPluginFile" class="input" type="file" accept=".js,.mjs,.cjs"></label>
-      <label class="field"><span class="field-label" data-i18n="integrationsPluginName">Plugin name</span><input id="integrationPluginName" class="input" maxlength="128" autocomplete="off" placeholder="adapter.js"></label>
-      <label class="field"><span class="field-label" data-i18n="integrationsPlatform">Platform</span><input id="integrationPluginPlatform" class="input" maxlength="128" autocomplete="off"></label>
-      <label class="field"><span class="field-label" data-i18n="integrationsPluginSource">JavaScript source</span><textarea id="integrationPluginSource" class="input integration-source" rows="8" spellcheck="false" placeholder="Paste plugin JavaScript (max 256 KiB)" data-i18n-placeholder="integrationsPluginPaste"></textarea></label>
-      <fieldset class="field integration-env-field">
-        <legend class="field-label" data-i18n="integrationsEnv">Environment values</legend>
-        <div id="integrationPluginEnv" class="integration-env-rows"></div>
-        <button id="btnAddPluginEnv" class="btn ghost small" type="button" data-i18n="integrationsAddEnv">Add variable</button>
-      </fieldset>
+      <label class="field"><span class="field-label" data-i18n="integrationsPluginFile">Choose an adapter file</span><input id="integrationPluginFile" class="input" type="file" accept=".js,.mjs,.cjs,.ts"></label>
+      <p class="hint" data-i18n="integrationsPluginHint">A valid adapter declares its platform and account fields from the initialize handshake. Upload does not start the account or require credentials.</p>
       <div class="announcement-actions">
         <button id="btnSaveIntegrationPlugin" class="btn primary small" type="submit" data-i18n="integrationsUpload">Upload plugin</button>
         <button id="btnCancelIntegrationPlugin" class="btn ghost small" type="button" data-i18n="cancel">Cancel</button>
@@ -732,9 +774,9 @@
       </button>
     </div>
 
-    <aside id="readerPanel" class="reader-panel" role="dialog" aria-modal="false" aria-labelledby="readerHeading" hidden>
+    <aside id="readerPanel" class="reader-panel" role="dialog" aria-modal="false" aria-label="Message readers" data-i18n-aria-label="readerPanelTitle" tabindex="-1" hidden>
       <div class="reader-panel-head">
-        <div><p id="readerCount" class="hint"></p><h2 id="readerHeading" tabindex="-1" data-i18n="readerPanelTitle">Message readers</h2></div>
+        <p id="readerCount" class="hint"></p>
         <button type="button" id="btnCloseReaders" class="reader-close" data-i18n-aria-label="close" aria-label="Close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button>
       </div>
       <ul id="readerList" class="receipt-reader-list" aria-label="Message readers" data-i18n-aria-label="readerPanelTitle"></ul>
@@ -836,14 +878,6 @@
       <button id="btnCancelConfirm" class="btn ghost small" type="button" data-i18n="cancel">Cancel</button>
       <button id="btnAcceptConfirm" class="btn primary small" type="button" data-i18n="confirmAction">Confirm</button>
     </div>
-  </dialog>
-
-  <dialog id="forwardDialog" class="admin-dialog" aria-labelledby="forwardHeading">
-    <header class="admin-dialog-head"><h2 id="forwardHeading" data-i18n="forwardTitle">Forward message</h2><div class="admin-dialog-actions"><button id="btnCloseForward" class="reader-close" type="button" aria-label="Close" data-i18n-aria-label="close"><svg class="fluent-icon close-icon" aria-hidden="true" viewBox="0 0 24 24"><use href="/assets/fluent-icons.svg#fluent-dismiss-24"></use></svg></button></div></header>
-    <p class="hint" data-i18n="forwardHint">Choose where to forward this message.</p>
-    <div id="forwardTargets" class="forward-targets"></div>
-    <p id="forwardStatus" class="hint" role="status" aria-live="polite"></p>
-    <div class="announcement-actions"><button id="btnCancelForward" class="btn ghost small" type="button" data-i18n="cancel">Cancel</button></div>
   </dialog>
 
   <!-- Alt+Space: message search and common commands in one keyboard-first surface. -->

@@ -33,7 +33,6 @@ export function initCreateRoomDialog(app) {
   };
   app.closeCreateRoomDialog = (restore = true) => close(restore);
 
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) close(); });
   dialog.addEventListener("cancel", () => trigger.setAttribute("aria-expanded", "false"));
   dialog.addEventListener("close", () => {
     const target = opener, restore = restoreFocus;

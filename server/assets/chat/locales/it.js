@@ -78,7 +78,7 @@ export const it = {
   integrationsAddEnv: "Aggiungi variabile", integrationsClearEnv: "Cancella tutte le variabili", integrationsKeepEnv: "Mantieni tutte le variabili",
   integrationsClearEnvActive: "Tutte le variabili salvate verranno cancellate al salvataggio.", integrationsEnvInvalid: "Usa nomi di variabile univoci con lettere, numeri e trattini bassi.",
   integrationsAccountTitle: "Account di integrazione", integrationsAccountId: "ID account", integrationsPlatform: "Piattaforma",
-  integrationsAccountInvalid: "Aggiungi un ID account e scegli un plugin.", integrationsDuplicateAccount: "Esiste già un account con questo ID.",
+  integrationsAccountInvalid: "Scegli un plugin.", integrationsDuplicateAccount: "Esiste già un account con questo ID.",
   integrationsAccountSaved: "Account salvato. Salva le integrazioni per applicarlo.", integrationsAccountRemoved: "Account rimosso. Salva le integrazioni per applicarlo.",
   integrationsLastError: "Ultimo errore", integrationsEdit: "Modifica", integrationsRemove: "Rimuovi",
   integrationsInvalidJson: "Il JSON delle regole non è valido vicino alla riga {line}.", integrationsInvalidRules: "Le regole devono essere un array JSON.",

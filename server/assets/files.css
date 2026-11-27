@@ -99,6 +99,9 @@
   animation-delay: calc(var(--file-i, 0) * 14ms);
 }
 .file-row.is-previewing { border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 24%, var(--surface)); }
+/* The copy tooltip hangs below the button; lift the row so the next animated
+   row cannot paint over it. */
+.file-row:has(.copy-action.is-copied), .file-row:has(.copy-action.is-copy-failed) { position: relative; z-index: 7; }
 @keyframes file-row-in { from { opacity: 0; transform: translateY(3px); } }
 
 .file-kind {

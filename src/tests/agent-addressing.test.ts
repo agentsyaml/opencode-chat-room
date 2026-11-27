@@ -92,7 +92,7 @@ test("send forwards parentMessageId and clientMessageID to /messages", async () 
   const calls = stubFetch(() => ({ body: room }));
   const output = await centerAction(opts,
     { action: "send", roomId: "r1", text: " answer ", parentMessageId: "m1", clientMessageID: "c1" }, "s1");
-  expect(output).toContain("message id: m9");
+  expect(output).toContain("message_id=m9 room_id=r1");
   expect(calls[0]!.url).toBe("https://center.example/rooms/r1/messages");
   expect(calls[0]!.method).toBe("POST");
   expect(calls[0]!.body).toEqual({

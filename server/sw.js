@@ -11,6 +11,7 @@ const STATIC = [
   "/assets/recall.css",
   "/assets/attachments.css",
   "/assets/responsive.css",
+  "/assets/window-controls.css",
   "/assets/code-highlight.css",
   "/assets/room-create.css",
   "/assets/edit-room.css",

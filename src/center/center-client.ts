@@ -422,7 +422,7 @@ export async function centerAction(
       const sentID = [...parsed.messages].reverse()
         .find((message) => message.senderSessionID === sessionID && message.text === args.text!.trim())?.id
         ?? parsed.messages.at(-1)?.id;
-      return `sent: ${args.text.trim()}\n${sentID ? `message id: ${sentID}\n` : ""}${formatRoom(svcOf(room), parsed)}`;
+      return `sent: ${args.text.trim()}\n${sentID ? `message_id=${sentID} room_id=${parsed.id}\n` : ""}${formatRoom(svcOf(room), parsed)}`;
     }
     case "recall": {
       if (!args.roomId) return "error: roomId is required; use a room UUID from the room list, not the room name";

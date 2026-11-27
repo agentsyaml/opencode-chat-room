@@ -258,10 +258,6 @@ export function initEvents(app) {
     void app.refreshRoomList();
   });
   $("#btnCancelToken").addEventListener("click", () => $("#tokenBox").close());
-  $("#tokenBox").addEventListener("close", () => {
-    if (LS.token) return;
-    try { sessionStorage.setItem("chat.keyPromptDismissed", "1"); } catch { /* Storage may be blocked. */ }
-  });
   $("#btnRefreshRooms").addEventListener("click", () => void app.refreshRoomList());
   $("#btnNewRoom").addEventListener("click", () => app.openCreateRoomDialog());
   $("#railRoomForm").addEventListener("submit", (event) => { event.preventDefault(); void app.createRoom(); });
@@ -335,6 +331,9 @@ export function initEvents(app) {
     // Trackpad pinch arrives as Ctrl/Cmd + wheel. Blocking it at a scroll
     // edge would also block browser zoom-out.
     if (event.ctrlKey || event.metaKey) return;
+    // While pinch-zoomed the default wheel action pans the visual viewport.
+    // The document itself never overflows, so preventing it would freeze the page.
+    if (Math.abs((window.visualViewport?.scale ?? 1) - 1) > 0.01) return;
     markScrollIntent();
     const gap = thread.scrollHeight - thread.clientHeight - thread.scrollTop;
     if (event.deltaY < 0 && thread.scrollTop <= 0 || event.deltaY > 0 && gap <= 2) event.preventDefault();
@@ -430,14 +429,23 @@ export function initEvents(app) {
     });
   });
 
+  // A press inside a dialog released over the backdrop dispatches click to the
+  // dialog's common ancestor (body), so it used to read as an outside click and
+  // close the dialog through closePanels. Only a press that started outside may.
+  let pressInDialog = false;
+  document.addEventListener("pointerdown", (event) => {
+    pressInDialog = Boolean(event.target.closest?.("dialog[open]"));
+  }, true);
   document.addEventListener("click", (event) => {
+    const releasedFromDialog = pressInDialog && !event.target.closest?.("dialog");
+    pressInDialog = false;
     const save = event.target.closest("[data-token-save]");
     if (save) {
       saveAccessToken(save, app);
       return;
     }
     if (app.mentionActive && !event.target.closest("#mentionPicker")) app.closeMention();
-    if (!event.target.closest(".anchor, dialog")) app.closePanels();
+    if (!releasedFromDialog && !event.target.closest(".anchor, dialog")) app.closePanels();
   });
   let lastEscapeAt = -Infinity;
   document.addEventListener("keydown", (event) => {

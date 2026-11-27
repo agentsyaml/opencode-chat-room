@@ -1,13 +1,15 @@
 // Resizes the right-hand pane (Markdown preview or task board) on wide windows.
-// --side-pane-width holds the only width; the rail keeps its 252px column and the
-// chat column never shrinks below MIN_CHAT.
+// --side-pane-width holds the only width; responsive.css owns its default
+// (up to 1080px at 1700x900+), while this splitter clamps a user-chosen width.
+// The rail keeps its 252px column and the chat column never shrinks below MIN_CHAT.
 const STORAGE_KEY = "chat.sidePaneWidth";
 const MIN_WIDTH = 360;
 const MIN_CHAT = 420;
 const WIDE_TASKS_MIN_CHAT = 700;
 const RAIL_WIDTH = 252;
 const GUTTER = 8;
-const MAX_WIDTH = 960;
+const MAX_WIDTH = 1080;
+const ANIMATION_MS = 220;
 
 export function initSidePaneSplitter(app) {
   const view = app.$("#chatView");
@@ -20,9 +22,23 @@ export function initSidePaneSplitter(app) {
   let frame = 0;
   let pending = 0;
   let drag = null;
+  let paneWasOpen = view.classList.contains("has-doc") || view.classList.contains("has-pane");
+  let animationTimer = 0;
 
   const activePane = () => view.classList.contains("has-doc") ? preview
     : view.classList.contains("has-pane") ? view.querySelector(":scope > dialog.is-pane[open]") : null;
+  const paneOpen = () => view.classList.contains("has-doc") || view.classList.contains("has-pane");
+
+  // Only an open or close class change animates the column; dragging and window
+  // resizes apply their width immediately.
+  const animatePane = () => {
+    const open = paneOpen();
+    if (open === paneWasOpen) return;
+    paneWasOpen = open;
+    view.classList.add("pane-animating");
+    clearTimeout(animationTimer);
+    animationTimer = setTimeout(() => view.classList.remove("pane-animating"), ANIMATION_MS);
+  };
 
   // A wide task board must leave the conversation a full working column; the
   // Markdown preview keeps the normal minimum.
@@ -41,7 +57,9 @@ export function initSidePaneSplitter(app) {
     handle.setAttribute("aria-valuemax", String(Math.round(maxWidth())));
     const pane = activePane();
     if (pane?.open) {
-      handle.setAttribute("aria-valuenow", String(Math.round(pane.getBoundingClientRect().width)));
+      // During the open transition the layout is still moving; report the
+      // width we asked for, not a frame of the animation.
+      handle.setAttribute("aria-valuenow", String(Math.round(applied || pane.getBoundingClientRect().width)));
     }
   };
 
@@ -55,7 +73,7 @@ export function initSidePaneSplitter(app) {
   // attribute changes when the workspace first appears.
   const reflow = () => {
     if (!view.clientWidth) return;
-    if (stored == null) syncAria();
+    if (stored == null) { applied = 0; syncAria(); }
     else apply(clamp(stored));
   };
 
@@ -108,7 +126,7 @@ export function initSidePaneSplitter(app) {
 
   handle.addEventListener("keydown", (event) => {
     if (!activePane()?.open) return;
-    const current = activePane().getBoundingClientRect().width;
+    const current = applied || activePane().getBoundingClientRect().width;
     const step = event.shiftKey ? 64 : 16;
     let next;
     if (event.key === "ArrowRight") next = current - step;
@@ -122,13 +140,20 @@ export function initSidePaneSplitter(app) {
 
   handle.addEventListener("dblclick", () => {
     stored = null;
+    applied = 0;
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* Ignore unavailable storage. */ }
     view.style.removeProperty("--side-pane-width");
     syncAria();
   });
 
-  window.addEventListener("resize", reflow);
-  new MutationObserver(reflow).observe(view, { attributes: true, attributeFilter: ["class", "hidden"] });
+  window.addEventListener("resize", () => {
+    view.classList.remove("pane-animating");
+    reflow();
+  });
+  new MutationObserver(() => {
+    animatePane();
+    reflow();
+  }).observe(view, { attributes: true, attributeFilter: ["class", "hidden"] });
   reflow();
 }
 

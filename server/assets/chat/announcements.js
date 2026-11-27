@@ -180,14 +180,12 @@ export function initAnnouncements(app) {
   $("#btnRefreshAnnouncements").addEventListener("click", () => void load());
   $("#btnCloseAnnouncement").addEventListener("click", () => dialog.close());
   $("#btnCancelAnnouncement").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   trigger.addEventListener("click", () => {
     // The entry lives in the Options menu, so choosing it closes that menu first.
     app.closePanels();
     openSurface();
   });
   $("#btnCloseAnnouncements").addEventListener("click", () => closeSurface());
-  surface.addEventListener("click", (event) => { if (event.target === surface) closeSurface(); });
   surface.addEventListener("cancel", (event) => { event.preventDefault(); closeSurface(); });
   surface.addEventListener("close", () => {
     if (pendingReopen) { pendingReopen = false; return; }
@@ -199,12 +197,12 @@ export function initAnnouncements(app) {
     if (focus && target?.isConnected) target.focus({ preventScroll: true });
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !surface.open || !surface.classList.contains("is-pane")) return;
+    if (event.key !== "Escape" || event.altKey || !surface.open || !surface.classList.contains("is-pane")) return;
     if (!surface.contains(document.activeElement)) return;
     event.preventDefault();
     closeSurface();
   });
-  app.registerPanelSurface?.("announcements", { close: () => closeSurface(false) });
+  app.registerPanelSurface?.("announcements", { element: surface, close: (restore = false) => closeSurface(restore) });
   app.watchPanel?.("announcements", syncMode);
   const closePanels = app.closePanels;
   app.closePanels = () => { closePanels(); if (dialog.open) dialog.close(); };

@@ -122,8 +122,11 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     expect(iconOnly[0].label).toBe("Wrap code");
     expect(iconOnly[0].title).toBe("Wrap code");
     expect(iconOnly[1].label).toBe("Copy");
-    // The header is part of the block, not a hover-only overlay.
-    expect(await toolbar.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
+    // The header floats in on hover; touch screens keep it visible.
+    const head = first.locator(".code-block-head");
+    expect(await head.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("0");
+    await first.hover();
+    expect(await head.evaluate((node: Element) => getComputedStyle(node).opacity)).toBe("1");
     await page.screenshot({ path: path.join(artifactDir, "code-block-desktop.png") });
 
     const wrap = first.locator(".code-wrap-toggle");
@@ -164,7 +167,7 @@ test.skipIf(!browserModule)("code blocks highlight, wrap, and copy without nativ
     await mobile.locator("#btnJoin").click();
     await mobile.locator("#chatView").waitFor({ state: "visible" });
     const mobileBlock = mobile.locator(".msg-text .code-block").first();
-    const mobileToolbar = mobileBlock.locator(".code-toolbar");
+    const mobileToolbar = mobileBlock.locator(".code-block-head");
     await mobileBlock.waitFor();
     await mobileBlock.scrollIntoViewIfNeeded();
     // Touch screens get the same persistent header instead of a hidden hover toolbar.

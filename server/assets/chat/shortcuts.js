@@ -25,9 +25,6 @@ export function initShortcuts(app) {
   app.$("#btnShortcuts")?.addEventListener("mousedown", (event) => event.preventDefault());
   app.$("#btnShortcuts")?.addEventListener("click", openSheet);
   app.$("#btnCloseShortcuts")?.addEventListener("click", () => dialog.close());
-  dialog.addEventListener("click", (event) => {
-    if (event.target === dialog) dialog.close();
-  });
   dialog.addEventListener("close", () => requestAnimationFrame(() => app.focusComposer?.()));
   let scrollFrame = 0;
   let scrollGeneration = 0;

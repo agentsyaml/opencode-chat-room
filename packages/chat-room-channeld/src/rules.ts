@@ -1,5 +1,5 @@
 import { ConfigError, type ChannelConfig, type RuleConfig, type RuleTarget } from "./config.ts";
-import type { Endpoint, IngestEvent, MessageRef } from "./protocol.ts";
+import type { AttachmentRef, Endpoint, IngestEvent, MessageRef } from "./protocol.ts";
 
 const QUOTE_PREVIEW_LIMIT = 280;
 export const UNSUPPORTED_NOTICE = "attachment/format unsupported";
@@ -10,6 +10,7 @@ export type DeliveryPayload = {
   text: string;
   degraded?: "empty" | "unthreaded";
   parent?: MessageRef;
+  attachments?: AttachmentRef[];
 };
 
 export type PayloadPlan = { payload: DeliveryPayload } | { dropped: string };
@@ -107,12 +108,16 @@ export function planPayload(rule: RuleConfig, event: IngestEvent, target: Endpoi
   });
 
   let payload: DeliveryPayload;
-  if (rendered.degraded === "empty") {
+  if (rendered.degraded === "empty" && !event.content?.attachments?.length) {
     if (rule.onUnsupported === "drop") return { dropped: "rendered text is empty" };
     payload = { text: UNSUPPORTED_NOTICE, degraded: "empty" };
   } else {
     payload = { text: rendered.text };
   }
+
+  // Attachments are opaque to rule rendering: the host resolves chatroom
+  // resource ids to local files right before the adapter sends.
+  if (event.content?.attachments?.length) payload.attachments = event.content.attachments;
 
   if (event.parent) {
     if (sameEndpoint(event.parent.endpoint, target)) {

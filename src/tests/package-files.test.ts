@@ -39,10 +39,18 @@ test("the server package lists channel runtime modules", async () => {
   expect(manifest.scripts?.prepack).toContain("scripts/build-monaco.ts --quiet");
   expect(manifest.files).toContain("packages/chat-room-channeld/src");
   expect(manifest.files).toContain("packages/chat-room-channeld/dist/mock-adapter.js");
-  expect(manifest.files).toContain("packages/chat-room-channeld/dist/feishu-adapter.js");
+  expect(manifest.files?.some((entry) => entry.startsWith("plugins/"))).toBe(false);
+  expect(manifest.files).not.toContain("plugins/feishu/dist/feishu-adapter.js");
+  expect(manifest.files).not.toContain("packages/chat-room-channeld/dist/feishu-adapter.js");
+  expect(manifest.files).not.toContain("packages/chat-room-channeld/dist/feishu-adapter.ts");
   expect(manifest.scripts?.prepack).toContain("build:channeld-mock");
-  expect(manifest.scripts?.prepack).toContain("build:channeld-feishu");
+  expect(manifest.scripts?.prepack).not.toContain("build:adapter-feishu");
+  expect(manifest.scripts?.["build:adapter-feishu"]).toContain("scripts/build-feishu-adapter.ts");
+  expect(manifest.scripts?.["build:adapter-feishu"]).not.toContain("bun build");
+  expect(manifest.scripts?.prepack).not.toContain("build:channeld-feishu");
   expect(manifest.dependencies ?? {}).not.toHaveProperty("@alexsun-top/chat-room-channeld");
+  expect(manifest.files.some((file) => file.includes("@alexsun-top/chat-room-adapter-feishu"))).toBe(false);
+  expect(manifest.dependencies ?? {}).not.toHaveProperty("@alexsun-top/chat-room-adapter-feishu");
   const source = await Bun.file(path.join(root, "server/channels.ts")).text();
   // A bare specifier would become an undeclared runtime dependency.
   expect(source).toContain('from "../packages/chat-room-channeld/src/host.ts"');

@@ -45,7 +45,7 @@ export function initIntegrationEditor(app, options) {
   };
 
   const updateFormatButtons = () => {
-    const active = controller?.getFormat() || "json";
+    const active = controller?.getFormat() || "yaml";
     for (const button of formatGroup?.querySelectorAll("[data-format]") || []) {
       button.setAttribute("aria-pressed", String(button.dataset.format === active));
     }

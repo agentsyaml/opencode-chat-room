@@ -5,16 +5,15 @@ IM endpoints through adapter child processes. Explicit rules turn a source-room
 event into frozen deliveries for target accounts; each adapter owns one IM
 account and speaks JSON-RPC over stdio.
 
-This is the 0.1 MVP: static rules, text messages, outbound adapters with text and Markdown cards, a mock
-adapter, and a Feishu adapter with opt-in inbound long-connection events. Inbound Feishu
-events can be relayed into one chat-room as notifications; they are never matched by
-outbound rules.
+This package is published as `@alexsun-top/chat-room-channeld`. Platform
+adapters, including Feishu, are single files under the top-level
+`plugins/` directory, not separate npm packages; their inbound events can be
+relayed into one chat-room as notifications and are never matched by outbound
+rules. The core launches any adapter through the account's `adapter.command`.
 
-This package is bundled inside `@alexsun-top/opencode-chat-room` 0.8.0 as
-source plus the Feishu and mock adapter entry points. Standalone npm
-publication, and the `npx @alexsun-top/chat-room-channeld` form, are planned
-for 0.8.x. In 0.8.0 use `GET /channeld/status` on the ChatRoom server, or run
-the CLI from a checkout with Bun.
+The core ships the source plus the mock adapter entry point. Use
+`GET /channeld/status` on the ChatRoom server, or run the CLI from a checkout
+with Bun.
 
 ## Run from a checkout
 
@@ -123,7 +122,7 @@ retries. A room that stays missing keeps failing until it is created.
 accounts:
   - id: feishu-main
     platform: feishu
-    adapter: { command: ["node", "/opt/chatroom/feishu-adapter.js"] }
+    adapter: { command: ["node", "/opt/chatroom/feishu-adapter.ts"] }
     env: { FEISHU_APP_ID: "cli_xxx", FEISHU_APP_SECRET: "xxx" }
 ```
 
@@ -170,7 +169,13 @@ from room `in` after starting, so the relay can be exercised end to end.
 
 ## Feishu adapter
 
-`dist/feishu-adapter.js` is a Feishu OpenAPI adapter. Outbound it sends interactive
+The Feishu adapter is the generated typed single-file adapter
+`plugins/feishu/dist/feishu-adapter.ts`, produced by concatenating the typed
+source under `plugins/feishu/src` without a bundler so its TypeScript
+annotations stay in the file. It is attached to the GitHub Release instead of being shipped inside the root
+`@alexsun-top/opencode-chat-room` package and runs directly under Node 22.18+
+through native type stripping (erasable syntax only: no `enum`, `namespace`, or
+constructor parameter properties). Outbound it sends interactive
 cards and can reply natively to a Feishu message; inbound it can receive group
 messages over the event long connection. It speaks the same stdio JSON-RPC protocol
 as the mock adapter and has no room or session concepts.
@@ -219,7 +224,7 @@ keeps the account started for outbound sends, and reports a sanitized
 accounts:
   - id: feishu-bot
     platform: feishu
-    adapter: { command: ["node", "/opt/chatroom/dist/feishu-adapter.js"], runtime: "node" }
+    adapter: { command: ["node", "/opt/chatroom/feishu-adapter.ts"], runtime: "node" }
 rules:
   - id: to-feishu
     version: 1

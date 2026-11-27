@@ -3,9 +3,45 @@
 import { formatBytes, renderMarkdown } from "./markdown.js";
 import { docPreviewFormat, OFFICE_KINDS, OFFICE_PREVIEW_LIMIT, TEXT_PREVIEW_LIMIT } from "./resource-format.js";
 import { createCopyButton, copyResourceText } from "./copy-action.js";
-import { enhanceCodeElement } from "./shiki.js";
 
 const PANE_QUERY = "(min-width: 1100px) and (min-height: 560px)";
+const MONACO_BUNDLE_URL = "/assets/monaco/integration-rules.js";
+const MONACO_STYLES_URL = "/assets/monaco/integration-rules.css";
+let monacoPromise = null;
+let codeEditor = null;
+
+function loadMonaco() {
+  if (!monacoPromise) {
+    monacoPromise = import(MONACO_BUNDLE_URL)
+      .then((module) => {
+        if (!document.querySelector("link[data-doc-code-editor]")) {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = MONACO_STYLES_URL;
+          link.dataset.docCodeEditor = "true";
+          document.head.append(link);
+        }
+        return module;
+      })
+      .catch((error) => {
+        // A blocked asset must not surface as an uncaught page error; the plain text view stays.
+        console.warn("Code preview editor unavailable; keeping the plain text view.", error);
+        throw error;
+      });
+  }
+  return monacoPromise;
+}
+
+// Fallback for a failed Monaco import: the same plain block the preview used before.
+function plainCode(text, format) {
+  const pre = document.createElement("pre");
+  pre.className = "code-block doc-code";
+  const code = document.createElement("code");
+  code.className = format.language ? `language-${format.language}` : "";
+  code.textContent = text;
+  pre.append(code);
+  return pre;
+}
 
 export function initDocPreview(app) {
   const dialog = app.$("#docPreview");
@@ -98,24 +134,38 @@ export function initDocPreview(app) {
   const contentPath = (roomId, id) => `/rooms/${encodeURIComponent(roomId)}/resources/${encodeURIComponent(id)}/content`;
 
   const clearFrame = () => {
+    codeEditor?.dispose();
+    codeEditor = null;
     if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
-    dialog.classList.remove("is-pdf", "is-office");
+    dialog.classList.remove("is-pdf", "is-office", "is-code");
   };
 
-  const renderText = (text, format) => {
+  const renderText = async (text, format, request) => {
     copyButton.hidden = false;
     languageLabel.textContent = format.label || "";
     languageLabel.hidden = !format.label;
     if (!text) { empty.hidden = false; return; }
-    const pre = document.createElement("pre");
-    pre.className = "code-block doc-code";
-    const code = document.createElement("code");
-    code.className = format.language ? `language-${format.language}` : "";
-    code.textContent = text;
-    pre.append(code);
-    body.append(pre);
+    dialog.classList.add("is-code");
+    const host = document.createElement("div");
+    host.className = "doc-monaco";
+    body.append(host);
     empty.hidden = true;
-    void enhanceCodeElement(code);
+    try {
+      const module = await loadMonaco();
+      // Another document or a close may have run while the import was pending.
+      if (request !== token || !dialog.open || !host.isConnected) return;
+      codeEditor = module.createCodePreviewEditor({
+        container: host,
+        value: text,
+        language: format.language || "plaintext",
+      });
+    } catch {
+      host.remove();
+      if (request !== token || !dialog.open) return;
+      // Let the plain block use the normal padded scroll area.
+      dialog.classList.remove("is-code");
+      body.append(plainCode(text, format));
+    }
   };
 
   const showTooLarge = (format) => {
@@ -175,7 +225,7 @@ export function initDocPreview(app) {
     clearTimeout(pptxTimer);
     pptxTimer = setTimeout(() => {
       if (dialog.open && officeKind === "pptx" && blob) {
-        void renderOfficeDocument("pptx", blob, token, width);
+        void renderOfficeDocument("pptx", blob, token, width).catch(() => undefined);
       }
     }, 150);
   };
@@ -253,7 +303,7 @@ export function initDocPreview(app) {
       const text = await data.text();
       if (request !== token) return;
       rawText = text;
-      if (format.kind === "text") renderText(text, format);
+      if (format.kind === "text") void renderText(text, format, request);
       else {
         renderMarkdown(body, text, app);
         empty.hidden = body.children.length > 0;
@@ -346,16 +396,22 @@ export function initDocPreview(app) {
 
   app.openDocPreview = (roomId, resource, source) => { void open(roomId, resource, source); };
   app.closeDocPreview = (restoreFocus = true) => close(restoreFocus);
+  app.registerDismissibleSurface?.("docPreview", { element: dialog, close: (restore = true) => close(restore) });
   updateFullscreenButton();
 
   app.$("#btnCloseDocPreview")?.addEventListener("click", () => close());
   fullscreenButton?.addEventListener("click", () => setFullscreen(!fullscreen));
   download.addEventListener("click", downloadDocument);
+  // A drag that starts in the document and ends on the backdrop produces a click
+  // whose target is the dialog; only a press and release on the backdrop closes.
+  let dismissPress = false;
+  dialog.addEventListener("pointerdown", (event) => { dismissPress = event.target === dialog; });
   dialog.addEventListener("click", (event) => {
-    if (event.target === dialog && !fullscreen && !dialog.classList.contains("is-pane")) close();
+    if (event.target === dialog && dismissPress && !fullscreen && !dialog.classList.contains("is-pane")) close();
+    dismissPress = false;
   });
   const escapePreview = (event) => {
-    if (!event || event.key !== "Escape" || !dialog.open) return;
+    if (!event || event.altKey || event.key !== "Escape" || !dialog.open) return;
     event.preventDefault();
     event.stopPropagation();
     // The first Esc leaves full screen; the next one closes the preview.

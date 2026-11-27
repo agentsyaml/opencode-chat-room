@@ -77,6 +77,11 @@ class FakeFeishu {
     const body = await readBody(request);
     const url = request.url ?? "";
     this.requests.push({ method: request.method ?? "", url, body });
+    if (url.includes("/resources/")) {
+      response.writeHead(200, { "content-type": "image/png" });
+      response.end(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+      return;
+    }
     const spec = url.startsWith("/open-apis/auth/")
       ? this.tokenResponse()
       : url.startsWith("/callback/ws/endpoint")
@@ -433,10 +438,10 @@ describe("feishu inbound long connection", () => {
     ws.sendEvent(messageEvent({ eventId: "evt-other", messageId: "om_other", chatId: "oc_other" }));
     await waitForAckCount(ws, 2);
     ws.sendEvent(messageEvent({
-      eventId: "evt-image",
-      messageId: "om_image",
-      messageType: "image",
-      content: JSON.stringify({ image_key: "img_1" }),
+      eventId: "evt-audio",
+      messageId: "om_audio",
+      messageType: "audio",
+      content: JSON.stringify({ file_key: "audio_1" }),
     }));
     await waitForAckCount(ws, 3);
     ws.sendEvent(messageEvent({ eventId: "evt-appmismatch", messageId: "om_mismatch", appId: "cli_other" }));
@@ -444,6 +449,26 @@ describe("feishu inbound long connection", () => {
 
     expect(child.requests.filter((frame) => frame.method === "ingest")).toHaveLength(0);
     expect(ws.ackCodes).toEqual([200, 200, 200, 200]);
+  });
+
+  test("image messages download their resource and ingest the attachment", async () => {
+    const { http, ws } = await startFake();
+    const child = await boot(http, INBOUND_ENV);
+
+    ws.sendEvent(messageEvent({
+      eventId: "evt-image",
+      messageId: "om_image",
+      messageType: "image",
+      content: JSON.stringify({ image_key: "img_1" }),
+    }));
+    const ingest = await child.waitForIngest();
+    const content = ingest.params.content as { text?: string; attachments?: Array<Record<string, unknown>> };
+    expect(content.text).toBeUndefined();
+    expect(content.attachments).toHaveLength(1);
+    expect(content.attachments![0]).toMatchObject({ kind: "image", name: "image.png", sourceId: "img_1" });
+    expect(String(content.attachments![0]!.path)).toContain("chat-room-channeld-");
+    expect(content.attachments![0]!.size).toBeGreaterThan(0);
+    await waitForAck(ws, 200);
   });
 
   test("inbound start failure keeps outbound send working and reports a sanitized status", async () => {
@@ -483,8 +508,10 @@ describe("feishu inbound long connection", () => {
       FEISHU_INBOUND: "1",
     });
     const initialized = await child.request("initialize", INIT_PARAMS);
-    expect(initialized.result).toBeUndefined();
-    expect(initialized.error?.message).toContain("FEISHU_INBOUND_CHATS");
+    expect(initialized.result?.platform).toBe("feishu");
+    const started = await child.request("start", START_PARAMS);
+    expect(started.result).toBeUndefined();
+    expect(started.error?.message).toContain("FEISHU_INBOUND_CHATS");
   });
 
   test("inbound stays off by default and outbound is unchanged", async () => {

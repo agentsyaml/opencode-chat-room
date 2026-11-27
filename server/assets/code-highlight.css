@@ -37,14 +37,30 @@
 .code-block:focus-within { border-color: color-mix(in srgb, var(--accent) 32%, var(--line)); }
 
 .code-block-head {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 34px;
-  padding: 3px 5px 3px 11px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  background: color-mix(in srgb, var(--ink) 3.5%, var(--surface));
+  gap: 6px;
+  max-width: calc(100% - 12px);
+  padding: 3px 4px 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 10%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+.code-block:hover .code-block-head,
+.code-block:focus-within .code-block-head {
+  opacity: 1;
+  pointer-events: auto;
+}
+.code-block-head.is-selecting { opacity: 0 !important; pointer-events: none !important; }
+@media (hover: none) {
+  .code-block-head { opacity: 1; pointer-events: auto; }
 }
 
 .code-block pre {

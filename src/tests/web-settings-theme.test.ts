@@ -114,11 +114,11 @@ test.skipIf(!browserModule)("settings uses tabbed categories for language, appea
     expect(await page.locator("#pageStepValue").textContent()).toBe("20%");
     await setPageStep(page, "55");
 
-    // All five themes are large cards that switch live and follow the system option.
+    // All six themes are large cards that switch live and follow the system option.
     await page.locator("#settingsTabAppearance").click();
     const choices = await page.locator('#chatSettings input[name="theme"]').evaluateAll((nodes: HTMLInputElement[]) => nodes.map((node) => node.value));
-    expect(choices).toEqual(["system", "light", "dark", "forest", "sand"]);
-    expect(await page.locator("#chatSettings .theme-option").count()).toBe(5);
+    expect(choices).toEqual(["system", "light", "dark", "forest", "sand", "custom"]);
+    expect(await page.locator("#chatSettings .theme-option").count()).toBe(6);
     const cardMetrics = await page.locator("#chatSettings .theme-option").evaluateAll((nodes: HTMLElement[]) => nodes.map((node) => ({ width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height, border: getComputedStyle(node).borderTopWidth })));
     for (const card of cardMetrics) {
       expect(card.width).toBeGreaterThan(96);
@@ -141,7 +141,158 @@ test.skipIf(!browserModule)("settings uses tabbed categories for language, appea
     await page.locator("#settingsHeading").focus();
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(screenshots, "settings-desktop-light.png") });
+
+    // The sixth card is a custom palette driven by its own color input.
+    const darkCustom = "#162823";
+    const lightCustom = "#e8f0e4";
+    expect(await page.locator("#inCustomThemeColor").isVisible()).toBe(true);
+    await page.locator('[data-theme-choice="custom"]').click();
+    expect(await page.locator("#chatSettings").evaluate(() => document.documentElement.dataset.theme)).toBe("custom");
+    expect(await page.evaluate(() => localStorage.getItem("chat.theme"))).toBe("custom");
+    expect(await page.locator("#inCustomThemeColor").inputValue()).toBe("#22695c");
+    expect(await page.evaluate(() => document.documentElement.dataset.customDark)).toBe("true");
+    let customTheme = await themeColors(page);
+    expect(customTheme.colorScheme).toBe("dark");
+    expect(luminance(customTheme.surface)).toBeLessThan(0.2);
+    expect(contrast(customTheme.ink, customTheme.surface)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(customTheme.ink2, customTheme.surface)).toBeGreaterThanOrEqual(3);
+    expect(contrast(customTheme.dialogInk, customTheme.dialogBg)).toBeGreaterThanOrEqual(4.5);
+    expect(luminance((await customPreviewColors(page)).surface)).toBeLessThan(0.2);
+
+    // Drag previews update once per animation frame; only persistence waits.
+    const burstStart = await page.evaluate(() => {
+      const original = Storage.prototype.setItem;
+      (window as any).__restoreCustomSetItem = original;
+      (window as any).__customThemeWrites = [];
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (key === "chat.customTheme") (window as any).__customThemeWrites.push(value);
+        return original.call(this, key, value);
+      };
+      return {
+        color: getComputedStyle(document.documentElement).getPropertyValue("--custom-bg").trim(),
+        dark: document.documentElement.dataset.customDark,
+        stored: localStorage.getItem("chat.customTheme"),
+      };
+    });
+    const burstDuring = await page.evaluate(async () => {
+      const input = document.querySelector<HTMLInputElement>("#inCustomThemeColor")!;
+      for (const value of ["#f0f0f0", "#101010", "#d0d0d0"]) {
+        input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return {
+        color: getComputedStyle(document.documentElement).getPropertyValue("--custom-bg").trim(),
+        dark: document.documentElement.dataset.customDark,
+        stored: localStorage.getItem("chat.customTheme"),
+      };
+    });
+    expect(burstDuring.color).toBe("#d0d0d0");
+    expect(burstDuring.dark).toBe("false");
+    expect(burstDuring.stored).toBe(burstStart.stored);
+    await page.waitForTimeout(400);
+    const burstSettled = await page.evaluate(() => ({
+      color: getComputedStyle(document.documentElement).getPropertyValue("--custom-bg").trim(),
+      dark: document.documentElement.dataset.customDark,
+      stored: localStorage.getItem("chat.customTheme"),
+    }));
+    expect(burstSettled.color).toBe("#d0d0d0");
+    expect(burstSettled.dark).toBe("false");
+    expect(burstSettled.stored).toBe("#d0d0d0");
+    const burstWrites = await page.evaluate(() => {
+      const writes = (window as any).__customThemeWrites;
+      Storage.prototype.setItem = (window as any).__restoreCustomSetItem;
+      return writes;
+    });
+    expect(burstWrites).toEqual(["#d0d0d0"]);
+    const burstFinal = await page.locator("#inCustomThemeColor").evaluate((node: HTMLInputElement) => {
+      node.value = "#162823";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+      node.dispatchEvent(new Event("change", { bubbles: true }));
+      return {
+        color: getComputedStyle(document.documentElement).getPropertyValue("--custom-bg").trim(),
+        dark: document.documentElement.dataset.customDark,
+        stored: localStorage.getItem("chat.customTheme"),
+      };
+    });
+    expect(burstFinal.color).toBe(darkCustom);
+    expect(burstFinal.dark).toBe("true");
+    expect(burstFinal.stored).toBe(darkCustom);
+
+    // A light pick keeps the light palette and dark text.
+    await setCustomColor(page, lightCustom);
+    expect(await page.evaluate(() => localStorage.getItem("chat.customTheme"))).toBe(lightCustom);
+    expect(await page.evaluate(() => document.documentElement.dataset.customDark)).toBe("false");
+    customTheme = await themeColors(page);
+    expect(customTheme.colorScheme).toBe("light");
+    expect(luminance(customTheme.surface)).toBeGreaterThan(0.7);
+    expect(contrast(customTheme.ink, customTheme.surface)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(customTheme.ink2, customTheme.surface)).toBeGreaterThanOrEqual(3);
+    expect(contrast(customTheme.dialogInk, customTheme.dialogBg)).toBeGreaterThanOrEqual(4.5);
+    expect(luminance((await customPreviewColors(page)).surface)).toBeGreaterThan(0.7);
+
+    // A vivid pick must tint the actual surfaces, not just the theme card.
+    await setCustomColor(page, "#c026d3");
+    customTheme = await themeColors(page);
+    const vivid = parseChannels(customTheme.surface);
+    expect(await page.evaluate(() => document.documentElement.dataset.customDark)).toBe("true");
+    expect(vivid[2]!).toBeGreaterThan(vivid[0]!);
+    expect(vivid[0]!).toBeGreaterThan(vivid[1]!);
+    expect(Math.max(...vivid) - Math.min(...vivid)).toBeGreaterThan(40);
+    expect(contrast(customTheme.ink, customTheme.surface)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(customTheme.dialogInk, customTheme.dialogBg)).toBeGreaterThanOrEqual(4.5);
+
+    // A dark pick switches every surface and text token, including the preview.
+    await setCustomColor(page, darkCustom);
+    expect(await page.evaluate(() => localStorage.getItem("chat.customTheme"))).toBe(darkCustom);
+    expect(await page.evaluate(() => document.documentElement.dataset.customDark)).toBe("true");
+    customTheme = await themeColors(page);
+    expect(customTheme.colorScheme).toBe("dark");
+    expect(contrast(customTheme.ink, customTheme.surface)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(customTheme.ink2, customTheme.surface)).toBeGreaterThanOrEqual(3);
+    expect(luminance((await customPreviewColors(page)).surface)).toBeLessThan(0.2);
+    expect(await page.locator("#chatSettings").evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--custom-bg").trim())).toBe(darkCustom);
+    await page.waitForFunction((expected: string) => document.querySelector('meta[name="theme-color"]')?.getAttribute("content") === expected, darkCustom);
+    await page.locator("#settingsHeading").focus();
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(screenshots, "settings-desktop-custom.png") });
+
+    // The chosen custom color survives a reload and tints the join screen globally.
+    await page.keyboard.press("Escape");
+    await page.locator("#chatSettings").waitFor({ state: "hidden" });
+    await page.reload();
+    await page.locator("#joinView").waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "custom");
+    await page.waitForFunction(() => document.documentElement.dataset.customDark === "true");
+    await page.waitForFunction((expected: string) => document.querySelector('meta[name="theme-color"]')?.getAttribute("content") === expected, darkCustom);
+    const joinTheme = await themeColors(page);
+    expect(joinTheme.colorScheme).toBe("dark");
+    expect(luminance(joinTheme.surface)).toBeLessThan(0.2);
+    expect(contrast(joinTheme.ink, joinTheme.surface)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(joinTheme.ink2, joinTheme.surface)).toBeGreaterThanOrEqual(3);
+    expect(contrast(joinTheme.ink, joinTheme.bg)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(joinTheme.ink2, joinTheme.bg)).toBeGreaterThanOrEqual(3);
+    const joinSurface = await page.evaluate(() => ({
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
+      bodyColor: getComputedStyle(document.body).color,
+      inputBackground: getComputedStyle(document.querySelector<HTMLElement>("#inName")!).backgroundColor,
+      inputColor: getComputedStyle(document.querySelector<HTMLElement>("#inName")!).color,
+    }));
+    expect(luminance(joinSurface.bodyBackground)).toBeLessThan(0.2);
+    expect(contrast(joinSurface.bodyColor, joinSurface.bodyBackground)).toBeGreaterThanOrEqual(4.5);
+    expect(luminance(joinSurface.inputBackground)).toBeLessThan(0.2);
+    expect(contrast(joinSurface.inputColor, joinSurface.inputBackground)).toBeGreaterThanOrEqual(4.5);
+    await page.locator("#btnJoinSettings").click();
+    await page.locator("#settingsTabAppearance").click();
+    expect(await page.locator('#chatSettings input[value="custom"]').isChecked()).toBe(true);
+    expect(await page.locator("#inCustomThemeColor").inputValue()).toBe(darkCustom);
+    expect(await page.locator("#chatSettings").evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--custom-bg").trim())).toBe(darkCustom);
+    const settingsTheme = await themeColors(page);
+    expect(luminance(settingsTheme.dialogBg)).toBeLessThan(0.2);
+    expect(contrast(settingsTheme.dialogInk, settingsTheme.dialogBg)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(settingsTheme.ink2, settingsTheme.dialogBg)).toBeGreaterThanOrEqual(3);
     await page.locator('[data-theme-choice="dark"]').click();
+    expect(await page.locator("#chatSettings").evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
     await page.locator("#settingsHeading").focus();
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(screenshots, "settings-desktop-dark.png") });
@@ -196,6 +347,8 @@ test.skipIf(!browserModule)("settings uses tabbed categories for language, appea
     await page.locator("#settingsTabConnection").click();
     expect(await page.locator("#tokenHint").isVisible()).toBe(false);
     await page.mouse.click(6, 6);
+    expect(await page.locator("#chatSettings").isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
     await page.locator("#chatSettings").waitFor({ state: "hidden" });
     expect(await page.evaluate(() => document.activeElement?.id)).toBe("btnJoinSettings");
     expect(await page.locator("#btnJoinSettings").getAttribute("aria-expanded")).toBe("false");
@@ -212,7 +365,19 @@ test.skipIf(!browserModule)("settings uses tabbed categories for language, appea
     expect(await page.locator("#inPageStep").inputValue()).toBe("55");
     await page.locator("#settingsTabAppearance").click();
     expect(await page.locator('#chatSettings input[value="dark"]').isChecked()).toBe(true);
-    expect(await page.locator("#chatSettings .theme-option").count()).toBe(5);
+    expect(await page.locator("#chatSettings .theme-option").count()).toBe(6);
+    await page.locator('[data-theme-choice="custom"]').click();
+    const roomTheme = await page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      dark: document.documentElement.dataset.customDark,
+      railColor: getComputedStyle(document.querySelector<HTMLElement>("#roomRail")!).color,
+      roomSurface: getComputedStyle(document.querySelector<HTMLElement>("#chatView")!).backgroundColor,
+    }));
+    expect(roomTheme.theme).toBe("custom");
+    expect(roomTheme.dark).toBe("true");
+    expect(luminance(roomTheme.roomSurface)).toBeLessThan(0.2);
+    expect(contrast(roomTheme.railColor, roomTheme.roomSurface)).toBeGreaterThanOrEqual(4.5);
+    await page.locator('[data-theme-choice="dark"]').click();
     await page.locator("#settingsTabConnection").click();
     expect(await page.locator("#inTokenChat").inputValue()).toBe(token);
     expect(await page.locator("#tokenHint").isVisible()).toBe(false);
@@ -220,6 +385,8 @@ test.skipIf(!browserModule)("settings uses tabbed categories for language, appea
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(screenshots, "settings-desktop-connection-dark.png") });
     await page.mouse.click(6, 6);
+    expect(await page.locator("#chatSettings").isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
     await page.locator("#chatSettings").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
     expect(await page.locator("#btnSettings").getAttribute("aria-expanded")).toBe("false");
@@ -329,6 +496,66 @@ test.skipIf(!browserModule)("settings uses tabbed categories for language, appea
     await rm(stateDir, { recursive: true, force: true });
   }
 }, 60000);
+
+async function setCustomColor(page: any, value: string) {
+  await page.locator("#inCustomThemeColor").evaluate((node: HTMLInputElement, next: string) => {
+    node.value = next;
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
+async function themeColors(page: any) {
+  return page.evaluate(() => {
+    const surface = document.createElement("div");
+    surface.style.cssText = "position:fixed;left:-9999px;top:0;background:var(--surface);color:var(--ink);";
+    const backdrop = document.createElement("div");
+    backdrop.style.cssText = "position:fixed;left:-9999px;top:0;background:var(--bg);color:var(--ink-2);";
+    document.body.append(surface, backdrop);
+    const surfaceStyle = getComputedStyle(surface), backdropStyle = getComputedStyle(backdrop);
+    const dialog = document.querySelector("#chatSettings");
+    const dialogStyle = dialog ? getComputedStyle(dialog) : null;
+    const colors = {
+      customDark: document.documentElement.dataset.customDark,
+      colorScheme: getComputedStyle(document.documentElement).colorScheme,
+      surface: surfaceStyle.backgroundColor,
+      ink: surfaceStyle.color,
+      bg: backdropStyle.backgroundColor,
+      ink2: backdropStyle.color,
+      dialogBg: dialogStyle?.backgroundColor || "",
+      dialogInk: dialogStyle?.color || "",
+    };
+    surface.remove();
+    backdrop.remove();
+    return colors;
+  });
+}
+
+async function customPreviewColors(page: any) {
+  return page.evaluate(() => {
+    const preview = document.querySelector('[data-theme-choice="custom"] .theme-preview')!;
+    return {
+      surface: getComputedStyle(preview, "::before").backgroundColor,
+      accent: getComputedStyle(preview, "::after").backgroundColor,
+    };
+  });
+}
+
+function parseChannels(value: string): number[] {
+  if (value.startsWith("#")) return [1, 3, 5].map((index) => parseInt(value.slice(index, index + 2), 16));
+  const numbers = value.match(/[\d.]+(?:e-?\d+)?/gi)?.map(Number) ?? [];
+  return value.startsWith("color(srgb") ? numbers.slice(0, 3).map((part) => part * 255) : numbers.slice(0, 3);
+}
+
+function luminance(value: string): number {
+  const [red = 0, green = 0, blue = 0] = parseChannels(value).map((channel) => channel / 255).map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function contrast(foreground: string, background: string): number {
+  const light = Math.max(luminance(foreground), luminance(background)), dark = Math.min(luminance(foreground), luminance(background));
+  return (light + 0.05) / (dark + 0.05);
+}
 
 async function expectMobileDialog(page: any) {
   const metrics = await page.evaluate(() => {

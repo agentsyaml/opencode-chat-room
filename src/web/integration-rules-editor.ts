@@ -49,8 +49,10 @@ type Options = {
 type RegistryEntry = { kind: RulesKind; uri: string; schema: JsonSchema; modelUri: string };
 const registry = new Map<RulesKind, RegistryEntry>();
 let completionRegistered = false;
+let hoverRegistered = false;
 let themeObserver: MutationObserver | null = null;
 let themeMedia: MediaQueryList | null = null;
+let previewCount = 0;
 
 const scope = globalThis as typeof globalThis & { MonacoEnvironment?: { getWorker?: (workerId: string, label: string) => Worker } };
 scope.MonacoEnvironment = {
@@ -61,13 +63,28 @@ scope.MonacoEnvironment = {
 
 function isDarkTheme(): boolean {
   const theme = document.documentElement.dataset.theme;
+  if (theme === "custom") return document.documentElement.dataset.customDark === "true";
   if (theme === "dark") return true;
   return theme !== "light" && theme !== "forest" && theme !== "sand" && matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
 function applyTheme() {
-  const style = getComputedStyle(document.documentElement);
-  const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
+  const read = (name: string, fallback: string) => {
+    // Monaco only accepts hex token colors. Resolve the CSS variable to a
+    // concrete color first, then normalize rgb()/color() through a canvas.
+    const probe = document.createElement("span");
+    probe.style.position = "absolute";
+    probe.style.visibility = "hidden";
+    probe.style.background = `var(${name})`;
+    document.documentElement.append(probe);
+    const resolved = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    const canvas = document.createElement("canvas").getContext("2d");
+    if (!canvas || !resolved) return fallback;
+    canvas.fillStyle = "#000000";
+    canvas.fillStyle = resolved;
+    return /^#[0-9a-f]{6}$/i.test(canvas.fillStyle) ? canvas.fillStyle : fallback;
+  };
   monaco.editor.defineTheme("chatroom-light", {
     base: "vs",
     inherit: true,
@@ -77,13 +94,31 @@ function applyTheme() {
       "editorGutter.background": read("--surface", "#fffefa"),
       "editor.lineHighlightBackground": read("--surface-2", "#f2f0e8"),
       "editorLineNumber.foreground": read("--ink-3", "#63716b"),
+      "menu.background": read("--surface", "#fffefa"),
+      "menu.foreground": read("--ink", "#1e2c29"),
+      "menu.selectionBackground": read("--surface-2", "#f2f0e8"),
+      "menu.selectionForeground": read("--ink", "#1e2c29"),
+      "menu.border": read("--line", "#dcded4"),
+      "editorWidget.background": read("--surface", "#fffefa"),
+      "editorWidget.foreground": read("--ink", "#1e2c29"),
+      "editorWidget.border": read("--line", "#dcded4"),
     },
   });
   monaco.editor.defineTheme("chatroom-dark", {
     base: "vs-dark",
     inherit: true,
     rules: [],
-    colors: { "editor.background": read("--surface", "#182522") },
+    colors: {
+      "editor.background": read("--surface", "#182522"),
+      "menu.background": read("--surface", "#182522"),
+      "menu.foreground": read("--ink", "#e6efe9"),
+      "menu.selectionBackground": read("--surface-2", "#22322e"),
+      "menu.selectionForeground": read("--ink", "#e6efe9"),
+      "menu.border": read("--line", "#31433d"),
+      "editorWidget.background": read("--surface", "#182522"),
+      "editorWidget.foreground": read("--ink", "#e6efe9"),
+      "editorWidget.border": read("--line", "#31433d"),
+    },
   });
   monaco.editor.setTheme(isDarkTheme() ? "chatroom-dark" : "chatroom-light");
 }
@@ -92,7 +127,7 @@ function watchTheme() {
   applyTheme();
   if (themeObserver) return;
   themeObserver = new MutationObserver(applyTheme);
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-custom-dark"] });
   themeMedia = matchMedia("(prefers-color-scheme: dark)");
   themeMedia.addEventListener("change", applyTheme);
 }
@@ -222,6 +257,48 @@ function ensureYamlCompletion() {
   });
 }
 
+function ensureYamlHover() {
+  if (hoverRegistered) return;
+  hoverRegistered = true;
+  monaco.languages.registerHoverProvider("yaml", {
+    provideHover(model, position) {
+      const entry = [...registry.values()].find((item) => item.modelUri === model.uri.toString());
+      if (!entry) return null;
+      let doc: any;
+      try { doc = parseDocument(model.getValue()); } catch { return null; }
+      const root = doc.contents;
+      const path = pathAtOffset(root, model.getOffsetAt(position));
+      if (!path) return null;
+      const line = model.getLineContent(position.lineNumber);
+      const match = /^\s*(?:-\s*)?["']?([A-Za-z0-9_.-]+)["']?\s*:/.exec(line);
+      let schema: JsonSchema | undefined;
+      let label = "";
+      if (match) {
+        const key = match[1]!;
+        const container = path[path.length - 1] === key ? path.slice(0, -1) : path;
+        schema = schemaAtPath(entry.schema, container, key);
+        label = key;
+      } else {
+        schema = schemaAtPath(entry.schema, path);
+        label = String(path[path.length - 1] ?? "");
+      }
+      if (!schema?.description) return null;
+      const word = model.getWordAtPosition(position);
+      const range = word
+        ? new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn)
+        : undefined;
+      const type = schema.type ? ` (${String(schema.type)})` : "";
+      return {
+        range,
+        contents: [
+          { value: `**${label}**` },
+          { value: `${type.trim()}${type ? " " : ""}${schema.description}` },
+        ],
+      };
+    },
+  });
+}
+
 type ParseResult = {
   value?: unknown;
   doc?: any;
@@ -312,7 +389,7 @@ function formatLabel(format: RulesFormat): string {
 
 export function createIntegrationRulesEditor(options: Options): IntegrationRulesEditor {
   const kind = options.kind;
-  let format: RulesFormat = options.format ?? "json";
+  let format: RulesFormat = options.format ?? "yaml";
   let accounts = options.accounts;
   let schema = kind === "inbound" ? buildInboundSchema(accounts) : buildRulesSchema(accounts);
   const entry: RegistryEntry = {
@@ -324,6 +401,7 @@ export function createIntegrationRulesEditor(options: Options): IntegrationRules
   registry.set(kind, entry);
   publishJsonSchemas();
   ensureYamlCompletion();
+  ensureYamlHover();
   watchTheme();
 
   const text = stringifyValue(options.value ?? [], format);
@@ -351,6 +429,29 @@ export function createIntegrationRulesEditor(options: Options): IntegrationRules
     scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
     suggest: { showWords: false },
   });
+
+  const onWheel = (event: WheelEvent) => {
+    // Modifiers belong to Monaco: Ctrl/Cmd zooms, Shift scrolls horizontally.
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    const max = Math.max(0, editor.getScrollHeight() - editor.getLayoutInfo().height);
+    const top = editor.getScrollTop();
+    const atTop = event.deltaY < 0 && top <= 0;
+    const atBottom = event.deltaY > 0 && top >= max - 1;
+    if (!atTop && !atBottom) return;
+    // Hand the wheel to the page once the editor cannot scroll further.
+    let node = options.container.parentElement;
+    while (node) {
+      const style = getComputedStyle(node);
+      if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1) {
+        node.scrollTop += event.deltaY;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      node = node.parentElement;
+    }
+  };
+  options.container.addEventListener("wheel", onWheel, { capture: true, passive: false });
 
   const validate = (): EditorValidation => {
     const current = model.getValue();
@@ -429,6 +530,7 @@ export function createIntegrationRulesEditor(options: Options): IntegrationRules
     setReadOnly: (readOnly) => editor.updateOptions({ readOnly }),
     focus: () => editor.focus(),
     dispose: () => {
+      options.container.removeEventListener("wheel", onWheel, true);
       change.dispose();
       editor.dispose();
       model.dispose();
@@ -436,4 +538,36 @@ export function createIntegrationRulesEditor(options: Options): IntegrationRules
       publishJsonSchemas();
     },
   };
+}
+
+export type CodePreviewOptions = { container: HTMLElement; value: string; language?: string };
+
+export function createCodePreviewEditor(options: CodePreviewOptions): { dispose: () => void } {
+  watchTheme();
+  const language = options.language || "plaintext";
+  const model = monaco.editor.createModel(
+    options.value,
+    language,
+    monaco.Uri.parse(`inmemory://chat/code-preview-${++previewCount}.${language}`),
+  );
+  const editor = monaco.editor.create(options.container, {
+    model,
+    theme: isDarkTheme() ? "chatroom-dark" : "chatroom-light",
+    readOnly: true,
+    automaticLayout: true,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    fontSize: 12,
+    lineNumbers: "on",
+    wordWrap: "off",
+    renderLineHighlight: "none",
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    folding: true,
+    padding: { top: 10, bottom: 10 },
+    scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8, useShadows: false },
+    contextmenu: true,
+    ariaLabel: "Code preview",
+  });
+  return { dispose: () => { editor.dispose(); model.dispose(); } };
 }

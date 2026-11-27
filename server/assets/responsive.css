@@ -46,9 +46,16 @@
      The task board and every file preview follow the same rule. */
   @media (min-width: 1500px) and (min-height: 900px) {
     #app:has(#chatView.has-doc),
-    #app:has(#chatView.has-pane) { max-width: 1600px; }
+    #app:has(#chatView.has-pane) { max-width: 2200px; }
     #chatView.has-doc,
-    #chatView.has-pane { --side-pane-width: min(560px, calc(100% - 960px)); }
+    #chatView.has-pane { --side-pane-width: min(720px, calc(100% - 960px)); }
+  }
+  /* From 1700px the document preview spends the extra width on the page and keeps
+     the conversation at 660px; the task board keeps its 700px chat until 920px. */
+  @media (min-width: 1700px) and (min-height: 900px) {
+    #chatView.has-doc,
+    #chatView.has-pane { --side-pane-width: min(1080px, calc(100% - 920px)); }
+    #chatView.has-tasks:not(.has-doc) { --side-pane-width: min(920px, calc(100% - 960px)); }
   }
   /* The separator owns one grid column of its own, so it never covers the chat. */
   .side-pane-handle {
@@ -79,6 +86,10 @@
   .side-pane-handle:focus-visible::before { background: var(--accent); }
   body.is-resizing-pane { cursor: col-resize; user-select: none; }
   @media (min-width: 1100px) and (min-height: 560px) {
+    /* Closed panes keep four tracks so side-pane.js can animate the column shut. */
+    #chatView { grid-template-columns: 252px minmax(0, 1fr) 0px 0px; }
+    #chatView.pane-animating { transition: grid-template-columns 180ms cubic-bezier(.2, .7, .3, 1); }
+    body.is-resizing-pane #chatView { transition: none; }
     #chatView.has-doc,
     #chatView.has-pane { grid-template-columns: 252px minmax(0, 1fr) 8px var(--side-pane-width); }
     #chatView.has-doc > .side-pane-handle,
@@ -424,3 +435,22 @@
     border-radius: 0;
     box-shadow: none;
   }
+
+  /* A browser-local wallpaper covers the whole client window behind the app.
+     The conversation plane stays transparent so the image reaches past the
+     message column; bubbles keep their own readable surfaces. */
+  html.has-chat-background body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background-image: var(--chat-background-image, none);
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    opacity: var(--chat-background-opacity, .35);
+    pointer-events: none;
+  }
+  html.has-chat-background #app { position: relative; z-index: 1; }
+  html.has-chat-background #chatView,
+  html.has-chat-background #chatView .thread { background: transparent; }

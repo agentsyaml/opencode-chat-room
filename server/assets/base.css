@@ -186,6 +186,10 @@
 
   .btn {
     appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     border: none;
     cursor: pointer;
     font: inherit;
@@ -233,7 +237,8 @@
   #announcementsDialog.is-pane .announcements-body, #remindersDialog.is-pane .reminders-body { padding: 0 14px 18px 18px; }
   .announcements-dialog .announcement-list { margin: 0; max-height: none; }
   .reminders-dialog .reminder-list { margin: 0; }
-  .announcement-list { list-style: none; padding: 0; margin: 10px 0; max-height: 150px; overflow: auto; }
+  #announcementStatus { min-height: 1.4em; }
+.announcement-list { list-style: none; padding: 0; margin: 10px 0; min-height: 120px; max-height: 150px; overflow: auto; }
   .announcement-list button { width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; font: inherit; overflow-wrap: anywhere; cursor: pointer; }
   .announcement-list button:hover, .announcement-list button[aria-current="true"] { background: var(--accent-soft); border-color: var(--line); }
   .announcement-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -325,7 +330,7 @@
   .keys-list { display: grid; gap: 2px; list-style: none; margin: 0; padding: 0; }
   .keys-list li { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 4px 16px; padding: 7px 0; border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent); font-size: 13px; }
   .keys-list li:first-child { border-top: 0; }
-  .keys-list li > span:last-child { color: var(--ink-2); }
+  .keys-list li > span:last-child { color: var(--ink-2); text-align: right; }
   .keys-group { display: inline-flex; align-items: center; gap: 6px; }
   @media (max-width: 560px) {
     .keys-dialog { padding: 18px; }
@@ -453,6 +458,7 @@
   .footnotes ol { margin: 0; padding-left: 20px; }
   .footnotes li { margin: 3px 0; }
   .footnote-ref { font-size: .78em; line-height: 0; }
+  .footnote-ref + .footnote-ref { margin-left: .3em; }
   .footnote-ref a { text-decoration: none; }
   .footnote-backref { margin-left: 2px; text-decoration: none; }
 

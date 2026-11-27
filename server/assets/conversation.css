@@ -154,6 +154,9 @@
     position: relative;
     display: flex;
     flex-direction: column;
+    /* The chat column drives the avatar breakpoint, so a side pane that narrows it
+       hides avatars without a separate width rule. */
+    container-type: inline-size;
   }
   .thread {
     flex: 1;
@@ -162,6 +165,10 @@
     overflow-anchor: none;
     overscroll-behavior: contain;
     padding: 22px 22px 6px;
+    /* A slightly recessed conversation plane, distinct from the head and composer. */
+    background: color-mix(in srgb, var(--surface) 52%, var(--bg));
+    /* A visible scrollbar would shift the content column left; reserve both edges. */
+    scrollbar-gutter: stable both-edges;
   }
   #msgList { width: min(100%, 940px); list-style: none; margin: 0 auto; padding: 0; }
 
@@ -221,12 +228,38 @@
     border-radius: 999px;
   }
 
-  .msg { display: flex; flex-direction: column; margin-bottom: 16px; }
+  /* One fixed line box for the meta row (13px name, 12px time), so the avatar
+     can center on it with plain math instead of font-metric guessing. */
+  .msg { --msg-meta-line: 21px; position: relative; display: flex; flex-direction: column; margin-bottom: 16px; }
   .msg.in, .sys.in, .day-sep.in { animation: msg-in .25s ease both; }
   .msg.own { align-items: flex-end; }
   .msg.pending .msg-text { opacity: .62; }
   .msg.repeat { margin-bottom: 8px; }
-  .msg-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+  /* Avatars live in the outer gutters, so they never push the bubble or the
+     read receipt from where they sit without them. */
+  .msg::before {
+    content: attr(data-initial);
+    position: absolute;
+    top: calc((var(--msg-meta-line) - 32px) / 2);
+    left: -44px;
+    display: none;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--line));
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--accent-soft) 54%, var(--surface));
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
+  }
+  .msg.own::before { left: auto; right: -44px; }
+  /* Grouped rows already hide the name; the avatar follows the same rhythm. */
+  .msg.repeat::before { display: none; }
+  @container (min-width: 1060px) { .msg::before { display: grid; } }
+  .msg-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 3px; line-height: var(--msg-meta-line); }
   .msg-name { font-size: 13px; font-weight: 650; color: var(--ink-2); }
   .msg.own .msg-name { color: var(--accent); }
   .question-mark { padding: 1px 6px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 10px; line-height: 1.5; }
@@ -257,7 +290,9 @@
   }
   @media (prefers-reduced-motion: reduce) { .msg.jump-flash .msg-text { animation-duration: .8s; animation-iteration-count: 1; } }
   .msg-content { position: relative; display: flex; align-items: flex-end; gap: 6px; width: 100%; max-width: 100%; }
-  .msg.own .msg-content { flex-direction: row-reverse; }
+  .msg.own .msg-content { flex-direction: row; justify-content: flex-end; }
+  /* Own bubbles sit at the right edge, so the receipt belongs on their inner (left) side. */
+  .msg.own .message-readers { order: -1; }
   .message-copy {
     position: relative;
     align-self: flex-start;
@@ -282,7 +317,6 @@
   .message-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .message-copy-feedback { position: absolute; z-index: 25; left: 0; bottom: calc(100% + 5px); width: max-content; max-width: min(260px, calc(100vw - 32px)); padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); box-shadow: var(--shadow); font-size: 11px; font-weight: 500; line-height: 1.4; text-align: left; white-space: normal; overflow-wrap: anywhere; }
   .message-actions { display: flex; align-items: center; gap: 2px; }
-  .forward-targets { display: grid; gap: 8px; }
   .message-reply { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 8px; color: var(--ink-3); background: transparent; cursor: pointer; }
   .message-reply-icon { display: block; width: 16px; height: 16px; }
   .message-reply:hover, .message-reply:focus-visible { border-color: var(--line); color: var(--accent); background: var(--accent-soft); }
@@ -297,7 +331,7 @@
   .reply-quote:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); }
   .reply-quote:disabled { cursor: default; opacity: .7; }
   .msg.own .message-copy-feedback { left: auto; right: 0; }
-  .message-readers { flex: 0 0 24px; align-self: flex-end; margin: 0 0 4px; padding: 0; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font: inherit; font-size: 10px; cursor: pointer; box-shadow: 0 1px 3px rgb(20 40 32 / .06); }
+  .message-readers { flex: 0 0 24px; align-self: flex-end; margin: 0; padding: 0; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-3); background: var(--surface); font: inherit; font-size: 10px; cursor: pointer; box-shadow: 0 1px 3px rgb(20 40 32 / .06); }
   .message-readers[data-reader-state="empty"], .message-readers[data-reader-state="unknown"] { background: var(--surface-2); }
   .message-readers[data-reader-state="all"] { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); background: var(--accent-soft); }
   .message-read-check { display: block; width: 14px; height: 14px; }
@@ -308,9 +342,8 @@
   .receipt-reader-list li + li { margin-top: 4px; }
   .receipt-reader-list li span:last-child { color: var(--ink-3); }
   .reader-panel { position: fixed; z-index: 40; width: min(320px, calc(100vw - 24px)); min-width: 0; max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
-  .reader-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-  .reader-panel-head h2 { margin: 0; font-family: var(--font-sans); font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
-  .reader-panel-head .hint { margin: 0 0 4px; }
+  .reader-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .reader-panel-head .hint { margin: 0; }
   .reader-close { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid transparent; border-radius: 10px; color: var(--ink-2); background: transparent; font: inherit; cursor: pointer; transition: background .14s, border-color .14s, color .14s; }
   .reader-close:hover { border-color: var(--line); color: var(--ink); background: var(--surface-2); }
   .close-icon { width: 20px; height: 20px; }
@@ -531,29 +564,41 @@
   .sys[data-kind="remove"] { --sys-accent: var(--danger); --sys-tint: var(--danger-soft); }
   .sys[data-kind="admin"], .sys[data-kind="forward"] { --sys-accent: var(--mention-blue); --sys-tint: color-mix(in srgb, var(--mention-blue) 12%, var(--surface)); }
   .sys[data-kind="reminder"] { --sys-accent: var(--warning); --sys-tint: color-mix(in srgb, var(--warning) 14%, var(--surface)); }
+  /* Short notices are pills; past three lines the same chip becomes a rounded
+     card. Both states share padding, tint, type and alignment so the switch is
+     only a corner-radius change, not a different container. */
   .sys-event {
     display: inline-flex;
-    align-items: center;
+    align-self: center;
+    align-items: flex-start;
     gap: 8px;
-    max-width: min(100%, 680px);
-    padding: 4px 10px 4px 6px;
+    max-width: min(100%, 760px);
+    padding: 8px 14px;
     border: 1px solid color-mix(in srgb, var(--sys-accent) 18%, var(--line));
     border-radius: 999px;
     background: color-mix(in srgb, var(--sys-tint) 58%, var(--surface));
     box-shadow: 0 1px 2px rgb(20 40 32 / .035);
+    text-align: left;
   }
+  .sys[data-long="true"] .sys-event { border-radius: 12px; }
+  .sys[data-kind="relay"] .sys-event { align-self: flex-start; border-radius: 12px; }
   .sys-icon {
     display: grid;
     place-items: center;
     flex: none;
     width: 20px;
     height: 20px;
+    margin-top: 1px;
     border-radius: 50%;
     color: var(--sys-accent);
     background: color-mix(in srgb, var(--sys-accent) 12%, transparent);
   }
   .sys-icon-glyph { width: 13px; height: 13px; }
-  .sys-text { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
+  .sys-text { display: block; min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
+  .sys-text > :first-child { margin-top: 0; }
+  .sys-text > :last-child { margin-bottom: 0; }
+  /* Date first and muted, matching relay messages. */
+  .sys-time { order: -1; opacity: .72; }
   .sys-time { flex: none; color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
   .sys.recalled .sys-recalled {
     display: inline-flex;

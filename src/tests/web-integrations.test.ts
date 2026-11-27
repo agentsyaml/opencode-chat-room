@@ -23,7 +23,10 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
   const inboundRoute = { from: { platform: "telegram", account: "acct", room: "tg-room", event: "message.received" }, to: { room: "room-1" } };
   let integration: any = {
     enabled: false, source: "managed", editable: true, accounts: [], rules: [], inbound: [inboundRoute],
-    plugins: [{ pluginId: "plugin-1", name: "telegram.js", platform: "telegram" }],
+    plugins: [{ pluginId: "plugin-1", name: "telegram.js", platform: "telegram", account: { env: [
+      { key: "API_TOKEN", label: "API Token", type: "secret" },
+      { key: "OTHER_ENV", label: "Other setting", type: "string" },
+    ] } }],
   };
   const envKeys = new Map<string, string[]>();
   let failNextSave = false;
@@ -54,14 +57,61 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     await page.locator("#btnSettings").click();
     await page.locator("#chatSettings[open]").waitFor();
     await page.locator("#settingsTabIntegrations").click();
+    expect(calls.some((call) => call.method === "GET" && call.path === "/channeld/integration")).toBe(true);
+    // Reopening the panel refetches instead of reusing the first snapshot.
+    const getsBeforeReopen = calls.filter((call) => call.method === "GET" && call.path === "/channeld/integration").length;
+    const refetched = page.waitForResponse((response: any) => response.url().endsWith("/channeld/integration") && response.request().method() === "GET");
+    await page.locator("#settingsTabGeneral").click();
+    await page.locator("#settingsTabIntegrations").click();
+    await refetched;
+    expect(calls.filter((call) => call.method === "GET" && call.path === "/channeld/integration").length).toBeGreaterThan(getsBeforeReopen);
+    await page.locator("#integrationDisabledHint").waitFor({ state: "visible" });
+    expect(await page.locator("#inIntegrationsEnabled").isChecked()).toBe(false);
+    expect(await page.locator("#integrationBody").isVisible()).toBe(false);
+    const postsBeforeDraft = calls.filter((call) => call.path === "/channeld/enable" || call.path === "/channeld/disable").length;
+    await page.locator("#inIntegrationsEnabled").check();
+    expect(await page.locator("#integrationBody").isVisible()).toBe(true);
+    expect(await page.locator("#integrationDisabledHint").isVisible()).toBe(false);
+    expect(calls.filter((call) => call.path === "/channeld/enable" || call.path === "/channeld/disable").length).toBe(postsBeforeDraft);
     await page.locator("#integrationPlugins").getByText("telegram.js").waitFor();
     await page.locator("#integrationRulesEditor .monaco-editor").waitFor();
     await page.locator("#integrationInboundEditor .monaco-editor").waitFor();
-    expect(calls.some((call) => call.method === "GET" && call.path === "/channeld/integration")).toBe(true);
-    expect(await page.locator("#inIntegrationsEnabled").isChecked()).toBe(false);
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = "custom";
+      document.documentElement.dataset.customDark = "false";
+      document.documentElement.style.setProperty("--custom-bg", "#e8f0e4");
+    });
+    await page.waitForFunction(() => {
+      const el = document.querySelector("#integrationRulesEditor .monaco-editor .monaco-editor-background");
+      if (!el) return false;
+      const [r = 0, g = 0, b = 0] = getComputedStyle(el).backgroundColor.match(/\d+/g)!.map(Number);
+      return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.7;
+    });
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = "light";
+      delete document.documentElement.dataset.customDark;
+      document.documentElement.style.removeProperty("--custom-bg");
+    });
+    await page.emulateMedia({ colorScheme: "light" });
+    // Both editors start in YAML; the user does not have to switch formats first.
+    expect(await page.locator("#integrationRulesFormatYaml").getAttribute("aria-pressed")).toBe("true");
+    expect(await page.locator("#integrationRulesFormatJson").getAttribute("aria-pressed")).toBe("false");
+    expect(await page.locator("#integrationInboundFormatYaml").getAttribute("aria-pressed")).toBe("true");
+    for (const [yaml, json] of [
+      ["#integrationRulesFormatYaml", "#integrationRulesFormatJson"],
+      ["#integrationInboundFormatYaml", "#integrationInboundFormatJson"],
+    ] as Array<[string, string]>) {
+      expect(await page.evaluate(([yaml, json]: [string, string]) => {
+        const first = document.querySelector(yaml)!;
+        const second = document.querySelector(json)!;
+        return Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+      }, [yaml, json])).toBe(true);
+    }
+    expect(await page.locator("#integrationInbound").inputValue()).toContain("from:");
     expect(await page.locator("#integrationAccountsEmpty").isVisible()).toBe(true);
-    expect(await page.locator("#integrationRules").inputValue()).toBe("[]");
-    expect(await page.locator("#integrationInbound").inputValue()).toContain('"message.received"');
+    expect((await page.locator("#integrationRules").inputValue()).trim()).toBe("[]");
+    expect(await page.locator("#integrationInbound").inputValue()).toContain("message.received");
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
     if (process.env.CHAT_UI_SCREENSHOT_DIR) {
       await page.waitForTimeout(250);
@@ -85,22 +135,37 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.waitForTimeout(120);
 
-    // The switch uses the dedicated runtime endpoints.
-    await page.locator("#inIntegrationsEnabled").check();
-    await page.locator("#integrationStatus").filter({ hasText: "Integrations are enabled." }).waitFor();
-    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/channeld/enable" });
-    await page.locator("#inIntegrationsEnabled").uncheck();
-    await page.locator("#integrationStatus").filter({ hasText: "Integrations are disabled." }).waitFor();
-    expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/channeld/disable" });
-
     // Add an account with an environment value.
     await page.locator("#btnAddIntegrationAccount").click();
     await page.locator("#integrationAccountDialog[open]").waitFor();
+    // Clicking the dialog's edge/backdrop must not discard the form.
+    await page.locator("#integrationAccountDialog").click({ position: { x: 8, y: 8 } });
+    expect(await page.locator("#integrationAccountDialog[open]").count()).toBe(1);
     await page.locator("#integrationAccountId").fill("acct");
     await page.locator("#integrationAccountPlugin").selectOption("plugin-1");
-    expect(await page.locator("#integrationAccountPlatform").inputValue()).toBe("telegram");
+    expect(await page.locator("#integrationAccountPlatform").count()).toBe(0);
     await page.locator("#integrationAccountEnv .integration-env-key").fill("API_TOKEN");
     await page.locator("#integrationAccountEnv .integration-env-value").fill("first-secret");
+    const iconCentering = await page.locator("#integrationAccountDialog").evaluate((dialog: Element) => {
+      const measure = (selector: string) => {
+        const button = dialog.querySelector<HTMLElement>(selector)!;
+        const icon = button.querySelector<SVGElement>("svg")!;
+        const outer = button.getBoundingClientRect(), inner = icon.getBoundingClientRect();
+        return {
+          button: [outer.width, outer.height],
+          icon: [inner.width, inner.height],
+          dx: Math.abs((outer.left + outer.width / 2) - (inner.left + inner.width / 2)),
+          dy: Math.abs((outer.top + outer.height / 2) - (inner.top + inner.height / 2)),
+        };
+      };
+      return { add: measure(".integration-env-add"), remove: measure(".integration-env-remove") };
+    });
+    for (const button of [iconCentering.add, iconCentering.remove]) {
+      expect(button.button).toEqual([32, 32]);
+      expect(button.icon).toEqual([16, 16]);
+      expect(button.dx).toBeLessThanOrEqual(0.75);
+      expect(button.dy).toBeLessThanOrEqual(0.75);
+    }
     if (process.env.CHAT_UI_SCREENSHOT_DIR) {
       await page.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, "integrations-account.png") });
     }
@@ -111,14 +176,41 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     expect(await accountRow.textContent()).toContain("telegram.js");
     expect(await accountRow.textContent()).toContain("API_TOKEN");
 
+    // A blank account ID is generated from the plugin platform and stays editable.
+    await page.locator("#btnAddIntegrationAccount").click();
+    await page.locator("#integrationAccountDialog[open]").waitFor();
+    expect(await page.locator("#integrationAccountId").inputValue()).toBe("");
+    await page.locator("#integrationAccountPlugin").selectOption("plugin-1");
+    await page.locator("#btnSaveIntegrationAccount").click();
+    await page.locator("#integrationAccountDialog").waitFor({ state: "hidden" });
+    const generated = await page.locator("#integrationAccounts .integration-account")
+      .filter({ hasText: "telegram.js" }).last()
+      .getByRole("button", { name: /^Edit: telegram-/ }).getAttribute("aria-label");
+    expect(generated).toMatch(/^Edit: telegram-[0-9a-f]{8}$/);
+    await page.locator("#integrationAccounts .integration-account")
+      .filter({ hasText: "telegram.js" }).last()
+      .getByRole("button", { name: /^Remove: telegram-/ }).click();
+    await page.locator("#btnAcceptConfirm").click();
+    expect(await page.locator("#integrationAccounts .integration-account").count()).toBe(1);
+
     await saveIntegrations(page);
     let saved = calls.findLast((call) => call.method === "PUT" && call.path === "/channeld/integration")!.body;
-    expect(saved.enabled).toBe(false);
+    expect(saved.enabled).toBe(true);
     expect(saved.accounts).toEqual([{ id: "acct", platform: "telegram", pluginId: "plugin-1", env: { API_TOKEN: "first-secret" } }]);
     expect(saved.rules).toEqual([]);
     // An untouched inbound list is omitted so the server keeps existing routes.
     expect(Object.hasOwn(saved, "inbound")).toBe(false);
-    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are disabled." }).waitFor();
+    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are enabled." }).waitFor();
+
+    // Disabling is a draft until save, and save asks for confirmation first.
+    const putsBeforeDisable = calls.filter((call) => call.method === "PUT" && call.path === "/channeld/integration").length;
+    await page.locator("#inIntegrationsEnabled").uncheck();
+    await page.locator("#btnSaveIntegrations").click();
+    await page.locator("#confirmDialog[open]").waitFor();
+    await page.locator("#btnCancelConfirm").click();
+    expect(await page.locator("#inIntegrationsEnabled").isChecked()).toBe(true);
+    expect(await page.locator("#integrationBody").isVisible()).toBe(true);
+    expect(calls.filter((call) => call.method === "PUT" && call.path === "/channeld/integration").length).toBe(putsBeforeDisable);
 
     // Leaving env values blank omits env, preserving the stored set.
     await accountRow.getByRole("button", { name: "Edit: acct" }).click();
@@ -126,6 +218,30 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     expect(await page.locator("#integrationAccountEnv .integration-env-key").inputValue()).toBe("API_TOKEN");
     expect(await page.locator("#integrationAccountEnv .integration-env-value").inputValue()).toBe("");
     expect(await page.locator("#integrationAccountEnv .integration-env-row.is-stored").count()).toBe(1);
+    expect(await page.locator("#integrationAccountEnvKeys").count()).toBe(0);
+    await page.locator("#btnAddAccountEnv").click();
+    const draftKey = page.locator("#integrationAccountEnv .integration-env-row:not(.is-stored) .integration-env-key").last();
+    await draftKey.focus();
+    const envMenu = page.locator("#integrationAccountEnv .integration-env-menu:not([hidden])").last();
+    await envMenu.waitFor();
+    const envOptions = await envMenu.locator(".integration-env-option").evaluateAll((nodes: Element[]) => nodes.map((node) => (node as HTMLElement).dataset.key));
+    expect(envOptions).toContain("OTHER_ENV");
+    expect(envOptions).not.toContain("API_TOKEN");
+    await envMenu.locator('.integration-env-option[data-key="OTHER_ENV"]').click();
+    expect(await draftKey.inputValue()).toBe("OTHER_ENV");
+    await page.locator("#integrationAccountEnv .integration-env-row:not(.is-stored) .integration-env-remove").last().click();
+    const envColors = await page.evaluate(() => {
+      const key = document.querySelector<HTMLInputElement>("#integrationAccountEnv .integration-env-key")!;
+      const value = document.querySelector<HTMLInputElement>("#integrationAccountEnv .integration-env-value")!;
+      const normal = document.querySelector<HTMLInputElement>("#integrationAccountId")!;
+      return {
+        key: getComputedStyle(key).color,
+        normal: getComputedStyle(normal).color,
+        placeholder: getComputedStyle(value, "::placeholder").color,
+      };
+    });
+    expect(envColors.key).toBe(envColors.normal);
+    expect(envColors.placeholder).not.toBe(envColors.key);
     if (process.env.CHAT_UI_SCREENSHOT_DIR) {
       await page.screenshot({ path: path.join(process.env.CHAT_UI_SCREENSHOT_DIR, "integrations-account-stored.png") });
     }
@@ -134,7 +250,7 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     await saveIntegrations(page);
     saved = calls.findLast((call) => call.method === "PUT" && call.path === "/channeld/integration")!.body;
     expect(Object.hasOwn(saved.accounts[0], "env")).toBe(false);
-    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are disabled." }).waitFor();
+    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are enabled." }).waitFor();
 
     // A new variable sends only the new key; untouched stored keys stay on the server.
     await accountRow.getByRole("button", { name: "Edit: acct" }).click();
@@ -148,7 +264,7 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     saved = calls.findLast((call) => call.method === "PUT" && call.path === "/channeld/integration")!.body;
     expect(saved.accounts[0].env).toEqual({ OTHER: "second-secret" });
     expect(Object.hasOwn(saved.accounts[0], "envDelete")).toBe(false);
-    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are disabled." }).waitFor();
+    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are enabled." }).waitFor();
     expect(await accountRow.textContent()).toContain("API_TOKEN, OTHER");
 
     // Replacing one stored value sends only that key; the other secret survives.
@@ -160,7 +276,7 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     await saveIntegrations(page);
     saved = calls.findLast((call) => call.method === "PUT" && call.path === "/channeld/integration")!.body;
     expect(saved.accounts[0].env).toEqual({ API_TOKEN: "rotated-secret" });
-    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are disabled." }).waitFor();
+    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are enabled." }).waitFor();
     expect(await accountRow.textContent()).toContain("API_TOKEN, OTHER");
 
     // Removing one stored key sends envDelete only; env: {} would clear the rest.
@@ -173,7 +289,7 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     saved = calls.findLast((call) => call.method === "PUT" && call.path === "/channeld/integration")!.body;
     expect(Object.hasOwn(saved.accounts[0], "env")).toBe(false);
     expect(saved.accounts[0].envDelete).toEqual(["API_TOKEN"]);
-    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are disabled." }).waitFor();
+    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are enabled." }).waitFor();
     expect(await accountRow.textContent()).not.toContain("API_TOKEN");
     expect(await accountRow.textContent()).toContain("OTHER");
 
@@ -188,10 +304,11 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     saved = calls.findLast((call) => call.method === "PUT" && call.path === "/channeld/integration")!.body;
     expect(saved.accounts[0].env).toEqual({});
     expect(Object.hasOwn(saved.accounts[0], "envDelete")).toBe(false);
-    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are disabled." }).waitFor();
+    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are enabled." }).waitFor();
     expect(await accountRow.textContent()).not.toContain("OTHER");
 
     // Invalid JSON and missing target accounts block the PUT with readable field errors.
+    await page.locator("#integrationRulesFormatJson").click();
     const putCount = () => calls.filter((call) => call.method === "PUT").length;
     const beforeInvalid = putCount();
     await setEditorText(page, "#integrationRulesEditor", "#integrationRules", "[");
@@ -229,11 +346,16 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     ].join("\n");
     await setEditorText(page, "#integrationRulesEditor", "#integrationRules", yamlRule);
     await page.waitForFunction(() => document.querySelector("#integrationRulesEditor")?.getAttribute("data-error-count") === "0");
+    // Schema hover is the compose-style hint: visible keys must explain themselves.
+    await page.locator("#integrationRulesEditor .monaco-editor .view-line span").filter({ hasText: "version" }).first().hover();
+    const schemaHover = page.locator(".monaco-hover").filter({ hasText: "Bump the version" });
+    await schemaHover.waitFor({ state: "visible" });
+    expect((await schemaHover.textContent()) ?? "").toContain("Bump the version");
     await saveIntegrations(page);
     saved = calls.findLast((call) => call.method === "PUT" && call.path === "/channeld/integration")!.body;
     expect(saved.rules).toEqual([rule]);
     expect(Object.hasOwn(saved, "inbound")).toBe(false);
-    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are disabled." }).waitFor();
+    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are enabled." }).waitFor();
     await page.locator("#integrationRulesFormatJson").click();
     await page.waitForFunction(() => (document.getElementById("integrationRules") as HTMLTextAreaElement | null)?.value.trimStart().startsWith("["));
 
@@ -242,7 +364,7 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     await saveIntegrations(page);
     saved = calls.findLast((call) => call.method === "PUT" && call.path === "/channeld/integration")!.body;
     expect(saved.inbound).toEqual([]);
-    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are disabled." }).waitFor();
+    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are enabled." }).waitFor();
 
     // A route pointing at a missing account blocks the PUT with a readable error.
     const beforeInboundInvalid = putCount();
@@ -263,7 +385,7 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     await page.locator("#integrationError").filter({ hasText: "relay deployment rejected the target" }).waitFor();
     expect(await page.locator("#integrationRules").inputValue()).toContain("\"account\": \"acct\"");
     await saveIntegrations(page);
-    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are disabled." }).waitFor();
+    await page.locator("#integrationStatus").filter({ hasText: "Saved. Integrations are enabled." }).waitFor();
     saved = calls.findLast((call) => call.method === "PUT" && call.path === "/channeld/integration")!.body;
     expect(saved.rules).toHaveLength(1);
 
@@ -272,22 +394,56 @@ test.skipIf(!browserModule)("integrations settings manage accounts, plugins, rul
     const putsBefore = putCount();
     await page.locator("#btnUploadPlugin").click();
     await page.locator("#integrationPluginDialog[open]").waitFor();
-    await page.locator("#integrationPluginName").fill("custom.mjs");
-    await page.locator("#integrationPluginPlatform").fill("custom");
-    await page.locator("#integrationPluginSource").fill("export default async () => ({});");
-    await page.locator("#integrationPluginEnv .integration-env-key").fill("PLUGIN_TOKEN");
-    await page.locator("#integrationPluginEnv .integration-env-value").fill("upload-secret");
+    expect(await page.locator("#integrationPluginName").count()).toBe(0);
+    expect(await page.locator("#integrationPluginPlatform").count()).toBe(0);
+    expect(await page.locator("#integrationPluginSource").count()).toBe(0);
+    await page.locator("#integrationPluginFile").setInputFiles({
+      name: "custom.mjs",
+      mimeType: "text/javascript",
+      buffer: Buffer.from("export default async () => ({});"),
+    });
     await page.locator("#btnSaveIntegrationPlugin").click();
     await page.locator("#integrationAccountDialog[open]").waitFor();
     expect(calls.filter((call) => call.path === "/channeld/plugins")).toHaveLength(uploadsBefore + 1);
     expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/channeld/plugins" });
-    expect(calls.at(-1)!.body).toMatchObject({ name: "custom.mjs", platform: "custom", env: { PLUGIN_TOKEN: "upload-secret" } });
+    expect(calls.at(-1)!.body).toMatchObject({ name: "custom.mjs" });
+    expect(Object.keys(calls.at(-1)!.body).sort()).toEqual(["name", "source"]);
     expect(putCount()).toBe(putsBefore);
     expect(await page.locator("#integrationAccountPlugin").inputValue()).toBe("plugin-2");
-    expect(await page.locator("#integrationAccountPlatform").inputValue()).toBe("custom");
-    expect(await page.evaluate(() => document.activeElement?.id)).toBe("integrationAccountId");
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("integrationAccountPlugin");
+    const advanced = page.locator("#integrationAccountAdvanced");
+    const advancedIcon = advanced.locator(".integration-advanced-icon");
+    expect(await advanced.getAttribute("open")).toBeNull();
+    expect(await advancedIcon.isVisible()).toBe(true);
+    const iconBox = await advancedIcon.boundingBox();
+    expect(iconBox?.width).toBe(16);
+    expect(iconBox?.height).toBe(16);
+    const collapsedRotation = await advancedIcon.evaluate((node: Element) => new DOMMatrixReadOnly(getComputedStyle(node).transform).b);
+    expect(collapsedRotation).toBeLessThan(-0.99);
+    await advanced.locator("summary").click();
+    expect(await advanced.getAttribute("open")).not.toBeNull();
+    await page.waitForFunction(() => {
+      const icon = document.querySelector("#integrationAccountAdvanced .integration-advanced-icon");
+      if (!icon) return false;
+      return Math.abs(new DOMMatrixReadOnly(getComputedStyle(icon).transform).b) < 0.01;
+    });
+    const openRotation = await advancedIcon.evaluate((node: Element) => new DOMMatrixReadOnly(getComputedStyle(node).transform).b);
+    expect(Math.abs(openRotation)).toBeLessThan(0.01);
+    const schemaToken = page.locator('#integrationAccountSchema [data-account-key="PLUGIN_TOKEN"]');
+    await schemaToken.waitFor();
+    expect(await page.locator("#integrationAccountSchemaField").isVisible()).toBe(true);
+    expect(await page.locator("#integrationAccountSchemaField .integration-required").count()).toBe(1);
+    await page.locator("#btnSaveIntegrationAccount").click();
+    await page.locator("#integrationAccountError").filter({ hasText: "Fill required account fields" }).waitFor();
     await page.locator("#btnCancelIntegrationAccount").click();
     await page.locator("#integrationPlugins").getByText("custom.mjs").waitFor();
+    const downloadPromise = page.waitForEvent("download");
+    await page.locator("#integrationPlugins .integration-plugin")
+      .filter({ hasText: "custom.mjs" })
+      .locator(".integration-plugin-download")
+      .click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("custom.mjs");
 
     // An external configuration stays visible but read-only; a managed snapshot restores editing.
     const managedSnapshot = integration;
@@ -426,9 +582,30 @@ async function installIntegrationRoutes(page: any, state: any) {
   await page.route("**/channeld/plugins", async (route: any) => {
     const body = route.request().postDataJSON();
     state.calls.push({ method: "POST", path: "/channeld/plugins", body });
-    const plugin = { pluginId: "plugin-2", name: body.name, platform: body.platform };
+    const plugin = {
+      pluginId: "plugin-2",
+      name: body.name,
+      platform: "custom",
+      displayName: "Custom",
+      account: { schema: [{ key: "PLUGIN_TOKEN", label: "Token", type: "secret", required: true }] },
+    };
     state.replace({ ...state.snapshot(), plugins: [...state.snapshot().plugins, plugin] });
     return json(route, plugin, 201);
+  });
+  await page.route("**/channeld/plugins/*/download", async (route: any) => {
+    const url = new URL(route.request().url());
+    const id = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+    state.calls.push({ method: "GET", path: `/channeld/plugins/${id}/download` });
+    const plugin = state.snapshot().plugins.find((item: any) => item.pluginId === id);
+    if (!plugin) return json(route, { error: "plugin not found" }, 404);
+    return route.fulfill({
+      status: 200,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${plugin.name}"`,
+      },
+      body: "export default async () => ({});",
+    });
   });
   for (const [pathname, enabled] of [["/channeld/enable", true], ["/channeld/disable", false]] as const) {
     await page.route(`**${pathname}`, async (route: any) => {

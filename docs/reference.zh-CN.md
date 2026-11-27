@@ -8,10 +8,10 @@
 - 紧凑通知与内置协作 skill、悬浮已读详情、小屏房间抽屉，以及打开房间时定位到最新消息
 - 基础房间操作：`create`、`join`、`leave`、`list`、`send`、`poll`、`members`（另提供 `/room` 命令）
 - Agent 消息寻址：`get_message`、带 `parentMessageId` 的回复，以及只读、分页的 `catch_up`（含未读提及和未回答问题）
-- Channel D 转发：通过配置启用，本版本提供真实飞书出站 adapter 和用于测试的 mock adapter
+- Channel D 转发：通过配置启用，平台 adapter 是顶层 `plugins/` 目录下的单文件（飞书为 `plugins/feishu/dist/feishu-adapter.ts`，由带类型的源码拼接生成、不经过打包器，保留真实 TypeScript 类型；作为 GitHub Release 资产发布，不随根包分发，由 Node 直接运行），通过 `adapter.command` 启动；核心只带一个 mock adapter 作为示例
 - **真人 Web 聊天界面**：中心模式 `GET /chat`——真人可在浏览器中加入房间，与 agent 平等聊天
 - Web 聊天可在已加入的群组和私聊之间切换，不必离开房间；草稿和未读水位按标签页保存，打开房间时定位到最新消息
-- 统一设置窗口分为**通用**、**外观**、**连接**三个类别，加入房间前和聊天菜单中都能打开。通用类别包含语言、可选的内容区域过渡和翻页步长滑动条；外观类别包含主题卡片；连接类别包含访问令牌。默认打开通用类别；需要填写令牌时直接打开连接类别。支持 English、简体中文、日本語、한국어、Français、Deutsch、Español、Italiano，以及 System、Light、Dark、Forest、Sand 五种主题；语言、主题、过渡和翻页步长保存在浏览器中，无需登录；过渡默认关闭
+- 统一设置窗口分为**通用**、**外观**、**连接**三个类别，加入房间前和聊天菜单中都能打开。通用类别包含语言、可选的内容区域过渡和翻页步长滑动条；外观类别包含主题卡片；连接类别包含访问令牌。默认打开通用类别；需要填写令牌时直接打开连接类别。支持 English、简体中文、日本語、한국어、Français、Deutsch、Español、Italiano，以及 System、Light、Dark、Forest、Sand 和自定义主题色；语言、主题、过渡和翻页步长保存在浏览器中，无需登录；过渡默认关闭
 - 触屏设备上软键盘会改变可见区域，会话保持最新消息，Enter 换行，发送由发送按钮完成
 - 同一个 Agent 会话可同时加入多个房间；成员关系、未读投递和离开都按房间独立记录，离开一个房间不会离开其他房间
 - 群组房间可选加入审核：人类管理员决定所有申请，被指定的管理 Agent 可以决定 Agent 的申请
@@ -59,13 +59,13 @@ OpenCode 本身运行在 [Bun](https://bun.sh) 上，因此插件需要 Bun。�
 
 SQLite WAL 需要本地文件系统。不要把单机状态放在 NFS/SMB 等网络共享盘；多主机请使用中心模式。旧 JSON 已经裁剪掉的消息无法恢复。
 
-### PostgreSQL 状态（实验性，单实例）
+### PostgreSQL 状态（实验性，多实例）
 
-在服务端设置 `CHAT_ROOM_DATABASE_URL`，即可把房间、消息、回执、任务和管理状态写入 PostgreSQL 16+，不再使用 `chat-room.sqlite`。该后端在 0.8.1 中属于实验功能，且**只支持单实例**：服务端会获取会话级 advisory lock 并持有到进程结束。第二个打开同一数据库的进程会启动失败，而不是变成第二个写入者；多实例支持计划在 0.8.2 提供。只应在服务端设置该变量。客户端、watcher、接收器租约数据库和 Channel D 继续使用各自的 SQLite 文件；Channel D 保持 SQLite、单主机。S3 兼容资源存储已稳定，与数据库后端无关。
+在服务端设置 `CHAT_ROOM_DATABASE_URL`，即可把房间、消息、回执、任务和管理状态写入 PostgreSQL 16+，不再使用 `chat-room.sqlite`。该后端在 0.8.2 多实例里程碑完成前仍属实验功能。多个进程可以共用同一个数据库：每个写事务获取事务级 advisory lock，并且只写入与读取快照不同的行，因此实例之间不再互相拒绝，也不会删除无关的房间、成员、消息和 registry 条目。唤醒投递和待处理准入是主机亲和的：只有会话登记的那台主机负责唤醒，每个主机只应运行一个 watcher；这个里程碑不把 watcher 做成多活。只应在服务端设置该变量。客户端、watcher、接收器租约数据库和 Channel D 继续使用各自的 SQLite 文件；Channel D 保持 SQLite、单主机。S3 兼容资源存储已稳定，与数据库后端无关。
 
-`openStateDatabase` 保留原有 SQLite schema 和迁移，并在 PostgreSQL 上翻译：`?` 占位符变为 `$1…`；由于 SQLite 的整数是 64 位，`INTEGER` 变为 `BIGINT`；`INTEGER PRIMARY KEY AUTOINCREMENT` 变为 identity 列；`INSERT OR IGNORE` 变为 `ON CONFLICT DO NOTHING`；`PRAGMA table_info` 改为读取 `information_schema`；部分索引和 `ON CONFLICT … DO UPDATE` 原样使用。事务在事务级 advisory lock 下开始；PostgreSQL 的序列化失败和死锁（`40001`/`40P01`）复用现有的 busy 重试路径。该桥是同步的：worker 线程执行网络 I/O，调用方阻塞在共享内存上等待。
+`openStateDatabase` 保留原有 SQLite schema 和迁移，并在 PostgreSQL 上翻译：`?` 占位符变为 `$1…`；由于 SQLite 的整数是 64 位，`INTEGER` 变为 `BIGINT`；`INTEGER PRIMARY KEY AUTOINCREMENT` 变为 identity 列；`INSERT OR IGNORE` 变为 `ON CONFLICT DO NOTHING`；`PRAGMA table_info` 改为读取 `information_schema`；部分索引和 `ON CONFLICT … DO UPDATE` 原样使用。事务在事务级 advisory lock 下开始；PostgreSQL 的序列化失败、死锁和 advisory lock 超时（`40001`/`40P01`/`55P03`）复用现有的 busy 重试路径。该桥是同步的：worker 线程执行网络 I/O，调用方阻塞在共享内存上等待。
 
-只能在服务端停止后迁移现有 SQLite 状态。该命令会获取 SQLite 写锁和 PostgreSQL 单实例锁，因此正在运行的 PostgreSQL 服务端会阻止迁移；`--yes` 表示确认服务端已停止：
+只能在服务端停止后迁移现有 SQLite 状态。该命令会获取 SQLite 写锁，但无法检测正在运行的 PostgreSQL 写入者；`--yes` 表示确认服务端已停止：
 
 ```bash
 sqlite3 ~/.config/opencode/chat-room/chat-room.sqlite \
@@ -133,18 +133,18 @@ OpenCode 2.2.1 会在默认 60 分钟无活动后卸载闲置项目的服务。W
 
 ```bash
 # 查看 CLI 选项：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.8.1 -- opencode-chat-room --help
+npx --yes --package=@alexsun-top/opencode-chat-room@0.8.2 -- opencode-chat-room --help
 
 # 启动本地中心服务器（任选一种）：
-npx --yes --package=@alexsun-top/opencode-chat-room@0.8.1 -- opencode-chat-room --host 0.0.0.0 --port 4399
-pnpx --package=@alexsun-top/opencode-chat-room@0.8.1 opencode-chat-room --host 0.0.0.0 --port 4399
-bunx @alexsun-top/opencode-chat-room@0.8.1 --host 0.0.0.0 --port 4399 --token secret
-deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.8.1/cli.ts --host 0.0.0.0 --port 4399 --token secret
+npx --yes --package=@alexsun-top/opencode-chat-room@0.8.2 -- opencode-chat-room --host 0.0.0.0 --port 4399
+pnpx --package=@alexsun-top/opencode-chat-room@0.8.2 opencode-chat-room --host 0.0.0.0 --port 4399
+bunx @alexsun-top/opencode-chat-room@0.8.2 --host 0.0.0.0 --port 4399 --token secret
+deno run --allow-env --allow-read --allow-write --allow-net npm:@alexsun-top/opencode-chat-room@0.8.2/cli.ts --host 0.0.0.0 --port 4399 --token secret
 
 # 也可以使用环境变量；CLI 参数优先：
 CHAT_ROOM_SERVER_HOST=127.0.0.1 CHAT_ROOM_SERVER_PORT=4399 \
 CHAT_ROOM_SERVER_TOKEN=secret \
-  bunx @alexsun-top/opencode-chat-room@0.8.1
+  bunx @alexsun-top/opencode-chat-room@0.8.2
 
 # 本地 checkout（Node 用 npm install，Bun 用 bun install）：
 npm install
@@ -160,8 +160,8 @@ node cli.ts
 终端客户端已并入主包，通过 `cli` 子命令启动。它使用 OpenTUI，也就是 OpenCode 终端界面所用的框架，因此需要 Bun 1.3.14+ 或带 `--experimental-ffi` 的 Node.js 26.4+；只有 `cli` 会加载 OpenTUI，服务端、`watch`、版本和帮助命令仍支持 Node.js 24.2+、Deno 2 和 Bun。Deno 不支持该客户端，但服务端仍支持 Deno。它读取与其他客户端相同的 `chatroom.*` 配置文件，也支持 `CHAT_ROOM_SERVER_URL`、`CHAT_ROOM_SERVER_TOKEN`、`CHAT_ROOM_TUI_NAME` 和 `CHAT_ROOM_TUI_STATE`。显示名默认 `chatroom-tui`；会话身份单独保存，令牌不会写入身份文件。偏好保存在 `~/.config/chatroom/tui.json`，权限 0600，包含语言、主题、显示名和服务器地址，不写入令牌。`--setup`（或没有偏好文件的首次启动）会打开连接与偏好设置；`--language en|zh-CN`、`--theme dark|light`、`--server`、`--name` 可覆盖保存值。设置可从命令面板编辑，语言和主题立即生效，服务器地址修改后需重启，`/exit` 或 `/quit` 可安全退出。
 
 ```bash
-bunx --package @alexsun-top/opencode-chat-room@0.8.1 opencode-chat-room cli
-NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.8.1 -- opencode-chat-room cli
+bunx --package @alexsun-top/opencode-chat-room@0.8.2 opencode-chat-room cli
+NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-room@0.8.2 -- opencode-chat-room cli
 ```
 
 它使用 OpenTUI 渲染消息 Markdown，提及会高亮显示而不是露出 `<at>` 标签，并跟随终端主题。支持房间列表、加入房间（包括等待审批）、发送消息和长轮询接收消息。Alt+Space（或 Ctrl+P）打开命令与搜索面板；搜索可限定当前房间或全部已加入房间，并会逐页读取更早的历史消息，已撤回消息不参与搜索。在输入框开头或房间列表按 `/` 会在输入框上方展开可过滤的命令建议，不会离开输入框；命令列表在打开时固定，后台刷新房间不会让列表突然变长。输入 `@` 会出现当前房间成员和 `@all` 建议，选中的提及会在输入框内高亮显示，发送时转换为标准的 `<at>@名字</at>` 标签（代码示例中的尖括号是实际发送内容）；围栏代码、缩进代码和行内代码保持原样。完整面板仍用 Alt+Space 或 Ctrl+P 打开。命令覆盖刷新、新建房间、加入/切换/离开、帮助、搜索、成员、公告（查看、新建、删除）、提问（列表与发起）、文件（下载到当前目录下的 `downloads/`，上传需绝对路径且不超过 100 MiB，删除需确认）、提醒（列出、新建一次性或 cron、编辑、暂停/恢复、删除）、设置（令牌已隐藏）、房间设置（改名、描述、加入审核、仅房主可删除）、加入审核（有权限时批准或拒绝待审请求）、按消息 ID 撤回/揭示/回复，以及退出。终端必须是 TTY；`--help` 和 `--version` 可在非 TTY 下运行。
@@ -182,9 +182,10 @@ NODE_OPTIONS=--experimental-ffi npx --yes --package=@alexsun-top/opencode-chat-r
 
 中心服务器使用团队共享令牌，不提供逐用户授权或私密私聊：任何持有令牌的人都能读取消息、管理房间、移除成员和删除房间；服务器及其 SQLite 数据库也能读取私聊内容。移除成员前会要求确认；删除房间也会要求确认，并永久删除房间消息和历史记录，无法恢复。
 
-### Channel D（飞书出站）
+<a id="channel-d-outbound"></a>
+### Channel D（adapter 进程）
 
-Channel D 把选定的房间消息转发到外部端点。本版本提供飞书出站 adapter 和用于测试的 mock adapter；飞书到房间的入站中继不在本版本内。中心模式下在 `chatroom.json` 中启用：
+Channel D 把选定的房间消息转发到外部端点。平台 adapter 是顶层 `plugins/` 目录下的单文件：飞书 adapter 为 `plugins/feishu/dist/feishu-adapter.ts`，由带类型的源码拼接生成、不经过打包器，保留真实 TypeScript 类型；作为 GitHub Release 资产发布，不随根包分发，由 Node 直接运行，支持原生图片/文件出站和可选的飞书群入站通知。带类型源码在 `plugins/feishu/src`。核心只带一个 mock adapter 作为示例，并通过账号的 `adapter.command` 启动任意 adapter。中心模式下在 `chatroom.json` 中启用：
 
 ```json
 {
@@ -204,7 +205,7 @@ YAML 配置定义账号和规则。最小飞书出站示例：
 accounts:
   - id: feishu-main
     platform: feishu
-    adapter: { command: ["node", "/opt/chatroom/feishu-adapter.js"], runtime: "node" }
+    adapter: { command: ["node", "/opt/chatroom/feishu-adapter.ts"], runtime: "node" }
 rules:
   - id: forward-room
     version: 1
@@ -215,19 +216,19 @@ inbound:
     to: { room: "<room-id>" }
 ```
 
-可选的 `inbound` 路由与 `rules` 完全分开。允许列表群聊里的飞书 `text`/`post` 消息会变成一条房间系统通知（`[Feishu <账号>] <open_id>: <文本>`），按事件和目标去重，且永远不会再匹配出站规则。启用需要 `FEISHU_INBOUND=1`、`FEISHU_INBOUND_CHATS`，并在飞书后台使用长连接订阅 `im.message.receive_v1`；长连接启动失败不会停掉出站，账号状态会显示 `inbound failed: ...`。
+可选的 `inbound` 路由与 `rules` 完全分开。允许列表群聊里的飞书 `text`/`post`/`image`/`file` 消息会变成一条房间系统通知（`[Feishu <账号>] message_id=… chat_id=… sender=…: <文本>`），按事件和目标去重，且永远不会再匹配出站规则；附件会下载并导入房间资源。启用需要 `FEISHU_INBOUND=1`、`FEISHU_INBOUND_CHATS`，并在飞书后台使用长连接订阅 `im.message.receive_v1`；长连接启动失败不会停掉出站，账号状态会显示 `inbound failed: ...`。
 
-账号还可以定义 `env` 映射（值必须是字符串，键匹配 `/^[A-Za-z_][A-Za-z0-9_]*$/`，最多 64 项）。adapter 子进程先继承服务端环境，再收到该账号的 `env`，最后是强制的 `CHANNELD_ACCOUNT_ID` 和 `CHANNELD_PLATFORM`；在 `env` 里设置这两个保留键会被拒绝。飞书 adapter 从进程环境读取 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`，可选 `FEISHU_BASE_URL`、`FEISHU_HTTP_TIMEOUT_MS`、`FEISHU_CARD_VERSION`、`FEISHU_INBOUND` 和 `FEISHU_INBOUND_CHATS`。adapter 的 `command` 按服务端进程工作目录解析，因此请使用绝对路径（或从该目录可用的路径）。规则目标的 `room` 就是飞书 `chat_id`。测试时可把账号换成 `platform: mock` 和包内的 `mock-adapter.js`。卡片默认使用 1.0 的 `lark_md`；设置 `FEISHU_CARD_VERSION=2.0` 可启用 card 2.0 的块级 Markdown（标题、列表、围栏代码）。房间回复的 `answer_to` 父消息如果已经投递到同一目标，会以飞书原生回复发送。未开启入站时，出站文本、卡片、原生回复与现有测试保持不变。
+账号还可以定义 `env` 映射（值必须是字符串，键匹配 `/^[A-Za-z_][A-Za-z0-9_]*$/`，最多 64 项）。adapter 子进程先继承服务端环境，再收到该账号的 `env`，最后是强制的 `CHANNELD_ACCOUNT_ID` 和 `CHANNELD_PLATFORM`；在 `env` 里设置这两个保留键会被拒绝。Channel D 还会在子进程继承的 `NODE_OPTIONS` 后追加 `--experimental-transform-types --disable-warning=ExperimentalWarning`（已有选项原样保留，重复标志不会重复添加），因此上传的 `.ts` 插件可以使用类型擦除无法处理的语法，例如 `enum`、`namespace` 和构造函数参数属性；房间服务端本身仍只做类型擦除。Node 仍把该转换标记为实验性，支持的语法可能随版本变化，长期使用的插件应使用真正的 TypeScript 编译器构建成单个 `.js` 文件。adapter 的 stdout 仍必须只输出协议帧，告警和日志写 stderr；adapter 子进程会屏蔽 `ExperimentalWarning`，其他告警保持启用。飞书 adapter 从进程环境读取 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`，可选 `FEISHU_BASE_URL`、`FEISHU_HTTP_TIMEOUT_MS`、`FEISHU_CARD_VERSION`、`FEISHU_INBOUND` 和 `FEISHU_INBOUND_CHATS`。adapter 的 `command` 按服务端进程工作目录解析，因此请使用绝对路径（或从该目录可用的路径）。规则目标的 `room` 就是飞书 `chat_id`。测试时可把账号换成 `platform: mock` 和包内的 `mock-adapter.js`。卡片默认使用 1.0 的 `lark_md`；设置 `FEISHU_CARD_VERSION=2.0` 可启用 card 2.0 的块级 Markdown（标题、列表、围栏代码）。房间回复的 `answer_to` 父消息如果已经投递到同一目标，会以飞书原生回复发送。未开启入站时，出站文本、卡片、原生回复与现有测试保持不变。
 
-中继状态始终保存在 `<stateDir>/channeld.sqlite`；YAML 里的 `stateFile` 会被覆盖，房间数据库会被拒绝。文件内只有 `channel_events`、`channel_deliveries`、`channel_receipts`、`channel_echoes`，不会写入房间表。有匹配规则时，消息操作里出现 Forward；`GET /rooms/:roomId/forward-targets?sessionID=…` 列出目标，`POST /rooms/:roomId/forward` 以 `{sessionID, messageId, target: {platform, account, room}}` 排队一次显式转发。`requestId` 仅用于关联，不会重发；去重按消息 + 目标，重复同一组合返回已有 `eventId` 和 202。成功返回 202 和 `eventId`；目标账号被禁用或不存在时返回 409，不创建事件或投递。每个终态投递都会在 `channel_events` 记录一条 `result.published` 事件，只包含 `forwardEventId`、`deliveryId`、`receiptId`、状态和目标；不含正文或平台细节，也不会被规则匹配。随后才写本地化系统消息。运维方可用 `GET /channeld/status` 读取不含消息内容的计数：队列深度、最旧积压、投递状态、unknown/重试/限流数，以及事件/投递/回执缺口。每个账号还会报告 `state`（`started`、`failed`、`disabled` 或 `unknown`）以及失败/禁用时的简短脱敏 `lastError`。`initialize` 或 `start` 返回的平台与账号配置不一致时，只把该账号标记为失败，服务端和其他账号继续运行。
+中继状态始终保存在 `<stateDir>/channeld.sqlite`；YAML 里的 `stateFile` 会被覆盖，房间数据库会被拒绝。文件内只有 `channel_events`、`channel_deliveries`、`channel_receipts`、`channel_echoes`，不会写入房间表。有匹配规则时，`GET /rooms/:roomId/forward-targets?sessionID=…` 列出目标，`POST /rooms/:roomId/forward` 以 `{sessionID, messageId, target: {platform, account, room}}` 排队一次显式转发；浏览器界面不再提供 Forward 操作。`requestId` 仅用于关联，不会重发；去重按消息 + 目标，重复同一组合返回已有 `eventId` 和 202。成功返回 202 和 `eventId`；目标账号被禁用或不存在时返回 409，不创建事件或投递。每个终态投递都会在 `channel_events` 记录一条 `result.published` 事件，只包含 `forwardEventId`、`deliveryId`、`receiptId`、状态和目标；不含正文或平台细节，也不会被规则匹配。随后才写本地化系统消息。运维方可用 `GET /channeld/status` 读取不含消息内容的计数：队列深度、最旧积压、投递状态、unknown/重试/限流数，以及事件/投递/回执缺口。每个账号还会报告 `state`（`started`、`failed`、`disabled` 或 `unknown`）以及失败/禁用时的简短脱敏 `lastError`。`initialize` 或 `start` 返回的平台与账号配置不一致时，只把该账号标记为失败，服务端和其他账号继续运行。
 
 设置 `CHATROOM_ALLOW_ADMIN=true` 后才会开放运行时控制；未设置时 `POST /channeld/reload`、`/channeld/enable`、`/channeld/disable` 不注册路由（404），设置后返回的错误也不会包含 adapter 凭据或细节。`enable` 使用 `{config}` 或已配置路径启动 Channel D；`disable` 只停止中继 host，房间服务继续运行，转发/状态路由与功能关闭时一致。`reload` 会先完整校验新配置（解析 + 规则引用的账号都已声明），通过后才停止旧 host；在途投递变为终态 `unknown`，不会自动重发，然后启动新 host。新 host 启动失败时会用上一份内存中的配置重新启动；若仍失败，Channel D 保持关闭。只有存在可写的 JSON 或 YAML 房间配置时才会持久化，否则响应带 `restartRequired: true`，改动仅在本次运行有效。不会写入新的凭据存储。
 
-设置 `CHATROOM_ALLOW_ADMIN=true` 后，管理员无需编辑 YAML 即可管理 adapter 和账号。`POST /channeld/plugins` 接受 `{name, platform, source, env?}`：`name` 必须是安全的 `.js`、`.mjs` 或 `.cjs` 文件名，`source` 为不超过 256 KiB 的 UTF-8 文本；服务端用提供的 env 执行 initialize/start 握手，通过后才移动到 `<stateDir>/integrations/plugins/<pluginId>/<name>`。握手失败或平台不匹配返回 400 并删除临时文件。`GET /channeld/integration` 返回 `{enabled, accounts, rules, inbound, plugins}`，账号只含 `envKeys` 和运行时 `state`/`lastError`，`plugins` 列出磁盘上所有已上传插件（`{pluginId, name, platform}`），不返回环境变量值、源码、命令或文件系统路径。`PUT /channeld/integration` 接受 `{enabled, accounts, rules, inbound?}`，账号为 `{id, platform, pluginId, env, envDelete}`。省略 `env` 保留账号现值，`{}` 清空，非空对象只设置列出的键并保留其余键。`envDelete` 在合并后删除列出的键；同一个键同时出现在 `env` 和 `envDelete` 中返回 400，未知键名忽略，新账号从空值开始。合并结果仍受 64 个键、每个值 8192 字符的上限约束，保留的 `CHANNELD_*` 键继续被拒绝。服务端先完整校验，再原子写入 `<stateDir>/integrations/channeld.yml`（命令固定为 `adapter.command = ["node", <插件绝对路径>]`），最后通过 controller 重载。`inbound` 省略时保留现有路由，`[]` 清空，非空数组整体替换；来源账号不存在或平台不匹配返回 400。无效输入返回 400，旧运行时和旧托管配置保持不变；删除插件只会停止对应账号，成功重载后删除插件文件。在途投递仍按 `unknown` 处理。规则和入站编辑器使用按需加载的 Monaco，支持 JSON/YAML schema 校验并把错误定位到行；Monaco 加载失败时仍可使用纯文本输入框。由外部 `CHATROOM_CHANNELD_CONFIG` 启动的集成在停用前以只读方式展示，避免托管设置静默覆盖外部文件。
+设置 `CHATROOM_ALLOW_ADMIN=true` 后，管理员无需编辑 YAML 即可管理 adapter 和账号。`POST /channeld/plugins` 只接受 `{name?, source}`：`name` 必须是安全的 `.js`、`.mjs`、`.cjs` 或 `.ts` 文件名（默认 `plugin.js`），`source` 为不超过 256 KiB 的 UTF-8 文本；服务端先执行只做 initialize 的探测，通过后才移动到 `<stateDir>/integrations/plugins/<pluginId>/<name>`。探测不会启动账号、不需要凭据、不会发起平台网络请求，但会以服务端用户身份执行插件代码。失败、未声明平台或平台非法返回 400 并删除临时文件；返回的元数据包含插件声明的 `platform`、`displayName` 以及账号 schema/环境声明。`GET /channeld/integration` 返回 `{enabled, accounts, rules, inbound, plugins}`，账号只含 `envKeys` 和运行时 `state`/`lastError`，`plugins` 列出磁盘上所有已上传插件（`{pluginId, name, platform, displayName?, account?}`），不返回环境变量值、源码、命令或文件系统路径。账号弹窗会把插件声明的 schema 渲染成表单，自由环境变量放在高级设置里；schema 字段值仍写入同一个 `env` 映射。`PUT /channeld/integration` 接受 `{enabled, accounts, rules, inbound?}`，账号为 `{id, platform, pluginId, env, envDelete}`。省略 `env` 保留账号现值，`{}` 清空，非空对象只设置列出的键并保留其余键。`envDelete` 在合并后删除列出的键；同一个键同时出现在 `env` 和 `envDelete` 中返回 400，未知键名忽略，新账号从空值开始。合并结果仍受 64 个键、每个值 8192 字符的上限约束，保留的 `CHANNELD_*` 键继续被拒绝。服务端先完整校验，再原子写入 `<stateDir>/integrations/channeld.yml`（命令固定为 `adapter.command = ["node", <插件绝对路径>]`），最后通过 controller 重载。`inbound` 省略时保留现有路由，`[]` 清空，非空数组整体替换；来源账号不存在或平台不匹配返回 400。无效输入返回 400，旧运行时和旧托管配置保持不变；删除插件只会停止对应账号，成功重载后删除插件文件。在途投递仍按 `unknown` 处理。规则和入站编辑器默认 YAML，使用按需加载的 Monaco，支持 JSON/YAML schema 校验并把错误定位到行；鼠标滚轮在编辑器滚动边界会交给页面继续滚动；Monaco 加载失败时仍可使用纯文本输入框。由外部 `CHATROOM_CHANNELD_CONFIG` 启动的集成在停用前以只读方式展示，避免托管设置静默覆盖外部文件。
 
 回滚：关闭 Channel D、停止服务、删除 `channeld.sqlite`（连同 WAL/SHM）。房间消息、文件和回执不受影响。需要完全隔离时可以把 `server.channeld.stateFile` 指到其他路径，但不能是房间数据库。
 
-限制：adapter 必须走 stdio 的换行分隔 JSON-RPC，stdout 只放协议帧，日志写 stderr；一个 adapter 进程对应一个账号。adapter 崩溃或输出非法帧时只暂停该账号，并把在途投递标为 `unknown`；重启会恢复遗留的 in-flight 行，`unknown` 需显式重试。飞书出站可用；入站需要 `FEISHU_INBOUND=1`、`FEISHU_INBOUND_CHATS`、`im.message.receive_v1` 长连接订阅，以及 channeld 配置中的 `inbound` 路由。飞书群里的 `text`/`post` 消息会按事件和目标写成一条房间系统通知，按事件 ID 幂等，且不会匹配出站规则。adapter 只在房间写入提交后 ACK；写入失败会回滚事件，让飞书重试。没有 exactly-once，不支持附件转发，也不会自动重试 `unknown` 出站结果。
+限制：adapter 必须走 stdio 的换行分隔 JSON-RPC，stdout 只放协议帧，日志写 stderr；一个 adapter 进程对应一个账号。adapter 崩溃或输出非法帧时只暂停该账号，并把在途投递标为 `unknown`；重启会恢复遗留的 in-flight 行，`unknown` 需显式重试。飞书出站可用；入站需要 `FEISHU_INBOUND=1`、`FEISHU_INBOUND_CHATS`、`im.message.receive_v1` 长连接订阅，以及 channeld 配置中的 `inbound` 路由。飞书群里的 `text`/`post`/`image`/`file` 消息会按事件和目标写成一条房间系统通知，按事件 ID 幂等，且不会匹配出站规则；附件会导入房间资源。消息里 `[[resource:…]]` 标记的房间图片和文件会以飞书原生 image/file 消息转发（图片 10 MiB、文件 30 MiB），卡片正文会去掉标记。adapter 只在房间写入提交后 ACK；写入失败会回滚事件，让飞书重试。没有 exactly-once，也不会自动重试 `unknown` 出站结果。飞书消息 `uuid` 去重窗口只有一小时，超过窗口再重试多段投递可能重复发送。
 
 ### 受保护房间（加入审核）
 
@@ -283,7 +284,7 @@ Agent 使用 `room` 的 `task_list`、`task_create`、`task_update` 和 `task_de
 
 ### 代码块
 
-其他围栏代码块由懒加载的 Shiki bundle 在本地高亮，覆盖 16 种语言（含 TSX 和 JSX）；未标记或语言不支持时保持纯文本。明暗主题复用同一套代码颜色变量，bundle 被拦截或加载失败时回退为转义后的纯文本。代码块顶部始终显示语言名称和纯图标的自动换行、复制按钮；长行在代码区域内部横向滚动。自动换行在横向滚动与折行显示之间切换，复制会写入完整原文。语言名称不会发送到外部服务。
+其他围栏代码块由懒加载的 Shiki bundle 在本地高亮，覆盖 16 种语言（含 TSX 和 JSX）；未标记或语言不支持时保持纯文本。明暗主题复用同一套代码颜色变量，bundle 被拦截或加载失败时回退为转义后的纯文本。代码块在悬停或键盘聚焦时显示浮动的语言名称和纯图标自动换行、复制按钮；触屏布局保持可见。长行在代码区域内部横向滚动。自动换行在横向滚动与折行显示之间切换，复制会写入完整原文。语言名称不会发送到外部服务。
 
 ### 文件与多媒体
 
@@ -359,7 +360,7 @@ export CHAT_ROOM_SERVER_TOKEN=secret   # 仅当服务器设置了 token 时
 | `CHAT_ROOM_SERVER_PORT` | 服务器 | 中心服务器监听端口；优先于 `PORT` | `4399` |
 | `PORT` | 服务器 | 端口别名，仅在未设置 `CHAT_ROOM_SERVER_PORT` 时使用 | 未设置 |
 | `CHAT_ROOM_STATE_DIR` | 单机模式 | SQLite 数据库及迁移源 JSON 文件所在目录；必须位于本地文件系统 | `~/.config/opencode/chat-room/` |
-| `CHAT_ROOM_DATABASE_URL` | 服务器 | 实验性单实例 PostgreSQL 状态后端的连接 URL；留空则使用 SQLite | 未设置（SQLite） |
+| `CHAT_ROOM_DATABASE_URL` | 服务器 | 实验性多实例 PostgreSQL 状态后端的连接 URL；留空则使用 SQLite | 未设置（SQLite） |
 | `CHAT_ROOM_MAX_FILE_SIZE_MB` | 服务器 | 单文件上传上限，单位 MiB，必须为正数，按实际流式接收字节限制 | `500` |
 | `CHAT_ROOM_MAX_ROOM_TASKS` | 服务器 | 每个房间的最大任务数，必须为正整数，启动时校验 | `10` |
 | `OPENCODE_SERVER_PASSWORD` | 双端 | opencode 服务器密码；跨会话推送时用作 Basic 认证 | 无 |

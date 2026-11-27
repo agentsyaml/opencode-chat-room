@@ -56,9 +56,14 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     await page.locator("#btnSend").click();
     const ownRow = page.locator('#msgList [data-msg-id]:not([data-msg-id^="pending-"])').filter({ hasText: "My short note" }).last();
     await ownRow.waitFor();
+    await page.locator("#msgInput").fill("Own code receipt\n\n```js\nconst receiptLayout = true;\n```");
+    await page.locator("#btnSend").click();
+    const ownCodeRow = page.locator('#msgList [data-msg-id]:not([data-msg-id^="pending-"])').filter({ hasText: "const receiptLayout = true;" }).last();
+    await ownCodeRow.waitFor();
     const oldMessageID = oldMessage.messages.at(-1).id, targetMessageID = target.messages.at(-1).id;
     const contextMessageID = contextMessage.messages.at(-1).id;
     const ownMessageID = (await ownRow.getAttribute("data-msg-id"))!;
+    const ownCodeMessageID = (await ownCodeRow.getAttribute("data-msg-id"))!;
     await api(origin, "/queued", "POST", { roomId, sessionID: ownerID, ts: oldMessage.messages.at(-1).createdAt });
     const members = await api(origin, `/rooms/${roomId}/members`);
     const owner = members.find((member: any) => member.sessionID === ownerID);
@@ -84,19 +89,28 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     expect(await ownReceiptButton.getAttribute("aria-label")).toBe("No readers yet");
     await ownReceiptButton.click();
     expect(await page.locator("#readerCount").textContent()).toBe("No readers yet");
+    expect(await page.locator("#readerPanel h2, #readerHeading").count()).toBe(0);
+    expect(await page.locator("#readerPanel").getAttribute("aria-label")).toBe("Message readers");
+    await page.waitForFunction(() => document.activeElement?.id === "readerPanel");
     expect(await page.locator("#readerList li").count()).toBe(0);
     await page.waitForTimeout(220);
     await page.screenshot({ path: path.join(artifactDir, "chat-own-readers-empty.png"), fullPage: true });
     await page.keyboard.press("Escape");
     await page.locator("#readerPanel").waitFor({ state: "hidden" });
     const twinA = members.find((member: any) => member.sessionID === "twin-a");
-    const ownReceiptWrite = await api(origin, `/rooms/${roomId}/receipts`, "POST", { sessionID: "twin-a", membershipID: twinA.membershipID, messageIDs: [ownMessageID], evidence: "displayed" });
+    const ownReceiptWrite = await api(origin, `/rooms/${roomId}/receipts`, "POST", { sessionID: "twin-a", membershipID: twinA.membershipID, messageIDs: [ownMessageID, ownCodeMessageID], evidence: "displayed" });
     expect(ownReceiptWrite.acceptedIDs).toContain(ownMessageID);
+    expect(ownReceiptWrite.acceptedIDs).toContain(ownCodeMessageID);
     const ownReceiptRead = await refreshReceiptView(page, origin, roomId, ownMessageID);
     expect(ownReceiptRead.receipts[0].readers.some((reader: any) => reader.sessionID === "twin-a")).toBe(true);
     await page.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-readers`)?.textContent === "1", ownMessageID);
     await refreshReceiptView(page, origin, roomId, ownMessageID);
     expect(await ownReceiptButton.textContent()).toBe("1");
+    const ownCodeReceiptButton = page.locator(`[data-msg-id="${ownCodeMessageID}"] .message-readers`);
+    const ownCodeReceiptRead = await refreshReceiptView(page, origin, roomId, ownCodeMessageID);
+    expect(ownCodeReceiptRead.receipts[0].readers.some((reader: any) => reader.sessionID === "twin-a")).toBe(true);
+    await page.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-readers`)?.textContent === "1", ownCodeMessageID);
+    expect(await ownCodeReceiptButton.textContent()).toBe("1");
     await ownReceiptButton.click();
     await page.locator('#readerList [data-reader-session-id="twin-a"]').waitFor();
     await page.screenshot({ path: path.join(artifactDir, "chat-own-readers-confirmed.png"), fullPage: true });
@@ -105,25 +119,54 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     // Once every other member has read the note, the count becomes a check mark.
     const twinB = members.find((member: any) => member.sessionID === "twin-b");
     for (const reader of [twinB, agent]) {
-      await api(origin, `/rooms/${roomId}/receipts`, "POST", { sessionID: reader.sessionID, membershipID: reader.membershipID, messageIDs: [ownMessageID], evidence: "displayed", ...(reader.sessionID === "agent-twin" ? { receiverOwnerID } : {}) });
+      await api(origin, `/rooms/${roomId}/receipts`, "POST", { sessionID: reader.sessionID, membershipID: reader.membershipID, messageIDs: [ownMessageID, ownCodeMessageID], evidence: "displayed", ...(reader.sessionID === "agent-twin" ? { receiverOwnerID } : {}) });
     }
     await refreshReceiptView(page, origin, roomId, ownMessageID);
+    await refreshReceiptView(page, origin, roomId, ownCodeMessageID);
     await page.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-readers`)?.getAttribute("data-reader-state") === "all", ownMessageID);
+    await page.waitForFunction((id: string) => document.querySelector(`[data-msg-id="${id}"] .message-readers`)?.getAttribute("data-reader-state") === "all", ownCodeMessageID);
     expect(await ownReceiptButton.textContent()).toBe("");
     expect(await ownReceiptButton.locator("svg.message-read-check").count()).toBe(1);
     expect(await ownReceiptButton.getAttribute("aria-label")).toBe("Everyone has read this message");
+    expect(await ownCodeReceiptButton.textContent()).toBe("");
+    expect(await ownCodeReceiptButton.locator("svg.message-read-check").count()).toBe(1);
+    expect(await ownCodeReceiptButton.getAttribute("aria-label")).toBe("Everyone has read this message");
+    // Every receipt sits on the bubble's inner side, bottom-aligned: left of
+    // own bubbles and right of incoming bubbles.
+    await page.locator(`[data-msg-id="${ownCodeMessageID}"]`).scrollIntoViewIfNeeded();
+    const ownReceiptLayout = await page.locator(`[data-msg-id="${ownCodeMessageID}"]`).evaluate((row: Element) => {
+      const bubble = row.querySelector<HTMLElement>(".msg-text")!.getBoundingClientRect();
+      const button = row.querySelector<HTMLElement>(".message-readers")!;
+      const badge = button.getBoundingClientRect();
+      const list = document.querySelector<HTMLElement>("#msgList")!.getBoundingClientRect();
+      return {
+        size: [badge.width, badge.height],
+        gap: bubble.left - badge.right,
+        bottomGap: Math.abs(badge.bottom - bubble.bottom),
+        inActions: button.parentElement?.classList.contains("message-actions") === true,
+        contentButtons: row.querySelectorAll(".msg-content .message-readers").length,
+        bubbleToListRight: list.right - bubble.right,
+        label: button.getAttribute("aria-label"),
+      };
+    });
+    expect(ownReceiptLayout.size).toEqual([24, 24]);
+    expect(ownReceiptLayout.inActions).toBe(false);
+    expect(ownReceiptLayout.contentButtons).toBe(1);
+    expect(ownReceiptLayout.gap).toBeGreaterThanOrEqual(4);
+    expect(ownReceiptLayout.gap).toBeLessThanOrEqual(8);
+    expect(ownReceiptLayout.bottomGap).toBeLessThanOrEqual(2);
+    expect(ownReceiptLayout.bubbleToListRight).toBeGreaterThanOrEqual(0);
+    expect(ownReceiptLayout.bubbleToListRight).toBeLessThanOrEqual(2);
+    expect(ownReceiptLayout.label).toBe("Everyone has read this message");
+    await page.screenshot({ path: path.join(artifactDir, "chat-own-code-receipt.png"), fullPage: true });
     await ownReceiptButton.click();
     await page.locator('#readerList [data-reader-session-id="twin-b"]').waitFor();
     expect(await page.locator("#readerList li").count()).toBe(3);
     await page.keyboard.press("Escape");
     await page.locator("#readerPanel").waitFor({ state: "hidden" });
-    await page.locator("#btnMembers").click();
-    await page.locator('#memberList [data-member-session-id="agent-twin"] .member-activity').waitFor();
-    expect(await page.locator('#memberList [data-member-session-id="agent-twin"] .member-activity').textContent()).toBe("Status unknown");
-    expect(await page.locator('#memberList [data-member-session-id="twin-a"] .member-activity').count()).toBe(0);
-    await api(origin, "/presence", "POST", { ownerID: receiverOwnerID, sequence: 1, sessions: [{ sessionID: "agent-twin", receiverOwnerID, state: "working" }] });
-    await page.waitForFunction(() => document.querySelector('#memberList [data-member-session-id="agent-twin"] .member-activity')?.textContent === "Working", null, { timeout: 7000 });
-    await page.locator("#btnMembers").click();
+    // The taller own code message pushed the older target above the fold; scroll
+    // it back into view so the focused tab records its displayed receipt.
+    await page.locator(`[data-msg-id="${targetMessageID}"]`).scrollIntoViewIfNeeded();
     let roomReceipts: any;
     try { roomReceipts = await waitForReader(origin, roomId, targetMessageID, ownerID); }
     catch (error) {
@@ -133,6 +176,13 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
       }, "/assets/chat/state.js");
       throw new Error(`${error}; client=${JSON.stringify(state)}; requests=${receiptRequests.join(" | ")}`);
     }
+    await page.locator("#btnMembers").click();
+    await page.locator('#memberList [data-member-session-id="agent-twin"] .member-activity').waitFor();
+    expect(await page.locator('#memberList [data-member-session-id="agent-twin"] .member-activity').textContent()).toBe("Status unknown");
+    expect(await page.locator('#memberList [data-member-session-id="twin-a"] .member-activity').count()).toBe(0);
+    await api(origin, "/presence", "POST", { ownerID: receiverOwnerID, sequence: 1, sessions: [{ sessionID: "agent-twin", receiverOwnerID, state: "working" }] });
+    await page.waitForFunction(() => document.querySelector('#memberList [data-member-session-id="agent-twin"] .member-activity')?.textContent === "Working", null, { timeout: 7000 });
+    await page.locator("#btnMembers").click();
     expect(roomReceipts.readers.some((reader: any) => reader.sessionID === ownerID)).toBe(true);
     const visibleIDs = await visibleMessageIDs(page), allReceipts = await api(origin, `/rooms/${roomId}/receipts`);
     const ownerReceiptIDs = allReceipts.receipts.filter((item: any) => item.readers.some((reader: any) => reader.sessionID === ownerID)).map((item: any) => item.messageID).sort();
@@ -212,6 +262,20 @@ test.skipIf(!browserModule)("room activity and per-message receipts stay identit
     expect(await page.locator(`[data-msg-id="${ownMessageID}"] .msg-text p`).evaluate((node: HTMLElement) => node.getBoundingClientRect().height)).toBeLessThan(26);
     expect(await page.locator(`[data-msg-id="${contextMessageID}"] .msg-text`).evaluate((node: HTMLElement) => node.getBoundingClientRect().right <= innerWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const mobileOwnLayout = await page.locator(`[data-msg-id="${ownCodeMessageID}"]`).evaluate((row: Element) => {
+      const badge = row.querySelector<HTMLElement>(".message-readers")!.getBoundingClientRect();
+      const actions = row.querySelector<HTMLElement>(".message-actions")!.getBoundingClientRect();
+      return {
+        size: [badge.width, badge.height],
+        badgeRight: badge.right,
+        actionRight: actions.right,
+        pageOverflow: document.documentElement.scrollWidth - innerWidth,
+      };
+    });
+    expect(mobileOwnLayout.size).toEqual([24, 24]);
+    expect(mobileOwnLayout.pageOverflow).toBe(0);
+    expect(mobileOwnLayout.badgeRight).toBeLessThanOrEqual(390.5);
+    expect(mobileOwnLayout.actionRight).toBeLessThanOrEqual(390.5);
     const mobileReaderButton = page.locator(`[data-msg-id="${targetMessageID}"] .message-readers`);
     await mobileReaderButton.scrollIntoViewIfNeeded();
     if (!await page.locator("#readerPanel").isVisible()) await mobileReaderButton.click();

@@ -90,7 +90,7 @@ test.skipIf(!browserModule)("the rail opens a centered create-room dialog with a
       return { name: app.state.room.name, policy: app.state.room.joinPolicy };
     }, "/assets/chat/state.js")).toEqual({ name: "__Test_DialogRoom", policy: "approval" });
 
-    // Cancel, Escape, the backdrop, and the close button restore the composer.
+    // Cancel, Escape, and the close button restore the composer; backdrop clicks keep it open.
     await page.locator("#btnNewRoom").click();
     await dialog.waitFor({ state: "visible" });
     await page.locator("#btnCancelCreateRoom").click();
@@ -106,6 +106,10 @@ test.skipIf(!browserModule)("the rail opens a centered create-room dialog with a
     await page.locator("#btnNewRoom").click();
     await dialog.waitFor({ state: "visible" });
     await page.mouse.click(6, 6);
+    await page.waitForTimeout(300);
+    expect(await dialog.isVisible()).toBe(true);
+
+    await page.locator("#btnCloseCreateRoom").click();
     await dialog.waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "msgInput");
 

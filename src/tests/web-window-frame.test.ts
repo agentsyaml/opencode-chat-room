@@ -41,14 +41,28 @@ test.skipIf(!browserModule)("window frame defaults framed and switches live", as
 
     // Appearance exposes a persistent label and live Framed/Borderless values.
     await openAppearance(page);
+    await page.waitForTimeout(250);
+    const modeRow = page.locator(".panel-mode-row").last();
+    await modeRow.scrollIntoViewIfNeeded();
+    const hoverGeometry = () => modeRow.evaluate((row: Element) => {
+      const rect = (node: Element | null) => {
+        if (!node) return null;
+        const box = node.getBoundingClientRect();
+        return [box.x, box.y, box.width, box.height];
+      };
+      return { row: rect(row), label: rect(row.querySelector("label, span")), select: rect(row.querySelector("select")) };
+    });
+    const beforeHover = await hoverGeometry();
+    await modeRow.hover();
+    expect(await hoverGeometry()).toEqual(beforeHover);
     expect(await page.locator("#inWindowFrame").inputValue()).toBe("framed");
-    expect(await page.locator('label[for="inWindowFrame"] span').textContent()).toBe("Window frame");
+    expect(await page.locator('label[for="inWindowFrame"] span').textContent()).toBe("Display mode");
     await page.locator("#settingsTabGeneral").click();
     await page.locator("#localeSelectSettings").selectOption("zh-CN");
     await page.waitForFunction(() => document.documentElement.lang === "zh-CN");
     await page.locator("#settingsTabAppearance").click();
-    expect(await page.locator('label[for="inWindowFrame"] span').textContent()).toBe("窗口边框");
-    expect(await page.locator("#inWindowFrame option").allTextContents()).toEqual(["有边框", "无边框"]);
+    expect(await page.locator('label[for="inWindowFrame"] span').textContent()).toBe("显示模式");
+    expect(await page.locator("#inWindowFrame option").allTextContents()).toEqual(["窗口模式", "内容铺满"]);
     await page.locator("#settingsTabGeneral").click();
     await page.locator("#localeSelectSettings").selectOption("en");
     await page.waitForFunction(() => document.documentElement.lang === "en");

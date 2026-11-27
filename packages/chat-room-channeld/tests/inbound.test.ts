@@ -34,7 +34,7 @@ describe("inbound routes", () => {
     expect(validateTargets(parsed)).toBeUndefined();
     expect(matchInboundRoutes(parsed, event())).toHaveLength(1);
     expect(matchInboundRoutes(parsed, event({ source: { ...event().source, roomId: "oc_other" } }))).toHaveLength(0);
-    expect(inboundRoomText(event(), parsed.inbound[0]!)).toBe("[Feishu feishu-main] ou_alice: hello");
+    expect(inboundRoomText(event(), parsed.inbound[0]!)).toBe("[Feishu feishu-main] message_id=evt-1 chat_id=oc_allowed sender=ou_alice: hello");
   });
 
   test("event kind and platform filters are honored", () => {

@@ -25,6 +25,7 @@ test.skipIf(!browserModule)("the room file browser filters, previews, downloads,
     await waitForServer(origin);
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHAT_UI_BROWSER_EXECUTABLE });
     const page = await browser.newPage({ viewport: { width: 1280, height: 850 }, colorScheme: "light" });
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
     page.setDefaultTimeout(15000);
     page.on("pageerror", (error: Error) => pageErrors.push(error.message));
     page.on("dialog", (dialog: any) => { nativeDialogs.push(dialog.type()); void dialog.dismiss(); });
@@ -73,6 +74,31 @@ test.skipIf(!browserModule)("the room file browser filters, previews, downloads,
       const box = (await control.boundingBox())!;
       expect(Math.abs(box.height - 34)).toBeLessThanOrEqual(2);
     }
+    // Copy feedback hangs below the button and must stay above the next row.
+    const copyRow = page.locator("#fileList .file-row").filter({ hasText: "__Test_notes.txt" });
+    await copyRow.locator(".copy-action").click();
+    const feedback = copyRow.locator(".copy-feedback");
+    await feedback.waitFor();
+    await page.waitForTimeout(200);
+    const feedbackState = await feedback.evaluate((node: HTMLElement) => {
+      const rect = node.getBoundingClientRect();
+      const previous = node.style.pointerEvents;
+      node.style.pointerEvents = "auto";
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      node.style.pointerEvents = previous;
+      return {
+        opacity: Number(getComputedStyle(node).opacity),
+        visible: rect.width > 0 && rect.height > 0,
+        onTop: hit === node || node.contains(hit),
+        hit: hit?.className,
+      };
+    });
+    expect(feedbackState.opacity).toBeGreaterThan(0.9);
+    expect(feedbackState.visible).toBe(true);
+    expect(feedbackState.onTop).toBe(true);
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(screenshotDir, "web-files-copy-feedback.png") });
+
     // Icons inherit the themed text color instead of carrying their own palette.
     const themed = await page.evaluate(() => {
       const svg = document.querySelector<SVGElement>('#fileList [data-file-action="download"] svg')!;
@@ -167,6 +193,8 @@ test.skipIf(!browserModule)("the room file browser filters, previews, downloads,
     expect(await page.locator("#fileList .file-row").filter({ hasText: "__Test_notes.txt" }).count()).toBe(0);
     expect((await listResources(origin, roomId, ownerSession)).total).toBe(2);
     await page.mouse.click(4, 4);
+    expect(await page.locator("#filesDialog").isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
     await page.locator("#filesDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
 

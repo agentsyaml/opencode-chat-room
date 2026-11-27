@@ -79,7 +79,7 @@ export const fr = {
   integrationsAddEnv: "Ajouter une variable", integrationsClearEnv: "Effacer toutes les variables", integrationsKeepEnv: "Conserver toutes les variables",
   integrationsClearEnvActive: "Toutes les variables enregistrées seront effacées à l’enregistrement.", integrationsEnvInvalid: "Utilisez des noms de variable uniques composés de lettres, chiffres et traits de soulignement.",
   integrationsAccountTitle: "Compte d’intégration", integrationsAccountId: "ID du compte", integrationsPlatform: "Plateforme",
-  integrationsAccountInvalid: "Ajoutez un ID de compte et choisissez un plugin.", integrationsDuplicateAccount: "Un compte avec cet ID existe déjà.",
+  integrationsAccountInvalid: "Choisissez un plugin.", integrationsDuplicateAccount: "Un compte avec cet ID existe déjà.",
   integrationsAccountSaved: "Compte enregistré. Enregistrez les intégrations pour l’appliquer.", integrationsAccountRemoved: "Compte supprimé. Enregistrez les intégrations pour l’appliquer.",
   integrationsLastError: "Dernière erreur", integrationsEdit: "Modifier", integrationsRemove: "Retirer",
   integrationsInvalidJson: "Le JSON des règles est invalide vers la ligne {line}.", integrationsInvalidRules: "Les règles doivent être un tableau JSON.",

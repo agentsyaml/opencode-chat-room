@@ -41,18 +41,6 @@ test.skipIf(!browserModule)("reply drafts, mentions, retries, and history quotes
     await page.locator(`#msgList [data-msg-id="${original.messages.at(-1).id}"] .message-reply`).waitFor();
     await page.locator(`#msgList [data-msg-id="${otherMessage.messages.at(-1).id}"] .message-reply`).waitFor();
     expect(await page.locator("#msgList [data-forward-message]").count()).toBe(0);
-    await page.evaluate(async (url: string) => {
-      const { app } = await import(url);
-      document.body.dataset.channeld = "on";
-      app.rerenderMessages();
-    }, "/assets/chat/state.js");
-    await page.locator(`#msgList [data-msg-id="${original.messages.at(-1).id}"] [data-forward-message]`).waitFor();
-    await page.evaluate(async (url: string) => {
-      const { app } = await import(url);
-      document.body.dataset.channeld = "off";
-      app.rerenderMessages();
-    }, "/assets/chat/state.js");
-    expect(await page.locator("#msgList [data-forward-message]").count()).toBe(0);
     const replyAction = page.locator(`#msgList [data-msg-id="${original.messages.at(-1).id}"] .message-reply`);
     expect(await replyAction.getAttribute("aria-label")).toBe("Reply");
     expect(await replyAction.locator("svg[aria-hidden=true]").count()).toBe(1);

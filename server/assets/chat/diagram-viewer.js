@@ -181,7 +181,13 @@ export function initDiagramViewer(app) {
     return { width: width > 0 ? width : 640, height: height > 0 ? height : 420 };
   }
   const outside = (target) => target?.closest?.(".diagram-viewer-toolbar");
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) close(); });
+  // Only a press that began on the backdrop closes; a drag out of the canvas does not.
+  let dismissPress = false;
+  dialog.addEventListener("pointerdown", (event) => { dismissPress = event.target === dialog; });
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog && dismissPress) close();
+    dismissPress = false;
+  });
   dialog.addEventListener("wheel", (event) => {
     if (!dialog.open) return;
     event.preventDefault();

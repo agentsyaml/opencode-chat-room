@@ -1,6 +1,6 @@
 {
   "name": "@alexsun-top/chat-room-channeld",
-  "version": "0.1.0",
+  "version": "0.8.2",
   "description": "Channel D relay core: a host that relays chat-room events to external IM accounts through adapter child processes.",
   "type": "module",
   "repository": {
@@ -23,7 +23,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "test": "bun test tests/*.test.ts"
   },
   "dependencies": {

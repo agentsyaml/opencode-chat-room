@@ -21,7 +21,7 @@ const message = [
   "```",
 ].join("\n");
 
-test.skipIf(!browserModule)("Shiki highlights messages and previews after the lazy bundle loads", async () => {
+test.skipIf(!browserModule)("Shiki highlights message code blocks; previews use Monaco after the lazy bundle loads", async () => {
   const { chromium } = await import(pathToFileURL(browserModule!).href);
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "chat-shiki-"));
   const artifactDir = process.env.CHAT_UI_SCREENSHOT_DIR || stateDir;
@@ -116,12 +116,14 @@ test.skipIf(!browserModule)("Shiki highlights messages and previews after the la
     await previewButton.waitFor();
     await previewButton.click();
     await page.locator("#docPreview").waitFor({ state: "visible" });
-    const previewCode = page.locator("#docPreviewBody .doc-code code.language-typescript.shiki");
-    await previewCode.waitFor();
+    const previewEditor = page.locator("#docPreviewBody .doc-monaco .monaco-editor");
+    await previewEditor.waitFor();
+    expect(await previewEditor.evaluate((node: HTMLElement) => node.getBoundingClientRect().height)).toBeGreaterThan(0);
+    expect(await page.locator("#docPreviewBody pre.doc-code").count()).toBe(0);
     expect(await page.locator("#docPreviewLanguage").textContent()).toBe("TypeScript");
-    expect(await previewCode.locator("span[style*='--shiki-token']").count()).toBeGreaterThan(0);
-    expect(await previewCode.evaluate((node: HTMLElement) => node.textContent)).toBe(TS_SOURCE);
-    expect(await previewCode.evaluate((node: Element) => getComputedStyle(node).userSelect)).not.toBe("none");
+    const firstLine = await page.locator("#docPreviewBody .monaco-editor .view-line").first().textContent();
+    expect(firstLine?.replace(/\u00a0/g, " ")).toContain("export function answer");
+    expect(await page.locator("#docPreviewBody .monaco-editor .view-line span").count()).toBeGreaterThan(0);
     const beforeCopy = await page.evaluate(() => (window as any).__copiedCode);
     await page.locator("#btnDocPreviewCopy").click();
     await page.waitForFunction((previous: string) => (window as any).__copiedCode !== previous, beforeCopy);

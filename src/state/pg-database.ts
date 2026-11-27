@@ -8,9 +8,9 @@ import type { QueryStatement, SQLQueryBindings, StateDatabase, Transaction } fro
 // network I/O. The state layer is synchronous by design, so this preserves its
 // transaction boundaries without turning 100+ call sites into async code.
 //
-// PostgreSQL support is experimental and single-instance in 0.8.1: the worker
-// holds a session advisory lock for the lifetime of the connection, and a
-// second process fails startup instead of writing concurrently.
+// PostgreSQL support is experimental through the 0.8.2 multi-instance
+// milestone. Writers serialize per transaction with an advisory xact lock;
+// separate processes may share the database and apply disjoint diffs.
 
 type Reply = {
   id: number;
@@ -115,8 +115,8 @@ export class PgDatabase implements StateDatabase {
     const signal = new SharedArrayBuffer(4);
     try {
       this.#port.postMessage({ type: "close", signal });
-      // Give client.end() a chance to release the session advisory lock before
-      // a caller opens the next connection (migration and restart tests rely on it).
+      // Give client.end() time to flush before a caller opens the next
+      // connection (migration and restart tests rely on it).
       Atomics.wait(new Int32Array(signal), 0, 0, 2_000);
     } catch { /* worker already gone */ }
     this.#port.close();

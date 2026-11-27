@@ -1,9 +1,14 @@
+import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { cardVersionFromEnv, type CardVersion } from "./feishu-card.ts";
 import { parseInboundEvent } from "./feishu-inbound.ts";
 import { FeishuLiveConnection } from "./feishu-live.ts";
 import {
+  MAX_FILE_BYTES,
+  MAX_IMAGE_BYTES,
   ensureToken,
   FeishuApiError,
   sendMessage,
@@ -13,7 +18,7 @@ import {
   type SendReceipt,
   type TokenState,
 } from "./feishu-send.ts";
-import { createFrameReader, writeFrame } from "./framing.ts";
+import { createFrameReader, writeFrame } from "../../../packages/chat-room-channeld/src/framing.ts";
 import {
   EVENT_SCHEMA_VERSION,
   MAX_FRAME_BYTES,
@@ -24,8 +29,9 @@ import {
   rpcError,
   rpcRequest,
   rpcResult,
+  type AttachmentRef,
   type IngestEvent,
-} from "./protocol.ts";
+} from "../../../packages/chat-room-channeld/src/protocol.ts";
 
 export { deterministicUuid } from "./feishu-send.ts";
 
@@ -77,6 +83,62 @@ function configFromEnv(env: NodeJS.ProcessEnv): FeishuConfig | { error: string }
 
 const INGEST_TIMEOUT_MS = 5000;
 
+function imageExtension(mimeType: string | undefined): string {
+  return ({ "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" } as Record<string, string>)[mimeType ?? ""] ?? ".bin";
+}
+
+/**
+ * Feishu stores inbound media behind a resource endpoint, not in the event
+ * body. Download into the host's shared temp prefix and let the center import
+ * the file into the room. A failure is reported in the room instead of making
+ * the whole message disappear.
+ */
+async function downloadAttachments(
+  config: FeishuConfig,
+  state: AdapterState,
+  event: IngestEvent,
+): Promise<{ event: IngestEvent; cleanup: () => Promise<void> }> {
+  const messageId = event.message?.nativeMessageId;
+  const attachments = event.content?.attachments ?? [];
+  if (!messageId || attachments.length === 0) return { event, cleanup: async () => {} };
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "chat-room-channeld-"));
+  const resolved: AttachmentRef[] = [];
+  for (const attachment of attachments) {
+    if (!attachment.sourceId) {
+      resolved.push({ ...attachment, error: "attachment key is missing" });
+      continue;
+    }
+    try {
+      const type = attachment.kind === "image" ? "image" : "file";
+      const url = `${config.baseUrl}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(attachment.sourceId)}?type=${type}`;
+      const request = async (token: string) => fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(Math.max(config.timeoutMs, 120_000)),
+      });
+      let response = await request(await ensureToken(config, state));
+      if (response.status === 401 || response.status === 403) {
+        response = await request(await ensureToken(config, state, true));
+      }
+      if (!response.ok) throw new Error(`feishu http ${response.status}`);
+      const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim() || undefined;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const limit = type === "image" ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
+      if (bytes.length > limit) throw new Error(`attachment exceeds ${type === "image" ? "10 MiB" : "30 MiB"}`);
+      const name = type === "image" ? `image${imageExtension(mimeType)}` : attachment.name;
+      const extension = path.extname(name).toLowerCase();
+      const file = path.join(directory, `${randomUUID()}${/^\.[a-z0-9]{1,10}$/.test(extension) ? extension : ".bin"}`);
+      await fs.writeFile(file, bytes, { mode: 0o600 });
+      resolved.push({ ...attachment, name, mimeType, size: bytes.length, path: file });
+    } catch (error) {
+      resolved.push({ ...attachment, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return {
+    event: { ...event, content: { ...event.content, attachments: resolved } },
+    cleanup: () => fs.rm(directory, { recursive: true, force: true }),
+  };
+}
+
 /** Emit one ingest request and wait for the host commit; false means no ack. */
 function emitIngest(state: AdapterState, event: IngestEvent): Promise<boolean> {
   const id = adapterRequestId(++state.sequence);
@@ -85,7 +147,9 @@ function emitIngest(state: AdapterState, event: IngestEvent): Promise<boolean> {
       state.pending.delete(id);
       logLine(state.accountId, "inbound ingest timed out");
       resolve(false);
-    }, INGEST_TIMEOUT_MS);
+      // Importing an attachment uploads its bytes into the room, possibly to S3.
+      // A 30 MB file needs far longer than the text-only ack window.
+    }, event.content?.attachments?.length ? 60_000 : INGEST_TIMEOUT_MS);
     state.pending.set(id, (result) => {
       clearTimeout(timer);
       if (result.error) logLine(state.accountId, `inbound ingest failed: ${result.error}`);
@@ -116,7 +180,12 @@ async function startInbound(config: FeishuConfig, state: AdapterState): Promise<
         if (parsed.ignored) logLine(state.accountId, `inbound ignored: ${parsed.ignored}`);
         return true;
       }
-      return emitIngest(state, parsed.event);
+      const prepared = await downloadAttachments(config, state, parsed.event);
+      try {
+        return await emitIngest(state, prepared.event);
+      } finally {
+        await prepared.cleanup().catch(() => undefined);
+      }
     },
   });
   await live.start();
@@ -134,6 +203,58 @@ async function notifyInbound(state: AdapterState, inbound: "ready" | "failed", d
     // A status frame must never fail the adapter.
   }
 }
+
+const ACCOUNT_SCHEMA = [
+  {
+    key: "FEISHU_APP_ID",
+    label: "App ID",
+    type: "string",
+    required: true,
+    description: "Feishu app ID for this bot account.",
+  },
+  {
+    key: "FEISHU_APP_SECRET",
+    label: "App Secret",
+    type: "secret",
+    required: true,
+    description: "Feishu app secret; stored only in the account environment.",
+  },
+];
+
+const ACCOUNT_ENV = [
+  {
+    key: "FEISHU_INBOUND",
+    label: "Inbound events",
+    type: "boolean",
+    default: "0",
+    description: "Relay allowlisted group messages into the room.",
+  },
+  {
+    key: "FEISHU_INBOUND_CHATS",
+    label: "Inbound chat ids",
+    type: "string",
+    description: "Comma-separated group chat ids allowed to relay messages.",
+  },
+  {
+    key: "FEISHU_BASE_URL",
+    label: "API base URL",
+    type: "string",
+    default: "https://open.feishu.cn",
+  },
+  {
+    key: "FEISHU_HTTP_TIMEOUT_MS",
+    label: "HTTP timeout (ms)",
+    type: "number",
+    default: "10000",
+  },
+  {
+    key: "FEISHU_CARD_VERSION",
+    label: "Card version",
+    type: "select",
+    default: "2.0",
+    options: [{ value: "1.0" }, { value: "2.0" }],
+  },
+];
 
 async function handleRequest(message: Record<string, unknown>, state: AdapterState): Promise<void> {
   const rawId = message.id;
@@ -161,19 +282,25 @@ async function handleRequest(message: Record<string, unknown>, state: AdapterSta
 
   if (method === "initialize") {
     const config = configFromEnv(process.env);
-    if ("error" in config) {
-      await writeFrame(process.stdout, rpcError(id, RPC_INTERNAL_ERROR, config.error));
-      return;
-    }
-    state.config = config;
+    // A probe uploads an adapter before any account exists, so initialize must
+    // describe the account schema without requiring credentials.
+    if (!("error" in config)) state.config = config;
     await writeFrame(
       process.stdout,
       rpcResult(id, {
         version: PROTOCOL_VERSION,
         eventSchema: EVENT_SCHEMA_VERSION,
+        platform: "feishu",
         maxFrameBytes: MAX_FRAME_BYTES,
         accounts: {
           [state.accountId]: {
+            displayName: "Feishu",
+            account: { schema: ACCOUNT_SCHEMA, env: ACCOUNT_ENV },
+            attachments: {
+              kinds: ["image", "file"],
+              imageMaxBytes: MAX_IMAGE_BYTES,
+              fileMaxBytes: MAX_FILE_BYTES,
+            },
             send: {
               text: true,
               format: ["text", "markdown"],
@@ -181,7 +308,7 @@ async function handleRequest(message: Record<string, unknown>, state: AdapterSta
               idempotency: "persistent_delivery_key",
               card: ["1.0", "2.0"],
             },
-            ...(config.inbound ? { ingress: "durable_outbox" } : {}),
+            ...(!("error" in config) && config.inbound ? { ingress: "durable_outbox" } : {}),
           },
         },
       }),
@@ -191,11 +318,12 @@ async function handleRequest(message: Record<string, unknown>, state: AdapterSta
 
   if (method === "start") {
     if (!state.config) {
-      await writeFrame(
-        process.stdout,
-        rpcError(id, RPC_INTERNAL_ERROR, "feishu adapter requires FEISHU_APP_ID and FEISHU_APP_SECRET"),
-      );
-      return;
+      const config = configFromEnv(process.env);
+      if ("error" in config) {
+        await writeFrame(process.stdout, rpcError(id, RPC_INTERNAL_ERROR, config.error));
+        return;
+      }
+      state.config = config;
     }
     try {
       await ensureToken(state.config, state);

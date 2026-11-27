@@ -1,10 +1,12 @@
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { loadRoomConfig, resolveServerSettings, type ServerSettings } from "../config/file-config.ts";
 import { databasePath, readState, recallMessage, sendReply, writeState } from "../state/store.ts";
+import { findResource, uploadResource } from "../rooms/resources.ts";
 import {
   channelRoutes,
   createChannelController,
@@ -146,6 +148,29 @@ process.stdin.on("data", (chunk) => {
         platform: process.env.PLUGIN_REPORT_PLATFORM || "telegram",
       });
     }
+    newline = buffer.indexOf("\\n");
+  }
+});
+process.stdin.on("end", () => process.exit(0));
+setInterval(() => {}, 1000);
+`;
+
+const FEISHU_PLUGIN_SOURCE = PLUGIN_SOURCE.replace('|| "telegram"', '|| "feishu"');
+
+const TYPED_PLUGIN_SOURCE = `
+enum Reported { Platform = "typed-platform" }
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk.toString("utf8");
+  let newline = buffer.indexOf("\\n");
+  while (newline !== -1) {
+    const request = JSON.parse(buffer.slice(0, newline));
+    buffer = buffer.slice(newline + 1);
+    process.stdout.write(JSON.stringify({
+      jsonrpc: "2.0",
+      id: request.id,
+      result: { version: 1, eventSchema: 1, platform: Reported.Platform, maxFrameBytes: 1048576, accounts: {} },
+    }) + "\\n");
     newline = buffer.indexOf("\\n");
   }
 });
@@ -555,6 +580,82 @@ test("ordinary messages never publish; only an explicit forward notifies", async
       const texts = await readState((svc) => svc.getRoom(roomId).messages.map((message) => message.text));
       return sends.length === 1 && texts.includes("Forwarded to telegram/test/chat");
     });
+  } finally {
+    await stopChannels(runtime);
+  }
+});
+
+test("an inbound Feishu attachment becomes a room resource and marker", async () => {
+  const { roomId, directory } = await makeRoom("inbound-attachment");
+  const configPath = path.join(directory, "channeld.yml");
+  writeFileSync(configPath, `stateFile: ignored.sqlite
+accounts:
+  - id: feishu-main
+    platform: feishu
+    adapter: { command: ["unused"] }
+inbound:
+  - from: { platform: feishu, account: feishu-main, room: oc_allowed }
+    to: { room: ${roomId} }
+`);
+  const { spawnAdapter } = fakeAdapter("sent");
+  const attachmentDir = await mkdtemp(path.join(tmpdir(), "chat-room-channeld-"));
+  const file = path.join(attachmentDir, "photo.png");
+  const bytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await writeFile(file, bytes);
+  let runtime: ChannelsRuntime | undefined;
+  try {
+    runtime = await startChannels(settings(configPath), { spawnAdapter, deliveryIntervalMs: 10 });
+    const event: IngestEvent = {
+      schemaVersion: 1,
+      eventId: "evt-image",
+      kind: "message.created",
+      source: { platform: "feishu", accountId: "feishu-main", roomId: "oc_allowed" },
+      actor: { platform: "feishu", identityNamespace: "open_id", nativeUserId: "ou_alice" },
+      providerEventId: "evt-image",
+      sourceDedupKey: "feishu:feishu-main:evt-image",
+      receivedAt: new Date(0).toISOString(),
+      content: { attachments: [{ kind: "image", name: "photo.png", mimeType: "image/png", size: bytes.length, path: file }] },
+    };
+    expect((await runtime!.host.ingest(event)).duplicate).toBe(false);
+    await waitFor(async () => {
+      const texts = await readState((svc) => svc.getRoom(roomId).messages.map((message) => message.text));
+      return texts.some((text) => text.includes("[[resource:") && text.includes("[image]"));
+    });
+    const text = await readState((svc) => svc.getRoom(roomId).messages.at(-1)?.text ?? "");
+    expect(text).toContain("message_id=evt-image chat_id=oc_allowed sender=ou_alice");
+    const id = /\[\[resource:([0-9a-f-]{36})\]\]/.exec(text)?.[1];
+    expect(id).toBeTruthy();
+    expect(await findResource(roomId, id!)).toMatchObject({ name: "photo.png", mimeType: "image/png", size: bytes.length });
+  } finally {
+    await stopChannels(runtime);
+    await rm(attachmentDir, { recursive: true, force: true });
+  }
+});
+
+test("a forward resolves a room resource marker into an adapter file", async () => {
+  const { roomId, directory } = await makeRoom("forward-attachment");
+  const resource = await uploadResource(
+    roomId,
+    "photo.png",
+    new Blob([Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])]).stream(),
+    1024 * 1024,
+    { sessionID: "session-alice", name: "Alice" },
+  );
+  const messageId = await sendMessage(roomId, `photo\n[[resource:${resource.id}]]`);
+  const configPath = writeChannelConfig(directory, roomId);
+  const { sends, spawnAdapter } = fakeAdapter("sent");
+  let runtime: ChannelsRuntime | undefined;
+  try {
+    runtime = await startChannels(settings(configPath), { spawnAdapter, deliveryIntervalMs: 10 });
+    expect(await forwardMessage(runtime, roomId, messageId, { platform: "telegram", account: "test", room: "chat" })).toBe(202);
+    await waitFor(() => sends.length === 1);
+    const payload = sends[0]!.payload as { text: string; attachments: Array<Record<string, unknown>> };
+    expect(payload.text).toContain("photo");
+    expect(payload.attachments).toHaveLength(1);
+    expect(payload.attachments[0]).toMatchObject({
+      kind: "image", name: "photo.png", mimeType: "image/png", resourceId: resource.id, roomId,
+    });
+    expect(String(payload.attachments[0]!.path)).toContain("chat-room-outbound-");
   } finally {
     await stopChannels(runtime);
   }
@@ -1014,7 +1115,7 @@ test("without a writable config location admin changes report restart required",
   }
 });
 
-test("plugin upload validates the handshake, platform, and file limits", async () => {
+test("plugin upload derives platform and validates handshake and file limits", async () => {
   const { directory } = await makeRoom("plugin-upload");
   const controller = createChannelController(settings(undefined, false), {
     spawnAdapter: fakeAdapter("sent").spawnAdapter,
@@ -1026,39 +1127,35 @@ test("plugin upload validates the handshake, platform, and file limits", async (
     await controller.start();
     const good = await uploadPlugin(controller, {
       name: "adapter.js",
-      platform: "telegram",
       source: PLUGIN_SOURCE,
-      env: { PLUGIN_REPORT_PLATFORM: "telegram", SECRET_VALUE: "top-secret" },
     });
     expect(good.response?.status).toBe(201);
     expect(good.json).toMatchObject({ name: "adapter.js", platform: "telegram" });
-    expect(JSON.stringify(good.json)).not.toContain("top-secret");
     const pluginId = good.json.pluginId as string;
     expect(typeof pluginId).toBe("string");
     expect(existsSync(path.join(directory, "integrations", "plugins", pluginId, "adapter.js"))).toBe(true);
 
-    const mismatch = await uploadPlugin(controller, {
-      name: "mismatch.js",
-      platform: "telegram",
-      source: PLUGIN_SOURCE,
-      env: { PLUGIN_REPORT_PLATFORM: "slack", SECRET_VALUE: "top-secret" },
-    });
-    expect(mismatch.response?.status).toBe(400);
-    const mismatchText = await mismatch.response!.text();
-    expect(mismatchText).not.toContain("top-secret");
-    expect(mismatchText.toLowerCase()).not.toContain("channeld");
-    expect(mismatchText).toContain("reported platform");
+    const downloadUrl = new URL(`http://center.test/channeld/plugins/${pluginId}/download`);
+    const downloaded = await controller.handle(new Request(downloadUrl), downloadUrl);
+    expect(downloaded?.status).toBe(200);
+    expect(await downloaded!.text()).toBe(PLUGIN_SOURCE);
+    expect(downloaded!.headers.get("content-disposition")).toContain("adapter.js");
+    expect(downloaded!.headers.get("content-type")).toBe("application/octet-stream");
+    expect(downloaded!.headers.get("cache-control")).toBe("no-store");
+
+    const missingDownload = new URL("http://center.test/channeld/plugins/does-not-exist/download");
+    expect((await controller.handle(new Request(missingDownload), missingDownload))?.status).toBe(404);
+    const traversalDownload = new URL("http://center.test/channeld/plugins/..%2Fescape.js/download");
+    expect((await controller.handle(new Request(traversalDownload), traversalDownload))?.status).toBe(404);
 
     const oversized = await uploadPlugin(controller, {
       name: "big.js",
-      platform: "telegram",
       source: "x".repeat(256 * 1024 + 1),
     });
     expect(oversized.response?.status).toBe(400);
 
     const unsafe = await uploadPlugin(controller, {
       name: "../escape.js",
-      platform: "telegram",
       source: PLUGIN_SOURCE,
     });
     expect(unsafe.response?.status).toBe(400);
@@ -1073,6 +1170,31 @@ test("plugin upload validates the handshake, platform, and file limits", async (
       { pluginId, name: "adapter.js", platform: "telegram" },
     ]);
     expect(listedText).not.toContain(directory);
+  } finally {
+    await controller.stop();
+  }
+});
+
+test("plugin upload accepts non-erasable TypeScript through the adapter transform", async () => {
+  const { directory } = await makeRoom("plugin-upload-ts");
+  const controller = createChannelController(settings(undefined, false), {
+    spawnAdapter: fakeAdapter("sent").spawnAdapter,
+    deliveryIntervalMs: 10,
+    env: adminEnv({ CHATROOM_ALLOW_ADMIN: "true" }),
+    persistSettings: () => false,
+  });
+  try {
+    await controller.start();
+    const serverOptions = process.env.NODE_OPTIONS;
+    const typed = await uploadPlugin(controller, {
+      name: "typed-adapter.ts",
+      source: TYPED_PLUGIN_SOURCE,
+    });
+    expect(typed.response?.status).toBe(201);
+    expect(typed.json).toMatchObject({ name: "typed-adapter.ts", platform: "typed-platform" });
+    const pluginId = typed.json.pluginId as string;
+    expect(existsSync(path.join(directory, "integrations", "plugins", pluginId, "typed-adapter.ts"))).toBe(true);
+    expect(process.env.NODE_OPTIONS).toBe(serverOptions);
   } finally {
     await controller.stop();
   }
@@ -1172,12 +1294,11 @@ test("integration PUT preserves, replaces, and validates inbound routes", async 
     await controller.start();
     const uploaded = await uploadPlugin(controller, {
       name: "adapter.js",
-      platform: "feishu",
-      source: PLUGIN_SOURCE,
-      env: { PLUGIN_REPORT_PLATFORM: "feishu" },
+      source: FEISHU_PLUGIN_SOURCE,
     });
+    expect(uploaded.response?.status).toBe(201);
     const pluginId = uploaded.json.pluginId as string;
-    const accounts = [{ id: "acct", platform: "feishu", pluginId, env: { PLUGIN_REPORT_PLATFORM: "feishu" } }];
+    const accounts = [{ id: "acct", platform: "feishu", pluginId }];
     const inbound = [{
       from: { platform: "feishu", account: "acct", room: "oc_allowed" },
       to: { room: roomId },
@@ -1736,8 +1857,10 @@ inbound:
     expect((await channels.host.ingest(event("evt-2"))).duplicate).toBe(false);
     await waitFor(async () => {
       const texts = await readState((svc) => svc.getRoom(roomId).messages.map((message) => message.text));
-      return texts.filter((text) => text === "[Feishu feishu-main] ou_alice: hello from feishu").length === 2
-        && texts.some((text) => text.startsWith("[Feishu "));
+      const inbound = texts.filter((text) => text.startsWith("[Feishu "));
+      return inbound.length === 2
+        && inbound.some((text) => text.includes("message_id=evt-1 chat_id=oc_allowed"))
+        && inbound.some((text) => text.includes("message_id=evt-2 chat_id=oc_allowed"));
     });
     const missingRoomTexts = await readState((svc) =>
       svc.getRoom("room-that-does-not-exist").messages.map((message) => message.text)

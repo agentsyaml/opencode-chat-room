@@ -1,51 +1,158 @@
 import { randomUUID } from "node:crypto";
 import type { Message, Participant, Room } from "../rooms/room-service.ts";
 import type { Registry, RegistryEntry } from "./store.ts";
-import { type StateDatabase } from "./sqlite.ts";
+import { type SQLQueryBindings, type StateDatabase } from "./sqlite.ts";
 
 export type State = { rooms: Room[]; registry: Registry };
+
+const ROOM_COLUMNS = "name,owner_id,created_at,kind,direct_sessions,direct_pair,description,admin_names,admin_membership_ids,owner_membership_id,successor_name,successor_membership_id,join_policy";
+const ROOM_FIELDS = ROOM_COLUMNS.split(",");
+const ROOM_INSERT = `INSERT INTO rooms(id,${ROOM_COLUMNS}) VALUES(?,${ROOM_FIELDS.map(() => "?").join(",")})`;
+const MESSAGE_COLUMNS = "id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,recalled_at,recalled_by";
+const MESSAGE_FIELDS = MESSAGE_COLUMNS.split(",");
+const MESSAGE_INSERT = `INSERT INTO messages(${MESSAGE_COLUMNS}) VALUES(${MESSAGE_FIELDS.map(() => "?").join(",")})`;
+const MESSAGE_UPSERT = `${MESSAGE_INSERT} ON CONFLICT(id) DO UPDATE SET is_question=excluded.is_question,answer_to=excluded.answer_to,answered_by=excluded.answered_by,recalled_at=excluded.recalled_at,recalled_by=excluded.recalled_by`;
+const MESSAGE_MUTABLE_FIELDS = ["is_question", "answer_to", "answered_by", "recalled_at", "recalled_by"];
+const REGISTRY_COLUMNS = "server_url,api_prefix,protocol,name,last_read_ts,last_queued_ts,directory,host,receiver_owner_id,membership_id,work_state,last_seen_at";
+const REGISTRY_FIELDS = REGISTRY_COLUMNS.split(",");
+const REGISTRY_INSERT = `INSERT INTO registry(room_id,session_id,${REGISTRY_COLUMNS}) VALUES(?,?,${REGISTRY_FIELDS.map(() => "?").join(",")})`;
 
 function roomColumns(room: Room): string | null {
   return room.adminIds?.length ? JSON.stringify([...new Set(room.adminIds)]) : null;
 }
 const adminBindings = (room: Room) => room.adminMembershipIDs?.length ? JSON.stringify([...new Set(room.adminMembershipIDs)]) : null;
-const roomBindings = (room: Room) => [room.ownerMembershipID ?? null, room.successorId ?? null, room.successorMembershipID ?? null];
+
+function roomValues(room: Room): SQLQueryBindings[] {
+  return [room.name, room.ownerId, room.createdAt, room.kind ?? "group",
+    room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null,
+    room.description ?? null, roomColumns(room), adminBindings(room),
+    room.ownerMembershipID ?? null, room.successorId ?? null, room.successorMembershipID ?? null,
+    room.joinPolicy ?? null];
+}
+
+function messageValues(message: Message): SQLQueryBindings[] {
+  return [message.id, message.roomId, message.senderId, message.senderSessionID ?? null, message.text,
+    message.createdAt, message.isQuestion ? 1 : 0, message.answerToMessageID ?? null,
+    message.answeredByMessageID ?? null, message.recalledAt ?? null, message.recalledBy ?? null];
+}
+
+function mutableMessageValues(message: Message): SQLQueryBindings[] {
+  return [message.isQuestion ? 1 : 0, message.answerToMessageID ?? null, message.answeredByMessageID ?? null,
+    message.recalledAt ?? null, message.recalledBy ?? null];
+}
+
+function registryValues(entry: RegistryEntry): SQLQueryBindings[] {
+  return [entry.serverUrl, entry.apiPrefix, entry.protocol ?? null, entry.name,
+    entry.lastReadTs ?? null, entry.lastQueuedTs ?? null, entry.directory ?? null, entry.host ?? null,
+    entry.receiverOwnerID ?? null, entry.membershipID ?? null, entry.workState ?? null, entry.lastSeenAt ?? null];
+}
 
 export function insertRoom(db: StateDatabase, room: Room): void {
-  db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair,description,admin_names,admin_membership_ids,owner_membership_id,successor_name,successor_membership_id,join_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null, room.description ?? null, roomColumns(room), adminBindings(room), ...roomBindings(room), room.joinPolicy ?? null);
+  db.query(ROOM_INSERT).run(room.id, ...roomValues(room));
   const participant = db.query("INSERT INTO participants VALUES(?,?,?,?)");
   for (const p of room.participants.values()) participant.run(room.id, p.id, p.name, p.joinedAt);
-  const message = db.query("INSERT INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,recalled_at,recalled_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
-  for (const m of room.messages) message.run(m.id, room.id, m.senderId, m.senderSessionID ?? null, m.text, m.createdAt, m.isQuestion ? 1 : 0, m.answerToMessageID ?? null, m.answeredByMessageID ?? null, m.recalledAt ?? null, m.recalledBy ?? null);
+  const message = db.query(MESSAGE_INSERT);
+  for (const m of room.messages) message.run(...messageValues(m));
 }
 
 export function replaceRegistry(db: StateDatabase, registry: Registry): void {
   db.exec("DELETE FROM registry");
-  const insert = db.query("INSERT INTO registry(room_id,session_id,server_url,api_prefix,protocol,name,last_read_ts,last_queued_ts,directory,host,receiver_owner_id,membership_id,work_state,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+  const insert = db.query(REGISTRY_INSERT);
   for (const [roomID, members] of Object.entries(registry)) for (const [sessionID, r] of Object.entries(members)) {
     r.membershipID ||= randomUUID();
-    insert.run(roomID, sessionID, r.serverUrl, r.apiPrefix, r.protocol ?? null, r.name,
-      r.lastReadTs ?? null, r.lastQueuedTs ?? null, r.directory ?? null, r.host ?? null, r.receiverOwnerID ?? null,
-      r.membershipID, r.workState ?? null, r.lastSeenAt ?? null);
+    insert.run(roomID, sessionID, ...registryValues(r));
   }
 }
 
-export function persistState(db: StateDatabase, rooms: Room[], registry: Registry): void {
-  const roomRow = db.query("INSERT INTO rooms(id,name,owner_id,created_at,kind,direct_sessions,direct_pair,description,admin_names,admin_membership_ids,owner_membership_id,successor_name,successor_membership_id,join_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,owner_id=excluded.owner_id,created_at=excluded.created_at,kind=excluded.kind,direct_sessions=excluded.direct_sessions,direct_pair=excluded.direct_pair,description=excluded.description,admin_names=excluded.admin_names,admin_membership_ids=excluded.admin_membership_ids,owner_membership_id=excluded.owner_membership_id,successor_name=excluded.successor_name,successor_membership_id=excluded.successor_membership_id,join_policy=excluded.join_policy");
-  const participant = db.query("INSERT INTO participants VALUES(?,?,?,?)");
-  const message = db.query("INSERT OR IGNORE INTO messages(id,room_id,sender_id,sender_session_id,text,created_at,is_question,answer_to,answered_by,recalled_at,recalled_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
-  const removeParticipants = db.query("DELETE FROM participants WHERE room_id=?");
-  const keep = new Set(rooms.map((room) => room.id));
-  const existing = db.query("SELECT id FROM rooms").all() as Array<{ id: string }>;
+// Apply only the rows that differ between the snapshot read before a write
+// callback and the state the callback produced. Untouched rows are never
+// deleted or rewritten, so another process's committed changes survive.
+export function persistStateDiff(db: StateDatabase, before: State, after: State): void {
+  const beforeRooms = new Map(before.rooms.map((room) => [room.id, room]));
+  const afterRooms = new Map(after.rooms.map((room) => [room.id, room]));
   const deleteRoom = db.query("DELETE FROM rooms WHERE id=?");
-  for (const row of existing) if (!keep.has(row.id)) deleteRoom.run(row.id);
-  for (const room of rooms) {
-    roomRow.run(room.id, room.name, room.ownerId, room.createdAt, room.kind ?? "group", room.directSessionIDs ? JSON.stringify(room.directSessionIDs) : null, room.directPair ?? null, room.description ?? null, roomColumns(room), adminBindings(room), ...roomBindings(room), room.joinPolicy ?? null);
-    removeParticipants.run(room.id);
-    for (const p of room.participants.values()) participant.run(room.id, p.id, p.name, p.joinedAt);
-    for (const m of room.messages) message.run(m.id, room.id, m.senderId, m.senderSessionID ?? null, m.text, m.createdAt, m.isQuestion ? 1 : 0, m.answerToMessageID ?? null, m.answeredByMessageID ?? null, m.recalledAt ?? null, m.recalledBy ?? null);
+  for (const room of before.rooms) if (!afterRooms.has(room.id)) deleteRoom.run(room.id);
+
+  const insertRoomRow = db.query(ROOM_INSERT);
+  const insertParticipant = db.query("INSERT INTO participants VALUES(?,?,?,?)");
+  const updateParticipant = db.query("UPDATE participants SET name=?,joined_at=? WHERE room_id=? AND id=?");
+  const deleteParticipant = db.query("DELETE FROM participants WHERE room_id=? AND id=?");
+  const message = db.query(MESSAGE_UPSERT);
+
+  for (const room of after.rooms) {
+    const previous = beforeRooms.get(room.id);
+    if (!previous) {
+      insertRoomRow.run(room.id, ...roomValues(room));
+      for (const p of room.participants.values()) insertParticipant.run(room.id, p.id, p.name, p.joinedAt);
+      for (const m of room.messages) message.run(...messageValues(m));
+      continue;
+    }
+    updateChanged(db, "rooms", ROOM_FIELDS, roomValues(previous), roomValues(room), "id=?", [room.id]);
+    for (const [id, participant] of room.participants) {
+      const prior = previous.participants.get(id);
+      if (!prior) insertParticipant.run(room.id, id, participant.name, participant.joinedAt);
+      else if (prior.name !== participant.name || prior.joinedAt !== participant.joinedAt) {
+        updateParticipant.run(participant.name, participant.joinedAt, room.id, id);
+      }
+    }
+    for (const id of previous.participants.keys()) if (!room.participants.has(id)) deleteParticipant.run(room.id, id);
+    const previousMessages = new Map(previous.messages.map((item) => [item.id, item]));
+    for (const item of room.messages) {
+      const prior = previousMessages.get(item.id);
+      if (!prior) message.run(...messageValues(item));
+      else updateChanged(db, "messages", MESSAGE_MUTABLE_FIELDS, mutableMessageValues(prior), mutableMessageValues(item), "id=?", [item.id]);
+    }
   }
-  replaceRegistry(db, registry);
+
+  for (const members of Object.values(after.registry)) for (const entry of Object.values(members)) entry.membershipID ||= randomUUID();
+  const insertRegistry = db.query(REGISTRY_INSERT);
+  for (const [roomID, members] of Object.entries(after.registry)) {
+    for (const [sessionID, entry] of Object.entries(members)) {
+      const previous = before.registry[roomID]?.[sessionID];
+      if (!previous) insertRegistry.run(roomID, sessionID, ...registryValues(entry));
+      else updateChanged(db, "registry", REGISTRY_FIELDS, registryValues(previous), registryValues(entry), "room_id=? AND session_id=?", [roomID, sessionID]);
+    }
+  }
+  const deleteRegistry = db.query("DELETE FROM registry WHERE room_id=? AND session_id=?");
+  for (const [roomID, members] of Object.entries(before.registry)) {
+    for (const sessionID of Object.keys(members)) {
+      if (!after.registry[roomID]?.[sessionID]) deleteRegistry.run(roomID, sessionID);
+    }
+  }
+}
+
+function updateChanged(db: StateDatabase, table: string, fields: string[], before: SQLQueryBindings[], after: SQLQueryBindings[], where: string, key: SQLQueryBindings[]): void {
+  const changed: Array<{ field: string; value: SQLQueryBindings }> = [];
+  for (let index = 0; index < fields.length; index++) {
+    if (before[index] === after[index]) continue;
+    changed.push({ field: fields[index]!, value: after[index] });
+  }
+  if (!changed.length) return;
+  db.query(`UPDATE ${table} SET ${changed.map(({ field }) => `${field}=?`).join(",")} WHERE ${where}`)
+    .run(...changed.map(({ value }) => value), ...key);
+}
+
+function cloneRoom(room: Room): Room {
+  return {
+    ...room,
+    ...(room.adminIds ? { adminIds: [...room.adminIds] } : {}),
+    ...(room.adminMembershipIDs ? { adminMembershipIDs: [...room.adminMembershipIDs] } : {}),
+    ...(room.directSessionIDs ? { directSessionIDs: [...room.directSessionIDs] } : {}),
+    participants: new Map([...room.participants].map(([id, p]) => [id, { ...p }])),
+    messages: room.messages.map((message) => ({ ...message })),
+  };
+}
+
+// The write path hydrates this copy so the pre-callback snapshot stays
+// untouched for diffing. Registry entries are copied too: callbacks mutate them
+// in place.
+export function cloneState(state: State): State {
+  const registry: Registry = Object.create(null);
+  for (const [roomID, members] of Object.entries(state.registry)) {
+    registry[roomID] = Object.create(null);
+    for (const [sessionID, entry] of Object.entries(members)) registry[roomID]![sessionID] = { ...entry };
+  }
+  return { rooms: state.rooms.map(cloneRoom), registry };
 }
 
 export type RoomSummary = { id: string; name: string; latestMsgTs: number };

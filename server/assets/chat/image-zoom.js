@@ -91,7 +91,14 @@ export function initImageZoom(app) {
     open(image);
   });
   app.$("#btnCloseImage")?.addEventListener("click", close);
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) close(); });
+  // A backdrop click closes, but a drag that started inside the viewer and was
+  // released on the backdrop does not: the click target would be the dialog then.
+  let dismissPress = false;
+  dialog.addEventListener("pointerdown", (event) => { dismissPress = event.target === dialog; });
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog && dismissPress) close();
+    dismissPress = false;
+  });
   // The viewer owns the wheel while it is open so the thread behind it cannot scroll.
   dialog.addEventListener("wheel", (event) => {
     if (!dialog.open) return;

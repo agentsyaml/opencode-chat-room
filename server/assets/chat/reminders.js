@@ -184,11 +184,9 @@ export function initReminders(app) {
   newButton.addEventListener("click", () => openDialog());
   $("#btnCloseReminder").addEventListener("click", () => dialog.close());
   $("#btnCancelReminder").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   dialog.addEventListener("close", () => { editing = null; });
   trigger.addEventListener("click", () => { app.closePanels(); openSurface(); });
   $("#btnCloseReminders").addEventListener("click", () => closeSurface());
-  surface.addEventListener("click", (event) => { if (event.target === surface) closeSurface(); });
   surface.addEventListener("cancel", (event) => { event.preventDefault(); closeSurface(); });
   surface.addEventListener("close", () => {
     if (pendingReopen) { pendingReopen = false; return; }
@@ -200,12 +198,12 @@ export function initReminders(app) {
     if (focus && target?.isConnected) target.focus({ preventScroll: true });
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !surface.open || !surface.classList.contains("is-pane")) return;
+    if (event.key !== "Escape" || event.altKey || !surface.open || !surface.classList.contains("is-pane")) return;
     if (!surface.contains(document.activeElement)) return;
     event.preventDefault();
     closeSurface();
   });
-  app.registerPanelSurface?.("reminders", { close: () => closeSurface(false) });
+  app.registerPanelSurface?.("reminders", { element: surface, close: (restore = false) => closeSurface(restore) });
   app.watchPanel?.("reminders", syncMode);
   const closePanels = app.closePanels;
   app.closePanels = () => { closePanels(); if (dialog.open) dialog.close(); };

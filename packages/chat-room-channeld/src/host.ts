@@ -4,7 +4,7 @@ import { applyReceipt, notifyDeliveryResult, type DeliveryResultHandler } from "
 import { parseTarget, startFailureReason, toEndpoint, validateTargets } from "./host-helpers.ts";
 import { IngestGate, type IngestResult } from "./ingest-gate.ts";
 import { log } from "./log.ts";
-import type { Endpoint, IngestEvent, MessageRef } from "./protocol.ts";
+import type { AdapterCapabilities, Endpoint, IngestEvent, MessageRef } from "./protocol.ts";
 import { matchRules, planPayload, sameEndpoint, targetKey } from "./rules.ts";
 import type { ChannelAccountRuntime } from "./stats.ts";
 import { sanitizeAccountError } from "./stats.ts";
@@ -13,6 +13,8 @@ import { openState, type ChannelState, type DeliveryRow } from "./state.ts";
 export type { IngestResult } from "./ingest-gate.ts";
 
 export interface AdapterHandle {
+  /** Optional platform facts declared by the adapter during initialize. */
+  readonly capabilities?: AdapterCapabilities;
   start(): Promise<void>;
   send(
     deliveryId: string,
@@ -49,6 +51,14 @@ export interface HostDeps {
   onIngestCommitted?: (event: IngestEvent) => Promise<void> | void;
   /** Events used as inbound room notifications must not match outbound rules. */
   notificationOnly?: (event: IngestEvent) => boolean;
+  /**
+   * Resolve a stored delivery payload into the adapter's wire form right before
+   * a send. The host calls cleanup after the attempt, whether it succeeded or not.
+   */
+  prepareSendPayload?: (payload: unknown, capabilities?: AdapterCapabilities) => Promise<{
+    payload: unknown;
+    cleanup?: () => Promise<void>;
+  }>;
 }
 
 function defaultSpawnAdapter(account: AccountConfig, context: SpawnAdapterContext): AdapterHandle {
@@ -64,6 +74,7 @@ export class ChannelHost {
   readonly #onDeliveryResult?: DeliveryResultHandler;
   readonly #onIngestCommitted?: (event: IngestEvent) => Promise<void> | void;
   readonly #notificationOnly?: (event: IngestEvent) => boolean;
+  readonly #prepareSendPayload?: HostDeps["prepareSendPayload"];
   readonly #adapters = new Map<string, AdapterHandle>();
   readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #inFlight = new Map<string, Set<string>>();
@@ -90,6 +101,7 @@ export class ChannelHost {
     this.#onDeliveryResult = deps.onDeliveryResult;
     this.#onIngestCommitted = deps.onIngestCommitted;
     this.#notificationOnly = deps.notificationOnly;
+    this.#prepareSendPayload = deps.prepareSendPayload;
   }
 
   /** Account ids whose adapter failed to start or exited; their queues stay paused. */
@@ -251,7 +263,7 @@ export class ChannelHost {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         // An inbound notification owns the ACK: roll back and fail the ingest so
-        // Feishu retries. Other consumer failures stay contained as before.
+        // the provider retries. Other consumer failures stay contained as before.
         if (this.#notificationOnly?.(stored)) {
           state.deleteIngestEvent(stored.eventId);
           log.error(`inbound commit rolled back: ${message}`, { event: stored.eventId });
@@ -410,18 +422,21 @@ export class ChannelHost {
     this.#gate.begin(accountId);
     try {
       let receipt: SendReceipt;
+      let cleanup: (() => Promise<void>) | undefined;
       try {
-        receipt = await adapter.send(
-          row.deliveryId,
-          attemptId,
-          row.idempotencyKey,
-          target,
-          JSON.parse(row.payload) as unknown,
-        );
+        const stored = JSON.parse(row.payload) as unknown;
+        if (this.#prepareSendPayload) {
+          const prepared = await this.#prepareSendPayload(stored, adapter.capabilities);
+          cleanup = prepared.cleanup;
+          receipt = await adapter.send(row.deliveryId, attemptId, row.idempotencyKey, target, prepared.payload);
+        } else {
+          receipt = await adapter.send(row.deliveryId, attemptId, row.idempotencyKey, target, stored);
+        }
       } catch (error) {
         receipt = { state: "unknown", detail: error instanceof Error ? error.message : String(error) };
       } finally {
         inFlight.delete(row.deliveryId);
+        await cleanup?.().catch(() => undefined);
       }
       // A host stop wins over a late send result: reload must not auto-resend.
       if (this.#stopReason) receipt = { state: "unknown", detail: this.#stopReason };

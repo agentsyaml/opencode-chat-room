@@ -79,7 +79,7 @@ export const ko = {
   integrationsAddEnv: "변수 추가", integrationsClearEnv: "모든 변수 지우기", integrationsKeepEnv: "모든 변수 유지",
   integrationsClearEnvActive: "저장하면 저장된 모든 변수가 지워집니다.", integrationsEnvInvalid: "변수 이름은 문자, 숫자, 밑줄로 만든 고유한 이름을 사용하세요.",
   integrationsAccountTitle: "연동 계정", integrationsAccountId: "계정 ID", integrationsPlatform: "플랫폼",
-  integrationsAccountInvalid: "계정 ID를 입력하고 플러그인을 선택하세요.", integrationsDuplicateAccount: "같은 ID의 계정이 이미 있습니다.",
+  integrationsAccountInvalid: "플러그인을 선택하세요.", integrationsDuplicateAccount: "같은 ID의 계정이 이미 있습니다.",
   integrationsAccountSaved: "계정을 저장했습니다. 연동을 저장하면 적용됩니다.", integrationsAccountRemoved: "계정을 제거했습니다. 연동을 저장하면 적용됩니다.",
   integrationsLastError: "마지막 오류", integrationsEdit: "편집", integrationsRemove: "제거",
   integrationsInvalidJson: "규칙 JSON이 {line}행 근처에서 올바르지 않습니다.", integrationsInvalidRules: "규칙은 JSON 배열이어야 합니다.",

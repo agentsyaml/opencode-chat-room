@@ -336,7 +336,12 @@ export function initPalette(app) {
   input.addEventListener("compositionend", () => scheduleSearch());
   scopeButton.addEventListener("click", () => { toggleScope(); input.focus(); });
   app.$("#btnClosePalette")?.addEventListener("click", () => closePalette());
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) closePalette(); });
+  let dismissPress = false;
+  dialog.addEventListener("pointerdown", (event) => { dismissPress = event.target === dialog; });
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog && dismissPress) closePalette();
+    dismissPress = false;
+  });
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); closePalette(); });
   dialog.addEventListener("close", () => {
     clearTimeout(searchTimer);

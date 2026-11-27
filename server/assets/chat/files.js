@@ -25,7 +25,7 @@ export function initFiles(app) {
   const empty = $("#filesEmpty"), error = $("#filesError"), more = $("#btnFilesMore");
   const roomName = $("#filesRoomName"), heading = $("#filesHeading"), trigger = $("#btnFiles"), chatView = $("#chatView");
   let items = [], total = 0, loading = false, generation = 0, opener = null, preview = null, previewToken = 0;
-  let pendingReopen = false;
+  let pendingReopen = false, restoreFocus = true;
 
   const mediaKind = (mime) => /^image\//.test(mime || "") ? "image"
     : /^audio\//.test(mime || "") ? "audio"
@@ -359,22 +359,24 @@ export function initFiles(app) {
   };
   app.openFilesDialog = open;
 
-  const close = () => { if (dialog.open) dialog.close(); };
+  const close = (restore = true) => {
+    restoreFocus = restore;
+    if (dialog.open) dialog.close();
+  };
 
   trigger?.addEventListener("click", () => { app.closePanels(); open(); });
   $("#btnCloseFiles")?.addEventListener("click", close);
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !dialog.open || !dialog.classList.contains("is-pane")) return;
+    if (event.key !== "Escape" || event.altKey || !dialog.open || !dialog.classList.contains("is-pane")) return;
     if (!dialog.contains(document.activeElement)) return;
     event.preventDefault();
     close();
   });
-  app.registerPanelSurface?.("files", { close });
+  app.registerPanelSurface?.("files", { element: dialog, close: (restore = true) => close(restore) });
   app.watchPanel?.("files", syncMode);
   $("#btnRefreshFiles")?.addEventListener("click", () => void load(true));
   more.addEventListener("click", () => void load(false));
   select.addEventListener("change", render);
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) close(); });
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
   dialog.addEventListener("close", () => {
     // close() queues this event; a rapid reopen can land before it runs, and
@@ -396,7 +398,9 @@ export function initFiles(app) {
     const target = opener;
     opener = null;
     // A document preview opens right after the file list closes; keep focus there.
-    if (target?.isConnected && !document.querySelector("dialog[open]")) target.focus({ preventScroll: true });
+    const focus = restoreFocus;
+    restoreFocus = true;
+    if (focus && target?.isConnected && !document.querySelector("dialog[open]")) target.focus({ preventScroll: true });
   });
   list.addEventListener("click", (event) => {
     const button = event.target.closest?.("[data-file-action]");

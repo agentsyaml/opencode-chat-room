@@ -9,8 +9,8 @@ import { immediate, pause } from "./sqlite-transaction.ts";
 const databases = new Map<string, Promise<StateDatabase>>();
 
 // Set CHAT_ROOM_DATABASE_URL only on the server process. The PostgreSQL
-// backend is experimental and single-instance in 0.8.1; the PgDatabase worker
-// holds a session advisory lock and a second process fails startup.
+// backend is experimental through the 0.8.2 multi-instance milestone; writers
+// serialize per transaction with a transaction-scoped advisory lock.
 function postgresURL(): string | undefined {
   const value = process.env.CHAT_ROOM_DATABASE_URL?.trim();
   return value || undefined;
@@ -27,8 +27,8 @@ export function openStateDatabase(file: string): Promise<StateDatabase> {
   return pending;
 }
 
-// Test and shutdown hook. PgDatabase.close() waits for client.end() so the
-// single-instance session lock is released before a new connection is opened.
+// Test and shutdown hook. PgDatabase.close() waits for client.end() so a
+// restart does not overlap the previous connection's shutdown.
 export async function closeStateDatabases(): Promise<void> {
   const pending = [...databases.values()];
   databases.clear();
@@ -78,7 +78,16 @@ export async function initializeReminderSchema(file: string): Promise<void> {
 async function initializePostgres(connectionString: string): Promise<StateDatabase> {
   const db = new PgDatabase(connectionString);
   try {
-    await initializeSchema(db);
+    // Concurrent CREATE TABLE IF NOT EXISTS is not race-free in PostgreSQL:
+    // two instances can both try to create the same type and one gets a
+    // duplicate pg_type error. Serialize only the startup DDL with a
+    // session-scoped lock; the lock is released automatically if a process dies.
+    db.exec("SELECT pg_advisory_lock(hashtext('chat-room-schema'))");
+    try {
+      await initializeSchema(db);
+    } finally {
+      db.exec("SELECT pg_advisory_unlock(hashtext('chat-room-schema'))");
+    }
     // Legacy rooms.json/registry.json migration is SQLite-only. The migrate
     // command copies an existing SQLite state database into PostgreSQL.
     return db;

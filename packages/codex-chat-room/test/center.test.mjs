@@ -38,7 +38,7 @@ test("list, create, join and send map to central routes", async () => {
     assert.equal(join.body.participantName, "alice");
 
     const sent = await centerAction(cfg, { action: "send", roomId: "r1", text: " hello " }, "codex:t1");
-    assert.match(sent, /^sent: hello\nmessage id: m-sent\nRoom r1 \(dev\)/);
+    assert.match(sent, /^sent: hello\nmessage_id=m-sent room_id=r1\nRoom r1 \(dev\)/);
     const message = center.requests.find((r) => r.path === "/rooms/r1/messages");
     assert.deepEqual(message.body, { sessionID: "codex:t1", text: "hello" });
 

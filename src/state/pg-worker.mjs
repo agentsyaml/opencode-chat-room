@@ -2,18 +2,13 @@ import { parentPort } from "node:worker_threads";
 import pg from "pg";
 import { hasSql, translate } from "./pg-sql.mjs";
 
-// One pg.Client per worker: transactions and the process-wide advisory lock
-// belong to a single session, so a pool would be incorrect here.
+// One pg.Client per worker: transactions and their advisory locks belong to a
+// single session, so a pool would be incorrect here.
 //
 // The worker deliberately starts with no workerData. Some Bun versions fail to
 // load `pg` in a worker that received any workerData at startup. The main
 // thread sends one init message over the default worker channel instead; that
 // message also transfers the request MessagePort and the ready SharedArrayBuffer.
-
-const SINGLE_INSTANCE_KEY = "opencode-chat-room:state-writer";
-const SINGLE_INSTANCE_ERROR =
-  "PostgreSQL backend is experimental and single-instance: another chat-room process already holds the database writer lock. " +
-  "Multi-instance support is planned for 0.8.2. Stop the other process, or unset CHAT_ROOM_DATABASE_URL to return to SQLite.";
 
 let client;
 let port;
@@ -119,16 +114,6 @@ async function startup(connectionString, ready, timeout) {
       statement_timeout: statementTimeout,
     });
     await client.connect();
-    const guard = await client.query(
-      "SELECT pg_try_advisory_lock(hashtext($1), 1) AS locked",
-      [SINGLE_INSTANCE_KEY],
-    );
-    if (!guard.rows[0]?.locked) {
-      port.postMessage({ type: "fatal", error: { code: "PG_SINGLE_INSTANCE", message: SINGLE_INSTANCE_ERROR } });
-      signalReady();
-      try { await client.end(); } catch { /* main will terminate this worker */ }
-      return;
-    }
     connected = true;
     port.postMessage({ type: "ready" });
     signalReady();

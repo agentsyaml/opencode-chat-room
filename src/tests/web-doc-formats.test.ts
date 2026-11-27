@@ -121,22 +121,14 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
       await dialog.waitFor({ state: "hidden" });
     };
 
-    // Plain text is escaped, wrapped, and fills the reading width.
+    // Plain text renders in the read-only code editor.
     await openPreview("sample.txt");
-    const code = page.locator("#docPreviewBody .doc-code code");
-    await code.waitFor();
-    expect(await code.textContent()).toBe(text);
+    const textEditor = page.locator("#docPreviewBody .doc-monaco .monaco-editor");
+    await textEditor.waitFor();
     expect(await page.locator("#docPreviewBody b").count()).toBe(0);
     expect(await page.locator("#docPreviewLanguage").textContent()).toBe("TXT");
     expect(await page.locator("#docPreviewEyebrow").textContent()).toBe("File preview");
-    expect(await code.evaluate((node: HTMLElement) => getComputedStyle(node).whiteSpace)).toBe("pre-wrap");
-    const wrapped = await page.locator("#docPreviewBody .doc-code").evaluate((pre: HTMLElement) => ({
-      scroll: pre.scrollWidth, client: pre.clientWidth,
-      preWidth: pre.getBoundingClientRect().width,
-      bodyWidth: pre.closest("#docPreviewBody")!.getBoundingClientRect().width,
-    }));
-    expect(wrapped.scroll).toBeLessThanOrEqual(wrapped.client + 1);
-    expect(Math.abs(wrapped.preWidth - wrapped.bodyWidth)).toBeLessThanOrEqual(2);
+    expect(await textEditor.evaluate((node: HTMLElement) => node.getBoundingClientRect().width)).toBeGreaterThan(0);
     const txtHeaderCopy = page.locator("#btnDocPreviewCopy");
     expect(await txtHeaderCopy.isVisible()).toBe(true);
     const beforeHeaderCopy = await copiedLength();
@@ -147,13 +139,13 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     expect(contentCount("sample.txt")).toBe(1);
     await closePreview();
 
-    // TypeScript gets a real highlight token and a readable language label.
+    // TypeScript gets the Monaco editor and a readable language label.
     await openPreview("sample.ts");
-    await page.locator("#docPreviewBody code.language-typescript").waitFor();
-    await page.locator("#docPreviewBody code.language-typescript.shiki").waitFor();
-    expect(await page.locator("#docPreviewBody .doc-code span[style*='--shiki-token']").count()).toBeGreaterThan(0);
+    const tsEditor = page.locator("#docPreviewBody .doc-monaco .monaco-editor");
+    await tsEditor.waitFor();
     expect(await page.locator("#docPreviewLanguage").textContent()).toBe("TypeScript");
-    expect(await page.locator("#docPreviewBody").textContent()).toContain("answer");
+    const tsLine = await tsEditor.locator(".view-line").first().textContent();
+    expect(tsLine?.replace(/\u00a0/g, " ")).toContain("answer");
     const beforeTsCopy = await copiedLength();
     await page.locator("#btnDocPreviewCopy").click();
     await page.waitForFunction((count: number) => (window as any).__copied.length === count + 1, beforeTsCopy);
@@ -161,15 +153,16 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     await closePreview();
 
     await openPreview("sample.json");
-    await page.locator("#docPreviewBody .doc-code code.shiki").waitFor();
+    await page.locator("#docPreviewBody .doc-monaco .monaco-editor").waitFor();
     expect(await page.locator("#docPreviewLanguage").textContent()).toBe("JSON");
-    expect(await page.locator("#docPreviewBody .doc-code span[style*='--shiki-token']").count()).toBeGreaterThan(0);
     await closePreview();
 
     // Markup previews as escaped source: no script nodes and no execution.
     await openPreview("sample.html");
-    await page.locator("#docPreviewBody .doc-code").waitFor();
-    expect(await page.locator("#docPreviewBody").textContent()).toContain("<script>window.__docXss = 1</script>");
+    await page.locator("#docPreviewBody .doc-monaco .monaco-editor").waitFor();
+    const htmlLine = page.locator("#docPreviewBody .monaco-editor .view-line").filter({ hasText: "<script>" }).first();
+    await htmlLine.waitFor();
+    expect((await htmlLine.textContent())?.replace(/\u00a0/g, " ")).toContain("<script>window.__docXss = 1</script>");
     expect(await page.locator("#docPreviewBody script").count()).toBe(0);
     expect(await page.evaluate(() => (window as any).__docXss)).toBeUndefined();
     await closePreview();
@@ -186,7 +179,7 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     // Empty files keep the existing empty state and fail the copy cleanly.
     await openPreview("empty.txt");
     await page.locator("#docPreviewEmpty").waitFor({ state: "visible" });
-    expect(await page.locator("#docPreviewBody .doc-code").count()).toBe(0);
+    expect(await page.locator("#docPreviewBody .doc-monaco").count()).toBe(0);
     const emptyCopy = page.locator("#btnDocPreviewCopy");
     expect(await emptyCopy.isVisible()).toBe(true);
     const beforeEmptyCopy = await copiedLength();
@@ -200,7 +193,7 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     await openPreview("too-big.txt");
     await page.locator("#docPreviewNotice").waitFor({ state: "visible" });
     expect(await page.locator("#docPreviewNotice").textContent()).toBe(tooLargeLabel);
-    expect(await page.locator("#docPreviewBody .doc-code").count()).toBe(0);
+    expect(await page.locator("#docPreviewBody .doc-monaco").count()).toBe(0);
     expect(await page.locator("#btnDocPreviewDownload").isEnabled()).toBe(true);
     const beforeBigCopy = await copiedLength();
     await page.locator("#btnDocPreviewCopy").click();
@@ -285,7 +278,7 @@ test.skipIf(!browserModule)("plain text, code, and PDF resources preview in the 
     await page.locator("#fileList .file-row").filter({ hasText: "sample.txt" }).locator('[data-file-action="preview"]').click();
     await page.locator("#filesDialog").waitFor({ state: "hidden" });
     await dialog.waitFor({ state: "visible" });
-    await page.locator("#docPreviewBody .doc-code code").waitFor();
+    await page.locator("#docPreviewBody .doc-monaco .monaco-editor").waitFor();
     await page.screenshot({ path: path.join(artifacts, "web-doc-formats-text-1440.png") });
     await closePreview();
 

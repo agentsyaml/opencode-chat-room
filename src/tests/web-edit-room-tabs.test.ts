@@ -165,13 +165,15 @@ test.skipIf(!browserModule)("edit room groups fields into tabs without changing 
     await page.locator("#editRoomDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
 
-    // Escape and the backdrop also close and restore focus; the close button keeps working.
+    // Escape and the close button close and restore focus; a backdrop click keeps it open.
     await openDialog();
     await page.keyboard.press("Escape");
     await page.locator("#editRoomDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
     await openDialog();
     await page.mouse.click(6, 6);
+    expect(await page.locator("#editRoomDialog").isVisible()).toBe(true);
+    await page.keyboard.press("Escape");
     await page.locator("#editRoomDialog").waitFor({ state: "hidden" });
     await page.waitForFunction(() => document.activeElement?.id === "btnRoomOptions");
     await openDialog();

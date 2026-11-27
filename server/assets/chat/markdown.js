@@ -42,6 +42,17 @@ function escapeHtmlText(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 }
 
+/**
+ * Render plain text that may contain resource markers into attachment cards.
+ * System relay rows use this instead of textContent so inbound files stay openable.
+ */
+export function renderResourceText(root, text, app) {
+  root.textContent = text;
+  for (const resource of replaceResourceMarkers(root, app)) {
+    void loadResourceCard(resource.card, resource.roomId, app);
+  }
+}
+
 export function renderMarkdown(root, text, app) {
   const mentions = [], diagrams = new Map();
   const nonce = createRandomId();
@@ -116,6 +127,18 @@ function decorateCodeBlock(code, app) {
     head.append(label);
   }
   head.append(codeToolbar(code, pre, block, app));
+  // The floating toolbar sits over the code's top-right corner. Hide it while a
+  // pointer drag starts inside the code so pointerup selects code, not the toolbar.
+  pre.addEventListener("pointerdown", () => {
+    head.classList.add("is-selecting");
+    const done = () => {
+      head.classList.remove("is-selecting");
+      window.removeEventListener("pointerup", done, true);
+      window.removeEventListener("pointercancel", done, true);
+    };
+    window.addEventListener("pointerup", done, true);
+    window.addEventListener("pointercancel", done, true);
+  });
   block.append(head, pre);
 }
 

@@ -11,7 +11,7 @@ COPY cli.ts plugin.ts index.ts ./
 COPY server ./server
 COPY src ./src
 COPY packages/chat-room-channeld ./packages/chat-room-channeld
-RUN bun run build:cli && bun run build:channeld-mock && bun run build:channeld-feishu
+RUN bun run build:cli && bun run build:channeld-mock
 
 # The server speaks Node's HTTP and SQLite modules, so the image runtime is
 # Node even though Bun installs dependencies and bundles the CLI at build time.

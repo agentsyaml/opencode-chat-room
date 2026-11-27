@@ -88,11 +88,12 @@ export function buildRulesSchema(accounts: RuleAccount[]): JsonSchema {
         version: { type: "integer", minimum: 1, description: "Bump the version to replace this rule." },
         from: {
           type: "object",
+          description: "Where the rule reads events from.",
           additionalProperties: false,
           required: ["platform", "account", "room"],
           properties: {
-            platform: { const: "chatroom", errorMessage: "The source platform must be chatroom." },
-            account: { const: "center", errorMessage: "The source account must be center." },
+            platform: { const: "chatroom", description: "Source platform; room messages always use chatroom.", errorMessage: "The source platform must be chatroom." },
+            account: { const: "center", description: "Source account; room messages always use center.", errorMessage: "The source account must be center." },
             room: { type: "string", minLength: 1, description: "Room ID to watch." },
             event: {
               enum: ["message.created", "message.forward_requested"],
@@ -100,10 +101,10 @@ export function buildRulesSchema(accounts: RuleAccount[]): JsonSchema {
             },
           },
         },
-        transforms: { type: "array", items: transformSchema },
-        to: { type: "array", minItems: 1, items: target(accounts) },
-        onMissingParent: { enum: ["quote_or_unthreaded", "drop"] },
-        onUnsupported: { enum: ["text_with_notice", "drop"] },
+        transforms: { type: "array", description: "Transformations applied to the message before delivery.", items: transformSchema },
+        to: { type: "array", description: "External accounts and rooms that receive matching messages.", minItems: 1, items: target(accounts) },
+        onMissingParent: { enum: ["quote_or_unthreaded", "drop"], description: "What to do when the replied-to parent message is unavailable on the target." },
+        onUnsupported: { enum: ["text_with_notice", "drop"], description: "What to do when the target cannot render the message content." },
       },
     },
   } as JsonSchema;
