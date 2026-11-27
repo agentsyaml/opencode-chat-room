@@ -167,8 +167,6 @@
     padding: 22px 22px 6px;
     /* A slightly recessed conversation plane, distinct from the head and composer. */
     background: color-mix(in srgb, var(--surface) 52%, var(--bg));
-    /* A visible scrollbar would shift the content column left; reserve both edges. */
-    scrollbar-gutter: stable both-edges;
   }
   #msgList { width: min(100%, 940px); list-style: none; margin: 0 auto; padding: 0; }
 
